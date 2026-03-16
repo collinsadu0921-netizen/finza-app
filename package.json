@@ -1,0 +1,50 @@
+{
+  "name": "finza-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "check-fx-tokens": "node scripts/check-fx-tokens.js",
+    "test": "jest",
+    "test:opening-balances": "jest --testPathPattern=opening-balances",
+    "test:opening-balances:watch": "jest --testPathPattern=opening-balances --watch",
+    "test:flash-sale": "vitest run --testPathPattern=flash-sale-race",
+    "ci:accounting-audit": "ts-node scripts/accounting-ci-audit.ts",
+    "ci:detect-bypass": "ts-node scripts/detect-report-bypass.ts",
+    "ci:detect-non-ledger": "ts-node scripts/detect-non-ledger-reports.ts",
+    "ci:accounting": "npm run ci:accounting-audit && npm run ci:detect-bypass && npm run ci:detect-non-ledger"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "@types/pdfkit": "^0.17.4",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.2.3",
+    "next": "^16.0.3",
+    "next-themes": "^0.4.6",
+    "pdfkit": "^0.17.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^3.5.0",
+    "tailwind-merge": "^3.4.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.0.0",
+    "jest": "^30.2.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.3.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}

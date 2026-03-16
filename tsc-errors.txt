@@ -1,0 +1,787 @@
+﻿.next/dev/types/validator.ts(3933,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/stock-transfers/[id]/cancel/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/stock-transfers/[id]/cancel">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; transfer: any; }> | NextResponse<{ error: any; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/dev/types/validator.ts(3942,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/stock-transfers/[id]/receive/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/stock-transfers/[id]/receive">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; warning: string; journal_id: any; }> | NextResponse<{ success: boolean; transfer: any; journal_id: any; }> | NextResponse<...>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/dev/types/validator.ts(3951,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/stock-transfers/[id]/send/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/stock-transfers/[id]/send">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; transfer: any; }> | NextResponse<{ error: any; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/dev/types/validator.ts(3987,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/suppliers/[id]/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/suppliers/[id]">'.
+  Types of property 'PATCH' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; supplier: any; }> | NextResponse<{ error: any; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/types/validator.ts(3789,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/stock-transfers/[id]/cancel/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/stock-transfers/[id]/cancel">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; transfer: any; }> | NextResponse<{ error: any; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/types/validator.ts(3798,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/stock-transfers/[id]/receive/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/stock-transfers/[id]/receive">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; warning: string; journal_id: any; }> | NextResponse<{ success: boolean; transfer: any; journal_id: any; }> | NextResponse<...>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/types/validator.ts(3807,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/stock-transfers/[id]/send/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/stock-transfers/[id]/send">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; transfer: any; }> | NextResponse<{ error: any; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/types/validator.ts(3843,31): error TS2344: Type 'typeof import("C:/projects/finza-web/finza-web/app/api/suppliers/[id]/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/suppliers/[id]">'.
+  Types of property 'PATCH' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; supplier: any; }> | NextResponse<{ error: any; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+app/(dashboard)/pos/page.tsx(2419,16): error TS18048: 'cartTotals.total_discount' is possibly 'undefined'.
+app/(dashboard)/pos/register/CloseRegisterModal.tsx(4,10): error TS2300: Duplicate identifier 'supabase'.
+app/(dashboard)/pos/register/CloseRegisterModal.tsx(10,10): error TS2300: Duplicate identifier 'supabase'.
+app/(dashboard)/pos/register/CloseRegisterModal.tsx(300,30): error TS2304: Cannot find name 'currencySymbol'.
+app/accounting/control-tower/page.tsx(13,7): error TS2740: Type '{ journal_approval: string; journal_post: string; ob_approval: string; ob_post: string; period_blocker: string; recon_exception: string; }' is missing the following properties from type 'Record<WorkItemType, string>': accounting_not_initialized, engagement_pending_acceptance, engagement_suspended, engagement_terminated, and 2 more.
+app/accounting/firm/page.tsx(367,19): error TS2322: Type 'string' is not assignable to type 'FirmRole | null'.
+app/accounting/firm/page.tsx(376,19): error TS2322: Type 'string' is not assignable to type 'FirmRole | null'.
+app/accounting/firm/page.tsx(378,19): error TS2322: Type '"bulk_operations"' is not assignable to type 'ActionType'.
+app/accounting/firm/page.tsx(385,19): error TS2322: Type 'string' is not assignable to type 'FirmRole | null'.
+app/accounting/firm/page.tsx(387,19): error TS2322: Type '"bulk_operations"' is not assignable to type 'ActionType'.
+app/accounting/journals/drafts/[id]/edit/page.tsx(398,13): error TS2322: Type '"" | Element | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+app/accounting/journals/drafts/[id]/page.tsx(638,13): error TS2322: Type 'Element' is not assignable to type 'string'.
+app/accounting/journals/drafts/[id]/page.tsx(1092,13): error TS2322: Type '{ children: Element; isOpen: boolean; onClose: () => void; title: string; size: "lg"; closeOnOverlayClick: boolean; footer: Element; }' is not assignable to type 'IntrinsicAttributes & ModalProps'.
+  Property 'closeOnOverlayClick' does not exist on type 'IntrinsicAttributes & ModalProps'.
+app/accounting/journals/drafts/[id]/page.tsx(1140,26): error TS2304: Cannot find name 'clientBusinessName'.
+app/accounting/journals/new/page.tsx(370,13): error TS2322: Type '"" | Element | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+app/accounting/journals/page.tsx(325,13): error TS2322: Type 'Element' is not assignable to type 'string'.
+app/accounting/journals/page.tsx(339,43): error TS2345: Argument of type 'AccountingPeriod | undefined' is not assignable to parameter of type 'AccountingPeriod | null'.
+  Type 'undefined' is not assignable to type 'AccountingPeriod | null'.
+app/accounting/periods/__tests__/ui.sanity.test.tsx(12,52): error TS2307: Cannot find module '@testing-library/react' or its corresponding type declarations.
+app/accounting/periods/page.tsx(681,35): error TS2719: Type 'AccountingPeriod' is not assignable to type 'AccountingPeriod'. Two different types with this name exist, but they are unrelated.
+  Types of property 'closed_by_user' are incompatible.
+    Type 'ClosedByUser | null' is not assignable to type '{ id: string; email: string | null; full_name: string | null; } | undefined'.
+      Type 'null' is not assignable to type '{ id: string; email: string | null; full_name: string | null; } | undefined'.
+app/accounting/reconciliation/page.tsx(172,25): error TS2345: Argument of type '(id: string | null) => "" | Promise<void> | null' is not assignable to parameter of type '(value: string | null) => void | PromiseLike<void | null> | null'.
+  Type '"" | Promise<void> | null' is not assignable to type 'void | PromiseLike<void | null> | null'.
+    Type '""' is not assignable to type 'void | PromiseLike<void | null> | null'.
+app/accounting/reconciliation/page.tsx(361,13): error TS2322: Type 'string | null' is not assignable to type '"accountant" | "owner" | "employee" | null'.
+  Type 'string' is not assignable to type '"accountant" | "owner" | "employee" | null'.
+app/accounting/reports/trial-balance/page.tsx(289,13): error TS2322: Type 'string | null' is not assignable to type '"accountant" | "owner" | "employee" | null'.
+  Type 'string' is not assignable to type '"accountant" | "owner" | "employee" | null'.
+app/admin/retail/bulk-import/page.tsx(455,53): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/admin/retail/bulk-import/page.tsx(458,43): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/admin/retail/bulk-import/page.tsx(683,84): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(685,91): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(691,45): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(704,46): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(720,53): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/admin/retail/bulk-import/page.tsx(720,93): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(722,45): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(723,43): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/admin/retail/bulk-import/page.tsx(723,83): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(755,50): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(783,46): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(804,46): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(840,46): error TS2339: Property 'id' does not exist on type 'never'.
+app/admin/retail/bulk-import/page.tsx(856,44): error TS2339: Property 'id' does not exist on type 'never'.
+app/api/accounting/control-tower/work-items/route.ts(94,76): error TS2537: Type '{ id: any; accounting_firm_id: any; client_business_id: any; status: any; access_level: any; effective_from: any; effective_to: any; accepted_at: any; accepted_by: any; }[] | null' has no matching index signature for type 'number'.
+app/api/accounting/drafts/route.ts(76,7): error TS2322: Type '"view_client_data"' is not assignable to type 'ActionType'.
+app/api/accounting/exports/levies/route.ts(35,11): error TS2451: Cannot redeclare block-scoped variable 'periodParam'.
+app/api/accounting/exports/levies/route.ts(67,11): error TS2451: Cannot redeclare block-scoped variable 'periodParam'.
+app/api/accounting/exports/transactions/route.ts(37,11): error TS2451: Cannot redeclare block-scoped variable 'periodParam'.
+app/api/accounting/exports/transactions/route.ts(69,11): error TS2451: Cannot redeclare block-scoped variable 'periodParam'.
+app/api/accounting/exports/vat/route.ts(33,11): error TS2451: Cannot redeclare block-scoped variable 'periodParam'.
+app/api/accounting/exports/vat/route.ts(65,11): error TS2451: Cannot redeclare block-scoped variable 'periodParam'.
+app/api/accounting/firm/clients/route.ts(75,29): error TS2802: Type 'Set<any>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/accounting/firm/engagements/route.ts(270,29): error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/accounting/firm/ops/alerts/route.ts(149,47): error TS2802: Type 'Map<string, { business_id: any; created_at: any; severity: any; }>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/accounting/firm/ops/alerts/route.ts(183,44): error TS2802: Type 'Map<string, { business_id: any; period_end: any; }>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/accounting/firm/ops/alerts/route.ts(213,41): error TS2802: Type 'Map<string, { business_id: any; created_at: any; }>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/accounting/journals/drafts/[id]/route.ts(400,49): error TS2339: Property 'period_start' does not exist on type '{ id: any; status: any; business_id: any; }'.
+app/api/accounting/journals/drafts/[id]/route.ts(401,47): error TS2339: Property 'period_end' does not exist on type '{ id: any; status: any; business_id: any; }'.
+app/api/accounting/journals/drafts/[id]/route.ts(408,90): error TS2339: Property 'period_start' does not exist on type '{ id: any; status: any; business_id: any; }'.
+app/api/accounting/journals/drafts/[id]/route.ts(408,119): error TS2339: Property 'period_end' does not exist on type '{ id: any; status: any; business_id: any; }'.
+app/api/accounting/journals/drafts/route.ts(455,7): error TS2322: Type '"create_manual_journal_draft"' is not assignable to type 'ActionType'.
+app/api/accounting/journals/drafts/route.ts(467,19): error TS2339: Property 'requiredEngagementAccess' does not exist on type 'AuthorityResolution'.
+app/api/accounting/journals/drafts/route.ts(468,19): error TS2339: Property 'requiredFirmRole' does not exist on type 'AuthorityResolution'.
+app/api/accounting/opening-balances/__tests__/testSetup.ts(10,31): error TS2307: Cannot find module '@/types/supabase' or its corresponding type declarations.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(31,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(32,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(41,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(42,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(48,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(48,25): error TS2339: Property 'action' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(49,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(49,25): error TS2339: Property 'performed_by' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(49,44): error TS2454: Variable 'testUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(50,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(50,25): error TS2339: Property 'performed_at' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(59,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(60,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(69,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(70,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(76,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(76,25): error TS2339: Property 'action' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(77,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(77,25): error TS2339: Property 'performed_at' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(86,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(87,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(96,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(97,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(103,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(103,25): error TS2339: Property 'action' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(112,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(113,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(122,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(123,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(129,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(129,25): error TS2339: Property 'action' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(137,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(138,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(142,27): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(143,35): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(143,50): error TS2339: Property 'performed_at' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(144,35): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(144,46): error TS2339: Property 'performed_at' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(153,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(154,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(159,23): error TS2339: Property 'business_id' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(160,23): error TS2339: Property 'period_start' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(161,23): error TS2339: Property 'action' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(162,23): error TS2339: Property 'performed_by' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(163,23): error TS2339: Property 'performed_at' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(175,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(176,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/audit-trail.test.ts(187,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(28,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(29,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(49,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(50,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(68,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(69,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(84,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(85,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(95,52): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(95,68): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(102,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(103,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(109,51): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(109,67): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(117,44): error TS2304: Cannot find name 'supabase'.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(120,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(121,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(129,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(130,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(136,43): error TS2304: Cannot find name 'supabase'.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(139,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/authority-enforcement.test.ts(140,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(35,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(36,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(37,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(49,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(50,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(61,53): error TS2454: Variable 'testUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(67,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(68,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(74,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(74,25): error TS2339: Property 'performed_by' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(74,44): error TS2454: Variable 'testUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(81,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(82,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(83,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(91,52): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Argument of type '{ accounting_firm_id: string; client_business_id: string; period_id: any; status: string; entry_date: string; description: string; lines: never[]; total_debit: number; total_credit: number; created_by: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'accounting_firm_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(93,29): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(94,20): error TS18047: 'period' is possibly 'null'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(101,21): error TS2454: Variable 'testUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(110,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(111,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(128,17): error TS2345: Argument of type '{ status: string; close_requested_at: string; close_requested_by: string; }' is not assignable to parameter of type 'never'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(131,31): error TS2454: Variable 'testUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(133,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(134,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(143,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(144,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(161,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(162,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(176,17): error TS2345: Argument of type '{ status: string; close_requested_at: string; close_requested_by: string; }' is not assignable to parameter of type 'never'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(179,31): error TS2454: Variable 'testUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(181,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(182,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(191,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(192,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(204,44): error TS2454: Variable 'testPartnerUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(211,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(212,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(218,14): error TS18047: 'actions' is possibly 'null'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(218,25): error TS2339: Property 'performed_by' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(218,44): error TS2454: Variable 'testPartnerUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(225,17): error TS2345: Argument of type '{ status: string; }' is not assignable to parameter of type 'never'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(226,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(227,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(236,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(237,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(255,17): error TS2345: Argument of type '{ status: string; closed_at: string; closed_by: string; }' is not assignable to parameter of type 'never'.
+app/api/accounting/periods/__tests__/close-flow.test.ts(258,22): error TS2454: Variable 'testPartnerUserId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(260,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(261,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(270,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(271,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(287,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/close-flow.test.ts(288,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(26,8): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; closed_at: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/posting-block.test.ts(27,22): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(28,23): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(36,22): error TS18047: 'period' is possibly 'null'.
+app/api/accounting/periods/__tests__/posting-block.test.ts(42,70): error TS2345: Argument of type '{ p_invoice_id: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/posting-block.test.ts(53,66): error TS2345: Argument of type '{ p_business_id: string; p_date: string; p_description: string; p_reference_type: string; p_reference_id: null; p_lines: never[]; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/posting-block.test.ts(54,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(55,17): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(68,71): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; p_entry_date: string; p_description: string; p_lines: never[]; p_created_by: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/posting-block.test.ts(69,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(70,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/posting-block.test.ts(85,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/posting-block.test.ts(86,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(32,74): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(33,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(34,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(40,74): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(41,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(42,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(46,28): error TS2339: Property 'snapshot_hash' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/readiness.test.ts(46,62): error TS2339: Property 'snapshot_hash' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/readiness.test.ts(50,74): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(51,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(52,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(55,74): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(56,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(57,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(61,28): error TS2339: Property 'snapshot_hash' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/readiness.test.ts(61,62): error TS2339: Property 'snapshot_hash' does not exist on type 'never'.
+app/api/accounting/periods/__tests__/readiness.test.ts(70,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(71,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(72,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(79,86): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(80,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(81,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(84,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(85,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(97,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(98,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(99,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(107,52): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Argument of type '{ accounting_firm_id: string; client_business_id: string; period_id: any; status: string; entry_date: string; description: string; lines: never[]; total_debit: number; total_credit: number; created_by: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'accounting_firm_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(109,29): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(110,20): error TS18047: 'period' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(121,86): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(122,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(123,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(126,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(127,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(138,17): error TS2345: Argument of type '{ status: string; }' is not assignable to parameter of type 'never'.
+app/api/accounting/periods/__tests__/readiness.test.ts(139,28): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(140,29): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(145,56): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_period_actions", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; action: string; performed_by: string; performed_at: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_period_actions", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(146,22): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(147,23): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(153,86): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(154,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(155,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(158,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(159,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(172,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(173,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(174,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(181,52): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Argument of type '{ accounting_firm_id: string; client_business_id: string; period_id: any; status: string; entry_date: string; description: string; lines: never[]; total_debit: number; total_credit: number; created_by: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'accounting_firm_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(183,29): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(184,20): error TS18047: 'period' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(194,86): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(195,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(196,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(199,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(200,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(211,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(212,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(213,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(220,52): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Argument of type '{ accounting_firm_id: string; client_business_id: string; period_id: any; status: string; entry_date: string; description: string; lines: never[]; total_debit: number; total_credit: number; created_by: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'accounting_firm_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(222,29): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(223,20): error TS18047: 'period' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(233,86): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(234,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(235,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(238,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(239,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(250,10): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Argument of type '{ business_id: string; period_start: string; period_end: string; status: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "accounting_periods", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'business_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(251,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(252,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(259,52): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(values: never, options?: { count?: "exact" | "planned" | "estimated" | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Argument of type '{ accounting_firm_id: string; client_business_id: string; period_id: any; status: string; entry_date: string; description: string; lines: never[]; total_debit: number; total_credit: number; created_by: string; }' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(values: never[], options?: { count?: "exact" | "planned" | "estimated" | undefined; defaultToNull?: boolean | undefined; } | undefined): PostgrestFilterBuilder<{ PostgrestVersion: string; }, never, never, null, "manual_journal_drafts", never, "POST">', gave the following error.
+    Object literal may only specify known properties, and 'accounting_firm_id' does not exist in type 'never[]'.
+app/api/accounting/periods/__tests__/readiness.test.ts(261,29): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(262,20): error TS18047: 'period' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(272,86): error TS2345: Argument of type '{ p_business_id: string; p_period_start: string; }' is not assignable to parameter of type 'undefined'.
+app/api/accounting/periods/__tests__/readiness.test.ts(273,24): error TS2454: Variable 'testBusinessId' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(274,25): error TS2454: Variable 'testPeriodStart' is used before being assigned.
+app/api/accounting/periods/__tests__/readiness.test.ts(277,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/__tests__/readiness.test.ts(279,14): error TS18047: 'readiness' is possibly 'null'.
+app/api/accounting/periods/close/route.ts(116,9): error TS2322: Type 'string' is not assignable to type 'ActionType'.
+app/api/accounting/periods/close/route.ts(128,21): error TS2339: Property 'requiredEngagementAccess' does not exist on type 'AuthorityResolution'.
+app/api/accounting/periods/close/route.ts(129,21): error TS2339: Property 'requiredFirmRole' does not exist on type 'AuthorityResolution'.
+app/api/accounting/periods/reopen/route.ts(134,21): error TS2339: Property 'requiredEngagementAccess' does not exist on type 'AuthorityResolution'.
+app/api/accounting/periods/reopen/route.ts(135,21): error TS2339: Property 'requiredFirmRole' does not exist on type 'AuthorityResolution'.
+app/api/accounting/reconciliation/resolve/route.ts(182,22): error TS2345: Argument of type 'number | null' is not assignable to parameter of type 'number'.
+  Type 'null' is not assignable to type 'number'.
+app/api/accounting/reconciliation/resolve/route.ts(194,41): error TS2345: Argument of type 'number | null' is not assignable to parameter of type 'number'.
+  Type 'null' is not assignable to type 'number'.
+app/api/accounting/reconciliation/resolve/route.ts(284,23): error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(105,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(106,58): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(107,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(110,40): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(110,45): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(111,50): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(111,55): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(112,40): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(112,45): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(122,20): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(123,20): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(123,25): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(125,20): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(126,20): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/csv/route.ts(126,25): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(99,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(100,58): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(101,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(104,40): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(104,45): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(105,50): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(105,55): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(106,40): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/balance-sheet/export/pdf/route.ts(106,45): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/csv/route.ts(209,45): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/csv/route.ts(209,50): error TS7006: Parameter 'line' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/csv/route.ts(210,46): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/csv/route.ts(210,51): error TS7006: Parameter 'line' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/pdf/route.ts(230,45): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/pdf/route.ts(230,50): error TS7006: Parameter 'line' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/pdf/route.ts(231,46): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/general-ledger/export/pdf/route.ts(231,51): error TS7006: Parameter 'line' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/csv/route.ts(108,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/csv/route.ts(109,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/csv/route.ts(112,49): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/csv/route.ts(112,54): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/csv/route.ts(113,51): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/csv/route.ts(113,56): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/pdf/route.ts(142,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/pdf/route.ts(143,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/pdf/route.ts(146,49): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/pdf/route.ts(146,54): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/pdf/route.ts(147,51): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/profit-and-loss/export/pdf/route.ts(147,56): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/csv/route.ts(129,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/csv/route.ts(129,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/csv/route.ts(130,48): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/csv/route.ts(130,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/pdf/route.ts(181,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/pdf/route.ts(181,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/pdf/route.ts(182,48): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/export/pdf/route.ts(182,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(114,28): error TS7006: Parameter 'account' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(119,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(119,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(120,48): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(120,53): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(121,46): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(121,51): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(122,55): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(122,60): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(123,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(123,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(124,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(124,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(125,50): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/reports/trial-balance/route.ts(125,55): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(153,27): error TS7006: Parameter 'account' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(158,53): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(158,58): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(164,54): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(164,59): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(170,52): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(170,57): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(171,53): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(171,58): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(172,53): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(172,58): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(178,54): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/accounting/trial-balance/route.ts(178,59): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/admin/accounting/forensic-failures/[id]/acknowledge/route.ts(49,41): error TS2339: Property 'message' does not exist on type 'never'.
+app/api/admin/accounting/forensic-failures/[id]/escalate/route.ts(68,40): error TS2339: Property 'message' does not exist on type 'never'.
+app/api/admin/accounting/forensic-failures/[id]/ignore/route.ts(48,41): error TS2339: Property 'message' does not exist on type 'never'.
+app/api/admin/accounting/forensic-failures/[id]/resolve/route.ts(68,41): error TS2339: Property 'message' does not exist on type 'never'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(72,43): error TS2339: Property 'customers' does not exist on type '{ id: any; invoice_number: any; customers: { id: any; name: any; email: any; phone: any; whatsapp_phone: any; address: any; }[]; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(76,36): error TS2339: Property 'name' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(77,42): error TS2339: Property 'legal_name' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(78,44): error TS2339: Property 'trading_name' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(79,37): error TS2339: Property 'phone' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(80,37): error TS2339: Property 'email' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(81,39): error TS2339: Property 'address' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(82,40): error TS2339: Property 'logo_url' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(83,38): error TS2339: Property 'tax_id' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(84,51): error TS2339: Property 'registration_number' does not exist on type '{ id: any; name: any; legal_name: any; trading_name: any; phone: any; email: any; address: any; logo_url: any; tax_id: any; registration_number: any; }[]'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(112,32): error TS2339: Property 'total_amount' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(116,35): error TS2551: Property 'credit_note_number' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'. Did you mean 'credit_number'?
+app/api/credit-notes/[id]/pdf-preview/route.ts(117,30): error TS2339: Property 'issue_date' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(133,35): error TS2339: Property 'currency_code' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(134,40): error TS2339: Property 'currency_code' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(134,69): error TS2339: Property 'currency_symbol' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(135,22): error TS2339: Property 'currency_symbol' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/[id]/pdf-preview/route.ts(136,33): error TS2339: Property 'currency_code' does not exist on type '{ id: any; business_id: any; invoice_id: any; credit_number: any; date: any; reason: any; subtotal: any; nhil: any; getfund: any; covid: any; vat: any; total_tax: any; total: any; status: any; notes: any; public_token: any; ... 9 more ...; credit_note_items: { ...; }[]; }'.
+app/api/credit-notes/create/route.ts(149,42): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/credit-notes/create/route.ts(149,47): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/estimates/[id]/route.ts(192,44): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/estimates/[id]/route.ts(202,9): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/estimates/[id]/route.ts(217,42): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/estimates/[id]/route.ts(217,47): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/estimates/create/route.ts(113,44): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/estimates/create/route.ts(122,9): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/estimates/create/route.ts(137,42): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/estimates/create/route.ts(137,47): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/invoices/[id]/route.ts(234,13): error TS2322: Type 'number | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.
+app/api/invoices/[id]/route.ts(355,42): error TS2339: Property 'issue_date' does not exist on type '{ id: any; business_id: any; status: any; sent_at: any; paid_at: any; apply_taxes: any; invoice_number: any; }'.
+app/api/invoices/[id]/route.ts(386,46): error TS18047: 'business' is possibly 'null'.
+app/api/invoices/[id]/route.ts(409,44): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/invoices/[id]/route.ts(409,49): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/invoices/[id]/unsent/route.ts(21,15): error TS2451: Cannot redeclare block-scoped variable 'user'.
+app/api/invoices/[id]/unsent/route.ts(25,15): error TS2451: Cannot redeclare block-scoped variable 'user'.
+app/api/invoices/[id]/unsent/route.ts(47,28): error TS2304: Cannot find name 'getCurrentBusiness'.
+app/api/invoices/__tests__/invoice-issuance-idempotency.test.ts(67,14): error TS2802: Type 'Set<any>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/invoices/__tests__/send-ar-posting.test.ts(96,29): error TS2802: Type 'Set<any>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/invoices/create/route.ts(213,44): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/invoices/create/route.ts(222,9): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/invoices/create/route.ts(237,42): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/invoices/create/route.ts(237,47): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/invoices/preview-draft/route.ts(150,36): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/invoices/preview-draft/route.ts(150,41): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/invoices/preview/route.ts(91,56): error TS2339: Property 'message' does not exist on type 'never'.
+app/api/invoices/preview/route.ts(130,36): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/invoices/preview/route.ts(130,41): error TS7006: Parameter 'item' implicitly has an 'any' type.
+app/api/invoices/preview/route.ts(202,33): error TS2304: Cannot find name 'taxCalculationResult'.
+app/api/invoices/preview/route.ts(202,56): error TS2304: Cannot find name 'taxCalculationResult'.
+app/api/layaway/payments/route.ts(177,9): error TS2345: Argument of type 'PostgrestFilterBuilder<any, any, any, { id: any; }[], "layaway_plans", unknown, "GET">' is not assignable to parameter of type 'readonly any[]'.
+  Type 'PostgrestFilterBuilder<any, any, any, { id: any; }[], "layaway_plans", unknown, "GET">' is missing the following properties from type 'readonly any[]': length, concat, join, slice, and 25 more.
+app/api/offline/sync/route.ts(3,10): error TS2305: Module '"@/lib/supabaseServer"' has no exported member 'createClient'.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(219,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(247,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(276,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(305,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(324,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(345,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(365,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/__tests__/convert-to-invoice.test.ts(390,11): error TS2554: Expected 2 arguments, but got 1.
+app/api/orders/[id]/convert-to-invoice/route.ts(279,44): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/orders/[id]/convert-to-invoice/route.ts(288,9): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+app/api/override/void-sale/route.ts(143,11): error TS2451: Cannot redeclare block-scoped variable 'getServiceRoleClient'.
+app/api/override/void-sale/route.ts(337,11): error TS2451: Cannot redeclare block-scoped variable 'getServiceRoleClient'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(47,66): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(74,35): error TS2345: Argument of type '{ data: { user: null; }; }' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(89,35): error TS2345: Argument of type '{ data: { user: { id: string; }; }; }' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(90,39): error TS2345: Argument of type 'null' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(104,35): error TS2345: Argument of type '{ data: { user: { id: string; }; }; }' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(105,39): error TS2345: Argument of type '"owner"' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(119,35): error TS2345: Argument of type '{ data: { user: { id: string; }; }; }' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(120,39): error TS2345: Argument of type '"owner"' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(122,5): error TS2322: Type 'Mock<UnknownFunction>' is not assignable to type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; }'.
+  Type 'unknown' is not assignable to type 'Promise<Response>'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(155,35): error TS2345: Argument of type '{ data: { user: { id: string; }; }; }' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(156,39): error TS2345: Argument of type '"owner"' is not assignable to parameter of type 'never'.
+app/api/receipt-ocr/__tests__/receipt-ocr-route.test.ts(158,5): error TS2322: Type 'Mock<UnknownFunction>' is not assignable to type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; }'.
+  Type 'unknown' is not assignable to type 'Promise<Response>'.
+app/api/reports/aging/route.ts(85,18): error TS18047: 'invoicesError' is possibly 'null'.
+app/api/reports/aging/route.ts(152,27): error TS18047: 'arAccount' is possibly 'null'.
+app/api/reports/aging/route.ts(160,28): error TS18047: 'arLines' is possibly 'null'.
+app/api/reports/aging/route.ts(161,51): error TS2339: Property 'reference_id' does not exist on type '{ id: any; date: any; business_id: any; reference_type: any; reference_id: any; }[]'.
+app/api/reports/aging/route.ts(164,60): error TS2339: Property 'date' does not exist on type '{ id: any; date: any; business_id: any; reference_type: any; reference_id: any; }[]'.
+app/api/reports/aging/route.ts(202,35): error TS18047: 'invoiceDetails' is possibly 'null'.
+app/api/reports/aging/route.ts(204,38): error TS18048: 'invoiceBalance' is possibly 'undefined'.
+app/api/reports/aging/route.ts(207,33): error TS18048: 'invoiceBalance' is possibly 'undefined'.
+app/api/reports/aging/route.ts(223,26): error TS18048: 'invoiceBalance' is possibly 'undefined'.
+app/api/reports/aging/route.ts(230,53): error TS2339: Property 'id' does not exist on type '{ id: any; name: any; }[]'.
+app/api/reports/aging/route.ts(231,55): error TS2339: Property 'name' does not exist on type '{ id: any; name: any; }[]'.
+app/api/reports/aging/route.ts(244,90): error TS18048: 'invoiceBalance' is possibly 'undefined'.
+app/api/reports/aging/route.ts(245,50): error TS18048: 'invoiceBalance' is possibly 'undefined'.
+app/api/reports/registers/route.ts(54,68): error TS18047: 'user' is possibly 'null'.
+app/api/reports/registers/route.ts(61,32): error TS2339: Property 'businessId' does not exist on type 'ResolveAccountingContextResult'.
+  Property 'businessId' does not exist on type '{ error: "CLIENT_REQUIRED"; }'.
+app/api/reports/registers/route.ts(74,35): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'string | null' is not assignable to parameter of type 'string | number | Date'.
+      Type 'null' is not assignable to type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'string | null' is not assignable to parameter of type 'string | number'.
+      Type 'null' is not assignable to type 'string | number'.
+app/api/reports/registers/route.ts(75,33): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'string | null' is not assignable to parameter of type 'string | number | Date'.
+      Type 'null' is not assignable to type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'string | null' is not assignable to parameter of type 'string | number'.
+      Type 'null' is not assignable to type 'string | number'.
+app/api/reports/registers/route.ts(153,62): error TS18047: 'periodError' is possibly 'null'.
+app/api/reports/registers/route.ts(159,25): error TS18047: 'periodLines' is possibly 'null'.
+app/api/reports/registers/route.ts(174,9): error TS18047: 'periodLines' is possibly 'null'.
+app/api/reports/registers/route.ts(193,28): error TS18047: 'sales' is possibly 'null'.
+app/api/reports/registers/route.ts(223,25): error TS18048: 'cashAccount' is possibly 'undefined'.
+app/api/reports/registers/route.ts(231,62): error TS18047: 'openingError' is possibly 'null'.
+app/api/reports/registers/route.ts(256,28): error TS18047: 'openingSales' is possibly 'null'.
+app/api/reports/registers/route.ts(276,22): error TS18048: 'registerInfo' is possibly 'undefined'.
+app/api/reports/registers/route.ts(276,50): error TS18048: 'registerInfo' is possibly 'undefined'.
+app/api/reports/registers/route.ts(300,42): error TS2802: Type 'MapIterator<[string, { register_id: string; session_id: string | null; }]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/reports/registers/route.ts(332,22): error TS18048: 'registerInfo' is possibly 'undefined'.
+app/api/reports/registers/route.ts(332,50): error TS18048: 'registerInfo' is possibly 'undefined'.
+app/api/reports/registers/route.ts(346,11): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(352,11): error TS18048: 'data' is possibly 'undefined'.
+app/api/reports/registers/route.ts(355,11): error TS18048: 'data' is possibly 'undefined'.
+app/api/reports/registers/route.ts(362,14): error TS18048: 'data' is possibly 'undefined'.
+app/api/reports/registers/route.ts(362,35): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(363,11): error TS18048: 'data' is possibly 'undefined'.
+app/api/reports/registers/route.ts(363,32): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(364,19): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(365,19): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(371,11): error TS18048: 'data' is possibly 'undefined'.
+app/api/reports/registers/route.ts(371,32): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(374,11): error TS18048: 'data' is possibly 'undefined'.
+app/api/reports/registers/route.ts(374,32): error TS18048: 'account' is possibly 'undefined'.
+app/api/reports/registers/route.ts(381,31): error TS2802: Type 'MapIterator<[string, RegisterSessionData]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/reports/registers/route.ts(421,17): error TS18046: 'tot' is of type 'unknown'.
+app/api/reports/registers/route.ts(422,17): error TS18046: 'tot' is of type 'unknown'.
+app/api/reports/registers/route.ts(423,32): error TS18046: 'tot' is of type 'unknown'.
+app/api/reports/registers/route.ts(424,28): error TS18046: 'tot' is of type 'unknown'.
+app/api/reports/sales-summary/route.ts(26,13): error TS2451: Cannot redeclare block-scoped variable 'searchParams'.
+app/api/reports/sales-summary/route.ts(27,68): error TS18047: 'user' is possibly 'null'.
+app/api/reports/sales-summary/route.ts(34,32): error TS2339: Property 'businessId' does not exist on type 'ResolveAccountingContextResult'.
+  Property 'businessId' does not exist on type '{ error: "CLIENT_REQUIRED"; }'.
+app/api/reports/sales-summary/route.ts(36,13): error TS2451: Cannot redeclare block-scoped variable 'searchParams'.
+app/api/reports/sales-summary/route.ts(76,18): error TS18047: 'error' is possibly 'null'.
+app/api/reports/tax-summary/route.ts(28,13): error TS2451: Cannot redeclare block-scoped variable 'searchParams'.
+app/api/reports/tax-summary/route.ts(29,68): error TS18047: 'user' is possibly 'null'.
+app/api/reports/tax-summary/route.ts(36,32): error TS2339: Property 'businessId' does not exist on type 'ResolveAccountingContextResult'.
+  Property 'businessId' does not exist on type '{ error: "CLIENT_REQUIRED"; }'.
+app/api/reports/tax-summary/route.ts(55,42): error TS18047: 'businessData' is possibly 'null'.
+app/api/reports/tax-summary/route.ts(58,13): error TS2451: Cannot redeclare block-scoped variable 'searchParams'.
+app/api/reports/tax-summary/route.ts(205,18): error TS18047: 'sales' is possibly 'null'.
+app/api/reports/tax-summary/route.ts(206,26): error TS18047: 'sales' is possibly 'null'.
+app/api/reports/trial-balance/route.ts(93,24): error TS2552: Cannot find name 'business'. Did you mean 'businessId'?
+app/api/reports/trial-balance/route.ts(123,27): error TS7006: Parameter 'account' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(128,46): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(128,51): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(129,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(129,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(130,46): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(130,51): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(131,55): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(131,60): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(132,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(132,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(133,47): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(133,52): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(134,50): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+app/api/reports/trial-balance/route.ts(134,55): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+app/api/sales/create/route.ts(14,28): error TS2305: Module '"@/lib/userRoles"' has no exported member 'UserRole'.
+app/api/service/expenses/activity/route.ts(18,3): error TS2739: Type 'PromiseLike<boolean>' is missing the following properties from type 'Promise<boolean>': catch, finally, [Symbol.toStringTag]
+app/api/service/expenses/activity/route.ts(139,32): error TS2802: Type 'Set<any>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/service/invitations/route.ts(107,25): error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/api/suppliers/[id]/route.ts(66,15): error TS2304: Cannot find name 'supabase'.
+app/api/suppliers/[id]/route.ts(72,47): error TS2304: Cannot find name 'supabase'.
+app/api/suppliers/[id]/route.ts(82,65): error TS2304: Cannot find name 'supabase'.
+app/api/suppliers/[id]/route.ts(85,17): error TS2304: Cannot find name 'supplierId'.
+app/api/suppliers/[id]/route.ts(123,65): error TS2304: Cannot find name 'supabase'.
+app/api/suppliers/[id]/route.ts(126,17): error TS2304: Cannot find name 'supplierId'.
+app/estimates/page.tsx(83,31): error TS2802: Type 'Set<any>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+app/invoice-public/[token]/page.tsx(253,48): error TS2339: Property 'tax_lines' does not exist on type 'Invoice'.
+app/invoice-public/[token]/page.tsx(254,46): error TS2339: Property 'tax_lines' does not exist on type 'Invoice'.
+app/invoice-public/[token]/page.tsx(263,62): error TS2339: Property 'tax_lines' does not exist on type 'Invoice'.
+app/invoice-public/[token]/page.tsx(263,94): error TS2339: Property 'tax_lines' does not exist on type 'Invoice'.
+app/invoices/page.tsx(268,52): error TS2339: Property 'tax_lines' does not exist on type 'Invoice'.
+app/invoices/page.tsx(352,52): error TS2339: Property 'tax_lines' does not exist on type 'Invoice'.
+app/orders/[id]/view/page.tsx(419,47): error TS2339: Property 'execution_status' does not exist on type 'Order'.
+app/orders/[id]/view/page.tsx(422,46): error TS2339: Property 'execution_status' does not exist on type 'Order'.
+app/orders/[id]/view/page.tsx(428,45): error TS2339: Property 'execution_status' does not exist on type 'Order'.
+app/orders/[id]/view/page.tsx(430,20): error TS2339: Property 'execution_status' does not exist on type 'Order'.
+app/orders/[id]/view/page.tsx(430,59): error TS2339: Property 'execution_status' does not exist on type 'Order'.
+app/orders/[id]/view/page.tsx(438,20): error TS2339: Property 'execution_status' does not exist on type 'Order'.
+app/orders/[id]/view/page.tsx(558,13): error TS2719: Type 'Order' is not assignable to type 'Order'. Two different types with this name exist, but they are unrelated.
+  Types of property 'customers' are incompatible.
+    Type '{ id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null | undefined; address: string | null; } | null' is not assignable to type '{ email?: string | undefined; phone?: string | undefined; whatsapp_phone?: string | undefined; } | null | undefined'.
+      Type '{ id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null | undefined; address: string | null; }' is not assignable to type '{ email?: string | undefined; phone?: string | undefined; whatsapp_phone?: string | undefined; }'.
+        Types of property 'email' are incompatible.
+          Type 'string | null' is not assignable to type 'string | undefined'.
+            Type 'null' is not assignable to type 'string | undefined'.
+app/reports/vat/diagnostic/page.tsx(311,32): error TS2339: Property 'total_tax' does not exist on type '{ id: any; amount: any; tax_lines: any; created_at: any; store_id: any; }'.
+app/settings/reminders/page.tsx(6,10): error TS2305: Module '"@/lib/business"' has no exported member 'useBusinessCurrency'.
+components/accounting/ClientsPanel.tsx(81,13): error TS2345: Argument of type '(r: Response) => Promise<{ err: any; }> | Promise<{ clients: any; }>' is not assignable to parameter of type '(value: Response) => { err: any; } | PromiseLike<{ err: any; }>'.
+  Type 'Promise<{ err: any; }> | Promise<{ clients: any; }>' is not assignable to type '{ err: any; } | PromiseLike<{ err: any; }>'.
+    Type 'Promise<{ clients: any; }>' is not assignable to type '{ err: any; } | PromiseLike<{ err: any; }>'.
+      Type 'Promise<{ clients: any; }>' is not assignable to type 'PromiseLike<{ err: any; }>'.
+        Types of property 'then' are incompatible.
+          Type '<TResult1 = { clients: any; }, TResult2 = never>(onfulfilled?: ((value: { clients: any; }) => TResult1 | PromiseLike<TResult1>) | null | undefined, onrejected?: ((reason: any) => TResult2 | PromiseLike<...>) | null | undefined) => Promise<...>' is not assignable to type '<TResult1 = { err: any; }, TResult2 = never>(onfulfilled?: ((value: { err: any; }) => TResult1 | PromiseLike<TResult1>) | null | undefined, onrejected?: ((reason: any) => TResult2 | PromiseLike<...>) | null | undefined) => PromiseLike<...>'.
+            Types of parameters 'onfulfilled' and 'onfulfilled' are incompatible.
+              Types of parameters 'value' and 'value' are incompatible.
+                Property 'err' is missing in type '{ clients: any; }' but required in type '{ err: any; }'.
+components/accounting/ClientsPanel.tsx(85,13): error TS2345: Argument of type '(result: { err?: string; clients?: FirmClient[]; }) => void' is not assignable to parameter of type '(value: Response) => void | PromiseLike<void>'.
+  Types of parameters 'result' and 'value' are incompatible.
+    Type 'Response' has no properties in common with type '{ err?: string | undefined; clients?: FirmClient[] | undefined; }'.
+components/AuthorityGuard.tsx(30,17): error TS2304: Cannot find name 'canPerformAction'.
+components/AuthorityGuard.tsx(175,17): error TS2304: Cannot find name 'canPerformAction'.
+components/dashboard/service/FinancialFlowChart.tsx(35,3): error TS2339: Property 'payload' does not exist on type 'Omit<Props<number, string>, PropertiesReadFromContext> & { active?: boolean | undefined; includeHidden?: boolean | undefined; allowEscapeViewBox?: AllowInDimension | undefined; ... 16 more ...; axisId?: AxisId | undefined; } & { ...; }'.
+components/dashboard/service/FinancialFlowChart.tsx(36,3): error TS2339: Property 'label' does not exist on type 'Omit<Props<number, string>, PropertiesReadFromContext> & { active?: boolean | undefined; includeHidden?: boolean | undefined; allowEscapeViewBox?: AllowInDimension | undefined; ... 16 more ...; axisId?: AxisId | undefined; } & { ...; }'.
+components/dashboard/service/FinancialFlowChart.tsx(149,18): error TS2322: Type '{ currencyCode: string; showCash: boolean; separator?: string | undefined; formatter?: Formatter<ValueType, NameType> | undefined; wrapperClassName?: string | undefined; ... 30 more ...; activeIndex: TooltipIndex | undefined; }' is not assignable to type 'Omit<Props<number, string>, PropertiesReadFromContext>'.
+  Types of property 'formatter' are incompatible.
+    Type 'Formatter<ValueType, NameType> | undefined' is not assignable to type 'Formatter<number, string> | undefined'.
+      Type 'Formatter<ValueType, NameType>' is not assignable to type 'Formatter<number, string>'.
+        Type 'NameType' is not assignable to type 'string'.
+          Type 'number' is not assignable to type 'string'.
+components/dashboard/service/ServiceDashboardCockpit.tsx(9,45): error TS2307: Cannot find module './ServiceAccountingActivityWidget' or its corresponding type declarations.
+components/dashboard/service/ServiceDashboardCockpit.tsx(10,42): error TS2307: Cannot find module './ServiceAccountantNotesWidget' or its corresponding type declarations.
+components/documents/FinancialDocument.ts(477,37): error TS18048: 'taxLine.rate' is possibly 'undefined'.
+components/PeriodCloseCenter.tsx(466,38): error TS2869: Right operand of ?? is unreachable because the left operand is never nullish.
+components/PeriodCloseCenter.tsx(481,38): error TS2869: Right operand of ?? is unreachable because the left operand is never nullish.
+components/Sidebar.tsx(113,31): error TS2345: Argument of type 'boolean | null' is not assignable to parameter of type 'SetStateAction<boolean>'.
+  Type 'null' is not assignable to type 'SetStateAction<boolean>'.
+components/StockAdjustmentModal.tsx(305,39): error TS2339: Property 'replace' does not exist on type 'never'.
+lib/__tests__/gh-tax-regression.test.ts(139,40): error TS2339: Property 'amount' does not exist on type 'never'.
+lib/accessControl.ts(278,7): error TS2367: This comparison appears to be unintentional because the types '"retail" | "service"' and '"accounting"' have no overlap.
+lib/accessControl.ts(321,9): error TS2367: This comparison appears to be unintentional because the types '"retail" | "service"' and '"accounting"' have no overlap.
+lib/accessControl.ts(355,9): error TS2367: This comparison appears to be unintentional because the types '"owner" | "admin" | "manager"' and '"cashier"' have no overlap.
+lib/accounting/__tests__/testHelpers.ts(9,31): error TS2307: Cannot find module '@/types/supabase' or its corresponding type declarations.
+lib/accounting/reconciliation/resolution.ts(258,5): error TS2322: Type 'number | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.
+lib/accounting/reconciliation/resolution.ts(309,5): error TS2322: Type 'string | boolean' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+lib/accounting/reconciliation/resolution.ts(573,5): error TS2367: This comparison appears to be unintentional because the types 'ReconciliationStatus.WARN | ReconciliationStatus.FAIL' and 'ReconciliationStatus.ERROR' have no overlap.
+lib/accounting/useAccountingReadiness.ts(69,41): error TS2345: Argument of type 'Dispatch<SetStateAction<{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }>>' is not assignable to parameter of type 'Dispatch<SetStateAction<AccountingReadinessState>>'.
+  Type 'SetStateAction<AccountingReadinessState>' is not assignable to type 'SetStateAction<{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }>'.
+    Type '(prevState: AccountingReadinessState) => AccountingReadinessState' is not assignable to type 'SetStateAction<{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }>'.
+      Type '(prevState: AccountingReadinessState) => AccountingReadinessState' is not assignable to type '(prevState: { ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }) => { ready: boolean | null; authority_source: "accountant" | ... 2 more ... | null; loading: boolean; error: string | null; }'.
+        Types of parameters 'prevState' and 'prevState' are incompatible.
+          Property 'refetch' is missing in type '{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }' but required in type 'AccountingReadinessState'.
+lib/accounting/useAccountingReadiness.ts(77,25): error TS2345: Argument of type 'Dispatch<SetStateAction<{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }>>' is not assignable to parameter of type 'Dispatch<SetStateAction<AccountingReadinessState>>'.
+  Type 'SetStateAction<AccountingReadinessState>' is not assignable to type 'SetStateAction<{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }>'.
+    Type '(prevState: AccountingReadinessState) => AccountingReadinessState' is not assignable to type 'SetStateAction<{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }>'.
+      Type '(prevState: AccountingReadinessState) => AccountingReadinessState' is not assignable to type '(prevState: { ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }) => { ready: boolean | null; authority_source: "accountant" | ... 2 more ... | null; loading: boolean; error: string | null; }'.
+        Types of parameters 'prevState' and 'prevState' are incompatible.
+          Property 'refetch' is missing in type '{ ready: boolean | null; authority_source: "accountant" | "owner" | "employee" | null; loading: boolean; error: string | null; }' but required in type 'AccountingReadinessState'.
+lib/accountingAuthorityEngine.ts(229,28): error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+lib/accountingPeriods/__tests__/phase3_2_exports.test.ts(16,26): error TS2307: Cannot find module '@/types/supabase' or its corresponding type declarations.
+lib/accountingPeriods/lifecycle.ts(116,35): error TS2339: Property 'data' does not exist on type '{ user: User; } | { user: null; }'.
+  Property 'data' does not exist on type '{ user: User; }'.
+lib/accountingPeriods/lifecycle.ts(246,42): error TS2339: Property 'data' does not exist on type '{ user: User; } | { user: null; }'.
+  Property 'data' does not exist on type '{ user: User; }'.
+lib/documentState.ts(130,34): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/documentState.ts(141,34): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/documentState.ts(152,34): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/documentState.ts(163,38): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/documentState.ts(174,38): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/documentState.ts(185,38): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/documentState.ts(255,38): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+lib/firmAuthority.ts(278,10): error TS2678: Type '"create_journal"' is not comparable to type 'ActionType'.
+lib/taxEngine/jurisdictions/east-africa.ts(73,9): error TS2353: Object literal may only specify known properties, and 'base' does not exist in type 'TaxLine'.
+lib/taxEngine/jurisdictions/east-africa.ts(86,7): error TS2322: Type 'TaxLine[]' is not assignable to type 'LegacyTaxLine[]'.
+  Property 'base' is missing in type 'TaxLine' but required in type 'LegacyTaxLine'.
+lib/taxEngine/jurisdictions/kenya.ts(67,9): error TS2353: Object literal may only specify known properties, and 'base' does not exist in type 'TaxLine'.
+lib/taxEngine/jurisdictions/kenya.ts(80,7): error TS2322: Type 'TaxLine[]' is not assignable to type 'LegacyTaxLine[]'.
+  Property 'base' is missing in type 'TaxLine' but required in type 'LegacyTaxLine'.
+lib/taxEngine/jurisdictions/nigeria.ts(67,9): error TS2353: Object literal may only specify known properties, and 'base' does not exist in type 'TaxLine'.
+lib/taxEngine/jurisdictions/nigeria.ts(80,7): error TS2322: Type 'TaxLine[]' is not assignable to type 'LegacyTaxLine[]'.
+  Property 'base' is missing in type 'TaxLine' but required in type 'LegacyTaxLine'.
+lib/taxEngine/jurisdictions/zambia.ts(67,9): error TS2353: Object literal may only specify known properties, and 'base' does not exist in type 'TaxLine'.
+lib/taxEngine/jurisdictions/zambia.ts(80,7): error TS2322: Type 'TaxLine[]' is not assignable to type 'LegacyTaxLine[]'.
+  Property 'base' is missing in type 'TaxLine' but required in type 'LegacyTaxLine'.
+scripts/accounting-ci-audit.ts(154,18): error TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', 'nodenext', or 'preserve', and the 'target' option is set to 'es2017' or higher.

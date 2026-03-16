@@ -1,0 +1,266 @@
+{
+  "audit_timestamp": "2025-01-17T12:00:00Z",
+  "business_id": "REDACTED_BUSINESS_UUID",
+  "overall_status": "PASS",
+  "total_periods_audited": 3,
+  "passed_periods": 3,
+  "failed_periods": 0,
+  "periods": [
+    {
+      "period_id": "REDACTED_PERIOD_1_UUID",
+      "period_start": "2024-10-01",
+      "period_end": "2024-10-31",
+      "status": "locked",
+      "overall_status": "PASS",
+      "total_checks": 8,
+      "passed_checks": 8,
+      "failed_checks": 0,
+      "invariants": [
+        {
+          "invariant_name": "sale_journal_entry_completeness",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "total_sales": 150,
+            "posted_sales": 150
+          }
+        },
+        {
+          "invariant_name": "sale_ledger_line_completeness",
+          "status": "PASS",
+          "failure_reason": null
+        },
+        {
+          "invariant_name": "period_guard_enforcement",
+          "status": "PASS",
+          "failure_reason": null
+        },
+        {
+          "invariant_name": "period_state_machine",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "current_status": "locked"
+          }
+        },
+        {
+          "invariant_name": "opening_balance_rollforward",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "prior_period_id": "REDACTED_PRIOR_PERIOD_UUID"
+          }
+        },
+        {
+          "invariant_name": "trial_balance_balance",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "total_debits": 125000.50,
+            "total_credits": 125000.50,
+            "difference": 0.00
+          }
+        },
+        {
+          "invariant_name": "statement_reconciliation",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "trial_balance_debits": 125000.50,
+            "trial_balance_credits": 125000.50,
+            "trial_balance_is_balanced": true,
+            "pnl_net_income": 25000.00,
+            "balance_sheet_assets": 150000.00,
+            "balance_sheet_liabilities": 75000.00,
+            "balance_sheet_equity": 75000.00,
+            "balance_sheet_balanced": true
+          }
+        },
+        {
+          "invariant_name": "reporting_canonical_functions",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "canonical_functions_exist": true,
+            "legacy_functions_exist": false
+          }
+        }
+      ]
+    },
+    {
+      "period_id": "REDACTED_PERIOD_2_UUID",
+      "period_start": "2024-11-01",
+      "period_end": "2024-11-30",
+      "status": "soft_closed",
+      "overall_status": "PASS",
+      "total_checks": 8,
+      "passed_checks": 8,
+      "failed_checks": 0,
+      "invariants": [
+        {
+          "invariant_name": "sale_journal_entry_completeness",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "total_sales": 180,
+            "posted_sales": 180
+          }
+        },
+        {
+          "invariant_name": "sale_ledger_line_completeness",
+          "status": "PASS",
+          "failure_reason": null
+        },
+        {
+          "invariant_name": "period_guard_enforcement",
+          "status": "PASS",
+          "failure_reason": null
+        },
+        {
+          "invariant_name": "period_state_machine",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "current_status": "soft_closed"
+          }
+        },
+        {
+          "invariant_name": "opening_balance_rollforward",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "prior_period_id": "REDACTED_PERIOD_1_UUID"
+          }
+        },
+        {
+          "invariant_name": "trial_balance_balance",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "total_debits": 142000.75,
+            "total_credits": 142000.75,
+            "difference": 0.00
+          }
+        },
+        {
+          "invariant_name": "statement_reconciliation",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "trial_balance_debits": 142000.75,
+            "trial_balance_credits": 142000.75,
+            "trial_balance_is_balanced": true,
+            "pnl_net_income": 32000.25,
+            "balance_sheet_assets": 165000.00,
+            "balance_sheet_liabilities": 82000.00,
+            "balance_sheet_equity": 83000.00,
+            "balance_sheet_balanced": true
+          }
+        },
+        {
+          "invariant_name": "reporting_canonical_functions",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "canonical_functions_exist": true,
+            "legacy_functions_exist": false
+          }
+        }
+      ]
+    },
+    {
+      "period_id": "REDACTED_PERIOD_3_UUID",
+      "period_start": "2024-12-01",
+      "period_end": "2024-12-31",
+      "status": "open",
+      "overall_status": "PASS",
+      "total_checks": 8,
+      "passed_checks": 8,
+      "failed_checks": 0,
+      "invariants": [
+        {
+          "invariant_name": "sale_journal_entry_completeness",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "total_sales": 200,
+            "posted_sales": 200
+          }
+        },
+        {
+          "invariant_name": "sale_ledger_line_completeness",
+          "status": "PASS",
+          "failure_reason": null
+        },
+        {
+          "invariant_name": "period_guard_enforcement",
+          "status": "PASS",
+          "failure_reason": null
+        },
+        {
+          "invariant_name": "period_state_machine",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "current_status": "open"
+          }
+        },
+        {
+          "invariant_name": "opening_balance_rollforward",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "prior_period_id": "REDACTED_PERIOD_2_UUID"
+          }
+        },
+        {
+          "invariant_name": "trial_balance_balance",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "total_debits": 158000.00,
+            "total_credits": 158000.00,
+            "difference": 0.00
+          }
+        },
+        {
+          "invariant_name": "statement_reconciliation",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "trial_balance_debits": 158000.00,
+            "trial_balance_credits": 158000.00,
+            "trial_balance_is_balanced": true,
+            "pnl_net_income": 38000.00,
+            "balance_sheet_assets": 175000.00,
+            "balance_sheet_liabilities": 90000.00,
+            "balance_sheet_equity": 85000.00,
+            "balance_sheet_balanced": true
+          }
+        },
+        {
+          "invariant_name": "reporting_canonical_functions",
+          "status": "PASS",
+          "failure_reason": null,
+          "details": {
+            "canonical_functions_exist": true,
+            "legacy_functions_exist": false
+          }
+        }
+      ]
+    }
+  ],
+  "audit_function": "run_business_accounting_audit",
+  "audit_function_parameters": {
+    "p_business_id": "REDACTED_BUSINESS_UUID",
+    "p_limit_periods": 3
+  },
+  "notes": [
+    "All invariants passed for audited periods",
+    "Trial Balance balances verified (debits = credits)",
+    "Opening balance rollforward integrity verified",
+    "Period guard enforcement verified (no postings in locked periods)",
+    "Statement reconciliation verified (P&L and Balance Sheet reconcile to Trial Balance)",
+    "Canonical reporting functions verified (no bypass paths detected)"
+  ]
+}

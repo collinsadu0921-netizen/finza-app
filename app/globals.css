@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+  }
+ 
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+  }
+
+  body {
+    @apply bg-white text-slate-900 font-sans;
+  }
+}
+
+@layer components {
+  /* Financial Typography Utilities */
+  .tabular-nums {
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-money-in {
+    @apply text-emerald-600 dark:text-emerald-400;
+  }
+  
+  .text-money-out {
+    @apply text-slate-600 dark:text-slate-400;
+  }
+
+  .text-money-error {
+    @apply text-rose-600 dark:text-rose-400;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+/* ==========================================================================
+   Export / Print mode: hide UI controls so only document content is shown.
+   - .print-hide / .no-print: hidden when user prints (e.g. Ctrl+P).
+   - .export-hide: hidden when printing OR when [data-export-mode="true"] is set
+     (e.g. ?print=true, /preview/*, /export/*).
+   UI controls (buttons, toolbars, sidebar, nav) MUST include .export-hide so
+   they do not appear in preview, export, or print output.
+   ========================================================================== */
+@media print {
+  .print-hide,
+  .no-print,
+  .export-hide {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  /* Hide layout chrome when printing */
+  aside[class*="fixed"],
+  nav[class*="sticky"],
+  nav[class*="border-b"] {
+    display: none !important;
+  }
+  /* Remove sidebar offset from main content */
+  [class*="pl-64"] {
+    padding-left: 0 !important;
+  }
+}
+
+[data-export-mode="true"] .export-hide {
+  display: none !important;
+  visibility: hidden !important;
+}

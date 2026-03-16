@@ -1,0 +1,38 @@
+# Nightly forensic accounting verification.
+# Calls deployed cron endpoint with CRON_SECRET. No ledger or forensic logic changes.
+name: Forensic Accounting Nightly
+
+on:
+  schedule:
+    # 02:00 UTC every night
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  forensic-cron:
+    name: Trigger forensic verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Call forensic cron endpoint
+        env:
+          CRON_URL: ${{ secrets.FORENSIC_CRON_URL }}
+          CRON_SECRET: ${{ secrets.FORENSIC_CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Missing FORENSIC_CRON_URL or FORENSIC_CRON_SECRET"
+            exit 1
+          fi
+          echo "Calling $CRON_URL ..."
+          response=$(curl -s -w "\n%{http_code}" -X POST "$CRON_URL" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "HTTP $http_code"
+          echo "$body" | jq . 2>/dev/null || echo "$body"
+          if [ "$http_code" != "200" ]; then
+            echo "Expected 200, got $http_code"
+            exit 1
+          fi

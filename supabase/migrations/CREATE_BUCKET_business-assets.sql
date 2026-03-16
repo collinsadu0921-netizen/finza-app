@@ -1,0 +1,21 @@
+-- IMPORTANT: This migration cannot create the bucket via SQL
+-- Storage buckets must be created via Supabase Dashboard or Storage API
+-- 
+-- TO CREATE THE BUCKET:
+-- 1. Go to Supabase Dashboard > Storage
+-- 2. Click "New bucket"
+-- 3. Name: business-assets
+-- 4. Public: true (check this box)
+-- 5. File size limit: 5MB (optional)
+-- 6. Allowed MIME types: image/jpeg, image/png, image/gif, image/webp (optional)
+-- 7. Click "Create bucket"
+--
+-- OR use the Supabase CLI:
+-- supabase storage create business-assets --public
+--
+-- After creating the bucket, the policies in migration 066_ensure_business_assets_bucket.sql
+-- will apply automatically.
+
+-- This file is just documentation - the actual bucket creation must be done manually
+-- or via the Storage API/CLI
+

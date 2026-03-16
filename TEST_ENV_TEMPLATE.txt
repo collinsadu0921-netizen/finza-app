@@ -1,0 +1,53 @@
+# Test Database Configuration
+# Step 9.1 Batch F — Test Environment Variables
+# 
+# Copy these to your .env.test file and fill in your test project values
+
+# ============================================================================
+# SUPABASE TEST PROJECT
+# ============================================================================
+# Get these from: Supabase Dashboard → Project Settings → API
+
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
+
+# ============================================================================
+# TEST CONFIGURATION
+# ============================================================================
+
+NODE_ENV=test
+
+# Database connection (for direct PostgreSQL access if needed)
+# Format: postgresql://postgres:[PASSWORD]@db.YOUR_PROJECT_REF.supabase.co:5432/postgres
+TEST_DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@db.YOUR_PROJECT_REF.supabase.co:5432/postgres
+
+# ============================================================================
+# TEST DATA IDs
+# ============================================================================
+# Fill these in after running TEST_DATABASE_SEED.sql
+# Get user IDs from: SELECT id, email FROM auth.users WHERE email LIKE 'test-%@example.com';
+
+# Firm
+TEST_FIRM_ID=00000000-0000-0000-0000-000000000001
+
+# Business
+TEST_BUSINESS_ID=00000000-0000-0000-0000-000000000002
+
+# Periods
+TEST_OPEN_PERIOD_ID=00000000-0000-0000-0000-000000000003
+TEST_LOCKED_PERIOD_ID=00000000-0000-0000-0000-000000000004
+
+# Engagement
+TEST_ENGAGEMENT_ID=00000000-0000-0000-0000-000000000005
+
+# Users (get from auth.users after creating test users)
+TEST_PARTNER_USER_ID=
+TEST_SENIOR_USER_ID=
+TEST_JUNIOR_USER_ID=
+
+# Account IDs (get from accounts table after seeding)
+TEST_CASH_ACCOUNT_ID=
+TEST_AR_ACCOUNT_ID=
+TEST_AP_ACCOUNT_ID=
+TEST_EQUITY_ACCOUNT_ID=

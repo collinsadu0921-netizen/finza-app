@@ -1,0 +1,161 @@
+## 🔒 Finza — **Final Vision Statement (LOCKED)**
+
+This is the **authoritative vision**.
+No reinterpretation. No dilution. No silent drift.
+
+---
+
+# Finza Vision (Locked)
+
+### **Finza is business software that produces accounting automatically.**
+
+Accounting is **not a task** performed by the business.
+Accounting is a **byproduct of real business activity**.
+
+Every sale, invoice, payment, expense, refund, stock movement, and adjustment creates a **verifiable financial record** at the moment it happens.
+
+No reconstruction.
+No retroactive cleanup.
+No “send me your statements.”
+
+---
+
+## Core Principle
+
+> **If it happened in the business, it must already exist in the books.**
+
+Finza enforces this by design, not by training.
+
+---
+
+## The Three Workspaces (Non-Negotiable)
+
+### 1️⃣ Retail Workspace — **Operate the business**
+
+* Built for shops, cashiers, and managers
+* Uses operational language only (sell, refund, stock, cash)
+* **No accounting knowledge required**
+* No debits, credits, journals, or periods exposed
+* All financial truth is created automatically via immutable ledger posting
+* Ledger is **write-only via system rules**
+* Accounting workspace is **inaccessible**
+
+**Retail exists to run the business — not to explain accounting.**
+
+---
+
+### 2️⃣ Service Workspace — **Run the business and see the truth**
+
+* Built for service businesses, founders, and in-house bookkeepers
+* Business language first (invoices, payments, expenses)
+* Accounting visibility is **optional**, not hidden
+* Users may view:
+
+  * Profit & Loss
+  * Balance Sheet
+  * General Ledger
+* Users may **not**:
+
+  * Post manual journals
+  * Close periods
+  * Perform accounting adjustments
+* Accounting is automatic, but **transparency is allowed**
+
+**Service respects reality: some businesses want insight without being accountants.**
+
+---
+
+### 3️⃣ Accounting-First Workspace — **Professional authority**
+
+* Built exclusively for accounting firms and professionals
+* The **only place** where accounting decisions are made:
+
+  * Period control
+  * Adjustments
+  * Reconciliation
+  * Closing
+  * Audit readiness
+* Manages both:
+
+  * Finza businesses
+  * External clients (via opening balances and imports)
+* Operates on the same immutable ledger — no duplication
+
+**This workspace governs truth. Others consume it.**
+
+---
+
+## Accountant Reality (Explicitly Supported)
+
+Finza **does not assume** accountants use Finza.
+
+Three valid models are supported:
+
+1. **No accountant**
+
+   * Business runs independently
+   * Books are always correct and audit-ready
+
+2. **External accountant (not on Finza)**
+
+   * Business exports period-accurate books
+   * Accountant works in their own system
+   * Finza remains source of truth
+
+3. **Finza accounting firm**
+
+   * Firm collaborates directly in Accounting-First workspace
+   * Works across many clients
+   * Applies professional judgment on immutable data
+
+**All three are first-class. None are forced.**
+
+---
+
+## Ledger Doctrine (Immutable)
+
+* One ledger per business
+* Append-only
+* No edits or deletions of posted entries
+* Corrections occur via new entries
+* Every number is traceable to a real business event
+
+**The ledger is law.**
+
+---
+
+## Leakage Elimination (Why Finza Exists)
+
+Finza reduces financial leakage by:
+
+* Capturing truth at the moment of action
+* Eliminating after-the-fact bookkeeping
+* Enforcing supervision on exceptions
+* Locking periods
+* Creating audit trails by default
+
+This is **structural prevention**, not process compliance.
+
+---
+
+## What Finza Is Not
+
+* Not a POS with accounting features
+* Not bookkeeping software
+* Not an ERP
+* Not dependent on accountants
+
+---
+
+## What Finza Is
+
+> **A financial truth infrastructure for real businesses.**
+
+Banks trust it.
+Accountants respect it.
+Businesses can finally operate without fear.
+
+---
+
+**Status:** 🔒 **LOCKED**
+This vision is final and authoritative.
