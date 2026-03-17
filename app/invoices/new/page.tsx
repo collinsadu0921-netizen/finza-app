@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
+import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
@@ -464,7 +465,21 @@ export default function NewInvoicePage() {
           {error && (
             <div className="mb-6 rounded-md bg-red-50 border border-red-200 p-4 flex items-start gap-3">
               <svg className="w-5 h-5 text-red-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <div className="text-sm text-red-800">{error}</div>
+              <div className="text-sm text-red-800">
+                {error.includes("Business currency is required") || error.includes("Currency symbol not available") ? (
+                  <>
+                    Business currency is not set.{" "}
+                    <Link
+                      href="/settings/business-profile"
+                      className="underline font-semibold hover:text-red-900"
+                    >
+                      Set it here →
+                    </Link>
+                  </>
+                ) : (
+                  error
+                )}
+              </div>
             </div>
           )}
 
