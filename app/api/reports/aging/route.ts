@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
     if (invoicesError) {
       console.error("Error fetching invoices:", invoicesError)
       return NextResponse.json(
-        { error: invoicesError.message },
+        { error: invoicesError?.message ?? "Unknown error" },
         { status: 500 }
       )
     }
@@ -149,19 +149,20 @@ export async function GET(request: NextRequest) {
           )
         `
         )
-        .eq("account_id", arAccount.id)
+        .eq("account_id", arAccount!.id)
         .eq("journal_entries.business_id", businessId || "")
         .eq("journal_entries.reference_type", "invoice")
 
       if (arLines) {
         // Group by invoice_id and calculate balance per invoice
         const invoiceBalances = new Map<string, { balance: number; entryDate: Date }>()
-        
-        for (const line of arLines) {
-          const invoiceId = line.journal_entries?.reference_id
+        const je = (line: { journal_entries?: unknown }) => Array.isArray(line.journal_entries) ? line.journal_entries[0] : line.journal_entries
+        for (const line of arLines!) {
+          const journalEntry = je(line)
+          const invoiceId = journalEntry?.reference_id
           if (!invoiceId) continue
 
-          const entryDate = new Date(line.journal_entries?.date || today)
+          const entryDate = new Date((journalEntry as { date?: string })?.date || today)
           const amount = Number(line.debit || 0) - Number(line.credit || 0) // AR is asset: debit - credit
 
           const existing = invoiceBalances.get(invoiceId) || { balance: 0, entryDate }
@@ -199,12 +200,13 @@ export async function GET(request: NextRequest) {
             .is("deleted_at", null)
 
           if (invoiceDetails) {
-            for (const invoice of invoiceDetails) {
-              const invoiceBalance = invoiceBalances.get(invoice.id)
-              if (!invoiceBalance || invoiceBalance.balance <= 0) continue
+            for (const invoice of invoiceDetails!) {
+              const rawBalance = invoiceBalances.get(invoice.id)
+              if (rawBalance == null || (rawBalance?.balance ?? 0) <= 0) continue
+              const bal = rawBalance!
 
               // LEDGER-BASED: Use journal_entry.entry_date for aging, NOT invoice.issue_date or due_date
-              const entryDate = invoiceBalance.entryDate
+              const entryDate = bal.entryDate
               const daysPastDue = Math.floor((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24))
 
               let bucket: string
@@ -220,15 +222,16 @@ export async function GET(request: NextRequest) {
 
               const agingEntry = {
                 ...invoice,
-                balance: invoiceBalance.balance,
+                balance: bal.balance,
                 daysPastDue,
               }
 
               agingData[bucket].push(agingEntry)
 
-              // Group by customer
-              const customerId = invoice.customers?.id || "unknown"
-              const customerName = invoice.customers?.name || "Unknown"
+              // Group by customer (Supabase join can return array)
+              const cust = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers
+              const customerId = (cust as { id?: string } | null)?.id ?? "unknown"
+              const customerName = (cust as { name?: string } | null)?.name ?? "Unknown"
 
               if (!customerAging[customerId]) {
                 customerAging[customerId] = {
@@ -241,8 +244,8 @@ export async function GET(request: NextRequest) {
                 }
               }
 
-              customerAging[customerId][bucket as keyof typeof customerAging[string]] += invoiceBalance.balance
-              customerAging[customerId].total += invoiceBalance.balance
+              customerAging[customerId][bucket as keyof typeof customerAging[string]] += bal.balance
+              customerAging[customerId].total += bal.balance
             }
           }
         }

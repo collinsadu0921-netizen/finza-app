@@ -255,11 +255,11 @@ function buildAuditMetadata(
     reference,
     scope: result.scope,
     timestamp: new Date().toISOString(),
-    delta: result.delta,
+    delta: Number(result.delta ?? 0),
     approval_required: true,
     reconciliation_result_summary: {
-      expectedBalance: result.expectedBalance,
-      ledgerBalance: result.ledgerBalance,
+      expectedBalance: Number(result.expectedBalance ?? 0),
+      ledgerBalance: Number(result.ledgerBalance ?? 0),
       status: result.status,
     },
   }
@@ -283,12 +283,13 @@ export function buildDiagnosisReport(result: ReconciliationResult): DiagnosisRep
   if (result.scope.customerId) evidence.push(`scope: customer ${result.scope.customerId}`)
   if (rootCause) evidence.push(`inferred root cause: ${rootCause}`)
 
-  const canRecommendFix =
+  const canRecommendFix = Boolean(
     result.status !== ReconciliationStatus.OK &&
     result.status !== ReconciliationStatus.ERROR &&
     result.delta != null &&
     result.scope.businessId &&
     (result.scope.invoiceId ?? result.scope.customerId) != null
+  )
 
   let summary: string
   if (result.status === ReconciliationStatus.OK) {
@@ -570,7 +571,7 @@ export function produceLedgerCorrectionProposal(result: ReconciliationResult): L
   let proposed_fix: ProposedFixStrict | null = null
   if (
     result.status !== ReconciliationStatus.OK &&
-    result.status !== ReconciliationStatus.ERROR &&
+    (result.status as string) !== ReconciliationStatus.ERROR &&
     result.scope.businessId &&
     Math.abs(result.delta) > ROUNDING_THRESHOLD &&
     (result.scope.invoiceId ?? result.scope.customerId ?? result.scope.periodId)

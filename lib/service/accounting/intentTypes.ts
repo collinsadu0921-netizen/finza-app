@@ -119,7 +119,7 @@ export function validateServiceIntent(
 
   const accountMap = new Map(accounts.map((a) => [a.id, a]))
   for (const [field, eligibility] of Object.entries(rules)) {
-    const accountId = (intent as Record<string, unknown>)[field] as string | undefined
+    const accountId = (intent as unknown as Record<string, unknown>)[field] as string | undefined
     if (!accountId) return `Missing ${field}`
     const account = accountMap.get(accountId)
     if (!account) return `Account ${field} not found or not in this business`

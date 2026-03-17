@@ -71,7 +71,7 @@ export default function ServiceWithdrawalPage() {
     async function fetchCoa() {
       setCoaLoaded(false)
       try {
-        const res = await fetch(`/api/accounting/coa?business_id=${encodeURIComponent(businessId)}`)
+        const res = await fetch(`/api/accounting/coa?business_id=${encodeURIComponent(businessId ?? "")}`)
         if (!res.ok) return
         const data = await res.json()
         const accounts: Account[] = data.accounts || []

@@ -24,14 +24,14 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const ctx = await resolveAccountingContext({ supabase, userId: user.id, searchParams, source: "api" })
+    const ctx = await resolveAccountingContext({ supabase, userId: user!.id, searchParams, source: "api" })
     if ("error" in ctx) {
       return NextResponse.json(
-        { error: ctx.error, error_code: "CLIENT_REQUIRED" },
+        { error: (ctx as { error: string }).error, error_code: "CLIENT_REQUIRED" },
         { status: 400 }
       )
     }
-    const business = { id: ctx.businessId }
+    const business = { id: (ctx as { businessId: string }).businessId }
 
     const { searchParams: queryParams } = new URL(request.url)
     
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error("Error fetching invoices for sales summary:", error)
       return NextResponse.json(
-        { error: error.message },
+        { error: error?.message ?? "Unknown error" },
         { status: 500 }
       )
     }

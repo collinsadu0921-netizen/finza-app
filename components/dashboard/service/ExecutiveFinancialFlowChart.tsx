@@ -225,7 +225,7 @@ export default function ExecutiveFinancialFlowChart({
                     }}
                   />
                   <Tooltip
-                    content={(props: ExecutiveTooltipProps) => (
+                    content={(props: any) => (
                       <FinancialFlowTooltip {...props} currencyCode={currencyCode} />
                     )}
                     cursor={{ stroke: "#d1d5db", strokeWidth: 1 }}

@@ -507,7 +507,7 @@ export default function PeriodCloseCenter({
         {canSoftClose && (
           <button
             onClick={handleSoftClose}
-            disabled={processing || (readiness?.status === "BLOCKED" ?? false)}
+            disabled={processing || readiness?.status === "BLOCKED"}
             title={
               readiness?.status === "BLOCKED"
                 ? "Resolve all accounting issues before closing this period."
@@ -521,7 +521,7 @@ export default function PeriodCloseCenter({
         {canRequestClose && (
           <button
             onClick={handleRequestClose}
-            disabled={processing || (readiness?.status === "BLOCKED" ?? false)}
+            disabled={processing || readiness?.status === "BLOCKED"}
             title={
               readiness?.status === "BLOCKED"
                 ? "Resolve all accounting issues before closing this period."
@@ -536,7 +536,7 @@ export default function PeriodCloseCenter({
         {canApproveClose && (
           <button
             onClick={() => handleApproveClose()}
-            disabled={processing || (readiness?.status === "BLOCKED" ?? false)}
+            disabled={processing || readiness?.status === "BLOCKED"}
             title={
               readiness?.status === "BLOCKED"
                 ? "Resolve all accounting issues before closing this period."

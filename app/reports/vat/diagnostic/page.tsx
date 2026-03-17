@@ -308,7 +308,7 @@ export default function VatDiagnosticPage() {
         // Use canonical helper to read from tax_lines JSONB (source of truth)
         // All new sales have tax_lines populated (Commit A)
         const { vat, nhil, getfund, covid } = getGhanaLegacyView(sale.tax_lines)
-        const total_tax = sale.total_tax ?? (sale.tax_lines ? sumTaxLines(sale.tax_lines) : 0)
+        const total_tax = (sale as { total_tax?: number }).total_tax ?? (sale.tax_lines ? sumTaxLines(sale.tax_lines) : 0)
 
         // Calculate expected values for validation (audit-safe: derived from stored amounts only)
         // For both VAT-inclusive and VAT-exclusive: standard_rated = base + total_tax

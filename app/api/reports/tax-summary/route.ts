@@ -26,14 +26,14 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const ctx = await resolveAccountingContext({ supabase, userId: user.id, searchParams, source: "api" })
+    const ctx = await resolveAccountingContext({ supabase, userId: user!.id, searchParams, source: "api" })
     if ("error" in ctx) {
       return NextResponse.json(
-        { error: ctx.error, error_code: "CLIENT_REQUIRED" },
+        { error: (ctx as { error: string }).error, error_code: "CLIENT_REQUIRED" },
         { status: 400 }
       )
     }
-    const business = { id: ctx.businessId }
+    const business = { id: (ctx as { businessId: string }).businessId }
 
     // CRITICAL: Load business country and validate
     const { data: businessData } = await supabase
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const countryCode = normalizeCountry(businessData.address_country)
+    const countryCode = normalizeCountry(businessData!.address_country)
     const isGhana = countryCode === "GH"
 
     const { searchParams: queryParams } = new URL(request.url)
@@ -202,8 +202,9 @@ export async function GET(request: NextRequest) {
     let salesVat = 0
     let salesTotalTax = 0
 
-    if (sales && sales.length > 0) {
-      for (const sale of sales) {
+    const salesFiltered = sales ?? []
+    if (salesFiltered.length > 0) {
+      for (const sale of salesFiltered) {
         // Use canonical helper to extract tax amounts from tax_lines (source of truth)
         const { vat, nhil, getfund, covid } = getGhanaLegacyView(sale.tax_lines)
         salesNhil += nhil

@@ -13,6 +13,7 @@ import {
   type DiscountCaps,
   type RoleDiscountLimit,
 } from "@/lib/discounts/validation"
+import type { UserRole as AuthorityUserRole } from "@/lib/authority"
 import { getUserRole, type UserRole } from "@/lib/userRoles"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 
@@ -533,7 +534,7 @@ export async function POST(request: NextRequest) {
             lineTotal,
             caps,
             roleLimit,
-            finalUserRole
+            finalUserRole as AuthorityUserRole
           )
 
           if (!validation.valid) {
@@ -561,13 +562,13 @@ export async function POST(request: NextRequest) {
 
       // Validate cart discount
       if (cartDiscount && cartDiscount.discount_type !== 'none') {
-        const validation = validateCartDiscount(
-          cartDiscount,
-          subtotalBeforeDiscount,
-          caps,
-          roleLimit,
-          finalUserRole
-        )
+const validation = validateCartDiscount(
+        cartDiscount,
+        subtotalBeforeDiscount,
+        caps,
+        roleLimit,
+        finalUserRole as AuthorityUserRole
+      )
 
         if (!validation.valid) {
           return NextResponse.json(

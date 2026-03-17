@@ -91,7 +91,7 @@ export default function ServiceJobDetailPage() {
         setLoading(false)
         return
       }
-      setJob(jobData as Job)
+      setJob(jobData as unknown as Job)
 
       const { data: usageData, error: usageErr } = await supabase
         .from("service_job_material_usage")
@@ -99,7 +99,7 @@ export default function ServiceJobDetailPage() {
         .eq("job_id", jobId)
         .eq("business_id", business.id)
         .order("created_at", { ascending: false })
-      if (!usageErr) setUsages((usageData || []).map((u) => ({ ...u, quantity_used: Number(u.quantity_used), unit_cost: Number(u.unit_cost), total_cost: Number(u.total_cost), status: (u as any).status ?? 'allocated' })))
+      if (!usageErr) setUsages((usageData || []).map((u) => ({ ...u, quantity_used: Number(u.quantity_used), unit_cost: Number(u.unit_cost), total_cost: Number(u.total_cost), status: (u as any).status ?? 'allocated', service_material_inventory: Array.isArray((u as any).service_material_inventory) ? ((u as any).service_material_inventory[0] ?? { name: '', unit: '' }) : ((u as any).service_material_inventory ?? { name: '', unit: '' }) })) as Usage[])
 
       const { data: matData } = await supabase
         .from("service_material_inventory")

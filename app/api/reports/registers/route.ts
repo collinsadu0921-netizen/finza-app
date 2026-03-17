@@ -51,14 +51,14 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const ctx = await resolveAccountingContext({ supabase, userId: user.id, searchParams, source: "api" })
+    const ctx = await resolveAccountingContext({ supabase, userId: user!.id, searchParams, source: "api" })
     if ("error" in ctx) {
       return NextResponse.json(
-        { error: ctx.error, error_code: "CLIENT_REQUIRED" },
+        { error: (ctx as { error: string }).error, error_code: "CLIENT_REQUIRED" },
         { status: 400 }
       )
     }
-    const business = { id: ctx.businessId }
+    const business = { id: (ctx as { businessId: string }).businessId }
 
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
@@ -71,8 +71,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Validate date format
-    const startDateObj = new Date(startDate)
-    const endDateObj = new Date(endDate)
+    const startDateObj = new Date(startDate!)
+    const endDateObj = new Date(endDate!)
     
     if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
       return NextResponse.json(
@@ -150,13 +150,14 @@ export async function GET(request: NextRequest) {
     if (periodError) {
       console.error("Error fetching period lines:", periodError)
       return NextResponse.json(
-        { error: "Failed to fetch period movement", details: periodError.message },
+        { error: "Failed to fetch period movement", details: periodError?.message ?? "Unknown" },
         { status: 500 }
       )
     }
 
     // Handle case where no period lines are found
-    if (!periodLines || periodLines.length === 0) {
+    const lines = periodLines ?? []
+    if (lines.length === 0) {
       return NextResponse.json({
         period: {
           start_date: startDate,
@@ -171,7 +172,7 @@ export async function GET(request: NextRequest) {
     // Note: Voids may have deleted the sale, so we need to handle missing sales gracefully
     const saleIds = Array.from(
       new Set(
-        periodLines
+        lines
           .map((line: any) => line.journal_entries?.reference_id)
           .filter(Boolean)
       )
@@ -190,7 +191,7 @@ export async function GET(request: NextRequest) {
         .not("register_id", "is", null)
 
       if (sales) {
-        for (const sale of sales) {
+        for (const sale of sales!) {
           saleRegisterMap.set(sale.id, {
             register_id: sale.register_id,
             session_id: sale.cashier_session_id || null,
@@ -220,7 +221,7 @@ export async function GET(request: NextRequest) {
         )
       `
       )
-      .eq("account_id", cashAccount.id)
+      .eq("account_id", cashAccount!.id)
       .eq("journal_entries.business_id", business.id)
       .lt("journal_entries.date", startDate)
       .in("journal_entries.reference_type", ["sale", "refund", "void", "sale_refund"])  // Include sales, refunds, voids, and legacy sale_refund
@@ -228,7 +229,7 @@ export async function GET(request: NextRequest) {
     if (openingError) {
       console.error("Error fetching opening balance lines:", openingError)
       return NextResponse.json(
-        { error: "Failed to fetch opening balance", details: openingError.message },
+        { error: "Failed to fetch opening balance", details: openingError?.message ?? "Unknown" },
         { status: 500 }
       )
     }
@@ -252,8 +253,9 @@ export async function GET(request: NextRequest) {
         .in("id", openingSaleIds)
         .not("register_id", "is", null)
 
-      if (openingSales) {
-        for (const sale of openingSales) {
+      const openingSalesList = openingSales ?? []
+      if (openingSalesList.length > 0) {
+        for (const sale of openingSalesList) {
           openingSaleRegisterMap.set(sale.id, {
             register_id: sale.register_id,
             session_id: sale.cashier_session_id || null,
@@ -270,10 +272,9 @@ export async function GET(request: NextRequest) {
       const saleId = (line as any).journal_entries?.reference_id
       if (!saleId) continue
       
-      const registerInfo = openingSaleRegisterMap.get(saleId)
-      if (!registerInfo) continue
-      
-      const key = `${registerInfo.register_id}_${registerInfo.session_id || 'no_session'}`
+      const openingRegInfo = openingSaleRegisterMap.get(saleId)
+      if (!openingRegInfo) continue
+      const key = `${openingRegInfo!.register_id}_${openingRegInfo!.session_id || 'no_session'}`
       const current = openingBalancesByRegister.get(key) || 0
       // For asset accounts: balance = debit - credit (cash received - cash paid)
       // Sales: debit increases balance, Refunds/Voids: credit decreases balance
@@ -297,12 +298,12 @@ export async function GET(request: NextRequest) {
     const registerSessionMap = new Map<string, RegisterSessionData>()
 
     // Initialize register/session entries
-    for (const [saleId, registerInfo] of saleRegisterMap.entries()) {
-      const key = `${registerInfo.register_id}_${registerInfo.session_id || 'no_session'}`
+    for (const [saleId, regInfo] of saleRegisterMap.entries()) {
+      const key = `${regInfo.register_id}_${regInfo.session_id || 'no_session'}`
       if (!registerSessionMap.has(key)) {
         registerSessionMap.set(key, {
-          register_id: registerInfo.register_id,
-          session_id: registerInfo.session_id,
+          register_id: regInfo.register_id,
+          session_id: regInfo.session_id,
           opening_cash_balance: openingBalancesByRegister.get(key) || 0,
           cash_received: 0,
           cash_paid: 0,
@@ -315,7 +316,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Process period lines
-    const safePeriodLines = periodLines || []
+    const safePeriodLines = lines
     for (const line of safePeriodLines) {
       // Safety check: ensure journal_entries data exists
       if (!line || !(line as any).journal_entries) {
@@ -326,52 +327,52 @@ export async function GET(request: NextRequest) {
       const saleId = (line as any).journal_entries?.reference_id
       if (!saleId) continue
 
-      const registerInfo = saleRegisterMap.get(saleId)
-      if (!registerInfo) continue
+      const periodRegInfo = saleRegisterMap.get(saleId)
+      if (!periodRegInfo) continue
 
-      const key = `${registerInfo.register_id}_${registerInfo.session_id || 'no_session'}`
-      const data = registerSessionMap.get(key)
-      if (!data) continue
+      const regKey = `${periodRegInfo!.register_id}_${periodRegInfo!.session_id || 'no_session'}`
+      const periodData = registerSessionMap.get(regKey)
+      if (!periodData) continue
 
       const accountId = line.account_id
       if (!accountId) continue
 
-      const account = accounts?.find((acc) => acc.id === accountId)
-      if (!account) continue
+      const periodAccount = accounts?.find((a) => a.id === accountId)
+      if (!periodAccount) continue
 
       const debit = Number(line.debit || 0)
       const credit = Number(line.credit || 0)
       const referenceType = (line as any).journal_entries?.reference_type
 
-      if (account.code === "1000") {
+      if (periodAccount!.code === "1000") {
         // Cash account: 
         // - Sales: debit = cash received
         // - Refunds: credit = cash paid
         // - Voids: credit = cash paid
         if (referenceType === "sale") {
-          data.cash_received += debit
+          periodData!.cash_received += debit
         } else if (referenceType === "refund" || referenceType === "void" || referenceType === "sale_refund") {
           // Refunds, voids, and legacy sale_refund credit Cash (reduce cash in drawer)
-          data.cash_paid += credit
+          periodData!.cash_paid += credit
         }
       } else {
         // Clearing accounts: track non-cash totals
         // - Sales: debit = non-cash received
         // - Refunds: credit = non-cash paid
         // - Voids: credit = non-cash paid
-        if (!data.non_cash_totals[account.code]) {
-          data.non_cash_totals[account.code] = {
-            code: account.code,
-            name: account.name,
+        if (!periodData!.non_cash_totals[periodAccount!.code]) {
+          periodData!.non_cash_totals[periodAccount!.code] = {
+            code: periodAccount!.code,
+            name: periodAccount!.name,
             received: 0,
             paid: 0,
           }
         }
         if (referenceType === "sale") {
-          data.non_cash_totals[account.code].received += debit
+          periodData!.non_cash_totals[periodAccount!.code].received += debit
         } else if (referenceType === "refund" || referenceType === "void" || referenceType === "sale_refund") {
           // Refunds, voids, and legacy sale_refund credit clearing accounts
-          data.non_cash_totals[account.code].paid += credit
+          periodData!.non_cash_totals[periodAccount!.code].paid += credit
         }
       }
     }

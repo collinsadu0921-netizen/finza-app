@@ -78,11 +78,11 @@ export function ClientsPanel({
     setLoading(true)
     setError(null)
     fetch("/api/accounting/firm/clients")
-      .then((r) => {
-        if (!r.ok) return r.json().then((d) => ({ err: d.error || "Failed to load clients" }))
-        return r.json().then((d) => ({ clients: d.clients ?? [] }))
+      .then((r: Response): Promise<{ err?: string; clients?: FirmClient[] }> => {
+        if (!r.ok) return r.json().then((d: { error?: string }) => ({ err: d.error || "Failed to load clients" }))
+        return r.json().then((d: { clients?: FirmClient[] }) => ({ clients: d.clients ?? [] }))
       })
-      .then((result: { err?: string; clients?: FirmClient[] }) => {
+      .then((result) => {
         if (result.err) {
           setError(result.err)
           setClients([])

@@ -66,8 +66,8 @@ export async function POST(
     if (estimateError || !estimate) {
       console.log("[estimates.convert] returning 404: estimate not found", {
         estimateId: id,
-        estimateBusinessId: estimate?.business_id ?? null,
-        error: estimateError?.message ?? null,
+        estimateBusinessId: (estimate as { business_id?: string } | null)?.business_id ?? null,
+        error: (estimateError as { message?: string } | null)?.message ?? null,
       })
       return NextResponse.json(
         { error: "Estimate not found" },
@@ -115,9 +115,10 @@ export async function POST(
     }
 
     // Check if estimate has already been converted
-    if (estimate.converted_to) {
+    const convertedTo = (estimate as { converted_to?: string }).converted_to
+    if (convertedTo) {
       return NextResponse.json(
-        { error: `This estimate has already been converted to ${estimate.converted_to}. An estimate can only be converted once.` },
+        { error: `This estimate has already been converted to ${convertedTo}. An estimate can only be converted once.` },
         { status: 400 }
       )
     }
@@ -156,19 +157,19 @@ export async function POST(
         due_date: estimate.expiry_date || null,
         notes: estimate.notes || null,
         status: "draft",
-        apply_taxes: Number(estimate.total_tax_amount ?? 0) > 0,
+        apply_taxes: Number((estimate as any).total_tax_amount ?? 0) > 0,
         subtotal: Number(estimate.subtotal) || 0,
-        nhil: Number(estimate.nhil_amount ?? estimate.nhil) || 0,
-        getfund: Number(estimate.getfund_amount ?? estimate.getfund) || 0,
-        covid: Number(estimate.covid_amount ?? estimate.covid) || 0,
-        vat: Number(estimate.vat_amount ?? estimate.vat) || 0,
-        total_tax: Number(estimate.total_tax_amount ?? estimate.total_tax) || 0,
-        total: Number(estimate.total_amount ?? estimate.total) || 0,
+        nhil: Number((estimate as any).nhil_amount ?? (estimate as any).nhil) || 0,
+        getfund: Number((estimate as any).getfund_amount ?? (estimate as any).getfund) || 0,
+        covid: Number((estimate as any).covid_amount ?? (estimate as any).covid) || 0,
+        vat: Number((estimate as any).vat_amount ?? (estimate as any).vat) || 0,
+        total_tax: Number((estimate as any).total_tax_amount ?? (estimate as any).total_tax) || 0,
+        total: Number((estimate as any).total_amount ?? (estimate as any).total) || 0,
         // Preserve canonical tax metadata so posting can emit tax journal lines.
-        tax_lines: estimate.tax_lines ?? null,
-        tax_jurisdiction: estimate.tax_jurisdiction ?? null,
-        tax_engine_code: estimate.tax_engine_code ?? null,
-        tax_engine_effective_from: estimate.tax_engine_effective_from ?? null,
+        tax_lines: (estimate as any).tax_lines ?? null,
+        tax_jurisdiction: (estimate as any).tax_jurisdiction ?? null,
+        tax_engine_code: (estimate as any).tax_engine_code ?? null,
+        tax_engine_effective_from: (estimate as any).tax_engine_effective_from ?? null,
       })
       .select()
       .single()

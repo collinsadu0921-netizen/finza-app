@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, message: "Already processed (idempotent)" })
   }
 
-  if (validation.status === "success" || validation.status === "successful") {
+  if ((validation.status as string) === "success" || (validation.status as string) === "successful") {
     const newNotes = [payment.notes, idempotencyNote].filter(Boolean).join(" | ") || `MoMo completed. ${idempotencyNote}`
     await supabase
       .from("payments")

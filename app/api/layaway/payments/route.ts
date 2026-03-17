@@ -172,13 +172,16 @@ export async function GET(request: NextRequest) {
       query = query.eq("layaway_plan_id", planId)
     } else {
       // Filter by business through layaway_plans
-      query = query.in(
-        "layaway_plan_id",
-        supabase
-          .from("layaway_plans")
-          .select("id")
-          .eq("business_id", business.id)
-      )
+      const { data: plans } = await supabase
+        .from("layaway_plans")
+        .select("id")
+        .eq("business_id", business.id)
+      const planIds = (plans ?? []).map((p: { id: string }) => p.id)
+      if (planIds.length > 0) {
+        query = query.in("layaway_plan_id", planIds)
+      } else {
+        query = query.in("layaway_plan_id", [])
+      }
     }
 
     const { data: payments, error } = await query

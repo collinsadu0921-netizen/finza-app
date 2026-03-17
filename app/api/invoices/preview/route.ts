@@ -78,15 +78,16 @@ export async function POST(request: NextRequest) {
     if (businessError || !businessRow) {
       console.error("Business lookup error:", businessError)
       return NextResponse.json(
-        { error: `Business not found: ${businessError?.message || 'Business ID: ' + finalBusinessId}` },
+        { error: `Business not found: ${(businessError as { message?: string } | null)?.message ?? "Business ID: " + finalBusinessId}` },
         { status: 404 }
       )
     }
 
     if (customerError || !customer) {
       console.error("Customer lookup error:", customerError)
+      const errMsg = (customerError as { message?: string } | null)?.message ?? "Customer ID: " + customer_id
       return NextResponse.json(
-        { error: `Customer not found: ${customerError?.message || 'Customer ID: ' + customer_id}` },
+        { error: `Customer not found: ${errMsg}` },
         { status: 404 }
       )
     }
@@ -103,9 +104,10 @@ export async function POST(request: NextRequest) {
     let subtotal = 0
     let total = 0
     let totalTax = 0
+    let taxCalculationResult: ReturnType<typeof calculateTaxes> | null = null
 
     if (apply_taxes && lineItems.length > 0) {
-      const taxCalculationResult = calculateTaxes(
+      taxCalculationResult = calculateTaxes(
         lineItems,
         businessRow?.address_country,
         issue_date, // Use issue_date for preview (invoice hasn't been sent yet)

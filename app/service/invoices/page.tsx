@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useState, useRef, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -264,7 +264,7 @@ function InvoicesPageContent() {
         const totalCredits = creditNoteTotals[invoice.id] || 0
         const outstanding = Math.max(0, Number(invoice.total || 0) - totalPaid - totalCredits)
         // Use canonical helper to get VAT from tax_lines, fallback to legacy column for old invoices
-        const { vat } = getGhanaLegacyView(invoice.tax_lines)
+        const { vat } = getGhanaLegacyView((invoice as { tax_lines?: unknown }).tax_lines)
         const vatAmount = vat > 0 ? vat : (invoice.vat || 0)
         return {
           ...invoice,
@@ -348,7 +348,7 @@ function InvoicesPageContent() {
         const totalCredits = creditNoteTotals[invoice.id] || 0
         const outstanding = Math.max(0, Number(invoice.total || 0) - totalPaid - totalCredits)
         // Use canonical helper to get VAT from tax_lines, fallback to legacy column for old invoices
-        const { vat } = getGhanaLegacyView(invoice.tax_lines)
+        const { vat } = getGhanaLegacyView((invoice as { tax_lines?: unknown }).tax_lines)
         const vatAmount = vat > 0 ? vat : (invoice.vat || 0)
         return {
           ...invoice,

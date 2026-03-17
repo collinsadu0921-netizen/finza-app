@@ -10,27 +10,25 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 
-function ensureServiceBusinessAccess(
+async function ensureServiceBusinessAccess(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   userId: string,
   businessId: string
 ): Promise<boolean> {
-  return supabase
+  const { data: owner } = await supabase
     .from("businesses")
     .select("id")
     .eq("id", businessId)
     .eq("owner_id", userId)
     .maybeSingle()
-    .then(({ data: owner }) => {
-      if (owner) return true
-      return supabase
-        .from("business_users")
-        .select("business_id")
-        .eq("user_id", userId)
-        .eq("business_id", businessId)
-        .maybeSingle()
-        .then(({ data: bu }) => !!bu)
-    })
+  if (owner) return true
+  const { data: bu } = await supabase
+    .from("business_users")
+    .select("business_id")
+    .eq("user_id", userId)
+    .eq("business_id", businessId)
+    .maybeSingle()
+  return !!bu
 }
 
 export async function GET(request: NextRequest) {

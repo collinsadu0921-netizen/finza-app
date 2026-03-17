@@ -217,9 +217,9 @@ export async function GET(
           logReconciliationMismatch(result)
           reconciliationWarning = {
             status: result.status,
-            expectedBalance: result.expectedBalance,
-            ledgerBalance: result.ledgerBalance,
-            delta: result.delta,
+            expectedBalance: Number(result.expectedBalance ?? 0),
+            ledgerBalance: Number(result.ledgerBalance ?? 0),
+            delta: Number(result.delta ?? 0),
           }
         }
       } catch (_err) {
@@ -337,7 +337,7 @@ export async function PUT(
       // When updating a draft that becomes sent, we'll use the new sent_at timestamp
       const effectiveDate = existingInvoice.sent_at 
         ? existingInvoice.sent_at 
-        : (issue_date || existingInvoice.issue_date || new Date().toISOString().split('T')[0])
+        : (issue_date || (existingInvoice as any).issue_date || new Date().toISOString().split('T')[0])
 
       // Get business country for tax calculation
       const { data: business } = await supabase
@@ -368,7 +368,7 @@ export async function PUT(
         
         // Derive legacy Ghana tax columns from tax_lines
         // CRITICAL: Only derive Ghana taxes if country is GH
-        const countryCode = normalizeCountry(business.address_country)
+        const countryCode = normalizeCountry(business?.address_country ?? "GH")
         const isGhana = countryCode === "GH"
         const legacyGhanaTaxes = isGhana
           ? deriveLegacyGhanaTaxAmounts(taxCalculationResult.taxLines)

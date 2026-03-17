@@ -68,20 +68,22 @@ export async function GET(
       )
     }
 
-    // Get customer from linked invoice or directly
-    const customer = creditNote.invoices?.customers || null
+    // Get customer from linked invoice or directly (Supabase may type nested relations as array)
+    const invoiceRel = Array.isArray((creditNote as any).invoices) ? (creditNote as any).invoices[0] : (creditNote as any).invoices
+    const businessRel = Array.isArray((creditNote as any).businesses) ? (creditNote as any).businesses[0] : (creditNote as any).businesses
+    const customer = invoiceRel?.customers || null
 
     // Prepare data for shared document component
     const business: BusinessInfo = {
-      name: creditNote.businesses?.name,
-      legal_name: creditNote.businesses?.legal_name,
-      trading_name: creditNote.businesses?.trading_name,
-      phone: creditNote.businesses?.phone,
-      email: creditNote.businesses?.email,
-      address: creditNote.businesses?.address,
-      logo_url: creditNote.businesses?.logo_url,
-      tax_id: creditNote.businesses?.tax_id,
-      registration_number: creditNote.businesses?.registration_number,
+      name: businessRel?.name,
+      legal_name: businessRel?.legal_name,
+      trading_name: businessRel?.trading_name,
+      phone: businessRel?.phone,
+      email: businessRel?.email,
+      address: businessRel?.address,
+      logo_url: businessRel?.logo_url,
+      tax_id: businessRel?.tax_id,
+      registration_number: businessRel?.registration_number,
     }
 
     const customerData: CustomerInfo = customer
@@ -106,16 +108,17 @@ export async function GET(
       line_subtotal: item.line_total || 0,
     }))
 
+    const cn = creditNote as Record<string, unknown>
     const documentTotals: DocumentTotals = {
-      subtotal: Number(creditNote.subtotal || 0),
-      total_tax: Number(creditNote.total_tax || 0),
-      total: Number(creditNote.total_amount || creditNote.total || 0),
+      subtotal: Number(cn.subtotal || 0),
+      total_tax: Number(cn.total_tax || 0),
+      total: Number((cn as any).total_amount ?? cn.total ?? 0),
     }
 
     const documentMeta: DocumentMeta = {
-      document_number: creditNote.credit_note_number || creditNote.id.substring(0, 8).toUpperCase(),
-      issue_date: creditNote.issue_date || creditNote.created_at,
-      status: creditNote.status || null,
+      document_number: ((cn as any).credit_note_number ?? cn.credit_number ?? (cn.id as string).substring(0, 8).toUpperCase()) as string,
+      issue_date: String((cn as any).issue_date ?? cn.date ?? cn.created_at ?? ""),
+      status: (cn.status as string) || null,
     }
 
     // Generate HTML using shared document component
@@ -130,10 +133,10 @@ export async function GET(
       footer_message: null,
       apply_taxes: false, // Credit notes typically don't show tax breakdown
       // CRITICAL: No hardcoded fallbacks - use getCurrencySymbol if currency_code exists
-      currency_symbol: creditNote.currency_code 
-        ? getCurrencySymbol(creditNote.currency_code) || creditNote.currency_symbol || null
-        : creditNote.currency_symbol || null,
-      currency_code: creditNote.currency_code || null,
+      currency_symbol: (cn as any).currency_code
+        ? getCurrencySymbol((cn as any).currency_code) || (cn as any).currency_symbol || null
+        : (cn as any).currency_symbol || null,
+      currency_code: (cn as any).currency_code || null,
     })
 
     return new NextResponse(htmlPreview, {

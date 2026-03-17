@@ -14,6 +14,7 @@ type Order = {
   estimate_id: string | null
   invoice_id: string | null
   status: string
+  execution_status?: "pending" | "active" | "completed" | null
   subtotal: number
   total_tax: number
   total_amount: number
@@ -567,7 +568,7 @@ export default function OrderViewPage() {
         {/* Send Order Confirmation Modal */}
         {showSendModal && order && (
           <SendOrderConfirmationModal
-            order={order}
+            order={order as Parameters<typeof SendOrderConfirmationModal>[0]["order"]}
             orderId={orderId}
             onClose={() => setShowSendModal(false)}
             onSuccess={handleSendConfirmationSuccess}

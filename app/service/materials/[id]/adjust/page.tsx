@@ -161,6 +161,8 @@ export default function ServiceMaterialAdjustPage() {
     )
   }
 
+  if (!material) return <LoadingScreen />
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -223,7 +225,7 @@ export default function ServiceMaterialAdjustPage() {
             />
             {direction === "decrease" && (
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Current quantity on hand: {Number(material.quantity_on_hand ?? 0)}. You cannot decrease below 0.
+                Current quantity on hand: {material ? Number(material.quantity_on_hand ?? 0) : 0}. You cannot decrease below 0.
               </p>
             )}
           </div>
