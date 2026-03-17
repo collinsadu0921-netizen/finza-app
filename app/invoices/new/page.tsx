@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, memo, useCallback } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
@@ -37,6 +37,101 @@ type InvoiceItem = {
   _rawQty?: string
   _rawPrice?: string
 }
+
+// ------------------------------------------------------------
+// LINE ITEM ROW — memoised so typing in description doesn't
+// cause the parent (and all siblings) to re-render on every
+// keystroke, eliminating the "snappy jump" scroll issue.
+// ------------------------------------------------------------
+type LineItemRowProps = {
+  item: InvoiceItem
+  products: any[]
+  currencySymbol: string
+  businessIndustry: string | null
+  onUpdate: (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => void
+  onCommit: (id: string, field: "quantity" | "price") => void
+  onRemove: (id: string) => void
+  onSelectProduct: (itemId: string, productId: string) => void
+}
+
+const LineItemRow = memo(function LineItemRow({
+  item, products, currencySymbol, businessIndustry,
+  onUpdate, onCommit, onRemove, onSelectProduct,
+}: LineItemRowProps) {
+  // Local description state — typed into immediately, flushed to parent only on blur
+  const [localDesc, setLocalDesc] = useState(item.description)
+
+  // Sync if description is changed externally (e.g. product selected from dropdown)
+  useEffect(() => {
+    setLocalDesc(item.description)
+  }, [item.description])
+
+  return (
+    <tr className="group hover:bg-slate-50/50 transition-colors">
+      <td className="px-6 py-3 align-top">
+        <div className="space-y-1.5">
+          <select
+            value={item.product_id || ""}
+            onChange={(e) => e.target.value ? onSelectProduct(item.id, e.target.value) : onUpdate(item.id, "product_id", null)}
+            className="block w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+          >
+            <option value="">{businessIndustry === "service" ? "Select Service" : "Select product (optional)..."}</option>
+            {products.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name}{p.price != null ? ` — ${currencySymbol} ${Number(p.price).toFixed(2)}` : ""}
+              </option>
+            ))}
+          </select>
+          <textarea
+            value={localDesc}
+            onChange={(e) => setLocalDesc(e.target.value)}
+            onBlur={() => onUpdate(item.id, "description", localDesc)}
+            placeholder="Description"
+            rows={1}
+            className="block w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 resize-none"
+          />
+        </div>
+      </td>
+      <td className="px-4 py-3 align-top">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={item._rawQty ?? (item.quantity === 0 ? "" : String(item.quantity))}
+          onChange={(e) => onUpdate(item.id, "quantity", e.target.value)}
+          onBlur={() => onCommit(item.id, "quantity")}
+          onFocus={(e) => e.target.select()}
+          placeholder="1"
+          className="block w-full text-center text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+        />
+      </td>
+      <td className="px-4 py-3 align-top">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={item._rawPrice ?? (item.price === 0 ? "" : String(item.price))}
+          onChange={(e) => onUpdate(item.id, "price", e.target.value)}
+          onBlur={() => onCommit(item.id, "price")}
+          onFocus={(e) => e.target.select()}
+          placeholder="0.00"
+          className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+        />
+      </td>
+      <td className="px-6 py-3 align-top text-right font-medium text-slate-900 pt-5">
+        <Money amount={item.total} currency={currencySymbol} />
+      </td>
+      <td className="px-2 py-3 align-top pt-4">
+        <button
+          onClick={() => onRemove(item.id)}
+          className="text-slate-400 hover:text-red-600 transition-colors p-1"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </td>
+    </tr>
+  )
+})
 
 // ------------------------------------------------------------
 // PRIMARY COMPONENT: NewInvoicePage
@@ -223,9 +318,12 @@ export default function NewInvoicePage() {
   }
 
   // -- Item Management --
-  const addItem = () => {
-    setItems([
-      ...items,
+  // All mutations use functional setItems so useCallback deps stay stable ([]),
+  // which keeps callback references stable across renders and lets LineItemRow
+  // memo comparisons actually short-circuit (no re-renders while typing).
+  const addItem = useCallback(() => {
+    setItems(prev => [
+      ...prev,
       {
         id: Date.now().toString(),
         product_id: null,
@@ -235,14 +333,14 @@ export default function NewInvoicePage() {
         total: 0,
       },
     ])
-  }
+  }, [])
 
-  const removeItem = (id: string) => {
-    setItems(items.filter((item) => item.id !== id))
-  }
+  const removeItem = useCallback((id: string) => {
+    setItems(prev => prev.filter((item) => item.id !== id))
+  }, [])
 
-  const updateItem = (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => {
-    setItems(items.map((item) => {
+  const updateItem = useCallback((id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => {
+    setItems(prev => prev.map((item) => {
       if (item.id !== id) return item
       const updated = { ...item }
 
@@ -264,35 +362,31 @@ export default function NewInvoicePage() {
       }
       return updated
     }))
-  }
+  }, [])
 
   // Called on blur — clears raw strings so the formatted number displays cleanly
-  const commitItem = (id: string, field: "quantity" | "price") => {
-    setItems(items.map((item) => {
+  const commitItem = useCallback((id: string, field: "quantity" | "price") => {
+    setItems(prev => prev.map((item) => {
       if (item.id !== id) return item
       const updated = { ...item }
       if (field === "quantity") updated._rawQty = undefined
       if (field === "price")    updated._rawPrice = undefined
       return updated
     }))
-  }
+  }, [])
 
-  const selectProduct = (itemId: string, productId: string) => {
+  // products is loaded once on mount and never changes after that, so
+  // [products] dep recreates this callback at most twice (empty → loaded).
+  const selectProduct = useCallback((itemId: string, productId: string) => {
     const product = products.find((p) => p.id === productId)
-    if (product) {
-      const item = items.find(i => i.id === itemId)
-      const qty = item?.quantity || 1
+    if (!product) return
+    setItems(prev => prev.map(it => {
+      if (it.id !== itemId) return it
+      const qty = it.quantity || 1
       const price = Number(product.price) || 0
-
-      setItems(items.map(it => it.id === itemId ? {
-        ...it,
-        product_id: productId,
-        description: product.name,
-        price: price,
-        total: qty * price
-      } : it))
-    }
-  }
+      return { ...it, product_id: productId, description: product.name, price, total: qty * price }
+    }))
+  }, [products])
 
   // -- Financial Calculations (Strictly Preserved) --
   // Calculate subtotal from line items (sum of all line totals)
@@ -679,63 +773,18 @@ export default function NewInvoicePage() {
                         </td>
                       </tr>
                     ) : (
-                      items.map((item, index) => (
-                        <tr key={item.id} className="group hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-3 align-top">
-                            <div className="space-y-1.5">
-                              <select
-                                value={item.product_id || ""}
-                                onChange={(e) => e.target.value ? selectProduct(item.id, e.target.value) : updateItem(item.id, "product_id", null)}
-                                className="block w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
-                              >
-                                <option value="">{businessIndustry === "service" ? "Select Service" : "Select product (optional)..."}</option>
-                                {products.map(p => <option key={p.id} value={p.id}>{p.name}{p.price != null ? ` — ${currencySymbol} ${Number(p.price).toFixed(2)}` : ""}</option>)}
-                              </select>
-                              <textarea
-                                value={item.description}
-                                onChange={(e) => updateItem(item.id, "description", e.target.value)}
-                                placeholder="Description"
-                                rows={1}
-                                className="block w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 resize-none"
-                              />
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              value={item._rawQty ?? (item.quantity === 0 ? "" : String(item.quantity))}
-                              onChange={(e) => updateItem(item.id, 'quantity', e.target.value)}
-                              onBlur={() => commitItem(item.id, 'quantity')}
-                              onFocus={(e) => e.target.select()}
-                              placeholder="1"
-                              className="block w-full text-center text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
-                            />
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={item._rawPrice ?? (item.price === 0 ? "" : String(item.price))}
-                              onChange={(e) => updateItem(item.id, 'price', e.target.value)}
-                              onBlur={() => commitItem(item.id, 'price')}
-                              onFocus={(e) => e.target.select()}
-                              placeholder="0.00"
-                              className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
-                            />
-                          </td>
-                          <td className="px-6 py-3 align-top text-right font-medium text-slate-900 pt-5">
-                            <Money amount={item.total} currency={currencySymbol} />
-                          </td>
-                          <td className="px-2 py-3 align-top pt-4">
-                            <button
-                              onClick={() => removeItem(item.id)}
-                              className="text-slate-400 hover:text-red-600 transition-colors p-1"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                          </td>
-                        </tr>
+                      items.map((item) => (
+                        <LineItemRow
+                          key={item.id}
+                          item={item}
+                          products={products}
+                          currencySymbol={currencySymbol}
+                          businessIndustry={businessIndustry}
+                          onUpdate={updateItem}
+                          onCommit={commitItem}
+                          onRemove={removeItem}
+                          onSelectProduct={selectProduct}
+                        />
                       ))
                     )}
                   </tbody>

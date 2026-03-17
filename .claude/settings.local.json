@@ -6,7 +6,10 @@
       "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
       "Bash(grep -r \"function.*post.*journal\\\\|async.*post.*invoice\" /c/projects/finza-web/finza-web/supabase --include=*.sql -l)",
       "Bash(find /c/projects/finza-web/finza-web/app/service/accounting -type f -name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js)",
-      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
+      "Bash(Get-Content \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\app\\\\invoices\\\\new\\\\page.tsx\")",
+      "Bash(Select-Object -Skip 39)",
+      "Bash(npx tsc:*)"
     ]
   }
 }
