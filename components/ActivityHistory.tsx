@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { formatTimestamp } from "@/lib/formatTimestamp"
 
 type AuditLog = {
   id: string
@@ -134,7 +135,7 @@ export default function ActivityHistory({ entityType, entityId }: ActivityHistor
                       {formatActionType(log.action_type)}
                     </span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {new Date(log.created_at).toLocaleString("en-GH")}
+                      {formatTimestamp(log.created_at)}
                     </span>
                   </div>
                   {log.description && (

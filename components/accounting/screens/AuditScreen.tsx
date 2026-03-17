@@ -5,6 +5,7 @@ import Link from "next/link"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import type { ScreenProps } from "./types"
+import { formatTimestamp } from "@/lib/formatTimestamp"
 
 type AuditLog = {
   id: string
@@ -120,8 +121,7 @@ export default function AuditScreen({ mode, businessId }: ScreenProps) {
     if (nextCursor && businessId) loadLogs(nextCursor, true)
   }
 
-  const formatDate = (s: string) =>
-    new Date(s).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+  const formatDate = (s: string) => formatTimestamp(s)
 
   const backHref = mode === "service" ? buildServiceRoute("/service/accounting", businessId) : "/accounting"
 

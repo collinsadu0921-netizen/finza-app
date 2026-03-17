@@ -5,6 +5,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import LoadingScreen from "@/components/ui/LoadingScreen"
 import PageHeader from "@/components/ui/PageHeader"
 import EmptyState from "@/components/ui/EmptyState"
+import { formatTimestamp } from "@/lib/formatTimestamp"
 
 type AuditLog = {
   id: string
@@ -250,7 +251,7 @@ export default function AuditLogPage() {
                       <React.Fragment key={log.id}>
                         <tr className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {new Date(log.created_at).toLocaleString("en-GH")}
+                            {formatTimestamp(log.created_at)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                             {log.user ? log.user.email : <span className="text-gray-400 italic">System</span>}
