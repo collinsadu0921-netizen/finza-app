@@ -226,6 +226,9 @@ export default function Sidebar() {
           items: accountingItems,
         })
       }
+      const settingsAuditRoute = effectiveServiceBusinessId
+        ? buildServiceRoute("/service/accounting/audit", effectiveServiceBusinessId)
+        : "/service/accounting/audit"
       sections.push({
           title: "SETTINGS",
           items: [
@@ -236,7 +239,7 @@ export default function Sidebar() {
             { label: "WhatsApp Integration", route: "/service/settings/integrations/whatsapp" },
             { label: "Automations", route: "/service/settings/automations" },
             { label: "Staff Management", route: "/service/settings/staff" },
-            { label: "Accounting Activity", route: auditRoute },
+            { label: "Accounting Activity", route: settingsAuditRoute },
             { label: "System Activity", route: "/audit-log" },
           ],
         })
