@@ -16,7 +16,7 @@ export type PaymentMethod = "cash" | "card" | "mobile_money" | "bank_transfer"
 /**
  * Payment providers (integrations that exist)
  */
-export type PaymentProvider = "hubtel" | "mtn_momo"
+export type PaymentProvider = "hubtel" | "mtn_momo" | "paystack"
 
 /**
  * Country ISO code (2-letter)
@@ -157,8 +157,8 @@ export function getAllowedProviders(countryCode: CountryCode | null): PaymentPro
 
   // Country-specific provider rules
   const providerRules: Record<CountryCode, PaymentProvider[]> = {
-    // Ghana: Hubtel and MTN MoMo
-    GH: ["hubtel", "mtn_momo"],
+    // Ghana: Hubtel, MTN MoMo, and Paystack (mobile money + card)
+    GH: ["hubtel", "mtn_momo", "paystack"],
     // Kenya: no Ghana providers
     KE: [],
     // Nigeria: no Ghana providers

@@ -13,6 +13,7 @@
  * (ensureAccountingInitialized); otherwise payment INSERT trigger will roll back.
  */
 
+import { createHmac } from "crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 export type MobileMoneyProvider = "hubtel" | "paystack" | "flutterwave" | "mtn"
@@ -23,6 +24,7 @@ export interface InitiateMoMoInput {
   amount: number
   currency: string
   customerPhone: string
+  customerEmail?: string
   provider: MobileMoneyProvider
   reference?: string
   description?: string
@@ -118,10 +120,74 @@ async function initiateHubtel(input: InitiateMoMoInput & { reference: string }):
 async function initiatePaystack(input: InitiateMoMoInput & { reference: string }): Promise<InitiateMoMoResult> {
   const secretKey = process.env.PAYSTACK_SECRET_KEY
   if (!secretKey) {
-    return { success: false, reference: input.reference!, status: "FAILED", error: "Paystack not configured" }
+    return { success: false, reference: input.reference, status: "FAILED", error: "Paystack not configured" }
   }
-  // TODO: Paystack charge API (mobile money)
-  return { success: true, reference: input.reference!, status: "PENDING", providerReference: input.reference }
+
+  // Paystack mobile money provider codes for Ghana
+  const providerCodes: Record<string, string> = {
+    mtn: "mtn",
+    vodafone: "vod",
+    airteltigo: "atl",
+  }
+  const momoProvider = providerCodes[input.provider] ?? "mtn"
+
+  // Paystack amounts are in the smallest currency unit (pesewas for GHS, kobo for NGN)
+  const amountInSmallestUnit = Math.round(input.amount * 100)
+
+  // Paystack requires an email; use a deterministic placeholder when the caller
+  // doesn't supply one (public-facing /pay page where no customer email is known)
+  const email =
+    input.customerEmail?.trim() ||
+    `payment.${input.invoiceId.slice(0, 8)}@finza-noreply.africa`
+
+  const res = await fetch("https://api.paystack.co/charge", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      amount: amountInSmallestUnit,
+      email,
+      currency: input.currency || "GHS",
+      reference: input.reference,
+      mobile_money: {
+        phone: input.customerPhone,
+        provider: momoProvider,
+      },
+      metadata: {
+        invoice_id: input.invoiceId,
+        business_id: input.businessId,
+      },
+    }),
+  })
+
+  const data = await res.json()
+
+  if (!res.ok || !data.status) {
+    return {
+      success: false,
+      reference: input.reference,
+      status: "FAILED",
+      error: data.message || `Paystack error ${res.status}`,
+    }
+  }
+
+  const chargeStatus: string = data.data?.status ?? "pending"
+  const failed = chargeStatus === "failed" || chargeStatus === "error"
+
+  return {
+    success: !failed,
+    reference: input.reference,
+    providerReference: data.data?.reference ?? input.reference,
+    // "pay_offline" = push prompt on phone (MTN/AirtelTigo)
+    // "send_otp"   = customer must enter OTP  (Vodafone)
+    // "success"    = instant confirmation
+    status: failed ? "FAILED" : "PENDING",
+    error: failed ? (data.data?.gateway_response || data.message) : undefined,
+    // Signal OTP requirement to the caller via approvalUrl
+    approvalUrl: chargeStatus === "send_otp" ? "otp_required" : undefined,
+  }
 }
 
 async function initiateFlutterwave(input: InitiateMoMoInput & { reference: string }): Promise<InitiateMoMoResult> {
@@ -185,17 +251,32 @@ function validatePaystackWebhook(payload: WebhookPayload): WebhookValidationResu
   const secret = process.env.PAYSTACK_SECRET_KEY
   const sig = payload.headers["x-paystack-signature"]
   if (!secret || !sig) return { valid: false, error: "Paystack secret or signature missing" }
-  // TODO: HMAC SHA512 verify payload.rawBody with secret
+
+  // HMAC-SHA512 signature verification
+  const expected = createHmac("sha512", secret)
+    .update(payload.rawBody)
+    .digest("hex")
+  if (expected !== sig) {
+    return { valid: false, error: "Paystack signature mismatch" }
+  }
+
   try {
     const body = JSON.parse(payload.rawBody) as any
-    const event = body.event === "charge.success" ? "success" : body.data?.status === "success" ? "success" : "pending"
+    const eventStatus =
+      body.event === "charge.success" || body.data?.status === "success"
+        ? "success"
+        : body.data?.status === "failed"
+        ? "failed"
+        : "pending"
     return {
       valid: true,
       providerReference: body.data?.reference,
-      amount: Number(body.data?.amount) / 100,
+      // Paystack amounts are in smallest unit (pesewas) — convert back to major unit
+      amount: body.data?.amount != null ? Number(body.data.amount) / 100 : undefined,
       currency: body.data?.currency,
-      status: event as "success" | "failed" | "pending",
+      status: eventStatus,
       transactionId: body.data?.id?.toString(),
+      payerPhone: body.data?.authorization?.mobile_money_number,
     }
   } catch {
     return { valid: false, error: "Invalid Paystack payload" }

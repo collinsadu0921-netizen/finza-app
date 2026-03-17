@@ -1,9 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { normalizeCountry, getAllowedProviders } from "@/lib/payments/eligibility"
+import { normalizeCountry } from "@/lib/payments/eligibility"
 import { useToast } from "@/components/ui/ToastProvider"
 
 type Invoice = {
@@ -12,78 +11,81 @@ type Invoice = {
   total: number
   currency_symbol: string
   status: string
-  customers: {
-    name: string
-  } | null
-  businesses?: {
-    id: string
-    address_country: string | null
-  } | null
+  customers: { name: string } | null
+  businesses?: { id: string; address_country: string | null } | null
 }
 
-type PaymentStatus = "idle" | "initiating" | "pending" | "success" | "failed" | "cancelled"
+type PaymentStatus =
+  | "idle"
+  | "initiating"
+  | "pending"      // waiting for phone approval
+  | "otp"          // Vodafone OTP step
+  | "success"
+  | "failed"
+
+const PROVIDERS = [
+  { id: "mtn",        label: "MTN MoMo",      color: "yellow",  icon: "📱" },
+  { id: "vodafone",   label: "Vodafone Cash",  color: "red",     icon: "📱" },
+  { id: "airteltigo", label: "AirtelTigo",     color: "blue",    icon: "📱" },
+] as const
+
+type ProviderId = typeof PROVIDERS[number]["id"]
+
+const PROVIDER_COLORS: Record<string, string> = {
+  yellow: "border-yellow-500 bg-yellow-50",
+  red:    "border-red-500 bg-red-50",
+  blue:   "border-blue-500 bg-blue-50",
+}
 
 export default function PayInvoicePage() {
-  const params = useParams()
-  const router = useRouter()
+  const params  = useParams()
+  const router  = useRouter()
+  const toast   = useToast()
   const invoiceId = (params?.invoiceId as string) || ""
-  const toast = useToast()
 
-  const [invoice, setInvoice] = useState<Invoice | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [selectedProvider, setSelectedProvider] = useState<"mtn" | "vodafone" | "airteltigo" | null>(null)
-  const [phoneNumber, setPhoneNumber] = useState("")
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle")
-  const [paymentReference, setPaymentReference] = useState("")
-  const [qrCodeUrl, setQrCodeUrl] = useState("")
-  const [payments, setPayments] = useState<any[]>([])
-  const [businessCountry, setBusinessCountry] = useState<string | null>(null)
+  const [invoice,          setInvoice]          = useState<Invoice | null>(null)
+  const [payments,         setPayments]          = useState<any[]>([])
+  const [loading,          setLoading]           = useState(true)
+  const [error,            setError]             = useState("")
+  const [selectedProvider, setSelectedProvider]  = useState<ProviderId | null>(null)
+  const [phone,            setPhone]             = useState("")
+  const [otp,              setOtp]               = useState("")
+  const [paymentRef,       setPaymentRef]        = useState("")
+  const [paymentStatus,    setPaymentStatus]     = useState<PaymentStatus>("idle")
+  const [displayText,      setDisplayText]       = useState("")
+  const [qrCodeUrl,        setQrCodeUrl]         = useState("")
+  const [businessCountry,  setBusinessCountry]   = useState<string | null>(null)
+  const pollRef = useRef<NodeJS.Timeout | null>(null)
 
+  // ── Load invoice ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (invoiceId) {
-      loadInvoice()
-    }
+    if (invoiceId) loadInvoice()
   }, [invoiceId])
 
+  // ── Poll for payment confirmation ─────────────────────────────────────────
   useEffect(() => {
-    // Poll for payment status if payment is pending
-    if (paymentStatus === "pending" && paymentReference) {
-      const interval = setInterval(() => {
-        checkPaymentStatus()
-      }, 3000) // Check every 3 seconds
-
-      return () => clearInterval(interval)
+    if (paymentStatus === "pending" && paymentRef) {
+      pollRef.current = setInterval(pollStatus, 3000)
+      return () => { if (pollRef.current) clearInterval(pollRef.current) }
     }
-  }, [paymentStatus, paymentReference])
+  }, [paymentStatus, paymentRef])
 
   const loadInvoice = async () => {
     try {
-      setLoading(true)
-      setError("")
-
-      const response = await fetch(`/api/invoices/${invoiceId}`)
-      if (!response.ok) {
-        throw new Error("Invoice not found")
+      setLoading(true); setError("")
+      const res  = await fetch(`/api/public/invoice/${invoiceId}`)
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || "Invoice not found")
       }
-
-      const data = await response.json()
-      if (!data.invoice) {
-        throw new Error("Invoice data not available")
-      }
-
+      const data = await res.json()
+      if (!data.invoice) throw new Error("Invoice data not available")
       setInvoice(data.invoice)
       setPayments(data.payments || [])
-      
-      // Extract business country for payment provider gating
       const country = data.invoice.businesses?.address_country || null
       setBusinessCountry(country)
-      console.log("[Public Payment] Business country:", country)
-
-      // Generate QR code URL
       const payUrl = `${window.location.origin}/pay/${invoiceId}`
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payUrl)}`
-      setQrCodeUrl(qrUrl)
+      setQrCodeUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payUrl)}`)
     } catch (err: any) {
       setError(err.message || "Failed to load invoice")
     } finally {
@@ -91,181 +93,89 @@ export default function PayInvoicePage() {
     }
   }
 
-  const checkPaymentStatus = async () => {
-    if (!paymentReference) return
-
+  const pollStatus = async () => {
+    if (!paymentRef) return
     try {
-      const response = await fetch(`/api/payments/momo/status?reference=${paymentReference}`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.status === "SUCCESS" || data.status === "success") {
-          setPaymentStatus("success")
-          // Reload invoice to get updated status
-          setTimeout(() => {
-            loadInvoice()
-          }, 1000)
-        } else if (data.status === "FAILED" || data.status === "failed") {
-          setPaymentStatus("failed")
-        }
+      const res  = await fetch(`/api/payments/paystack/verify?reference=${paymentRef}`)
+      const data = await res.json()
+      if (data.status === "success") {
+        if (pollRef.current) clearInterval(pollRef.current)
+        setPaymentStatus("success")
+        setTimeout(loadInvoice, 1000)
+      } else if (data.status === "failed" || data.status === "abandoned") {
+        if (pollRef.current) clearInterval(pollRef.current)
+        setPaymentStatus("failed")
+        setError(data.gateway_response || "Payment was not completed")
       }
-    } catch (err) {
-      console.error("Error checking payment status:", err)
-    }
+    } catch {}
   }
 
-  const handleInitiatePayment = async () => {
-    if (!selectedProvider) {
-      setError("Please select a Mobile Money provider")
-      return
-    }
-
-    if (!phoneNumber || phoneNumber.length < 10) {
-      setError("Please enter a valid phone number")
-      return
-    }
-
+  // ── Initiate charge ───────────────────────────────────────────────────────
+  const handlePay = async () => {
+    if (!selectedProvider || phone.replace(/\D/g, "").length < 10) return
+    setError(""); setPaymentStatus("initiating")
     try {
-      setError("")
-      setPaymentStatus("initiating")
-
-      const response = await fetch("/api/payments/momo/initiate", {
-        method: "POST",
+      const res  = await fetch("/api/payments/paystack/charge", {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           invoice_id: invoiceId,
           provider: selectedProvider,
-          phone_number: phoneNumber,
+          phone: phone.replace(/\s+/g, ""),
         }),
       })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || "Failed to initiate payment")
 
-      if (!response.ok) {
-        // Try to parse JSON error response
-        let errorData: any = {}
-        let responseText = ""
-        
-        try {
-          // Clone response to avoid consuming it
-          const clonedResponse = response.clone()
-          responseText = await clonedResponse.text()
-          
-          if (responseText) {
-            try {
-              errorData = JSON.parse(responseText)
-            } catch (jsonError) {
-              // Not JSON, use as plain text
-              errorData = {
-                message: responseText,
-                error: "Invalid JSON response"
-              }
-            }
-          } else {
-            // Empty response
-            errorData = {
-              message: `HTTP ${response.status}: ${response.statusText}`,
-              error: "Empty response from server"
-            }
-          }
-        } catch (parseError: any) {
-          // If reading fails completely
-          console.error("Failed to read error response:", parseError)
-          errorData = {
-            message: `HTTP ${response.status}: ${response.statusText}`,
-            error: "Failed to read error response",
-            parseError: parseError.message
-          }
-        }
-        
-        // Build detailed error message with better formatting
-        let errorMessage = errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`
-        
-        // Add additional info on new lines for better readability
-        const additionalInfo: string[] = []
-        
-        if (errorData.details) {
-          additionalInfo.push(`Details: ${errorData.details}`)
-        }
-        
-        if (errorData.hint) {
-          additionalInfo.push(`Hint: ${errorData.hint}`)
-        }
-        
-        if (errorData.code) {
-          additionalInfo.push(`Error Code: ${errorData.code}`)
-        }
-        
-        // Combine main error with additional info
-        if (additionalInfo.length > 0) {
-          errorMessage += "\n\n" + additionalInfo.join("\n")
-        }
-        
-        // Always log detailed error info for debugging - CRITICAL DEBUG INFO
-        const errorLog = {
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url || "/api/payments/momo/initiate",
-          error: errorData.error,
-          message: errorData.message,
-          details: errorData.details,
-          hint: errorData.hint,
-          code: errorData.code,
-          fullError: errorData.fullError || errorData,
-          rawResponse: responseText || "(no response text)",
-          allErrorData: errorData
-        }
-        
-        console.error("🔴 Payment initiation error:", errorLog)
-        console.error("🔴 Response status:", response.status, response.statusText)
-        console.error("🔴 Full error object:", JSON.stringify(errorData, null, 2))
-        console.error("🔴 Raw response text:", responseText || "(empty)")
-        
-        // In development, show full error in console
-        if (process.env.NODE_ENV === "development") {
-          if (errorData.fullError) {
-            console.error("Full payment error:", errorData.fullError)
-          }
-          console.error("Complete error data:", errorData)
-          errorMessage += `\n\n(Check browser console for full error details)`
-        }
-        
-        throw new Error(errorMessage)
-      }
+      setPaymentRef(data.reference)
+      setDisplayText(data.display_text || "")
 
-      const data = await response.json()
-      if (data.success) {
-        setPaymentReference(data.reference || "")
-        setPaymentStatus("pending")
+      if (data.otp_required) {
+        setPaymentStatus("otp")  // Vodafone — OTP step
       } else {
-        // Build detailed error message for success=false case
-        let errorMessage = data.error || data.message || "Failed to initiate payment"
-        if (data.details) errorMessage += `\nDetails: ${data.details}`
-        if (data.hint) errorMessage += `\nHint: ${data.hint}`
-        
-        console.error("Payment initiation failed:", data)
-        throw new Error(errorMessage)
+        setPaymentStatus("pending")  // MTN / AirtelTigo — phone push
       }
     } catch (err: any) {
-      setError(err.message || "Failed to initiate payment")
+      setError(err.message || "Payment initiation failed")
       setPaymentStatus("idle")
-      console.error("Payment initiation exception:", err)
     }
   }
 
-  const formatPhoneNumber = (value: string) => {
-    // Remove all non-digits
-    const digits = value.replace(/\D/g, "")
-    // Format as 0XX XXX XXXX
-    if (digits.length <= 3) return digits
-    if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`
-    if (digits.length <= 10) return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`
-    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)}`
+  // ── Submit Vodafone OTP ───────────────────────────────────────────────────
+  const handleSubmitOtp = async () => {
+    if (!otp.trim()) return
+    setError(""); setPaymentStatus("initiating")
+    try {
+      const res  = await fetch("/api/payments/paystack/submit-otp", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: otp.trim(), reference: paymentRef }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || "Invalid OTP")
+      setPaymentStatus(data.status === "success" ? "success" : "pending")
+      if (data.status === "success") setTimeout(loadInvoice, 1000)
+    } catch (err: any) {
+      setError(err.message)
+      setPaymentStatus("otp")
+    }
   }
 
+  const formatPhone = (v: string) => {
+    const d = v.replace(/\D/g, "")
+    if (d.length <= 3)  return d
+    if (d.length <= 6)  return `${d.slice(0,3)} ${d.slice(3)}`
+    if (d.length <= 10) return `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6)}`
+    return `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6,10)}`
+  }
+
+  // ── Loading / error screens ───────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading invoice...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading invoice…</p>
         </div>
       </div>
     )
@@ -273,17 +183,14 @@ export default function PayInvoicePage() {
 
   if (error && !invoice) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white p-4">
         <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
           <svg className="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Invoice Not Found</h2>
           <p className="text-gray-600 mb-6">{error}</p>
-          <button
-            onClick={() => router.push("/")}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
+          <button onClick={() => router.push("/")} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
             Go Home
           </button>
         </div>
@@ -293,236 +200,221 @@ export default function PayInvoicePage() {
 
   if (!invoice) return null
 
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
-  const remainingBalance = Number(invoice.total) - totalPaid
+  const totalPaid      = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+  const remaining      = Number(invoice.total) - totalPaid
+  const sym            = invoice.currency_symbol
+  const countryCode    = normalizeCountry(businessCountry)
+  const isGhana        = countryCode === "GH"
+  const canPaystack    = isGhana && !!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY !== false  // always true when deployed
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
-      <div className="max-w-2xl mx-auto px-4 py-8">
+      <div className="max-w-lg mx-auto px-4 py-8">
+
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Pay Invoice</h1>
-          <p className="text-gray-600">Invoice #{invoice.invoice_number}</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">Pay Invoice</h1>
+          <p className="text-gray-500 text-sm">#{invoice.invoice_number}</p>
         </div>
 
-        {/* Invoice Summary Card */}
-        <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-200">
+        {/* Invoice summary */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-5">
+          <div className="flex items-center justify-between pb-4 border-b border-gray-100">
             <div>
-              <p className="text-sm text-gray-600">Customer</p>
-              <p className="font-semibold text-gray-900">{invoice.customers?.name || "No Customer"}</p>
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Customer</p>
+              <p className="font-semibold text-gray-900">{invoice.customers?.name || "—"}</p>
             </div>
             <div className="text-right">
-              <p className="text-sm text-gray-600">Total Amount</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {invoice.currency_symbol}{Number(invoice.total).toFixed(2)}
-              </p>
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Total</p>
+              <p className="text-2xl font-bold text-gray-900">{sym}{Number(invoice.total).toFixed(2)}</p>
             </div>
           </div>
 
-          {remainingBalance > 0 && (
-            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-              <p className="text-sm text-orange-800">
-                <strong>Remaining Balance:</strong> {invoice.currency_symbol}{remainingBalance.toFixed(2)}
-              </p>
+          {remaining > 0 && remaining < Number(invoice.total) && (
+            <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 text-sm text-orange-800">
+              Remaining: <strong>{sym}{remaining.toFixed(2)}</strong>
             </div>
           )}
 
           {invoice.status === "paid" && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-sm text-green-800 font-medium">✓ This invoice has been paid</p>
+            <div className="mt-4 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-800 font-medium">
+              ✓ This invoice has been paid
             </div>
           )}
         </div>
 
-        {/* Payment Status Messages */}
+        {/* Status banners */}
         {paymentStatus === "success" && (
-          <div className="bg-green-50 border-l-4 border-green-400 text-green-700 p-4 rounded mb-6">
-            <div className="flex items-center">
-              <svg className="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              <div>
-                <p className="font-semibold">Payment Successful!</p>
-                <p className="text-sm">Your payment has been processed. You will receive a confirmation shortly.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {paymentStatus === "failed" && (
-          <div className="bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded mb-6">
-            <div className="flex items-center">
-              <svg className="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <div>
-                <p className="font-semibold">Payment Failed</p>
-                <p className="text-sm">Please try again or contact support if the problem persists.</p>
-              </div>
+          <div className="bg-green-50 border-l-4 border-green-400 text-green-800 p-4 rounded-lg mb-5 flex items-start gap-3">
+            <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <p className="font-semibold">Payment Successful!</p>
+              <p className="text-sm mt-0.5">You will receive a receipt shortly.</p>
             </div>
           </div>
         )}
 
         {paymentStatus === "pending" && (
-          <div className="bg-blue-50 border-l-4 border-blue-400 text-blue-700 p-4 rounded mb-6">
-            <div className="flex items-center">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-2"></div>
-              <div>
-                <p className="font-semibold">Processing Payment...</p>
-                <p className="text-sm">Please approve the payment request on your phone. This page will update automatically.</p>
-              </div>
+          <div className="bg-blue-50 border-l-4 border-blue-400 text-blue-800 p-4 rounded-lg mb-5 flex items-start gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Waiting for Approval…</p>
+              <p className="text-sm mt-0.5">
+                {displayText || "A payment prompt has been sent to your phone. Please approve it to complete payment."}
+              </p>
             </div>
           </div>
         )}
 
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded mb-6">
-            <div className="flex items-start">
-              <svg className="w-5 h-5 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <div className="flex-1">
-                <p className="font-semibold mb-1">Payment Error</p>
-                <div className="text-sm whitespace-pre-wrap">{error}</div>
-              </div>
-            </div>
+        {paymentStatus === "failed" && (
+          <div className="bg-red-50 border-l-4 border-red-400 text-red-800 p-4 rounded-lg mb-5">
+            <p className="font-semibold">Payment Failed</p>
+            <p className="text-sm mt-0.5">{error || "Please try again or use a different provider."}</p>
+            <button onClick={() => { setPaymentStatus("idle"); setError("") }} className="mt-2 text-sm underline font-medium">
+              Try again
+            </button>
           </div>
         )}
 
-        {/* Payment Form */}
-        {invoice.status !== "paid" && remainingBalance > 0 && paymentStatus !== "success" && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Pay with Mobile Money</h2>
+        {error && paymentStatus !== "failed" && (
+          <div className="bg-red-50 border-l-4 border-red-400 text-red-800 p-4 rounded-lg mb-5 text-sm">
+            {error}
+          </div>
+        )}
 
-            {/* Provider Selection - Ghana-only providers */}
-            {(() => {
-              const countryCode = normalizeCountry(businessCountry)
-              const allowedProviders = getAllowedProviders(countryCode)
-              const isGhana = countryCode === "GH"
-              const canUseMTN = allowedProviders.includes("mtn_momo")
-              
-              // Only show Ghana providers if business is Ghana
-              if (!isGhana || !canUseMTN) {
-                return (
-                  <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <p className="text-sm text-yellow-800">
-                      Mobile Money payment is not available for businesses outside Ghana. Please contact the business for alternative payment methods.
+        {/* Payment form — only when unpaid */}
+        {invoice.status !== "paid" && remaining > 0 && paymentStatus !== "success" && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-5">
+
+            {!isGhana ? (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                Online payment is currently available for Ghana only. Please contact the business for alternative payment options.
+              </div>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-gray-900 mb-4">Pay with Mobile Money</h2>
+
+                {/* OTP step (Vodafone) */}
+                {paymentStatus === "otp" ? (
+                  <div className="space-y-4">
+                    <p className="text-sm text-gray-600">
+                      A confirmation code has been sent to your Vodafone number. Enter it below.
                     </p>
-                  </div>
-                )
-              }
-              
-              return (
-                <div className="mb-6">
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">Select Provider</label>
-                  <div className="grid grid-cols-3 gap-3">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={otp}
+                      onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
+                      placeholder="Enter OTP"
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 text-center text-2xl tracking-widest focus:ring-2 focus:ring-red-400 focus:border-red-400"
+                    />
                     <button
-                      onClick={() => setSelectedProvider("mtn")}
-                      className={`p-4 rounded-lg border-2 transition-all ${
-                        selectedProvider === "mtn"
-                          ? "border-yellow-500 bg-yellow-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
+                      onClick={handleSubmitOtp}
+                      disabled={otp.length < 4}
+                      className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-40"
                     >
-                      <div className="text-2xl mb-2">📱</div>
-                      <div className="text-sm font-medium">MTN</div>
+                      Confirm OTP
                     </button>
-                    <button
-                      onClick={() => setSelectedProvider("vodafone")}
-                      className={`p-4 rounded-lg border-2 transition-all ${
-                        selectedProvider === "vodafone"
-                          ? "border-red-500 bg-red-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className="text-2xl mb-2">📱</div>
-                      <div className="text-sm font-medium">Vodafone</div>
-                    </button>
-                    <button
-                      onClick={() => setSelectedProvider("airteltigo")}
-                      className={`p-4 rounded-lg border-2 transition-all ${
-                        selectedProvider === "airteltigo"
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className="text-2xl mb-2">📱</div>
-                      <div className="text-sm font-medium">AirtelTigo</div>
+                    <button onClick={() => { setPaymentStatus("idle"); setOtp("") }} className="w-full text-sm text-gray-500 hover:underline">
+                      Back
                     </button>
                   </div>
-                </div>
-              )
-            })()}
-
-            {/* Phone Number Input */}
-            {selectedProvider && (
-              <div className="mb-6">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Phone Number ({selectedProvider.toUpperCase()})
-                </label>
-                <input
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(formatPhoneNumber(e.target.value))}
-                  placeholder="0XX XXX XXXX"
-                  maxLength={14}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
-                />
-                <p className="text-xs text-gray-500 mt-1">Enter your {selectedProvider.toUpperCase()} Mobile Money number</p>
-              </div>
-            )}
-
-            {/* Pay Button */}
-            {selectedProvider && phoneNumber.length >= 10 && (
-              <button
-                onClick={handleInitiatePayment}
-                disabled={paymentStatus === "initiating" || paymentStatus === "pending"}
-                className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white px-6 py-4 rounded-lg font-semibold text-lg shadow-lg hover:from-green-700 hover:to-green-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
-              >
-                {paymentStatus === "initiating" ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Initiating Payment...</span>
-                  </>
-                ) : paymentStatus === "pending" ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Waiting for Approval...</span>
-                  </>
                 ) : (
                   <>
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                    <span>Pay {invoice.currency_symbol}{remainingBalance > 0 ? remainingBalance.toFixed(2) : Number(invoice.total).toFixed(2)}</span>
+                    {/* Provider selector */}
+                    <div className="mb-5">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Select Provider</label>
+                      <div className="grid grid-cols-3 gap-3">
+                        {PROVIDERS.map(p => (
+                          <button
+                            key={p.id}
+                            onClick={() => setSelectedProvider(p.id)}
+                            className={`p-3 rounded-xl border-2 transition-all text-center ${
+                              selectedProvider === p.id
+                                ? PROVIDER_COLORS[p.color]
+                                : "border-gray-200 hover:border-gray-300 bg-white"
+                            }`}
+                          >
+                            <div className="text-xl mb-1">{p.icon}</div>
+                            <div className="text-xs font-semibold text-gray-700 leading-tight">{p.label}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Phone input */}
+                    {selectedProvider && (
+                      <div className="mb-5">
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          {PROVIDERS.find(p => p.id === selectedProvider)?.label} Number
+                        </label>
+                        <input
+                          type="tel"
+                          value={phone}
+                          onChange={e => setPhone(formatPhone(e.target.value))}
+                          placeholder="0XX XXX XXXX"
+                          maxLength={14}
+                          className="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                          {selectedProvider === "vodafone"
+                            ? "You will receive an OTP to approve this payment."
+                            : "A payment prompt will be sent to your phone."}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Pay button */}
+                    {selectedProvider && phone.replace(/\D/g, "").length >= 10 && (
+                      <button
+                        onClick={handlePay}
+                        disabled={paymentStatus === "initiating"}
+                        className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-md hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                      >
+                        {paymentStatus === "initiating" ? (
+                          <>
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                            Processing…
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            Pay {sym}{remaining.toFixed(2)}
+                          </>
+                        )}
+                      </button>
+                    )}
                   </>
                 )}
-              </button>
+              </>
             )}
           </div>
         )}
 
-        {/* QR Code Section */}
-        <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 text-center">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Scan to Pay</h3>
+        {/* QR / share link */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
+          <h3 className="text-base font-semibold text-gray-900 mb-3">Share Payment Link</h3>
           {qrCodeUrl && (
-            <div className="flex justify-center mb-4">
-              <img src={qrCodeUrl} alt="Payment QR Code" className="border-2 border-gray-200 rounded-lg p-2" />
+            <div className="flex justify-center mb-3">
+              <img src={qrCodeUrl} alt="QR Code" className="border border-gray-200 rounded-lg p-2" width={160} height={160} />
             </div>
           )}
-          <p className="text-sm text-gray-600 mb-4">Scan this QR code with your mobile money app</p>
           <button
             onClick={() => {
-              const payUrl = `${window.location.origin}/pay/${invoiceId}`
-              navigator.clipboard.writeText(payUrl)
-              toast.showToast("Payment link copied to clipboard!", "success")
+              navigator.clipboard.writeText(`${window.location.origin}/pay/${invoiceId}`)
+              toast.showToast("Payment link copied!", "success")
             }}
             className="text-sm text-blue-600 hover:text-blue-700 font-medium"
           >
-            Copy Payment Link
+            Copy payment link
           </button>
         </div>
+
       </div>
     </div>
   )

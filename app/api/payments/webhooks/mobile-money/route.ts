@@ -22,10 +22,18 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 30
 
 function getProviderFromRequest(request: NextRequest): MobileMoneyProvider | null {
-  const provider = request.headers.get("x-momo-provider") ?? request.nextUrl.searchParams.get("provider")
-  if (provider && ["hubtel", "paystack", "flutterwave", "mtn"].includes(provider)) {
-    return provider as MobileMoneyProvider
+  // Explicit header/query-param takes priority
+  const explicit = request.headers.get("x-momo-provider") ?? request.nextUrl.searchParams.get("provider")
+  if (explicit && ["hubtel", "paystack", "flutterwave", "mtn"].includes(explicit)) {
+    return explicit as MobileMoneyProvider
   }
+
+  // Auto-detect Paystack — they sign requests with x-paystack-signature; no
+  // x-momo-provider header is sent from their side
+  if (request.headers.get("x-paystack-signature")) {
+    return "paystack"
+  }
+
   return null
 }
 
