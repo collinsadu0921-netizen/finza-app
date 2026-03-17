@@ -52,6 +52,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: e?.message || "Business is archived" }, { status: 403 })
     }
 
+    // Require country and currency before recording expenses (same rule as invoices)
+    const { data: businessProfile } = await supabase
+      .from("businesses")
+      .select("address_country, default_currency")
+      .eq("id", business_id)
+      .single()
+
+    if (!businessProfile?.address_country) {
+      return NextResponse.json(
+        { error: "Business country is required. Please set it in Business Profile settings." },
+        { status: 400 }
+      )
+    }
+
+    if (!businessProfile?.default_currency) {
+      return NextResponse.json(
+        { error: "Business currency is required. Please set it in Business Profile settings." },
+        { status: 400 }
+      )
+    }
+
     const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, business_id)
     if (bootstrapErr) {
       return NextResponse.json(

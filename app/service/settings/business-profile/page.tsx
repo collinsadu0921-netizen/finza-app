@@ -210,21 +210,71 @@ export default function ServiceBusinessProfilePage() {
           <input type="file" accept="image/*" onChange={handleLogoUpload} className="text-gray-900 dark:text-white" />
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input value={formData.legal_name} onChange={(e) => setFormData({ ...formData, legal_name: e.target.value })} placeholder="Legal name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.trading_name} onChange={(e) => setFormData({ ...formData, trading_name: e.target.value })} placeholder="Trading name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.address_street} onChange={(e) => setFormData({ ...formData, address_street: e.target.value })} placeholder="Street" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.address_city} onChange={(e) => setFormData({ ...formData, address_city: e.target.value })} placeholder="City" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.address_region} onChange={(e) => setFormData({ ...formData, address_region: e.target.value })} placeholder="Region" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.address_country} onChange={(e) => setFormData({ ...formData, address_country: e.target.value })} placeholder="Country" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="Phone" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.whatsapp_phone} onChange={(e) => setFormData({ ...formData, whatsapp_phone: e.target.value })} placeholder="WhatsApp" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="Email" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.website} onChange={(e) => setFormData({ ...formData, website: e.target.value })} placeholder="Website" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.tin} onChange={(e) => setFormData({ ...formData, tin: e.target.value })} placeholder="TIN / Tax ID" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={formData.default_currency} onChange={(e) => setFormData({ ...formData, default_currency: e.target.value })} placeholder="Default currency" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-          <input value={businessIndustry} readOnly disabled className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-gray-100 dark:bg-gray-700 dark:text-gray-300" />
+        {/* Business Identity */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Business Identity</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input value={formData.legal_name} onChange={(e) => setFormData({ ...formData, legal_name: e.target.value })} placeholder="Legal name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.trading_name} onChange={(e) => setFormData({ ...formData, trading_name: e.target.value })} placeholder="Trading name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.tin} onChange={(e) => setFormData({ ...formData, tin: e.target.value })} placeholder="TIN / Tax ID" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={businessIndustry} readOnly disabled placeholder="Industry" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-gray-100 dark:bg-gray-700 dark:text-gray-300" />
+            <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} placeholder="Business start date" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+          </div>
+        </div>
+
+        {/* Location */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Location</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <select value={formData.address_country} onChange={(e) => setFormData({ ...formData, address_country: e.target.value })} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
+              <option value="">Select country</option>
+              <option value="Ghana">Ghana</option>
+              <option value="Nigeria">Nigeria</option>
+              <option value="Kenya">Kenya</option>
+              <option value="South Africa">South Africa</option>
+              <option value="Uganda">Uganda</option>
+              <option value="Tanzania">Tanzania</option>
+              <option value="United States">United States</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Germany">Germany</option>
+              <option value="France">France</option>
+              <option value="Other">Other</option>
+            </select>
+            <input value={formData.address_region} onChange={(e) => setFormData({ ...formData, address_region: e.target.value })} placeholder="Region / State" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.address_city} onChange={(e) => setFormData({ ...formData, address_city: e.target.value })} placeholder="City" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.address_street} onChange={(e) => setFormData({ ...formData, address_street: e.target.value })} placeholder="Street address" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+          </div>
+        </div>
+
+        {/* Contact */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Contact</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="Phone" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.whatsapp_phone} onChange={(e) => setFormData({ ...formData, whatsapp_phone: e.target.value })} placeholder="WhatsApp number" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="Email" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.website} onChange={(e) => setFormData({ ...formData, website: e.target.value })} placeholder="Website" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+          </div>
+        </div>
+
+        {/* Financial Settings */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Financial Settings</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Required to create invoices and generate reports.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <select value={formData.default_currency} onChange={(e) => setFormData({ ...formData, default_currency: e.target.value })} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
+              <option value="">Select currency</option>
+              <option value="GHS">GHS — Ghana Cedi (₵)</option>
+              <option value="NGN">NGN — Nigerian Naira (₦)</option>
+              <option value="KES">KES — Kenyan Shilling (KSh)</option>
+              <option value="ZAR">ZAR — South African Rand (R)</option>
+              <option value="UGX">UGX — Ugandan Shilling (USh)</option>
+              <option value="TZS">TZS — Tanzanian Shilling (TSh)</option>
+              <option value="USD">USD — US Dollar ($)</option>
+              <option value="GBP">GBP — British Pound (£)</option>
+              <option value="EUR">EUR — Euro (€)</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex gap-3">

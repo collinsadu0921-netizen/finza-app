@@ -5,10 +5,40 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
+const COUNTRY_CURRENCY_MAP: Record<string, string> = {
+  Ghana: "GHS",
+  Nigeria: "NGN",
+  Kenya: "KES",
+  "South Africa": "ZAR",
+  Uganda: "UGX",
+  Tanzania: "TZS",
+  "United States": "USD",
+  "United Kingdom": "GBP",
+  Germany: "EUR",
+  France: "EUR",
+  Other: "USD",
+}
+
+const COUNTRIES = [
+  "Ghana",
+  "Nigeria",
+  "Kenya",
+  "South Africa",
+  "Uganda",
+  "Tanzania",
+  "United States",
+  "United Kingdom",
+  "Germany",
+  "France",
+  "Other",
+]
+
 export default function BusinessSetupPage() {
   const router = useRouter()
   const [name, setName] = useState("")
   const [industry, setIndustry] = useState("")
+  const [country, setCountry] = useState("")
+  const [currency, setCurrency] = useState("")
   const [startDate, setStartDate] = useState("")
   const [error, setError] = useState("")
   const [user, setUser] = useState<any>(null)
@@ -22,6 +52,12 @@ export default function BusinessSetupPage() {
     if (authData.user) {
       setUser(authData.user)
     }
+  }
+
+  const handleCountryChange = (selectedCountry: string) => {
+    setCountry(selectedCountry)
+    const autoCurrency = COUNTRY_CURRENCY_MAP[selectedCountry] || ""
+    setCurrency(autoCurrency)
   }
 
   const ensureUserRecord = async (authUser: any) => {
@@ -54,8 +90,7 @@ export default function BusinessSetupPage() {
 
   const handleSave = async () => {
     setError("")
-    
-    // Get user if not already loaded
+
     let currentUser = user
     if (!currentUser) {
       const { data: authData } = await supabase.auth.getUser()
@@ -73,16 +108,17 @@ export default function BusinessSetupPage() {
       setError(err.message || "Failed to prepare user record")
       return
     }
-    
-    // Insert business with start_date and onboarding_step
+
     const { data: business, error: businessError } = await supabase
       .from("businesses")
       .insert({
         owner_id: userRecord.id,
         name,
         industry,
+        address_country: country || null,
+        default_currency: currency || null,
         start_date: startDate || null,
-        onboarding_step: "business_profile"
+        onboarding_step: "business_profile",
       })
       .select("id, name, industry, created_at, start_date, onboarding_step")
       .single()
@@ -92,11 +128,10 @@ export default function BusinessSetupPage() {
       return
     }
 
-    // Add user as admin in business_users table (owner status is tracked via businesses.owner_id)
     const { error: userError } = await supabase.from("business_users").insert({
       business_id: business.id,
       user_id: userRecord.id,
-      role: "admin"
+      role: "admin",
     })
 
     if (userError) {
@@ -104,7 +139,6 @@ export default function BusinessSetupPage() {
       return
     }
 
-    // Redirect to onboarding wizard after business creation
     router.push("/onboarding")
   }
 
@@ -133,6 +167,34 @@ export default function BusinessSetupPage() {
             <option value="logistics">Logistics / Delivery</option>
           </select>
 
+          <select
+            className="border p-2 w-full mb-3"
+            onChange={(e) => handleCountryChange(e.target.value)}
+            value={country}
+          >
+            <option value="">Select country</option>
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+
+          <select
+            className="border p-2 w-full mb-3"
+            onChange={(e) => setCurrency(e.target.value)}
+            value={currency}
+          >
+            <option value="">Select currency</option>
+            <option value="GHS">GHS — Ghana Cedi (₵)</option>
+            <option value="NGN">NGN — Nigerian Naira (₦)</option>
+            <option value="KES">KES — Kenyan Shilling (KSh)</option>
+            <option value="ZAR">ZAR — South African Rand (R)</option>
+            <option value="UGX">UGX — Ugandan Shilling (USh)</option>
+            <option value="TZS">TZS — Tanzanian Shilling (TSh)</option>
+            <option value="USD">USD — US Dollar ($)</option>
+            <option value="GBP">GBP — British Pound (£)</option>
+            <option value="EUR">EUR — Euro (€)</option>
+          </select>
+
           <input
             type="date"
             className="border p-2 w-full mb-4"
@@ -144,7 +206,7 @@ export default function BusinessSetupPage() {
           <button
             onClick={handleSave}
             className="bg-green-600 text-white p-2 w-full"
-            disabled={!name || !industry}
+            disabled={!name || !industry || !country || !currency}
           >
             Continue
           </button>
@@ -153,5 +215,3 @@ export default function BusinessSetupPage() {
     </ProtectedLayout>
   )
 }
-
-
