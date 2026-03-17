@@ -125,6 +125,20 @@ function EntryCard({
   const totalCredits = entry.journal_entry_lines.reduce((s, l) => s + Number(l.credit || 0), 0)
   const isBalanced   = Math.abs(totalDebits - totalCredits) < 0.005
 
+  // Exclude rounding-adjustment lines (account 7990) from displayed totals.
+  // 7990 is an intentional sub-cent balancing entry produced by the Ghana tax
+  // engine when individually-rounded tax components don't sum to the rounded
+  // invoice total. It is still visible as its own line item; excluding it from
+  // the footer keeps the displayed figure aligned with the actual invoice amount.
+  const roundingDebitTotal  = entry.journal_entry_lines
+    .filter((l) => l.accounts?.code === "7990")
+    .reduce((s, l) => s + Number(l.debit  || 0), 0)
+  const roundingCreditTotal = entry.journal_entry_lines
+    .filter((l) => l.accounts?.code === "7990")
+    .reduce((s, l) => s + Number(l.credit || 0), 0)
+  const displayDebits  = totalDebits  - roundingDebitTotal
+  const displayCredits = totalCredits - roundingCreditTotal
+
   const meta = entry.reference_type ? (TYPE_META[entry.reference_type] ?? {
     label: entry.reference_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
     color: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
@@ -237,10 +251,10 @@ function EntryCard({
         <span className="text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Total</span>
         <div className="flex gap-8">
           <span className="w-28 text-right tabular-nums font-mono font-semibold text-blue-700 dark:text-blue-300">
-            <Money amount={totalDebits} currency="GHS" />
+            <Money amount={displayDebits} currency="GHS" />
           </span>
           <span className="w-28 text-right tabular-nums font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-            <Money amount={totalCredits} currency="GHS" />
+            <Money amount={displayCredits} currency="GHS" />
           </span>
         </div>
       </div>

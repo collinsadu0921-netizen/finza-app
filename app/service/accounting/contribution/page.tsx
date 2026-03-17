@@ -58,6 +58,7 @@ export default function ServiceContributionPage() {
           return
         }
         setBusinessId(b.id)
+        setLoading(false)
       } catch (_) {
         if (!cancelled) setLoading(false)
       }
