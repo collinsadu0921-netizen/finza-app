@@ -4,6 +4,7 @@ import './globals.css'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
 import { ThemeProvider } from '@/components/ThemeProvider'
+import NumberInputGuard from '@/components/NumberInputGuard'
 
 export const metadata: Metadata = {
   title: 'FINZA',
@@ -34,6 +35,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <Suspense fallback={null}>
           <ThemeProvider>
+            <NumberInputGuard />
             <ToastProvider>
               <ConfirmProvider>
                 {children}
