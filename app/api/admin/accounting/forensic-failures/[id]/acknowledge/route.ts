@@ -49,8 +49,9 @@ export async function PATCH(
       .maybeSingle()
 
     if (fetchError || !existing) {
+      const message = !existing ? "Failure not found" : (fetchError as { message?: string } | null)?.message ?? "Failed to fetch"
       return NextResponse.json(
-        { error: existing ? fetchError?.message : "Failure not found" },
+        { error: message },
         { status: existing ? 500 : 404 }
       )
     }

@@ -68,8 +68,9 @@ export async function POST(
       .maybeSingle()
 
     if (fetchError || !failure) {
+      const message = !failure ? "Failure not found" : (fetchError as { message?: string } | null)?.message ?? "Failed to fetch"
       return NextResponse.json(
-        { error: failure ? fetchError?.message : "Failure not found" },
+        { error: message },
         { status: failure ? 500 : 404 }
       )
     }
