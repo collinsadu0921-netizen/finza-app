@@ -15,7 +15,7 @@ type Business = { id: string; default_currency?: string }
 
 type Metrics = {
   period: { period_start?: string; period_end?: string }
-  currency: string
+  currency: string | { code: string; symbol: string; name: string }
   revenue: number
   expenses: number
   netProfit: number
@@ -92,7 +92,11 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null)
   const [metricsError, setMetricsError] = useState<string | null>(null)
 
-  const currencyCode = business?.default_currency ?? metrics?.currency ?? "USD"
+  const rawMetricsCurrency = metrics?.currency
+  const metricsCurrencyCode = typeof rawMetricsCurrency === "object" && rawMetricsCurrency !== null
+    ? rawMetricsCurrency.code
+    : rawMetricsCurrency as string | undefined
+  const currencyCode = business?.default_currency ?? metricsCurrencyCode ?? "USD"
 
   const load = useCallback(async () => {
     const businessId = business?.id
