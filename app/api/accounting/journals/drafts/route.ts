@@ -427,7 +427,7 @@ export async function POST(request: NextRequest) {
 
       const engagement = await getActiveEngagement(
         supabase,
-        onboardingCheck.firmId,
+        onboardingCheck.firmId!,
         client_business_id
       )
 
