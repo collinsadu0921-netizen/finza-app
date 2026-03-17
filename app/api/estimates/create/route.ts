@@ -115,6 +115,9 @@ export async function POST(request: NextRequest) {
 
     // Calculate taxes using canonical tax engine (tax-inclusive mode)
     const jurisdiction = normalizeCountry(businessData.address_country)
+    if (!jurisdiction) {
+      return NextResponse.json({ success: false, error: "Jurisdiction required", message: "Business country could not be resolved for tax calculation." }, { status: 400 })
+    }
     const taxEngineCode = getTaxEngineCode(jurisdiction)
     let taxResult: import('@/lib/taxEngine/types').TaxResult | null = null
     let baseSubtotal: number
@@ -139,7 +142,7 @@ export async function POST(request: NextRequest) {
       legacyTaxColumns = deriveLegacyTaxColumnsFromTaxLines(taxResult.lines)
     } else {
       // No taxes applied
-      const subtotal = lineItems.reduce((sum, item) => {
+      const subtotal = lineItems.reduce((sum: number, item: any) => {
         const lineTotal = item.quantity * item.unit_price
         const discount = item.discount_amount || 0
         return sum + lineTotal - discount

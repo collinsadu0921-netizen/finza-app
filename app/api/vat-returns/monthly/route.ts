@@ -10,6 +10,8 @@ export type LedgerLine = {
   description: string | null
   source_type: string | null
   reference: string | null
+  reference_type?: string | null
+  reference_id?: string | null
   tax_code: string
   debit: number
   credit: number
@@ -193,6 +195,8 @@ export async function GET(request: NextRequest) {
         description:      line.description || je.description || null,
         source_type:      je.source_type || null,
         reference,
+        reference_type:   refType,
+        reference_id:      refId,
         tax_code:         taxCode,
         debit,
         credit,
@@ -219,7 +223,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const grandTotalNetVat = monthlyReturns.reduce((sum, m) => sum + m.net_vat, 0)
+    const grandTotalNetVat = monthlyReturns.reduce((sum: number, m: MonthlyVatReturn) => sum + m.net_vat, 0)
 
     return NextResponse.json({
       monthlyReturns,

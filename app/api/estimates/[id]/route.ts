@@ -201,6 +201,9 @@ export async function PUT(
 
     // Recompute taxes canonically on every update (overwrite tax_lines and totals)
     const jurisdiction = normalizeCountry(businessRecord.address_country)
+    if (!jurisdiction) {
+      return NextResponse.json({ error: "Jurisdiction required", message: "Business country could not be resolved for tax calculation." }, { status: 400 })
+    }
     const taxEngineCode = getTaxEngineCode(jurisdiction)
     const shouldApplyTaxes = apply_taxes !== undefined ? apply_taxes : true
     let taxResult: import('@/lib/taxEngine/types').TaxResult | null = null
@@ -226,7 +229,7 @@ export async function PUT(
       legacyTaxColumns = deriveLegacyTaxColumnsFromTaxLines(taxResult.lines)
     } else {
       // No taxes applied
-      const subtotal = lineItems.reduce((sum, item) => {
+      const subtotal = lineItems.reduce((sum: number, item: any) => {
         const lineTotal = item.quantity * item.unit_price
         const discount = item.discount_amount || 0
         return sum + lineTotal - discount

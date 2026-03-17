@@ -31,12 +31,17 @@ export type TrendsSectionProps = {
   currentNetProfit?: number
 }
 
+type CustomTooltipProps = TooltipProps<number, string> & {
+  payload?: Array<{ payload?: Record<string, unknown> }>
+  label?: string
+  currencyCode: string
+}
 function CustomTooltip({
   active,
   payload,
   label,
   currencyCode,
-}: TooltipProps<number, string> & { currencyCode: string }) {
+}: CustomTooltipProps) {
   if (!active || !payload?.length || label == null) return null
   const p = payload[0]?.payload as Record<string, unknown> | undefined
   if (!p) return null
@@ -161,7 +166,7 @@ export default function TrendsSection({
                   width={60}
                 />
                 <Tooltip
-                  content={(props) => (
+                  content={(props: TooltipProps<number, string>) => (
                     <CustomTooltip {...props} currencyCode={currencyCode} />
                   )}
                   cursor={{ fill: "rgba(0,0,0,0.04)" }}

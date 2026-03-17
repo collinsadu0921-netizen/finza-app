@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       total = taxCalculationResult.total_incl_tax
     } else {
       // No taxes applied
-      subtotal = lineItems.reduce((sum, item) => {
+      subtotal = lineItems.reduce((sum: number, item: any) => {
         const lineTotal = item.quantity * item.unit_price
         const discount = item.discount_amount || 0
         return sum + lineTotal - discount

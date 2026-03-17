@@ -12,6 +12,7 @@ export type TaxLine = {
   amount: number         // 2dp rounded
   rate?: number          // optional, for audit/explainability
   name?: string          // human-readable
+  base?: number          // optional, taxable base (used by LegacyTaxLine / jurisdiction adapters)
   meta?: Record<string, any>
 }
 

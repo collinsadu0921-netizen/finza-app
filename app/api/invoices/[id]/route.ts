@@ -119,8 +119,8 @@ export async function GET(
         .eq("status", "applied")
         .is("deleted_at", null)
 
-      const totalPaid = payments?.reduce((sum, p) => sum + Number(p.amount || 0), 0) || 0
-      const totalCredits = creditNotes?.reduce((sum, cn) => sum + Number(cn.total || 0), 0) || 0
+      const totalPaid = payments?.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) || 0
+      const totalCredits = creditNotes?.reduce((sum: number, cn: any) => sum + Number(cn.total || 0), 0) || 0
       const outstandingAmount = Number(invoice.total || 0) - totalPaid - totalCredits
 
       // If fully paid but status says otherwise, auto-correct via database function
@@ -391,7 +391,7 @@ export async function PUT(
         updateData.total = invoiceTotal
       } else {
         // No taxes applied
-        const subtotal = lineItems.reduce((sum, item) => {
+        const subtotal = lineItems.reduce((sum: number, item: any) => {
           const lineTotal = item.quantity * item.unit_price
           const discount = item.discount_amount || 0
           return sum + lineTotal - discount

@@ -30,13 +30,19 @@ export type FinancialFlowChartProps = {
   showCash?: boolean
 }
 
+type FinancialFlowTooltipProps = TooltipProps<number, string> & {
+  payload?: Array<{ payload?: Record<string, unknown> }>
+  label?: string
+  currencyCode: string
+  showCash: boolean
+}
 function FinancialFlowTooltip({
   active,
   payload,
   label,
   currencyCode,
   showCash,
-}: TooltipProps<number, string> & { currencyCode: string; showCash: boolean }) {
+}: FinancialFlowTooltipProps) {
   if (!active || !payload?.length || label == null) return null
   const p = payload[0]?.payload as Record<string, unknown>
   if (!p) return null
@@ -147,7 +153,7 @@ export default function FinancialFlowChart({
               width={48}
             />
             <Tooltip
-              content={(props) => (
+              content={(props: TooltipProps<number, string>) => (
                 <FinancialFlowTooltip
                   {...props}
                   currencyCode={currencyCode}

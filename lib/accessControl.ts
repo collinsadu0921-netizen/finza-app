@@ -298,7 +298,8 @@ export async function resolveAccess(
   // STEP 6: Apply workspace-specific access rules
 
   // ACCOUNTING WORKSPACE: accountant_readonly applies HERE only
-  if (workspace === "accounting") {
+  // (workspace may be narrowed to retail|service after STEP 4 returns for accounting; cast to allow this branch for callers that reach STEP 6 with accounting)
+  if ((workspace as Workspace) === "accounting") {
     if (accountantReadonly) {
       // Accountant readonly users can ONLY access accounting routes
       const allowedRoutes = [
@@ -341,7 +342,7 @@ export async function resolveAccess(
     // If accounting workspace, user should have been handled in STEP 4 (firm membership)
     // or STEP 5 (redirect to firm setup). Reaching here means unexpected state.
     // For safety, allow accounting workspace even without role (will be resolved in handlers).
-    if (workspace === "accounting") {
+    if ((workspace as Workspace) === "accounting") {
       return debugDecision({ allowed: true })
     }
     // For other workspaces, role is required
@@ -349,7 +350,7 @@ export async function resolveAccess(
   }
 
   // Cashier rules: Only POS routes
-  if (role === "cashier") {
+  if ((role as UserRole) === "cashier") {
     if (pathname?.startsWith("/pos")) {
       return debugDecision({ allowed: true })
     }

@@ -206,8 +206,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate totals
-    const totalDebit = ledgerLines?.reduce((sum, line) => sum + Number(line.debit || 0), 0) || 0
-    const totalCredit = ledgerLines?.reduce((sum, line) => sum + Number(line.credit || 0), 0) || 0
+    const totalDebit = ledgerLines?.reduce((sum: number, line: any) => sum + Number(line.debit || 0), 0) || 0
+    const totalCredit = ledgerLines?.reduce((sum: number, line: any) => sum + Number(line.credit || 0), 0) || 0
     const finalBalance = ledgerLines && ledgerLines.length > 0 
       ? Number(ledgerLines[ledgerLines.length - 1].running_balance || 0)
       : 0

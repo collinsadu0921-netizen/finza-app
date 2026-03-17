@@ -105,12 +105,12 @@ export async function GET(request: NextRequest) {
     const hasLargeRowCount = rowCount > 50000
 
     // Separate income and expense accounts
-    const incomeAccounts = (pnlData || []).filter((acc) => acc.account_type === "income")
-    const expenseAccounts = (pnlData || []).filter((acc) => acc.account_type === "expense")
+    const incomeAccounts = (pnlData || []).filter((acc: any) => acc.account_type === "income")
+    const expenseAccounts = (pnlData || []).filter((acc: any) => acc.account_type === "expense")
 
     // Calculate totals
-    const totalRevenue = incomeAccounts.reduce((sum, acc) => sum + Number(acc.period_total || 0), 0)
-    const totalExpenses = expenseAccounts.reduce((sum, acc) => sum + Number(acc.period_total || 0), 0)
+    const totalRevenue = incomeAccounts.reduce((sum: number, acc: any) => sum + Number(acc.period_total || 0), 0)
+    const totalExpenses = expenseAccounts.reduce((sum: number, acc: any) => sum + Number(acc.period_total || 0), 0)
     const netProfit = totalRevenue - totalExpenses
     const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
 

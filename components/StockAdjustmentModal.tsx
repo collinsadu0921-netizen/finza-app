@@ -302,7 +302,7 @@ export default function StockAdjustmentModal({
       let finalStockValue: number
       if (typeof newStockValue === 'string') {
         // Remove any non-digit characters and parse
-        const cleaned = newStockValue.replace(/[^\d-]/g, '')
+        const cleaned = (newStockValue as string).replace(/[^\d-]/g, '')
         finalStockValue = parseInt(cleaned, 10) || 0
       } else {
         finalStockValue = Math.floor(Number(newStockValue)) || 0

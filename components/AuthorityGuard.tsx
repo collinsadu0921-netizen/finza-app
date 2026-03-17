@@ -3,7 +3,7 @@
 "use client"
 
 import React from "react"
-import { FirmRole, EngagementAccessLevel, ActionType, EngagementStatus, resolveAuthority } from "@/lib/firmAuthority"
+import { FirmRole, EngagementAccessLevel, ActionType, EngagementStatus, resolveAuthority, canPerformAction } from "@/lib/firmAuthority"
 
 interface AuthorityGuardProps {
   userRole: FirmRole | null

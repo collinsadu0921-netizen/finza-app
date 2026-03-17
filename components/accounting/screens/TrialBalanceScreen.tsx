@@ -11,6 +11,7 @@ import {
 import ReadinessBanner from "@/components/accounting/ReadinessBanner"
 import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
+import EmptyState from "@/components/ui/EmptyState"
 import type { ScreenProps } from "./types"
 
 type AccountingPeriod = {

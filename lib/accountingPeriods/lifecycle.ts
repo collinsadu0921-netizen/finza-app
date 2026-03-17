@@ -111,9 +111,9 @@ export async function updateAccountingPeriod(
     updateData.status = input.status
     // Update closed_at and closed_by when transitioning to soft_closed or locked
     if (input.status === 'soft_closed' || input.status === 'locked') {
-      const { data: user } = await supabase.auth.getUser()
+      const { data: userData } = await supabase.auth.getUser()
       updateData.closed_at = new Date().toISOString()
-      updateData.closed_by = user.data.user?.id || null
+      updateData.closed_by = userData?.user?.id || null
     }
   }
 
@@ -242,8 +242,8 @@ export async function transitionPeriodStatus(
   newStatus: AccountingPeriodStatus,
   userId?: string
 ): Promise<AccountingPeriod> {
-  const { data: user } = await supabase.auth.getUser()
-  const effectiveUserId = userId || user.data.user?.id || null
+  const { data: userData } = await supabase.auth.getUser()
+  const effectiveUserId = userId || userData?.user?.id || null
   
   if (!effectiveUserId) {
     throw new Error('User must be authenticated to transition period status')

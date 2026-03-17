@@ -1,5 +1,8 @@
 import { SupabaseClient } from "@supabase/supabase-js"
 
+/** Role string from business_users or "owner"; null when not found */
+export type UserRole = string | null
+
 export async function getUserRole(
   supabase: SupabaseClient,
   userId: string,

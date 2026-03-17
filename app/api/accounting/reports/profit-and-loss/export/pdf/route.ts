@@ -139,12 +139,12 @@ export async function GET(request: NextRequest) {
     doc.moveDown(1)
 
     // Separate income and expense accounts
-    const incomeAccounts = (pnlData || []).filter((acc) => acc.account_type === "income")
-    const expenseAccounts = (pnlData || []).filter((acc) => acc.account_type === "expense")
+    const incomeAccounts = (pnlData || []).filter((acc: any) => acc.account_type === "income")
+    const expenseAccounts = (pnlData || []).filter((acc: any) => acc.account_type === "expense")
 
     // Calculate totals
-    const totalRevenue = incomeAccounts.reduce((sum, acc) => sum + Number(acc.period_total || 0), 0)
-    const totalExpenses = expenseAccounts.reduce((sum, acc) => sum + Number(acc.period_total || 0), 0)
+    const totalRevenue = incomeAccounts.reduce((sum: number, acc: any) => sum + Number(acc.period_total || 0), 0)
+    const totalExpenses = expenseAccounts.reduce((sum: number, acc: any) => sum + Number(acc.period_total || 0), 0)
     const netProfit = totalRevenue - totalExpenses
 
     // Revenue section
@@ -158,7 +158,7 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(10).font("Helvetica-Bold")
     const headers = ["Account Code", "Account Name", "Period Total"]
-    headers.forEach((header, i) => {
+    headers.forEach((header: string, i: number) => {
       doc.rect(x, y, columnWidths[i], rowHeight).stroke()
       doc.text(header, x + 5, y + 7, { width: columnWidths[i] - 10, align: i === 2 ? "right" : "left" })
       x += columnWidths[i]
@@ -209,7 +209,7 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
-    headers.forEach((header, i) => {
+    headers.forEach((header: string, i: number) => {
       doc.rect(x, y, columnWidths[i], rowHeight).stroke()
       doc.text(header, x + 5, y + 7, { width: columnWidths[i] - 10, align: i === 2 ? "right" : "left" })
       x += columnWidths[i]

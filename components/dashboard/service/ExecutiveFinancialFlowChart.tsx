@@ -46,12 +46,17 @@ type ChartPoint = {
   net: number
 }
 
+type ExecutiveTooltipProps = TooltipProps<number, string> & {
+  payload?: Array<{ payload?: ChartPoint }>
+  label?: string
+  currencyCode: string
+}
 function FinancialFlowTooltip({
   active,
   payload,
   label,
   currencyCode,
-}: TooltipProps<number, string> & { currencyCode: string }) {
+}: ExecutiveTooltipProps) {
   if (!active || !payload?.length || label == null) return null
   const p = payload[0]?.payload as ChartPoint | undefined
   if (!p) return null
@@ -220,7 +225,7 @@ export default function ExecutiveFinancialFlowChart({
                     }}
                   />
                   <Tooltip
-                    content={(props) => (
+                    content={(props: ExecutiveTooltipProps) => (
                       <FinancialFlowTooltip {...props} currencyCode={currencyCode} />
                     )}
                     cursor={{ stroke: "#d1d5db", strokeWidth: 1 }}

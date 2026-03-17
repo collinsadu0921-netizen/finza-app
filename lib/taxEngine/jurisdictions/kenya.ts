@@ -29,7 +29,7 @@ export const kenyaTaxEngine: TaxEngine = {
     config: TaxEngineConfig
   ): TaxCalculationResult {
     // Calculate subtotal after discounts
-    const subtotal = lineItems.reduce((sum, item) => {
+    const subtotal = lineItems.reduce((sum: number, item: LineItem) => {
       const lineTotal = item.quantity * item.unit_price
       const discount = item.discount_amount || 0
       return sum + lineTotal - discount
@@ -59,7 +59,7 @@ export const kenyaTaxEngine: TaxEngine = {
     // VAT is creditable for purchases
     const isCreditableInput = transactionType === 'purchase'
 
-    const taxLines: Array<import('../types').TaxLine> = [
+    const taxLines: Array<import('../types').LegacyTaxLine> = [
       {
         code: 'VAT',
         name: 'VAT',

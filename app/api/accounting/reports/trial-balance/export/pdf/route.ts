@@ -142,7 +142,7 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(10).font("Helvetica-Bold")
     const headers = ["Account Code", "Account Name", "Type", "Debit Total", "Credit Total", "Ending Balance"]
-    headers.forEach((header, i) => {
+    headers.forEach((header: string, i: number) => {
       doc.rect(x, y, columnWidths[i], rowHeight).stroke()
       doc.text(header, x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 3 ? "right" : "left" })
       x += columnWidths[i]
@@ -168,9 +168,9 @@ export async function GET(request: NextRequest) {
           formatNumeric(account.closing_balance ?? 0),
         ]
 
-        cells.forEach((cell, i) => {
+        cells.forEach((cell: string | number, i: number) => {
           doc.rect(x, y, columnWidths[i], rowHeight).stroke()
-          doc.text(cell, x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 3 ? "right" : "left" })
+          doc.text(String(cell), x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 3 ? "right" : "left" })
           x += columnWidths[i]
         })
         y += rowHeight
@@ -178,8 +178,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Totals row
-    const totalDebits = trialBalance?.reduce((sum, acc) => sum + Number(acc.debit_total || 0), 0) || 0
-    const totalCredits = trialBalance?.reduce((sum, acc) => sum + Number(acc.credit_total || 0), 0) || 0
+    const totalDebits = trialBalance?.reduce((sum: number, acc: any) => sum + Number(acc.debit_total || 0), 0) || 0
+    const totalCredits = trialBalance?.reduce((sum: number, acc: any) => sum + Number(acc.credit_total || 0), 0) || 0
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01
 
     if (y + rowHeight > doc.page.height - 50) {

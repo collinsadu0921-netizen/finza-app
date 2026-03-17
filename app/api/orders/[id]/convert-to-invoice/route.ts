@@ -280,7 +280,10 @@ export async function POST(
 
     // Recompute taxes using canonical tax engine (DO NOT reuse order tax fields)
     // Effective date is based on INVOICE date, not order date
-    const jurisdiction = countryCode // Already validated above
+    const jurisdiction = countryCode
+    if (!jurisdiction) {
+      return NextResponse.json({ error: "Jurisdiction required", message: "Business country could not be resolved for tax calculation." }, { status: 400 })
+    }
     const taxEngineCode = getTaxEngineCode(jurisdiction)
     let taxResult: import('@/lib/taxEngine/types').TaxResult | null = null
     let baseSubtotal: number

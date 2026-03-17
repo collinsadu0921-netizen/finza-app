@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
       legacyTaxColumns = deriveLegacyTaxColumnsFromTaxLines(taxResult.lines)
     } else {
       // No taxes applied
-      const subtotal = lineItems.reduce((sum, item) => {
+      const subtotal = lineItems.reduce((sum: number, item: any) => {
         const lineTotal = item.quantity * item.unit_price
         const discount = item.discount_amount || 0
         return sum + lineTotal - discount
@@ -203,9 +203,9 @@ export async function POST(request: NextRequest) {
     const derivedGross = Math.round((Number(invoice.subtotal || 0) + Number(invoice.total_tax || 0)) * 100) / 100
     const invoiceGross = rawTotal > 0 ? rawTotal : derivedGross
     const paymentsGross =
-      (existingPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
+      (existingPayments ?? []).reduce((sum: number, p: any) => sum + Number(p.amount), 0)
     const creditsGross =
-      (existingCredits ?? []).reduce((sum, c) => sum + Number(c.total), 0)
+      (existingCredits ?? []).reduce((sum: number, c: any) => sum + Number(c.total), 0)
     const remainingGross = invoiceGross - paymentsGross - creditsGross
 
     const remainingGrossRounded = Math.round(remainingGross * 100) / 100

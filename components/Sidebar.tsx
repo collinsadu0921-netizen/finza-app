@@ -127,7 +127,7 @@ export default function Sidebar() {
         .eq("user_id", user.id)
         .limit(1)
 
-      setIsAccountantFirmUser(firmUsers && firmUsers.length > 0)
+      setIsAccountantFirmUser(!!(firmUsers && firmUsers.length > 0))
     } catch (err) {
       console.error("Error checking accountant firm user:", err)
       setIsAccountantFirmUser(false)

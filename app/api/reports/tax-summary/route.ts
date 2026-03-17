@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const ctx = await resolveAccountingContext({ supabase, userId: user.id, searchParams, source: "api" })
     if ("error" in ctx) {
       return NextResponse.json(
-        { error: "Client not selected.", error_code: "CLIENT_REQUIRED" },
+        { error: ctx.error, error_code: "CLIENT_REQUIRED" },
         { status: 400 }
       )
     }

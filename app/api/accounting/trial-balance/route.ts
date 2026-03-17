@@ -150,32 +150,32 @@ export async function GET(request: NextRequest) {
       expense: [],
     }
 
-    trialBalance.forEach((account) => {
+    trialBalance.forEach((account: any) => {
       byType[account.type].push(account)
     })
 
     // Calculate totals
-    const totalOpeningDebits = trialBalance.reduce((sum, acc) => {
+    const totalOpeningDebits = trialBalance.reduce((sum: number, acc: any) => {
       if (acc.type === "asset" || acc.type === "expense") {
         return sum + (acc.opening_balance > 0 ? acc.opening_balance : 0)
       }
       return sum
     }, 0)
-    const totalOpeningCredits = trialBalance.reduce((sum, acc) => {
+    const totalOpeningCredits = trialBalance.reduce((sum: number, acc: any) => {
       if (acc.type === "liability" || acc.type === "equity" || acc.type === "income") {
         return sum + (acc.opening_balance > 0 ? acc.opening_balance : 0)
       }
       return sum
     }, 0)
-    const totalPeriodDebits = trialBalance.reduce((sum, acc) => sum + acc.period_debit, 0)
-    const totalPeriodCredits = trialBalance.reduce((sum, acc) => sum + acc.period_credit, 0)
-    const totalClosingDebits = trialBalance.reduce((sum, acc) => {
+    const totalPeriodDebits = trialBalance.reduce((sum: number, acc: any) => sum + acc.period_debit, 0)
+    const totalPeriodCredits = trialBalance.reduce((sum: number, acc: any) => sum + acc.period_credit, 0)
+    const totalClosingDebits = trialBalance.reduce((sum: number, acc: any) => {
       if (acc.type === "asset" || acc.type === "expense") {
         return sum + (acc.closing_balance > 0 ? acc.closing_balance : 0)
       }
       return sum
     }, 0)
-    const totalClosingCredits = trialBalance.reduce((sum, acc) => {
+    const totalClosingCredits = trialBalance.reduce((sum: number, acc: any) => {
       if (acc.type === "liability" || acc.type === "equity" || acc.type === "income") {
         return sum + (acc.closing_balance > 0 ? acc.closing_balance : 0)
       }

@@ -191,7 +191,7 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(10).font("Helvetica-Bold")
     const headers = ["Entry Date", "Description", "Debit", "Credit", "Running Balance"]
-    headers.forEach((header, i) => {
+    headers.forEach((header: string, i: number) => {
       doc.rect(x, y, columnWidths[i], rowHeight).stroke()
       doc.text(header, x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 2 ? "right" : "left" })
       x += columnWidths[i]
@@ -217,7 +217,7 @@ export async function GET(request: NextRequest) {
           formatNumeric(line.running_balance || 0),
         ]
 
-        cells.forEach((cell, i) => {
+        cells.forEach((cell: string | number, i: number) => {
           doc.rect(x, y, columnWidths[i], rowHeight).stroke()
           doc.text(String(cell), x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 2 ? "right" : "left" })
           x += columnWidths[i]
@@ -227,8 +227,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Totals row
-    const totalDebit = ledgerLines?.reduce((sum, line) => sum + Number(line.debit || 0), 0) || 0
-    const totalCredit = ledgerLines?.reduce((sum, line) => sum + Number(line.credit || 0), 0) || 0
+    const totalDebit = ledgerLines?.reduce((sum: number, line: any) => sum + Number(line.debit || 0), 0) || 0
+    const totalCredit = ledgerLines?.reduce((sum: number, line: any) => sum + Number(line.credit || 0), 0) || 0
     const finalBalance = ledgerLines && ledgerLines.length > 0 
       ? Number(ledgerLines[ledgerLines.length - 1].running_balance || 0)
       : 0

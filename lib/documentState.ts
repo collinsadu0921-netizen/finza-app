@@ -126,8 +126,8 @@ export function isEstimateActionAllowed(
   status: EstimateStatus,
   action: string
 ): boolean {
-  const allowedActions = ESTIMATE_ACTIONS[status] || []
-  return allowedActions.includes(action as any)
+  const allowedActions: readonly string[] = (ESTIMATE_ACTIONS[status] || []) as readonly string[]
+  return allowedActions.includes(action)
 }
 
 /**
@@ -137,8 +137,8 @@ export function isOrderActionAllowed(
   status: OrderStatus,
   action: string
 ): boolean {
-  const allowedActions = ORDER_ACTIONS[status] || []
-  return allowedActions.includes(action as any)
+  const allowedActions: readonly string[] = (ORDER_ACTIONS[status] || []) as readonly string[]
+  return allowedActions.includes(action)
 }
 
 /**
@@ -148,8 +148,8 @@ export function isInvoiceActionAllowed(
   status: InvoiceStatus,
   action: string
 ): boolean {
-  const allowedActions = INVOICE_ACTIONS[status] || []
-  return allowedActions.includes(action as any)
+  const allowedActions: readonly string[] = (INVOICE_ACTIONS[status] || []) as readonly string[]
+  return allowedActions.includes(action)
 }
 
 /**
@@ -159,8 +159,8 @@ export function isValidEstimateTransition(
   from: EstimateStatus,
   to: EstimateStatus
 ): boolean {
-  const allowedTransitions = ESTIMATE_TRANSITIONS[from] || []
-  return allowedTransitions.includes(to as any)
+  const allowedTransitions: readonly string[] = (ESTIMATE_TRANSITIONS[from] || []) as readonly string[]
+  return allowedTransitions.includes(to)
 }
 
 /**
@@ -170,8 +170,8 @@ export function isValidOrderTransition(
   from: OrderStatus,
   to: OrderStatus
 ): boolean {
-  const allowedTransitions = ORDER_TRANSITIONS[from] || []
-  return allowedTransitions.includes(to as any)
+  const allowedTransitions: readonly string[] = (ORDER_TRANSITIONS[from] || []) as readonly string[]
+  return allowedTransitions.includes(to)
 }
 
 /**
@@ -181,8 +181,8 @@ export function isValidInvoiceTransition(
   from: InvoiceStatus,
   to: InvoiceStatus
 ): boolean {
-  const allowedTransitions = INVOICE_TRANSITIONS[from] || []
-  return allowedTransitions.includes(to as any)
+  const allowedTransitions: readonly string[] = (INVOICE_TRANSITIONS[from] || []) as readonly string[]
+  return allowedTransitions.includes(to)
 }
 
 /**
@@ -251,6 +251,6 @@ export function isValidExecutionTransition(
   from: OrderExecutionStatus,
   to: OrderExecutionStatus
 ): boolean {
-  const allowedTransitions = ORDER_EXECUTION_TRANSITIONS[from] || []
-  return allowedTransitions.includes(to as any)
+  const allowedTransitions: readonly string[] = (ORDER_EXECUTION_TRANSITIONS[from] || []) as readonly string[]
+  return allowedTransitions.includes(to)
 }

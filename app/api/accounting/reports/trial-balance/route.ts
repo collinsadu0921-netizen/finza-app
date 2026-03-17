@@ -122,19 +122,19 @@ export async function GET(request: NextRequest) {
       expense: [],
     }
 
-    accountsNormalized.forEach((account) => {
+    accountsNormalized.forEach((account: Record<string, unknown>) => {
       const t = (account.account_type as string) || "expense"
       if (byType[t]) byType[t].push(account)
     })
 
     // Calculate totals from normalized accounts (unchanged logic)
-    const totalDebits = accountsNormalized.reduce((sum, acc) => sum + acc.debit_total, 0)
-    const totalCredits = accountsNormalized.reduce((sum, acc) => sum + acc.credit_total, 0)
-    const totalAssets = byType.asset.reduce((sum, acc) => sum + acc.closing_balance, 0)
-    const totalLiabilities = byType.liability.reduce((sum, acc) => sum + acc.closing_balance, 0)
-    const totalEquity = byType.equity.reduce((sum, acc) => sum + acc.closing_balance, 0)
-    const totalIncome = byType.income.reduce((sum, acc) => sum + acc.closing_balance, 0)
-    const totalExpenses = byType.expense.reduce((sum, acc) => sum + acc.closing_balance, 0)
+    const totalDebits = accountsNormalized.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.debit_total as number), 0)
+    const totalCredits = accountsNormalized.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.credit_total as number), 0)
+    const totalAssets = byType.asset.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.closing_balance as number), 0)
+    const totalLiabilities = byType.liability.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.closing_balance as number), 0)
+    const totalEquity = byType.equity.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.closing_balance as number), 0)
+    const totalIncome = byType.income.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.closing_balance as number), 0)
+    const totalExpenses = byType.expense.reduce((sum: number, acc: Record<string, unknown>) => sum + (acc.closing_balance as number), 0)
     const netIncome = totalIncome - totalExpenses
 
     // INVARIANT 3: Fail loudly if unbalanced - never hide ledger errors

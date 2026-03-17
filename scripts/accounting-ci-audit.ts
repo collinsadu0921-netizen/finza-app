@@ -151,5 +151,7 @@ async function runAccountingCIAudit(): Promise<number> {
 }
 
 // Main execution
-const exitCode = await runAccountingCIAudit();
-process.exit(exitCode);
+(async () => {
+  const exitCode = await runAccountingCIAudit();
+  process.exit(exitCode);
+})();

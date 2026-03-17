@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         {
           error: rpcError.message || "Failed to fetch trial balance",
           step: "get_trial_balance_from_snapshot",
-          business_id: business.id,
+          business_id: businessId,
           period_id: resolvedPeriod.period_id,
           period_start: resolvedPeriod.period_start,
           period_end: resolvedPeriod.period_end,
@@ -120,18 +120,18 @@ export async function GET(request: NextRequest) {
       expense: [],
     }
 
-    trialBalance.forEach((account) => {
+    trialBalance.forEach((account: any) => {
       byType[account.type].push(account)
     })
 
     // Calculate totals
-    const totalDebits = trialBalance.reduce((sum, acc) => sum + acc.debit, 0)
-    const totalCredits = trialBalance.reduce((sum, acc) => sum + acc.credit, 0)
-    const totalAssets = byType.asset.reduce((sum, acc) => sum + acc.balance, 0)
-    const totalLiabilities = byType.liability.reduce((sum, acc) => sum + acc.balance, 0)
-    const totalEquity = byType.equity.reduce((sum, acc) => sum + acc.balance, 0)
-    const totalIncome = byType.income.reduce((sum, acc) => sum + acc.balance, 0)
-    const totalExpenses = byType.expense.reduce((sum, acc) => sum + acc.balance, 0)
+    const totalDebits = trialBalance.reduce((sum: number, acc: any) => sum + acc.debit, 0)
+    const totalCredits = trialBalance.reduce((sum: number, acc: any) => sum + acc.credit, 0)
+    const totalAssets = byType.asset.reduce((sum: number, acc: any) => sum + acc.balance, 0)
+    const totalLiabilities = byType.liability.reduce((sum: number, acc: any) => sum + acc.balance, 0)
+    const totalEquity = byType.equity.reduce((sum: number, acc: any) => sum + acc.balance, 0)
+    const totalIncome = byType.income.reduce((sum: number, acc: any) => sum + acc.balance, 0)
+    const totalExpenses = byType.expense.reduce((sum: number, acc: any) => sum + acc.balance, 0)
 
     // Calculate net income
     const netIncome = totalIncome - totalExpenses

@@ -126,8 +126,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate totals
-    const totalDebits = trialBalance?.reduce((sum, acc) => sum + Number(acc.debit_total || 0), 0) || 0
-    const totalCredits = trialBalance?.reduce((sum, acc) => sum + Number(acc.credit_total || 0), 0) || 0
+    const totalDebits = trialBalance?.reduce((sum: number, acc: any) => sum + Number(acc.debit_total || 0), 0) || 0
+    const totalCredits = trialBalance?.reduce((sum: number, acc: any) => sum + Number(acc.credit_total || 0), 0) || 0
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01
 
     // Totals rows (include in data section if include_metadata is false, otherwise add to metadata)
