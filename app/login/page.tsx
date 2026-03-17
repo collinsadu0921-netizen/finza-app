@@ -122,8 +122,8 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Sign Up Link */}
-        <div className="mt-6 text-center">
+        {/* Sign Up & Demo */}
+        <div className="mt-6 space-y-2 text-center">
           <p className="text-sm text-gray-600">
             Don't have an account?{" "}
             <button
@@ -132,6 +132,14 @@ export default function LoginPage() {
             >
               Sign up
             </button>
+          </p>
+          <p className="text-sm text-gray-600">
+            <Link
+              href="/demo"
+              className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
+            >
+              Watch demo video
+            </Link>
           </p>
         </div>
       </div>
