@@ -33,11 +33,11 @@ export async function GET(request: NextRequest) {
     }
     const business = { id: ctx.businessId }
 
-    const { searchParams } = new URL(request.url)
+    const { searchParams: queryParams } = new URL(request.url)
     
     // TRACK B1: LEGACY ROUTE GUARD - This route reads from operational tables (invoices, credit_notes)
     // Require explicit opt-in via ?legacy_ok=1 to prevent accidental usage
-    const legacyOk = searchParams.get("legacy_ok")
+    const legacyOk = queryParams.get("legacy_ok")
     if (legacyOk !== "1") {
       return NextResponse.json(
         {
@@ -49,8 +49,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const startDate = searchParams.get("start_date")
-    const endDate = searchParams.get("end_date")
+    const startDate = queryParams.get("start_date")
+    const endDate = queryParams.get("end_date")
 
     // INVARIANT 1: Exclude drafts - drafts never affect Financial Reports
     let query = supabase

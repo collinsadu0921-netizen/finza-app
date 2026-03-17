@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { createClient as createServerClient } from "@/lib/supabaseServer"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,7 +39,7 @@ type OfflineTransaction = {
 export async function POST(request: NextRequest) {
   try {
     // Get authenticated user
-    const supabaseServer = createServerClient()
+    const supabaseServer = await createSupabaseServerClient()
     const {
       data: { user },
       error: authError,

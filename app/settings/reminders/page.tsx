@@ -3,11 +3,10 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
-import { useBusinessCurrency } from "@/lib/business"
 
 export default function ReminderSettingsPage() {
   const router = useRouter()
-  const { currencySymbol } = useBusinessCurrency()
+  const currencySymbol = ""
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")

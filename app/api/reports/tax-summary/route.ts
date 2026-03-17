@@ -55,11 +55,11 @@ export async function GET(request: NextRequest) {
     const countryCode = normalizeCountry(businessData.address_country)
     const isGhana = countryCode === "GH"
 
-    const { searchParams } = new URL(request.url)
+    const { searchParams: queryParams } = new URL(request.url)
     
     // TRACK B1: LEGACY ROUTE GUARD - This route reads from operational tables (invoices, expenses, bills, sales, credit_notes)
     // Require explicit opt-in via ?legacy_ok=1 to prevent accidental usage
-    const legacyOk = searchParams.get("legacy_ok")
+    const legacyOk = queryParams.get("legacy_ok")
     if (legacyOk !== "1") {
       return NextResponse.json(
         {
@@ -71,8 +71,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const startDate = searchParams.get("start_date")
-    const endDate = searchParams.get("end_date")
+    const startDate = queryParams.get("start_date")
+    const endDate = queryParams.get("end_date")
 
     // Get invoice taxes (output tax)
     // CRITICAL: Only query Ghana tax columns (nhil, getfund, covid) for GH businesses

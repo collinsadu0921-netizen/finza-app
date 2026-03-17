@@ -334,7 +334,7 @@ export async function POST(request: NextRequest) {
     // STEP 3: POST VOID TO LEDGER (before deleting sale)
     // Every void MUST create a reversal journal entry. Failure to post aborts void.
     // NOTE: This happens BEFORE deletion so we can access sale data
-    const getServiceRoleClient = () => {
+    const getServiceRoleClientForVoid = () => {
       if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
         throw new Error("Service role key required for ledger operations")
       }
@@ -343,7 +343,7 @@ export async function POST(request: NextRequest) {
         process.env.SUPABASE_SERVICE_ROLE_KEY
       )
     }
-    const serviceRoleClient = getServiceRoleClient()
+    const serviceRoleClient = getServiceRoleClientForVoid()
 
     try {
       const { data: voidJournalEntryId, error: voidLedgerError } = await serviceRoleClient.rpc(

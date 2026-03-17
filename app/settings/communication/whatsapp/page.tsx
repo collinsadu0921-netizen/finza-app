@@ -162,7 +162,7 @@ export default function WhatsAppTemplatesPage() {
                     Message template
                   </label>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    Use {"{{variable_name}}"} for placeholders. Required: {{"{{invoice_number}}"}} and {{"{{public_url}}"}} for Invoice; {{"{{estimate_number}}"}} and {{"{{public_url}}"}} for Estimate; {{"{{order_number}}"}} and {{"{{public_url}}"}} for Order.
+                    {"Use {{variable_name}} for placeholders. Required: {{invoice_number}} and {{public_url}} for Invoice; {{estimate_number}} and {{public_url}} for Estimate; {{order_number}} and {{public_url}} for Order."}
                   </p>
                   <textarea
                     value={template}

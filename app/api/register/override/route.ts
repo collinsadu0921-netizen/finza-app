@@ -113,13 +113,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if supervisor is the business owner
-    const { data: business, error: businessError } = await supabase
+    const { data: businessRecord, error: businessError } = await supabase
       .from("businesses")
       .select("owner_id")
       .eq("id", register.business_id)
       .single()
 
-    const isBusinessOwner = business && business.owner_id === supervisorId
+    const isBusinessOwner = businessRecord && businessRecord.owner_id === supervisorId
 
     // Check supervisor role in business_users table (if not owner)
     let supervisorRole: string | null = null
