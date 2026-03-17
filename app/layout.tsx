@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import './globals.css'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
@@ -31,13 +32,15 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-        <ThemeProvider>
-          <ToastProvider>
-            <ConfirmProvider>
-              {children}
-            </ConfirmProvider>
-          </ToastProvider>
-        </ThemeProvider>
+        <Suspense fallback={null}>
+          <ThemeProvider>
+            <ToastProvider>
+              <ConfirmProvider>
+                {children}
+              </ConfirmProvider>
+            </ToastProvider>
+          </ThemeProvider>
+        </Suspense>
       </body>
     </html>
   )
