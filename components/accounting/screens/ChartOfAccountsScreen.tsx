@@ -38,6 +38,7 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
   const [createName, setCreateName] = useState("")
   const [createCode, setCreateCode] = useState("")
   const [createType, setCreateType] = useState<Account["type"]>("asset")
+  const [createSubType, setCreateSubType] = useState<"" | "bank" | "cash">("")
   const [createDescription, setCreateDescription] = useState("")
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState("")
@@ -77,6 +78,7 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
     setCreateName("")
     setCreateCode("")
     setCreateType("asset")
+    setCreateSubType("")
     setCreateDescription("")
     setCreateError("")
     setShowCreateModal(true)
@@ -101,6 +103,7 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
           name: createName.trim(),
           code: createCode.trim(),
           type: createType,
+          sub_type: createSubType || undefined,
           description: createDescription.trim() || undefined,
         }),
       })
@@ -453,7 +456,10 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
                 <select
                   value={createType}
-                  onChange={(e) => setCreateType(e.target.value as Account["type"])}
+                  onChange={(e) => {
+                    setCreateType(e.target.value as Account["type"])
+                    if (e.target.value !== "asset") setCreateSubType("")
+                  }}
                   disabled={createSubmitting}
                   className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white disabled:opacity-60"
                 >
@@ -464,6 +470,29 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                   ))}
                 </select>
               </div>
+              {createType === "asset" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Sub-type
+                    <span className="ml-1 text-xs font-normal text-gray-400">(optional)</span>
+                  </label>
+                  <select
+                    value={createSubType}
+                    onChange={(e) => setCreateSubType(e.target.value as "" | "bank" | "cash")}
+                    disabled={createSubmitting}
+                    className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white disabled:opacity-60"
+                  >
+                    <option value="">None</option>
+                    <option value="bank">Bank</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                  {createSubType === "" && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      Set sub-type to <strong>Bank</strong> or <strong>Cash</strong> if this account holds real money — required for owner withdrawals &amp; contributions.
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (optional)</label>
                 <input

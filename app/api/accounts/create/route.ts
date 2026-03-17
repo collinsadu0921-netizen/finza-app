@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, code, type, description } = body
+    const { name, code, type, description, sub_type } = body
 
     if (!name || !code || !type) {
       return NextResponse.json(
@@ -32,6 +32,15 @@ export async function POST(request: NextRequest) {
     if (!["asset", "liability", "equity", "income", "expense"].includes(type)) {
       return NextResponse.json(
         { error: "Invalid account type" },
+        { status: 400 }
+      )
+    }
+
+    // Validate sub_type (only allowed on assets)
+    const validSubTypes = ["bank", "cash"]
+    if (sub_type && (!validSubTypes.includes(sub_type) || type !== "asset")) {
+      return NextResponse.json(
+        { error: "sub_type must be 'bank' or 'cash' and only applies to asset accounts" },
         { status: 400 }
       )
     }
@@ -59,6 +68,7 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         code: code.trim(),
         type,
+        sub_type: sub_type || null,
         description: description?.trim() || null,
         is_system: false,
       })
