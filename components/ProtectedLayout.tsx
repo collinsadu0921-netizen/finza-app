@@ -10,7 +10,6 @@ import FirmRoleBadge from "./FirmRoleBadge"
 import ClientContextWarning from "./ClientContextWarning"
 import AccountingBreadcrumbs from "./AccountingBreadcrumbs"
 import Sidebar from "./Sidebar"
-import { clearTabIndustryMode } from "@/lib/industryMode"
 import { isCashierAuthenticated } from "@/lib/cashierSession"
 import { resolveAccess, getHomeRouteForRole, getWorkspaceFromPath } from "@/lib/accessControl"
 import { autoBindSingleStore } from "@/lib/autoBindStore"
@@ -107,8 +106,10 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
       {/* Main Layout */}
       <div className={cashierAuth ? "" : "lg:pl-64"}>
-        {/* Top Navigation Bar - hidden in print/export/preview (export-hide) */}
-        {!cashierAuth && (
+        {/* Top Navigation Bar — shown on accounting routes and non-service paths only.
+            On /service/* the bar is empty (no accounting selectors, logout moved to sidebar)
+            so we hide it to reclaim vertical space. */}
+        {!cashierAuth && !pathname?.startsWith('/service') && (
           <nav className="export-hide print-hide bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm sticky top-0 z-30">
             <div className="px-4 sm:px-6 lg:px-8">
               <div className="flex justify-between items-center h-16">
@@ -121,16 +122,6 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                   {pathname?.startsWith('/accounting') && <FirmSelector />}
                   {pathname?.startsWith('/accounting') && <FirmRoleBadge />}
                   {pathname?.startsWith('/accounting') && <ClientSelector />}
-                  <button
-                    onClick={async () => {
-                      clearTabIndustryMode()
-                      await supabase.auth.signOut()
-                      router.push("/login")
-                    }}
-                    className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    Logout
-                  </button>
                 </div>
               </div>
             </div>
@@ -138,7 +129,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         )}
 
         {/* Main Content - Accounting breadcrumbs/warning only for /accounting/*; /service/* uses BusinessLayout mode (no firm chrome). */}
-        <main className="min-h-[calc(100vh-4rem)]">
+        <main className={pathname?.startsWith('/service') ? "min-h-screen" : "min-h-[calc(100vh-4rem)]"}>
           {pathname?.startsWith('/accounting') && (
             <>
               <div className="export-hide print-hide">

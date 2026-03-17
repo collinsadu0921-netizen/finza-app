@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import ActivityHistory from "@/components/ActivityHistory"
@@ -91,6 +91,9 @@ type CreditNote = {
 
 export default function InvoiceViewPage() {
   const router = useRouter()
+  const pathname = usePathname()
+  const isUnderService = pathname?.startsWith("/service") ?? false
+  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
   const params = useParams()
   const invoiceId = (params?.id as string) || ""
   const { openConfirm } = useConfirm()
@@ -307,20 +310,20 @@ export default function InvoiceViewPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
+      <Wrapper>
         <div className="p-8 flex items-center justify-center min-h-[50vh]">
           <div className="flex flex-col items-center gap-4">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-mj-slate-900"></div>
             <p className="text-mj-slate-500 font-medium animate-pulse">Loading Invoice...</p>
           </div>
         </div>
-      </ProtectedLayout>
+      </Wrapper>
     )
   }
 
   if (error || !invoice) {
     return (
-      <ProtectedLayout>
+      <Wrapper>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
           <div className="max-w-xl mx-auto bg-white dark:bg-gray-800 border border-red-100 dark:border-red-900 rounded-lg shadow-sm p-8 text-center">
             <div className="w-12 h-12 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -342,7 +345,7 @@ export default function InvoiceViewPage() {
             </button>
           </div>
         </div>
-      </ProtectedLayout>
+      </Wrapper>
     )
   }
 

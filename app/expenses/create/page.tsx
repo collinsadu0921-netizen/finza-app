@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
@@ -13,6 +13,9 @@ type ExpenseCategory = {
 
 export default function CreateExpensePage() {
   const router = useRouter()
+  const pathname = usePathname()
+  const isUnderService = pathname?.startsWith("/service") ?? false
+  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
@@ -344,7 +347,7 @@ export default function CreateExpensePage() {
   const total = totalIncludingTaxes // Total is what user entered
 
   return (
-    <ProtectedLayout>
+    <Wrapper>
       <div className="bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-3xl mx-auto p-6">
           <div className="mb-6">
@@ -702,7 +705,7 @@ export default function CreateExpensePage() {
           )}
         </div>
       </div>
-    </ProtectedLayout>
+    </Wrapper>
   )
 }
 

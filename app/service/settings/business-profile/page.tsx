@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
+import DateInput from "@/components/ui/DateInput"
 
 export default function ServiceBusinessProfilePage() {
   const router = useRouter()
@@ -38,6 +39,10 @@ export default function ServiceBusinessProfilePage() {
   })
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
+
+  const handleChange = useCallback((field: keyof typeof formData, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }, [])
 
   useEffect(() => {
     loadBusinessProfile()
@@ -214,11 +219,11 @@ export default function ServiceBusinessProfilePage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Business Identity</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input value={formData.legal_name} onChange={(e) => setFormData({ ...formData, legal_name: e.target.value })} placeholder="Legal name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input value={formData.trading_name} onChange={(e) => setFormData({ ...formData, trading_name: e.target.value })} placeholder="Trading name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input value={formData.tin} onChange={(e) => setFormData({ ...formData, tin: e.target.value })} placeholder="TIN / Tax ID" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.legal_name} onChange={(e) => handleChange("legal_name", e.target.value)} placeholder="Legal name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.trading_name} onChange={(e) => handleChange("trading_name", e.target.value)} placeholder="Trading name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.tin} onChange={(e) => handleChange("tin", e.target.value)} placeholder="TIN / Tax ID" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
             <input value={businessIndustry} readOnly disabled placeholder="Industry" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-gray-100 dark:bg-gray-700 dark:text-gray-300" />
-            <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} placeholder="Business start date" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <DateInput value={formData.start_date} onChange={(e) => handleChange("start_date", e.target.value)} placeholder="Business start date" />
           </div>
         </div>
 
@@ -226,7 +231,7 @@ export default function ServiceBusinessProfilePage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Location</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={formData.address_country} onChange={(e) => setFormData({ ...formData, address_country: e.target.value })} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
+            <select value={formData.address_country} onChange={(e) => handleChange("address_country", e.target.value)} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
               <option value="">Select country</option>
               <option value="Ghana">Ghana</option>
               <option value="Nigeria">Nigeria</option>
@@ -240,9 +245,9 @@ export default function ServiceBusinessProfilePage() {
               <option value="France">France</option>
               <option value="Other">Other</option>
             </select>
-            <input value={formData.address_region} onChange={(e) => setFormData({ ...formData, address_region: e.target.value })} placeholder="Region / State" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input value={formData.address_city} onChange={(e) => setFormData({ ...formData, address_city: e.target.value })} placeholder="City" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input value={formData.address_street} onChange={(e) => setFormData({ ...formData, address_street: e.target.value })} placeholder="Street address" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.address_region} onChange={(e) => handleChange("address_region", e.target.value)} placeholder="Region / State" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.address_city} onChange={(e) => handleChange("address_city", e.target.value)} placeholder="City" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.address_street} onChange={(e) => handleChange("address_street", e.target.value)} placeholder="Street address" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
           </div>
         </div>
 
@@ -250,10 +255,10 @@ export default function ServiceBusinessProfilePage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Contact</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="Phone" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input value={formData.whatsapp_phone} onChange={(e) => setFormData({ ...formData, whatsapp_phone: e.target.value })} placeholder="WhatsApp number" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="Email" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
-            <input value={formData.website} onChange={(e) => setFormData({ ...formData, website: e.target.value })} placeholder="Website" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.phone} onChange={(e) => handleChange("phone", e.target.value)} placeholder="Phone" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.whatsapp_phone} onChange={(e) => handleChange("whatsapp_phone", e.target.value)} placeholder="WhatsApp number" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input type="email" value={formData.email} onChange={(e) => handleChange("email", e.target.value)} placeholder="Email" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
+            <input value={formData.website} onChange={(e) => handleChange("website", e.target.value)} placeholder="Website" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
           </div>
         </div>
 
@@ -262,7 +267,7 @@ export default function ServiceBusinessProfilePage() {
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Financial Settings</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Required to create invoices and generate reports.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={formData.default_currency} onChange={(e) => setFormData({ ...formData, default_currency: e.target.value })} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
+            <select value={formData.default_currency} onChange={(e) => handleChange("default_currency", e.target.value)} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
               <option value="">Select currency</option>
               <option value="GHS">GHS — Ghana Cedi (₵)</option>
               <option value="NGN">NGN — Nigerian Naira (₦)</option>

@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 export type StatusType =
     | "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled" | "void"
     | "open" | "soft_closed" | "locked"
+    | "active" | "blocked" | "inactive" | "pending"
 
 interface StatusBadgeProps {
     status: string
@@ -30,6 +31,12 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
         open: "bg-emerald-50 text-emerald-700 border border-emerald-200",
         soft_closed: "bg-amber-50 text-amber-700 border border-amber-200",
         locked: "bg-slate-100 text-slate-800 border border-slate-300",
+
+        // Customer / Entity Statuses
+        active: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+        blocked: "bg-rose-50 text-rose-700 border border-rose-200",
+        inactive: "bg-slate-100 text-slate-500 border border-slate-200",
+        pending: "bg-amber-50 text-amber-700 border border-amber-200",
     }
 
     // Fallback for unknown statuses

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getTabIndustryMode } from "@/lib/industryMode"
+import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
 import { getCurrentBusiness } from "@/lib/business"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
@@ -210,7 +210,6 @@ export default function Sidebar() {
           { label: "Trial Balance", route: trialBalanceRoute },
           { label: "Reconciliation", route: reconciliationRoute },
           { label: "Accounting Periods", route: periodsRoute },
-          { label: "Accounting Activity", route: auditRoute },
           ...(isAccountantFirmUser === true
             ? [
                 { label: "Health", route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
@@ -221,7 +220,6 @@ export default function Sidebar() {
             : [
                 { label: "Accounting Health", route: healthRoute },
               ]),
-          { label: "System Activity", route: "/audit-log" },
         ]
         sections.push({
           title: "Accounting",
@@ -238,6 +236,8 @@ export default function Sidebar() {
             { label: "WhatsApp Integration", route: "/service/settings/integrations/whatsapp" },
             { label: "Automations", route: "/service/settings/automations" },
             { label: "Staff Management", route: "/service/settings/staff" },
+            { label: "Accounting Activity", route: auditRoute },
+            { label: "System Activity", route: "/audit-log" },
           ],
         })
       return sections
@@ -478,7 +478,20 @@ export default function Sidebar() {
           </nav>
 
           {/* Sidebar Footer */}
-          <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+            <button
+              onClick={async () => {
+                clearTabIndustryMode()
+                await supabase.auth.signOut()
+                router.push("/login")
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-600 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+            >
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Logout
+            </button>
             <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
               Powered by Finza
             </p>

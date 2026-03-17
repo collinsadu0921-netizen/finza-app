@@ -860,30 +860,38 @@ export default function NewInvoicePage() {
           {/* --- Modals Helper --- */}
 
           {showCustomerModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-                <h3 className="text-lg font-bold mb-4">Create Customer</h3>
-                {customerError && <div className="text-red-600 text-sm bg-red-50 p-2 rounded mb-4">{customerError}</div>}
-                <form onSubmit={handleCreateCustomer} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium">Name</label>
-                    <input autoFocus type="text" value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} className="w-full border rounded p-2" required />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium">Email</label>
-                    <input type="email" value={newCustomerEmail} onChange={e => setNewCustomerEmail(e.target.value)} className="w-full border rounded p-2" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium">Phone</label>
-                    <input type="tel" value={newCustomerPhone} onChange={e => setNewCustomerPhone(e.target.value)} className="w-full border rounded p-2" />
-                  </div>
-                  <div className="flex gap-3 pt-2">
-                    <button type="button" onClick={() => setShowCustomerModal(false)} className="flex-1 border rounded p-2 hover:bg-gray-50">Cancel</button>
-                    <button type="submit" disabled={creatingCustomer} className="flex-1 bg-blue-600 text-white rounded p-2 hover:bg-blue-700">Create</button>
-                  </div>
-                </form>
+            <>
+              {/* Backdrop — separate from modal so backdrop-filter never traps pointer events inside the panel */}
+              <div className="fixed inset-0 bg-black/60 z-50" onClick={() => setShowCustomerModal(false)} />
+              <div className="fixed inset-0 flex items-center justify-center z-50 p-4 pointer-events-none">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 pointer-events-auto">
+                  <h3 className="text-lg font-bold mb-4 text-gray-900 dark:text-white">New Customer</h3>
+                  {customerError && <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-2 rounded mb-4">{customerError}</div>}
+                  <form onSubmit={handleCreateCustomer} className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name <span className="text-red-500">*</span></label>
+                      <input autoFocus type="text" value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                      <input type="email" value={newCustomerEmail} onChange={e => setNewCustomerEmail(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone</label>
+                      <input type="tel" value={newCustomerPhone} onChange={e => setNewCustomerPhone(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Address</label>
+                      <input type="text" value={newCustomerAddress} onChange={e => setNewCustomerAddress(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                      <button type="button" onClick={() => setShowCustomerModal(false)} className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+                      <button type="submit" disabled={creatingCustomer} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">{creatingCustomer ? "Creating..." : "Create Customer"}</button>
+                    </div>
+                  </form>
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {showPreviewModal && previewInvoiceId && (
