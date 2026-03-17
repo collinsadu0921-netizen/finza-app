@@ -32,6 +32,10 @@ type InvoiceItem = {
   quantity: number
   price: number
   total: number
+  // Raw strings kept during editing so decimal points / partial input aren't
+  // lost on every keystroke (number inputs discard "500." immediately)
+  _rawQty?: string
+  _rawPrice?: string
 }
 
 // ------------------------------------------------------------
@@ -237,20 +241,39 @@ export default function NewInvoicePage() {
     setItems(items.filter((item) => item.id !== id))
   }
 
-  const updateItem = (id: string, field: keyof InvoiceItem, value: any) => {
+  const updateItem = (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => {
     setItems(items.map((item) => {
-      if (item.id === id) {
-        const updated = { ...item }
-        if (field === "quantity" || field === "price") {
-          const numValue = value === "" || value === null || value === undefined ? 0 : Number(value)
-          updated[field] = isNaN(numValue) ? 0 : numValue
-          updated.total = updated.quantity * updated.price
-        } else {
-          (updated as any)[field] = value
-        }
-        return updated
+      if (item.id !== id) return item
+      const updated = { ...item }
+
+      if (field === "quantity" || field === "price") {
+        // Keep raw string so the input can show "500." without losing the dot
+        if (field === "quantity") updated._rawQty = String(value)
+        if (field === "price")    updated._rawPrice = String(value)
+        const numValue = value === "" || value === null || value === undefined
+          ? 0
+          : parseFloat(String(value))
+        updated[field] = isNaN(numValue) ? 0 : numValue
+        updated.total = updated.quantity * updated.price
+      } else if (field === "_rawQty") {
+        updated._rawQty = value
+      } else if (field === "_rawPrice") {
+        updated._rawPrice = value
+      } else {
+        (updated as any)[field] = value
       }
-      return item
+      return updated
+    }))
+  }
+
+  // Called on blur — clears raw strings so the formatted number displays cleanly
+  const commitItem = (id: string, field: "quantity" | "price") => {
+    setItems(items.map((item) => {
+      if (item.id !== id) return item
+      const updated = { ...item }
+      if (field === "quantity") updated._rawQty = undefined
+      if (field === "price")    updated._rawPrice = undefined
+      return updated
     }))
   }
 
@@ -679,20 +702,25 @@ export default function NewInvoicePage() {
                           </td>
                           <td className="px-4 py-3 align-top">
                             <input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
+                              type="text"
+                              inputMode="numeric"
+                              value={item._rawQty ?? (item.quantity === 0 ? "" : String(item.quantity))}
                               onChange={(e) => updateItem(item.id, 'quantity', e.target.value)}
+                              onBlur={() => commitItem(item.id, 'quantity')}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="1"
                               className="block w-full text-center text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
                             />
                           </td>
                           <td className="px-4 py-3 align-top">
                             <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.price}
+                              type="text"
+                              inputMode="decimal"
+                              value={item._rawPrice ?? (item.price === 0 ? "" : String(item.price))}
                               onChange={(e) => updateItem(item.id, 'price', e.target.value)}
+                              onBlur={() => commitItem(item.id, 'price')}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0.00"
                               className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
                             />
                           </td>

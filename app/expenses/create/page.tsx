@@ -438,13 +438,14 @@ export default function CreateExpensePage() {
                     )}
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={amount}
                     onChange={(e) => {
                       setAmount(e.target.value)
                       setOcrSuggestedFields((prev) => ({ ...prev, amount: false }))
                     }}
+                    onFocus={(e) => e.target.select()}
                     required
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                     placeholder="0.00"
