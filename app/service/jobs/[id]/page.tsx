@@ -17,10 +17,13 @@ type Job = {
   start_date: string | null
   end_date: string | null
   invoice_id: string | null
+  proforma_invoice_id: string | null
   materials_reversed?: boolean
   created_at: string
   customers?: { name: string; email: string | null; phone: string | null } | null
 }
+
+type ProformaOption = { id: string; proforma_number: string | null; customer_name: string | null }
 
 type Usage = {
   id: string
@@ -57,6 +60,9 @@ export default function ServiceJobDetailPage() {
   const [submitting, setSubmitting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [consumingId, setConsumingId] = useState<string | null>(null)
+  const [proformas, setProformas] = useState<ProformaOption[]>([])
+  const [linkingProforma, setLinkingProforma] = useState(false)
+  const [selectedProformaId, setSelectedProformaId] = useState("")
 
   useEffect(() => {
     if (!jobId) return
@@ -82,7 +88,7 @@ export default function ServiceJobDetailPage() {
 
       const { data: jobData, error: jobErr } = await supabase
         .from("service_jobs")
-        .select("id, business_id, customer_id, status, start_date, end_date, invoice_id, materials_reversed, created_at, customers(name, email, phone)")
+        .select("id, business_id, customer_id, status, start_date, end_date, invoice_id, proforma_invoice_id, materials_reversed, created_at, customers(name, email, phone)")
         .eq("id", jobId)
         .eq("business_id", business.id)
         .single()
@@ -92,6 +98,23 @@ export default function ServiceJobDetailPage() {
         return
       }
       setJob(jobData as unknown as Job)
+      setSelectedProformaId((jobData as any).proforma_invoice_id || "")
+
+      // Load available proformas for linking
+      const { data: proformaData } = await supabase
+        .from("proforma_invoices")
+        .select("id, proforma_number, customers(name)")
+        .eq("business_id", business.id)
+        .in("status", ["sent", "accepted"])
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+      setProformas(
+        (proformaData || []).map((p: any) => ({
+          id: p.id,
+          proforma_number: p.proforma_number,
+          customer_name: p.customers?.name ?? null,
+        }))
+      )
 
       const { data: usageData, error: usageErr } = await supabase
         .from("service_job_material_usage")
@@ -170,6 +193,25 @@ export default function ServiceJobDetailPage() {
       setError(err.message || "Failed to confirm consumption")
     } finally {
       setConsumingId(null)
+    }
+  }
+
+  const handleLinkProforma = async () => {
+    if (!jobId || !businessId) return
+    setLinkingProforma(true)
+    setError("")
+    try {
+      const { error: err } = await supabase
+        .from("service_jobs")
+        .update({ proforma_invoice_id: selectedProformaId || null })
+        .eq("id", jobId)
+        .eq("business_id", businessId)
+      if (err) throw err
+      load()
+    } catch (e: any) {
+      setError(e.message || "Failed to link proforma")
+    } finally {
+      setLinkingProforma(false)
     }
   }
 
@@ -257,12 +299,72 @@ export default function ServiceJobDetailPage() {
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Details</h2>
             <dl className="grid grid-cols-2 gap-2 text-sm">
               <dt className="text-gray-500 dark:text-gray-400">Status</dt>
-              <dd className="font-medium">{job.status}</dd>
+              <dd className="font-medium capitalize">{job.status}</dd>
               <dt className="text-gray-500 dark:text-gray-400">Start date</dt>
               <dd>{job.start_date ? new Date(job.start_date).toLocaleDateString() : "—"}</dd>
               <dt className="text-gray-500 dark:text-gray-400">End date</dt>
               <dd>{job.end_date ? new Date(job.end_date).toLocaleDateString() : "—"}</dd>
             </dl>
+
+            {/* Proforma Invoice link */}
+            <div className="mt-5 pt-5 border-t border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Linked Proforma Invoice</h3>
+              {job.proforma_invoice_id ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      {proformas.find(p => p.id === job.proforma_invoice_id)?.proforma_number
+                        ? `PRF — ${proformas.find(p => p.id === job.proforma_invoice_id)?.proforma_number}`
+                        : "Draft Proforma"}
+                    </span>
+                    {proformas.find(p => p.id === job.proforma_invoice_id)?.customer_name && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {proformas.find(p => p.id === job.proforma_invoice_id)?.customer_name}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => router.push(`/service/proforma/${job.proforma_invoice_id}/view`)}
+                      className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => { setSelectedProformaId(""); setJob({ ...job, proforma_invoice_id: null }) }}
+                      className="text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                    >
+                      Unlink
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <select
+                    value={selectedProformaId}
+                    onChange={(e) => setSelectedProformaId(e.target.value)}
+                    className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">— No proforma linked —</option>
+                    {proformas.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.proforma_number ?? "Draft"}{p.customer_name ? ` — ${p.customer_name}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleLinkProforma}
+                    disabled={linkingProforma || !selectedProformaId}
+                    className="text-sm bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-40 font-medium"
+                  >
+                    {linkingProforma ? "Saving…" : "Link"}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6">

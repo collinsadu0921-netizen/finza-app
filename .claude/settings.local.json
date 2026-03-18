@@ -47,7 +47,12 @@
       "Bash(grep -r \"post_invoice\\\\|finalise_invoice\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -l \"CREATE OR REPLACE FUNCTION post_invoice_to_ledger\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(node -e \":*)",
-      "Bash(find /c/projects/finza-web/finza-web -type f \\\\\\(-name *sidebar* -o -name *navigation* -o -name *navbar* \\\\\\) -iname *.tsx -o -iname *.ts)"
+      "Bash(find /c/projects/finza-web/finza-web -type f \\\\\\(-name *sidebar* -o -name *navigation* -o -name *navbar* \\\\\\) -iname *.tsx -o -iname *.ts)",
+      "Bash(Get-ChildItem \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\app\\\\service\\\\estimates\" -Recurse -Name)",
+      "Bash(mkdir -p \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\app\\\\service\\\\proforma\\\\[id]\\\\view\")",
+      "Bash(mkdir -p \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\app\\\\service\\\\proforma\\\\[id]\\\\edit\")",
+      "Bash(find /c/projects/finza-web/finza-web/app -path *order* -type f)",
+      "Bash(head -5 /c/projects/finza-web/finza-web/app/orders/page.tsx /c/projects/finza-web/finza-web/app/orders/[id]/view/page.tsx)"
     ]
   }
 }

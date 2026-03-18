@@ -155,22 +155,32 @@ export default function Sidebar() {
       const effectiveServiceBusinessId = urlBusinessId ?? serviceBusinessId ?? null
       const sections: MenuSection[] = [
         {
-          title: "SERVICE OPERATIONS",
+          title: "JOB MANAGEMENT",
           items: [
             { label: "Dashboard", route: "/service/dashboard" },
             { label: "Customers", route: "/service/customers" },
             { label: "Quotes", route: "/service/estimates" },
-            { label: "Orders", route: "/service/orders" },
+            { label: "Proforma Invoices", route: "/service/proforma" },
             { label: "Jobs", route: "/service/jobs" },
+            { label: "Services", route: "/service/services" },
+            { label: "Materials", route: "/service/materials" },
+            { label: "Inventory", route: "/service/inventory" },
+          ],
+        },
+        {
+          title: "BILLING & PAYMENTS",
+          items: [
             { label: "Invoices", route: "/service/invoices" },
             { label: "Credit Notes", route: "/credit-notes" },
             { label: "Recurring Invoices", route: "/recurring" },
             { label: "Payments", route: "/service/payments" },
+          ],
+        },
+        {
+          title: "COSTS",
+          items: [
             { label: "Expenses", route: "/service/expenses" },
             { label: "Supplier Bills", route: "/bills" },
-            { label: "Services", route: "/service/services" },
-            { label: "Materials", route: "/service/materials" },
-            { label: "Service Inventory", route: "/service/inventory" },
           ],
         },
       ]
@@ -414,8 +424,8 @@ export default function Sidebar() {
             <div className="space-y-1">
               {effectiveIndustry ? (
                 menuSections.map((section, sectionIdx) => {
-                  // SERVICE OPERATIONS expanded by default, others collapsed
-                  const defaultExpanded = section.title === "SERVICE OPERATIONS"
+                  // JOB MANAGEMENT and BILLING & PAYMENTS expanded by default, others collapsed
+                  const defaultExpanded = section.title === "JOB MANAGEMENT" || section.title === "BILLING & PAYMENTS"
                   const isExpanded = expandedSections[section.title] ?? defaultExpanded
                   
                   return (

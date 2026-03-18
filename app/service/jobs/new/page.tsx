@@ -9,6 +9,7 @@ import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
 
 type Customer = { id: string; name: string }
+type ProformaOption = { id: string; proforma_number: string | null; customer_name: string | null }
 
 export default function ServiceJobsNewPage() {
   const router = useRouter()
@@ -19,22 +20,40 @@ export default function ServiceJobsNewPage() {
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [status, setStatus] = useState("draft")
+  const [proformas, setProformas] = useState<ProformaOption[]>([])
+  const [proformaInvoiceId, setProformaInvoiceId] = useState("")
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (!user || cancelled) return
       const business = await getCurrentBusiness(supabase, user.id)
       if (!business || cancelled) return
-      const { data } = await supabase
+
+      const { data: customerData } = await supabase
         .from("customers")
         .select("id, name")
         .eq("business_id", business.id)
         .order("name")
-      if (!cancelled && data) setCustomers(data as Customer[])
+      if (!cancelled && customerData) setCustomers(customerData as Customer[])
+
+      const { data: proformaData } = await supabase
+        .from("proforma_invoices")
+        .select("id, proforma_number, customers(name)")
+        .eq("business_id", business.id)
+        .in("status", ["sent", "accepted"])
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+      if (!cancelled && proformaData) {
+        setProformas(
+          proformaData.map((p: any) => ({
+            id: p.id,
+            proforma_number: p.proforma_number,
+            customer_name: p.customers?.name ?? null,
+          }))
+        )
+      }
     }
     load()
     return () => { cancelled = true }
@@ -45,9 +64,7 @@ export default function ServiceJobsNewPage() {
     setError("")
     setLoading(true)
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Not authenticated")
       const business = await getCurrentBusiness(supabase, user.id)
       if (!business) throw new Error("Business not found")
@@ -57,12 +74,14 @@ export default function ServiceJobsNewPage() {
         status: string
         start_date: string | null
         end_date: string | null
+        proforma_invoice_id: string | null
       } = {
         business_id: business.id,
         customer_id: customerId.trim() || null,
         status,
         start_date: startDate || null,
         end_date: endDate || null,
+        proforma_invoice_id: proformaInvoiceId || null,
       }
       const { data: job, error: err } = await supabase
         .from("service_jobs")
@@ -141,6 +160,27 @@ export default function ServiceJobsNewPage() {
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Link Proforma Invoice{" "}
+              <span className="font-normal text-gray-500">(optional)</span>
+            </label>
+            <select
+              value={proformaInvoiceId}
+              onChange={(e) => setProformaInvoiceId(e.target.value)}
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
+            >
+              <option value="">— No proforma —</option>
+              {proformas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.proforma_number ?? "Draft"}{p.customer_name ? ` — ${p.customer_name}` : ""}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Link this job to an accepted or sent Proforma Invoice
+            </p>
           </div>
           <div className="flex gap-3 pt-4">
             <Button type="submit" disabled={loading}>

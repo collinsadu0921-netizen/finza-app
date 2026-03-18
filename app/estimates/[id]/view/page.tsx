@@ -24,6 +24,7 @@ type Estimate = {
   total_amount: number
   status: string
   converted_to: string | null
+  converted_to_proforma_id: string | null
   public_token: string | null
   tax_lines: any | null
   customers: {
@@ -57,8 +58,7 @@ export default function EstimateViewPage() {
   const [error, setError] = useState("")
   const [showSendModal, setShowSendModal] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
-  const [convertingToOrder, setConvertingToOrder] = useState(false)
-  const [linkedOrder, setLinkedOrder] = useState<{ id: string } | null>(null)
+  const [convertingToProforma, setConvertingToProforma] = useState(false)
 
   useEffect(() => {
     if (estimateId) {
@@ -108,19 +108,7 @@ export default function EstimateViewPage() {
       console.log("Setting items:", estimateItems)
       setItems(estimateItems)
 
-      // Check if estimate has already been converted to an order
-      // Use converted_to field for reliable tracking
-      if (data.estimate.converted_to === "order") {
-        const { data: existingOrder } = await supabase
-          .from("orders")
-          .select("id")
-          .eq("estimate_id", estimateId)
-          .maybeSingle()
-
-        setLinkedOrder(existingOrder)
-      } else {
-        setLinkedOrder(null)
-      }
+      // No linked entity lookup needed — proforma ID is on the estimate itself
       setLoading(false)
     } catch (err: any) {
       setError(err.message || "We couldn't load this quote. Please refresh or check your connection.")
@@ -143,44 +131,39 @@ export default function EstimateViewPage() {
     )
   }
 
-  const handleConvertToOrder = async () => {
+  const handleConvertToProforma = async () => {
     if (!estimate) return
-
     openConfirm({
-      title: "Convert to order",
-      description: "Are you sure you want to convert this quote to an order? This will create a new order from this quote.",
-      onConfirm: () => runConvertToOrder(),
+      title: "Convert to Proforma Invoice",
+      description: "This will create a Proforma Invoice from this quote. The customer can then approve or pay based on the proforma before a final invoice is issued.",
+      onConfirm: () => runConvertToProforma(),
     })
   }
 
-  const runConvertToOrder = async () => {
+  const runConvertToProforma = async () => {
     if (!estimate) return
     try {
-      setConvertingToOrder(true)
-      const response = await fetch(`/api/orders/convert-from-estimate`, {
+      setConvertingToProforma(true)
+      const response = await fetch("/api/proforma/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ estimateId }),
+        body: JSON.stringify({ source_estimate_id: estimateId }),
       })
 
       const data = await response.json()
 
-      if (response.ok) {
-        setToast({ message: "Quote converted to order successfully!", type: "success" })
-        // Redirect to the new order page
-        const redirectPath = `/service/orders/${data.orderId}/view`
-        console.log("Estimate conversion response JSON:", data)
-        console.log("Estimate->Order redirect path:", redirectPath)
+      if (response.ok && data.proformaId) {
+        setToast({ message: "Proforma Invoice created successfully!", type: "success" })
         setTimeout(() => {
-          router.push(redirectPath)
-        }, 1000)
+          router.push(`/service/proforma/${data.proformaId}/view`)
+        }, 800)
       } else {
-        setToast({ message: data.error || "Failed to convert quote to order", type: "error" })
-        setConvertingToOrder(false)
+        setToast({ message: data.error || "Failed to create Proforma Invoice", type: "error" })
+        setConvertingToProforma(false)
       }
     } catch (err: any) {
-      setToast({ message: "Error converting quote. Please try again.", type: "error" })
-      setConvertingToOrder(false)
+      setToast({ message: "Error creating Proforma Invoice. Please try again.", type: "error" })
+      setConvertingToProforma(false)
     }
   }
 
@@ -276,7 +259,7 @@ export default function EstimateViewPage() {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
-                <span>Read-only (Converted to {estimate.converted_to})</span>
+                <span>Read-only (Converted to {estimate.converted_to === "proforma" ? "Proforma Invoice" : estimate.converted_to})</span>
               </div>
             )}
             {/* Send button - Only for draft */}
@@ -297,26 +280,26 @@ export default function EstimateViewPage() {
                 Resend Quote
               </button>
             )}
-            {/* Convert to Order - Show for sent and accepted */}
+            {/* Convert to Proforma Invoice - Show for sent and accepted */}
             {!estimate.converted_to && (estimate.status === "sent" || estimate.status === "accepted") && (
               <button
-                onClick={handleConvertToOrder}
-                disabled={convertingToOrder}
+                onClick={handleConvertToProforma}
+                disabled={convertingToProforma}
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {convertingToOrder ? "Converting..." : "Convert to Order"}
+                {convertingToProforma ? "Creating Proforma..." : "Convert to Proforma"}
               </button>
             )}
-            {/* Link to existing order if converted to order */}
-            {estimate.converted_to === "order" && linkedOrder && (
+            {/* Link to existing proforma if converted */}
+            {estimate.converted_to === "proforma" && estimate.converted_to_proforma_id && (
               <button
-                onClick={() => router.push(`/service/orders/${linkedOrder.id}/view`)}
+                onClick={() => router.push(`/service/proforma/${estimate.converted_to_proforma_id}/view`)}
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
               >
-                View Order
+                View Proforma
               </button>
             )}
-            {/* Convert to Invoice - Show for sent and accepted */}
+            {/* Convert directly to Invoice - Show for sent and accepted */}
             {!estimate.converted_to && (estimate.status === "sent" || estimate.status === "accepted") && (
               <button
                 onClick={() => router.push(`/service/estimates/${estimateId}/convert`)}
