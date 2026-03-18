@@ -100,9 +100,13 @@ export async function POST(request: NextRequest) {
       // Import bill: VAT/NHIL/GETFund applied ON TOP of the VAT base
       // VAT base = CIF + import duty + all port levies
       // The user enters CIF-inclusive total; taxes are added on top by ICUMS
-      const vatBase = Number(cif_value) + Number(import_duty_amount)
+      // Round the sum explicitly — Number() parsing + addition can produce
+      // floating-point noise (e.g. 150.07000000000002) which would taint the tax calc.
+      const vatBase = Math.round((
+        Number(cif_value) + Number(import_duty_amount)
         + Number(ecowas_levy) + Number(au_levy)
         + Number(exim_levy) + Number(sil_levy) + Number(examination_fee)
+      ) * 100) / 100
 
       if (apply_taxes) {
         // For imports, taxes are applied ON TOP (exclusive), not extracted from total
@@ -124,12 +128,13 @@ export async function POST(request: NextRequest) {
         }
       }
     } else {
-      // Standard bill: line items come in tax-inclusive, extract base
-      const subtotalIncludingTaxes = (items ?? []).reduce((sum: number, item: any) => {
+      // Standard bill: line items come in tax-inclusive, extract base.
+      // Round each line contribution before accumulating to prevent float noise.
+      const subtotalIncludingTaxes = Math.round((items ?? []).reduce((sum: number, item: any) => {
         const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
         const discount = Number(item.discount_amount) || 0
-        return sum + lineTotal - discount
-      }, 0)
+        return sum + Math.round((lineTotal - discount) * 100) / 100
+      }, 0) * 100) / 100
 
       if (apply_taxes) {
         const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(

@@ -5,9 +5,10 @@
 
 /**
  * Round to 2 decimal places (pennies).
+ * Uses Number.EPSILON correction to prevent IEEE 754 half-rounding failures.
  */
 export function round2(n: number): number {
-  return Math.round(n * 100) / 100
+  return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
 /**

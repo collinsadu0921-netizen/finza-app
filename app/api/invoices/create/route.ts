@@ -225,13 +225,14 @@ export async function POST(request: NextRequest) {
       // Derive legacy columns from canonical tax lines (no rate logic, no cutoff logic, no country branching)
       legacyTaxColumns = deriveLegacyTaxColumnsFromTaxLines(taxResult.lines)
     } else {
-      // No taxes applied
+      // No taxes applied. Round each line contribution before accumulating to
+      // prevent float noise in multi-item totals (e.g. 0.1 + 0.2 = 0.30000000000000004).
       const subtotal = lineItems.reduce((sum: number, item: any) => {
         const lineTotal = item.quantity * item.unit_price
         const discount = item.discount_amount || 0
-        return sum + lineTotal - discount
+        return sum + Math.round((lineTotal - discount) * 100) / 100
       }, 0)
-      
+
       baseSubtotal = Math.round(subtotal * 100) / 100
       invoiceTotal = Math.round(subtotal * 100) / 100
       legacyTaxColumns = { nhil: 0, getfund: 0, covid: 0, vat: 0 }
@@ -426,7 +427,7 @@ export async function POST(request: NextRequest) {
         qty: Number(item.qty) || 0,
         unit_price: Number(item.unit_price) || 0,
         discount_amount: Number(item.discount_amount) || 0,
-        line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
+        line_subtotal: Math.round(((Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0)) * 100) / 100,
       }
     })
 

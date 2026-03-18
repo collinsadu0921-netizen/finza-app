@@ -372,12 +372,55 @@ export const ghanaTaxEngine: TaxEngine = {
     const rates = getGhanaTaxRatesForDate(config.effectiveDate)
     const multiplier = getGhanaTaxMultiplier(rates, config.effectiveDate)
 
-    // Reverse calculate base amount
-    // base = total_inclusive / multiplier
+    // Step 1: derive the pre-tax base by dividing by the multiplier.
+    // Rounding the base to 2dp is unavoidable (e.g. 20000/1.20 = 16666.666…),
+    // which means base × multiplier ≠ totalInclusive in general.
     const baseAmount = roundGhanaTax(totalInclusive / multiplier)
 
-    // Now calculate taxes on the base amount
-    return this.calculateFromAmount(baseAmount, config)
+    // Step 2: compute tax components on the rounded base (forward calc).
+    const result = this.calculateFromAmount(baseAmount, config)
+
+    // Step 3: anchor the result to the original user input.
+    //
+    // calculateFromAmount returns total_incl_tax = base + roundedTotalTax.
+    // Due to rounding, this can differ from totalInclusive by ±0.01 (e.g.
+    // base=16666.67, roundedTotalTax=3333.33, total=19999.00 → not 20000.00).
+    // It also emits a ROUNDING TaxLine (Dr/Cr 0.01 to account 7990) to balance
+    // the journal entry — but that line makes the journal entry total 20000.01,
+    // which is what the user saw in the ledger.
+    //
+    // For a REVERSE calculation the correct behaviour is:
+    //   • totalInclusive is authoritative (what the customer pays = AR debit).
+    //   • The revenue line absorbs the cent-level rounding difference.
+    //   • No ROUNDING (7990) line is needed.
+    //
+    // Approach:
+    //   1. Drop any ROUNDING lines from the forward result.
+    //   2. Sum only the credit-side tax amounts (NHIL, GETFund, VAT).
+    //   3. anchoredSubtotal = totalInclusive − creditTaxSum.
+    //      In PostgreSQL NUMERIC (exact decimal) this makes:
+    //        Cr Revenue + Cr NHIL + Cr GETFund + Cr VAT = totalInclusive  ✓
+    //   4. tax_total = creditTaxSum (the real charges, not roundedTotalTax).
+
+    const nonRoundingLines = result.taxLines.filter(l => l.code !== 'ROUNDING')
+
+    const creditTaxSum = roundGhanaTax(
+      nonRoundingLines
+        .filter(l => l.ledger_side === 'credit')
+        .reduce((sum, l) => sum + l.amount, 0)
+    )
+
+    // Revenue = invoice total − tax credits.  Stored as invoice.subtotal.
+    // PostgreSQL NUMERIC ensures anchoredSubtotal + creditTaxSum = totalInclusive exactly.
+    const anchoredSubtotal = roundGhanaTax(totalInclusive - creditTaxSum)
+
+    return {
+      ...result,
+      taxLines: nonRoundingLines,         // no 7990 ROUNDING line for reverse calc
+      subtotal_excl_tax: anchoredSubtotal, // revenue credit — anchored to user's total
+      tax_total: creditTaxSum,             // actual sum charged (may differ from roundedTotalTax by 0.01)
+      total_incl_tax: totalInclusive,      // exact user input — never re-derived from components
+    }
   },
 }
 

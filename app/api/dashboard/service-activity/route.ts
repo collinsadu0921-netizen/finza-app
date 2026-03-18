@@ -44,11 +44,11 @@ export async function GET(request: NextRequest) {
     const { data: entries } = await supabase
       .from("journal_entries")
       .select(`
-        id, date, description, source_type, reference_type, reference_id,
+        id, date, created_at, description, source_type, reference_type, reference_id,
         journal_entry_lines(debit, credit)
       `)
       .eq("business_id", businessId)
-      .order("date", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(limit)
 
     const items = (entries ?? []).map((e: Record<string, unknown>) => {
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
         type,
         description,
         amount,
-        timestamp: e.date as string,
+        timestamp: e.created_at as string,
         href,
       }
     })

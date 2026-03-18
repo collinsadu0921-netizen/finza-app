@@ -111,10 +111,19 @@ export function getGhanaTaxMultiplier(rates: GhanaTaxRates, effectiveDate: strin
 }
 
 /**
- * Round to 2 decimal places
+ * Round to 2 decimal places.
+ *
+ * Uses Number.EPSILON correction before multiplication to prevent IEEE 754
+ * half-rounding errors. Without this, values like 1.005 (represented internally
+ * as 1.00499999…) round DOWN to 1.00 instead of UP to 1.01.
+ *
+ * Example failure without fix:
+ *   Math.round(1.005 * 100) / 100  → 1.00  ❌ (should be 1.01)
+ * With fix:
+ *   Math.round((1.005 + ε) * 100) / 100 → 1.01  ✓
  */
 export function roundGhanaTax(value: number): number {
-  return Math.round(value * 100) / 100
+  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
 /**

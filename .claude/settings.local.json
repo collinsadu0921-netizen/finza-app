@@ -41,7 +41,12 @@
       "Bash(grep -r \"inventory_valuation\\\\|closing_stock\\\\|opening_stock\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --include=*.sql)",
       "Bash(grep -l \"get_account_movements\\\\|statement.*equity\\\\|cash.*flow\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -r \"2[5-9][0-9][0-9]\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(grep -r \"rounding\\\\|precision\\\\|floating\\\\|Math.round\\\\|toFixed\" /c/projects/finza-web/finza-web/lib/__tests__/ --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"1\\\\.219\\\\|1\\\\.20\\\\|0\\\\.005\\\\|deltaCents\\\\|rounding\" /c/projects/finza-web/finza-web/lib --include=*.ts)",
+      "Bash(grep -r \"post_invoice\\\\|finalise_invoice\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -l \"CREATE OR REPLACE FUNCTION post_invoice_to_ledger\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(node -e \":*)"
     ]
   }
 }
