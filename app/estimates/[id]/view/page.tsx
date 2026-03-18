@@ -335,17 +335,6 @@ export default function EstimateViewPage() {
               {estimate.expiry_date && (
                 <p className="text-sm text-gray-600">Expiry Date: {new Date(estimate.expiry_date).toLocaleDateString()}</p>
               )}
-              {linkedOrder && (
-                <p className="text-sm text-gray-600 mt-2">
-                  Linked Order:{" "}
-                  <button
-                    onClick={() => router.push(`/service/orders/${linkedOrder.id}/view`)}
-                    className="text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    View Order
-                  </button>
-                </p>
-              )}
             </div>
           </div>
 
