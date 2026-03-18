@@ -52,7 +52,10 @@
       "Bash(mkdir -p \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\app\\\\service\\\\proforma\\\\[id]\\\\view\")",
       "Bash(mkdir -p \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\app\\\\service\\\\proforma\\\\[id]\\\\edit\")",
       "Bash(find /c/projects/finza-web/finza-web/app -path *order* -type f)",
-      "Bash(head -5 /c/projects/finza-web/finza-web/app/orders/page.tsx /c/projects/finza-web/finza-web/app/orders/[id]/view/page.tsx)"
+      "Bash(head -5 /c/projects/finza-web/finza-web/app/orders/page.tsx /c/projects/finza-web/finza-web/app/orders/[id]/view/page.tsx)",
+      "Bash(grep -r \"SignaturePad\\\\|react-signature\\\\|signature\" /c/projects/finza-web/finza-web/app --include=*.tsx --include=*.ts)",
+      "Bash(ls -1 /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -B 10 -A 10 \"public_token.*estimates\\\\|ALTER TABLE estimates.*public_token\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
     ]
   }
 }

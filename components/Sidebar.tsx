@@ -210,8 +210,7 @@ export default function Sidebar() {
         const trialBalanceRoute = useServiceRoutes ? buildServiceRoute("/service/reports/trial-balance", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reports/trial-balance", accountingBusinessId ?? undefined)
         const reconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reconciliation", accountingBusinessId ?? undefined)
         const periodsRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/periods", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/periods", accountingBusinessId ?? undefined)
-        const auditRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/audit", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/audit", accountingBusinessId ?? undefined)
-        const healthRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/health", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined)
+
         const accountingItems: Array<{ label: string; route: string }> = [
           ...(effectiveIndustry === "service" && !isAccountantFirmUser
             ? [
@@ -231,9 +230,7 @@ export default function Sidebar() {
                 { label: "Forensic Runs", route: "/admin/accounting/forensic-runs" },
                 { label: "Tenants", route: "/admin/accounting/tenants" },
               ]
-            : [
-                { label: "Accounting Health", route: healthRoute },
-              ]),
+            : []),
         ]
         sections.push({
           title: "Accounting",
