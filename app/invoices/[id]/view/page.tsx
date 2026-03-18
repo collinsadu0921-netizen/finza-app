@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter, useParams, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
+
+const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import ActivityHistory from "@/components/ActivityHistory"
 import Toast from "@/components/Toast"
 import SendInvoiceModal from "@/components/invoices/SendInvoiceModal"
@@ -93,7 +95,7 @@ export default function InvoiceViewPage() {
   const router = useRouter()
   const pathname = usePathname()
   const isUnderService = pathname?.startsWith("/service") ?? false
-  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
+  const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
   const params = useParams()
   const invoiceId = (params?.id as string) || ""
   const { openConfirm } = useConfirm()
@@ -359,7 +361,7 @@ export default function InvoiceViewPage() {
   const remainingBalance = Number(invoice?.total || 0) - totalPaid - totalCredits
 
   return (
-    <ProtectedLayout>
+    <Wrapper>
       <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 pb-20">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
 
@@ -791,7 +793,7 @@ export default function InvoiceViewPage() {
           onClose={() => setToast(null)}
         />
       )}
-    </ProtectedLayout>
+    </Wrapper>
   )
 }
 

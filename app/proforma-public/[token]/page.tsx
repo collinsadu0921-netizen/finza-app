@@ -208,40 +208,42 @@ export default function ProformaPublicPage() {
 
           {/* Status banners */}
           {isAccepted && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <div>
-                <p className="font-semibold text-emerald-800">Proforma accepted</p>
+              <div className="flex-1">
+                <p className="font-bold text-emerald-800">You have accepted this proforma</p>
                 <p className="text-sm text-emerald-700 mt-0.5">
-                  Signed by <strong>{proforma.client_name_signed}</strong> on {formatDate(proforma.signed_at)}
-                  {proforma.client_id_type && (
-                    <> · {ID_TYPES.find(t => t.value === proforma.client_id_type)?.label}: <strong>{proforma.client_id_number}</strong></>
-                  )}
+                  Signed by <strong>{proforma.client_name_signed}</strong> · {formatDate(proforma.signed_at)}
                 </p>
               </div>
             </div>
           )}
           {isRejected && (
-            <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
-                <svg className="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
               <div>
-                <p className="font-semibold text-rose-800">Proforma declined</p>
+                <p className="font-bold text-rose-800">You have declined this proforma</p>
                 {proforma.rejected_reason && (
-                  <p className="text-sm text-rose-700 mt-0.5">Reason: {proforma.rejected_reason}</p>
+                  <p className="text-sm text-rose-700 mt-0.5">{proforma.rejected_reason}</p>
                 )}
               </div>
             </div>
           )}
           {isConverted && (
-            <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
+            <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
               <p className="font-semibold text-violet-800">This proforma has been converted to an invoice.</p>
             </div>
           )}
@@ -264,15 +266,24 @@ export default function ProformaPublicPage() {
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-violet-200 text-xs uppercase tracking-wider font-medium">Proforma Invoice</p>
-                  <p className="text-2xl font-bold mt-1">{proforma.proforma_number ?? "DRAFT"}</p>
-                  <span className={`mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    isAccepted ? "bg-emerald-400/30 text-emerald-100" :
-                    isRejected ? "bg-rose-400/30 text-rose-100" :
-                    isConverted ? "bg-white/20 text-violet-100" :
-                    isOpen ? "bg-white/20 text-white" : "bg-white/10 text-violet-200"
-                  }`}>
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </span>
+                  <p className="text-2xl font-bold mt-1">{proforma.proforma_number ?? "PRF"}</p>
+                  {/* Show a client-friendly status — never show internal "sent" label */}
+                  {isAccepted && (
+                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-400/30 text-emerald-100">
+                      Accepted
+                    </span>
+                  )}
+                  {isRejected && (
+                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-400/30 text-rose-100">
+                      Declined
+                    </span>
+                  )}
+                  {isConverted && (
+                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-violet-100">
+                      Converted
+                    </span>
+                  )}
+                  {/* "sent" → awaiting review; no label for draft/cancelled */}
                 </div>
               </div>
             </div>
@@ -400,27 +411,32 @@ export default function ProformaPublicPage() {
             </div>
           </div>
 
-          {/* Action buttons */}
+          {/* Action buttons — only shown when awaiting client response */}
           {isOpen && (
-            <div className="no-print flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={() => setShowAccept(true)}
-                className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3.5 px-6 rounded-xl shadow-sm transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Accept &amp; Sign
-              </button>
-              <button
-                onClick={() => setShowReject(true)}
-                className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-rose-50 border border-rose-300 text-rose-600 font-semibold py-3.5 px-6 rounded-xl shadow-sm transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Decline
-              </button>
+            <div className="no-print">
+              <p className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                Please review the proforma above and choose an option
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => setShowAccept(true)}
+                  className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition-colors text-base"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Accept &amp; Sign
+                </button>
+                <button
+                  onClick={() => setShowReject(true)}
+                  className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-rose-50 border-2 border-rose-200 text-rose-600 font-semibold py-4 px-6 rounded-2xl shadow-sm transition-colors text-base"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Decline
+                </button>
+              </div>
             </div>
           )}
 

@@ -77,6 +77,12 @@ export type InvoiceDocumentProps = {
   settings?: InvoiceDocumentSettings | null
   /** Optional class for the root container (e.g. print overrides) */
   className?: string
+  /**
+   * Override the status shown in the badge.
+   * Use this on client-facing pages to show a friendlier label
+   * (e.g. "awaiting_payment" instead of the internal "sent").
+   */
+  displayStatus?: string
 }
 
 function formatDate(dateString: string) {
@@ -97,6 +103,7 @@ export function InvoiceDocument({
   items,
   settings,
   className = "",
+  displayStatus,
 }: InvoiceDocumentProps) {
   const businessName = business?.trading_name || business?.legal_name || "Business"
   const businessAddress =
@@ -165,7 +172,7 @@ export function InvoiceDocument({
             <div className="text-sm font-mono text-slate-600 bg-slate-50 px-3 py-1.5 rounded border border-slate-200">
               #{invoice.invoice_number}
             </div>
-            <StatusBadge status={invoice.status} />
+            <StatusBadge status={displayStatus ?? invoice.status} />
           </div>
         </div>
       </div>

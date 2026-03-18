@@ -77,16 +77,13 @@ export default function ProformaViewPage() {
   const [error, setError] = useState("")
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
-  const [copiedClientLink, setCopiedClientLink] = useState(false)
 
-  const handleCopyClientLink = () => {
-    if (!proforma?.public_token) return
-    const url = `${window.location.origin}/proforma-public/${proforma.public_token}`
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedClientLink(true)
-      setTimeout(() => setCopiedClientLink(false), 2000)
-    })
-  }
+  // Send modal
+  const [showSendModal, setShowSendModal] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [sendDone, setSendDone] = useState(false)
+  const [sentProformaToken, setSentProformaToken] = useState<string | null>(null)
+  const [copiedSendLink, setCopiedSendLink] = useState(false)
 
   useEffect(() => {
     if (proformaId) loadProforma()
@@ -96,25 +93,19 @@ export default function ProformaViewPage() {
     try {
       setLoading(true)
       setError("")
-
       const response = await fetch(`/api/proforma/${proformaId}`)
-
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
-        if (response.status === 404) {
-          throw new Error("Proforma invoice not found. It may have been deleted or the link is incorrect.")
-        }
+        if (response.status === 404) throw new Error("Proforma invoice not found.")
         throw new Error(data.error || "Failed to load proforma invoice")
       }
-
       const data = await response.json()
       if (!data.proforma) throw new Error("Proforma data is missing from the response")
-
       setProforma(data.proforma)
       setItems(data.items || [])
-      setLoading(false)
     } catch (err: any) {
       setError(err.message || "Failed to load proforma invoice")
+    } finally {
       setLoading(false)
     }
   }
@@ -136,36 +127,83 @@ export default function ProformaViewPage() {
     </span>
   )
 
-  const handleSend = async () => {
+  /** Step 1 of Send: call API to mark as sent and assign PRF number */
+  const executeSend = async () => {
     if (!proforma) return
-    openConfirm({
-      title: "Send Proforma Invoice",
-      description: "This will mark the proforma as sent and assign a proforma number. Are you sure?",
-      onConfirm: async () => {
-        try {
-          setActionLoading(true)
-          const response = await fetch(`/api/proforma/${proformaId}/send`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-          })
-          const data = await response.json()
-          if (!response.ok) throw new Error(data.error || "Failed to send proforma")
-          setToast({ message: "Proforma invoice sent successfully!", type: "success" })
-          loadProforma()
-        } catch (err: any) {
-          setToast({ message: err.message || "Failed to send proforma", type: "error" })
-        } finally {
-          setActionLoading(false)
-        }
-      },
+    setSending(true)
+    try {
+      const response = await fetch(`/api/proforma/${proformaId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "Failed to send proforma")
+      await loadProforma()
+      // After reload, public_token is set — grab it from the fresh state via data
+      setSentProformaToken(data.proforma?.public_token ?? proforma.public_token)
+      setSendDone(true)
+    } catch (err: any) {
+      setToast({ message: err.message || "Failed to send proforma", type: "error" })
+      setShowSendModal(false)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const clientLink = () => {
+    const token = sentProformaToken ?? proforma?.public_token
+    if (!token) return ""
+    return `${typeof window !== "undefined" ? window.location.origin : ""}/proforma-public/${token}`
+  }
+
+  const openSendModal = () => {
+    // If already sent, jump straight to share panel
+    if (proforma?.status === "sent") {
+      setSendDone(true)
+      setSentProformaToken(proforma.public_token)
+      setShowSendModal(true)
+    } else {
+      setSendDone(false)
+      setShowSendModal(true)
+    }
+  }
+
+  const handleCopySendLink = () => {
+    navigator.clipboard.writeText(clientLink()).then(() => {
+      setCopiedSendLink(true)
+      setTimeout(() => setCopiedSendLink(false), 2000)
     })
   }
 
-  const handleAccept = async () => {
+  const handleWhatsApp = () => {
+    const link = clientLink()
+    if (!link) return
+    const custPhone = proforma?.customers?.phone?.replace(/\D/g, "")
+    const text = encodeURIComponent(
+      `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review and accept your proforma invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}.\n\n${link}`
+    )
+    const url = custPhone
+      ? `https://wa.me/${custPhone}?text=${text}`
+      : `https://wa.me/?text=${text}`
+    window.open(url, "_blank")
+  }
+
+  const handleEmail = () => {
+    const link = clientLink()
+    if (!link) return
+    const subject = encodeURIComponent(`Proforma Invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}`)
+    const body = encodeURIComponent(
+      `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review your proforma invoice using the link below:\n\n${link}\n\nKindly accept or decline at your earliest convenience.\n\nThank you.`
+    )
+    const email = proforma?.customers?.email ?? ""
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`
+  }
+
+  const handleMarkAccepted = async () => {
     if (!proforma) return
     openConfirm({
-      title: "Accept Proforma Invoice",
-      description: "Mark this proforma as accepted by the customer?",
+      title: "Record as Accepted",
+      description: "Mark this proforma as accepted on behalf of the client (e.g. they approved in person or by phone)?",
       onConfirm: async () => {
         try {
           setActionLoading(true)
@@ -175,7 +213,7 @@ export default function ProformaViewPage() {
           })
           const data = await response.json()
           if (!response.ok) throw new Error(data.error || "Failed to accept proforma")
-          setToast({ message: "Proforma invoice accepted!", type: "success" })
+          setToast({ message: "Recorded as accepted.", type: "success" })
           loadProforma()
         } catch (err: any) {
           setToast({ message: err.message || "Failed to accept proforma", type: "error" })
@@ -186,11 +224,11 @@ export default function ProformaViewPage() {
     })
   }
 
-  const handleReject = async () => {
+  const handleMarkRejected = async () => {
     if (!proforma) return
     openConfirm({
-      title: "Reject Proforma Invoice",
-      description: "Mark this proforma as rejected? This cannot be undone.",
+      title: "Record as Declined",
+      description: "Mark this proforma as declined (e.g. client declined in person or by phone)?",
       onConfirm: async () => {
         try {
           setActionLoading(true)
@@ -198,11 +236,11 @@ export default function ProformaViewPage() {
             .from("proforma_invoices")
             .update({ status: "rejected" })
             .eq("id", proformaId)
-          if (updateError) throw new Error(updateError.message || "Failed to reject proforma")
-          setToast({ message: "Proforma invoice rejected.", type: "info" })
+          if (updateError) throw new Error(updateError.message || "Failed to decline proforma")
+          setToast({ message: "Recorded as declined.", type: "info" })
           loadProforma()
         } catch (err: any) {
-          setToast({ message: err.message || "Failed to reject proforma", type: "error" })
+          setToast({ message: err.message || "Failed to decline proforma", type: "error" })
         } finally {
           setActionLoading(false)
         }
@@ -249,9 +287,7 @@ export default function ProformaViewPage() {
           const data = await response.json()
           if (!response.ok) throw new Error(data.error || "Failed to convert proforma to invoice")
           setToast({ message: "Invoice created successfully! Redirecting...", type: "success" })
-          setTimeout(() => {
-            router.push(`/service/invoices/${data.invoiceId}/view`)
-          }, 1000)
+          setTimeout(() => router.push(`/service/invoices/${data.invoiceId}/view`), 1000)
         } catch (err: any) {
           setToast({ message: err.message || "Failed to convert proforma", type: "error" })
           setActionLoading(false)
@@ -261,11 +297,7 @@ export default function ProformaViewPage() {
   }
 
   if (loading) {
-    return (
-      <div className="p-6">
-        <p className="text-gray-500">Loading...</p>
-      </div>
-    )
+    return <div className="p-6"><p className="text-gray-500">Loading...</p></div>
   }
 
   if (error || (!loading && !proforma)) {
@@ -286,15 +318,9 @@ export default function ProformaViewPage() {
 
   if (!proforma) return null
 
-  // Tax display
   const taxBreakdown = proforma.tax_lines
     ? getGhanaLegacyView(proforma.tax_lines)
-    : {
-        nhil: proforma.nhil || 0,
-        getfund: proforma.getfund || 0,
-        covid: proforma.covid || 0,
-        vat: proforma.vat || 0,
-      }
+    : { nhil: proforma.nhil || 0, getfund: proforma.getfund || 0, covid: proforma.covid || 0, vat: proforma.vat || 0 }
   const allTaxLines = proforma.tax_lines ? getTaxBreakdown(proforma.tax_lines) : null
 
   return (
@@ -325,81 +351,75 @@ export default function ProformaViewPage() {
         </div>
 
         {/* Action Buttons — status-based */}
-        <div className="flex gap-2 flex-wrap justify-end">
+        <div className="flex gap-2 flex-wrap justify-end items-center">
+
+          {/* DRAFT */}
           {proforma.status === "draft" && (
             <>
               <button
                 onClick={() => router.push(`/service/proforma/${proformaId}/edit`)}
-                className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 text-sm"
+                className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm"
               >
                 Edit
               </button>
               <button
-                onClick={handleSend}
+                onClick={openSendModal}
                 disabled={actionLoading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50"
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50 flex items-center gap-1.5"
               >
-                {actionLoading ? "Sending..." : "Send"}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+                Send to Client
               </button>
               <button
                 onClick={handleCancel}
                 disabled={actionLoading}
-                className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 text-sm disabled:opacity-50"
+                className="text-gray-500 hover:text-gray-700 text-sm px-2 py-2"
               >
                 Cancel
               </button>
             </>
           )}
 
+          {/* SENT — focus on sharing; Accept/Reject are manual overrides */}
           {proforma.status === "sent" && (
             <>
-              {/* Client acceptance link */}
-              {proforma.public_token && (
-                <button
-                  onClick={handleCopyClientLink}
-                  className="flex items-center gap-1.5 bg-slate-100 dark:bg-gray-700 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-slate-200 dark:hover:bg-gray-600 text-sm font-medium transition-colors"
-                >
-                  {copiedClientLink ? (
-                    <>
-                      <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                      </svg>
-                      Client Link
-                    </>
-                  )}
-                </button>
-              )}
               <button
-                onClick={handleAccept}
-                disabled={actionLoading}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm disabled:opacity-50"
+                onClick={openSendModal}
+                className="flex items-center gap-1.5 bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-black text-sm font-medium transition-colors"
               >
-                {actionLoading ? "Accepting..." : "Accept"}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                Share Link
+              </button>
+              {/* Manual record buttons — secondary */}
+              <button
+                onClick={handleMarkAccepted}
+                disabled={actionLoading}
+                className="text-emerald-700 hover:text-emerald-800 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-lg text-sm disabled:opacity-50 transition-colors"
+              >
+                Mark as Accepted
               </button>
               <button
-                onClick={handleReject}
+                onClick={handleMarkRejected}
                 disabled={actionLoading}
-                className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 text-sm disabled:opacity-50"
+                className="text-orange-600 hover:text-orange-700 border border-orange-200 bg-orange-50 hover:bg-orange-100 px-3 py-2 rounded-lg text-sm disabled:opacity-50 transition-colors"
               >
-                Reject
+                Mark as Declined
               </button>
               <button
                 onClick={handleCancel}
                 disabled={actionLoading}
-                className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 text-sm disabled:opacity-50"
+                className="text-gray-500 hover:text-gray-700 text-sm px-2 py-2"
               >
                 Cancel
               </button>
             </>
           )}
 
+          {/* ACCEPTED — convert to invoice */}
           {proforma.status === "accepted" && (
             <>
               <button
@@ -417,13 +437,14 @@ export default function ProformaViewPage() {
               <button
                 onClick={handleCancel}
                 disabled={actionLoading}
-                className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 text-sm disabled:opacity-50"
+                className="text-gray-500 hover:text-gray-700 text-sm px-2 py-2"
               >
                 Cancel
               </button>
             </>
           )}
 
+          {/* CONVERTED */}
           {proforma.status === "converted" && proforma.converted_invoice_id && (
             <button
               onClick={() => router.push(`/service/invoices/${proforma.converted_invoice_id}/view`)}
@@ -435,13 +456,14 @@ export default function ProformaViewPage() {
         </div>
       </div>
 
-      {/* Status Badge */}
-      <div className="mb-6">
+      {/* Status */}
+      <div className="mb-6 flex items-center gap-3">
         {getStatusBadge(proforma.status)}
+        {proforma.status === "sent" && (
+          <span className="text-sm text-blue-600 dark:text-blue-400">Awaiting client response</span>
+        )}
         {proforma.status === "converted" && proforma.converted_invoice_id && (
-          <span className="ml-3 text-sm text-purple-600 dark:text-purple-400">
-            Converted to Invoice
-          </span>
+          <span className="text-sm text-purple-600 dark:text-purple-400">Converted to Invoice</span>
         )}
       </div>
 
@@ -455,24 +477,15 @@ export default function ProformaViewPage() {
             {proforma.customers ? (
               <div>
                 <p className="text-lg font-semibold text-gray-900 dark:text-white">{proforma.customers.name}</p>
-                {proforma.customers.email && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{proforma.customers.email}</p>
-                )}
-                {proforma.customers.phone && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{proforma.customers.phone}</p>
-                )}
-                {proforma.customers.address && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">{proforma.customers.address}</p>
-                )}
-                {proforma.customers.tin && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">TIN: {proforma.customers.tin}</p>
-                )}
+                {proforma.customers.email && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{proforma.customers.email}</p>}
+                {proforma.customers.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{proforma.customers.phone}</p>}
+                {proforma.customers.address && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">{proforma.customers.address}</p>}
+                {proforma.customers.tin && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">TIN: {proforma.customers.tin}</p>}
               </div>
             ) : (
               <p className="text-gray-500 dark:text-gray-400">No customer assigned</p>
             )}
           </div>
-
           <div>
             <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Proforma Details</h3>
             <div className="space-y-1.5">
@@ -494,7 +507,7 @@ export default function ProformaViewPage() {
           </div>
         </div>
 
-        {/* Line Items Table */}
+        {/* Line Items */}
         <div className="mb-6">
           <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Line Items</h3>
           {items && items.length > 0 ? (
@@ -547,7 +560,6 @@ export default function ProformaViewPage() {
                   {currencyDisplay} {Number(proforma.subtotal).toFixed(2)}
                 </span>
               </div>
-
               {Number(proforma.total_tax) > 0 && (
                 <>
                   {proforma.tax_lines && allTaxLines ? (
@@ -589,7 +601,6 @@ export default function ProformaViewPage() {
                   </div>
                 </>
               )}
-
               <div className="flex justify-between text-lg pt-2 border-t-2 border-gray-300 dark:border-gray-600">
                 <span className="font-bold text-gray-900 dark:text-white">Total:</span>
                 <span className="font-bold text-gray-900 dark:text-white tabular-nums">
@@ -611,8 +622,7 @@ export default function ProformaViewPage() {
         {/* Footer Message */}
         {proforma.footer_message && (
           <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Footer</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{proforma.footer_message}</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 italic whitespace-pre-wrap">{proforma.footer_message}</p>
           </div>
         )}
 
@@ -643,7 +653,9 @@ export default function ProformaViewPage() {
                 )}
                 {proforma.signed_at && (
                   <p className="text-gray-400 dark:text-gray-500 text-xs">
-                    Signed {new Date(proforma.signed_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    Signed {new Date(proforma.signed_at).toLocaleDateString("en-GB", {
+                      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+                    })}
                   </p>
                 )}
               </div>
@@ -652,7 +664,7 @@ export default function ProformaViewPage() {
         )}
 
         {/* Rejection details */}
-        {proforma.status === "rejected" && proforma.rejected_reason && (
+        {(proforma.status === "rejected") && proforma.rejected_reason && (
           <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
             <h3 className="text-xs font-bold text-orange-500 uppercase tracking-wider mb-2">Declined by Client</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">{proforma.rejected_reason}</p>
@@ -666,12 +678,141 @@ export default function ProformaViewPage() {
       </div>
 
       {/* Toast */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+      {/* ── SEND MODAL ─────────────────────────────────────── */}
+      {showSendModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+
+            {/* Step 1: Confirm send */}
+            {!sendDone && (
+              <>
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-gray-700 flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-slate-800 dark:text-white">Send Proforma Invoice</h2>
+                  <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    This will assign a proforma number <span className="font-semibold">PRF-XXXXXX</span> and mark the invoice as sent. You can then share the client link via WhatsApp, email, or copy it directly.
+                  </p>
+                  {proforma?.customers?.name && (
+                    <div className="bg-slate-50 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm">
+                      <p className="text-slate-400 text-xs uppercase tracking-wide font-medium mb-1">Sending to</p>
+                      <p className="font-semibold text-slate-800 dark:text-white">{proforma.customers.name}</p>
+                      {proforma.customers.email && <p className="text-slate-500">{proforma.customers.email}</p>}
+                      {proforma.customers.phone && <p className="text-slate-500">{proforma.customers.phone}</p>}
+                    </div>
+                  )}
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={() => setShowSendModal(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-gray-700 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-gray-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={executeSend}
+                      disabled={sending}
+                      className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                    >
+                      {sending ? "Sending…" : "Confirm & Send"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Step 2: Share options */}
+            {sendDone && (
+              <>
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-gray-700 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <h2 className="text-lg font-bold text-slate-800 dark:text-white">
+                      {proforma?.proforma_number ?? "Proforma"} sent!
+                    </h2>
+                  </div>
+                  <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="p-6 space-y-3">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                    Share the client link so they can review, accept, and sign.
+                  </p>
+
+                  {/* WhatsApp */}
+                  <button
+                    onClick={handleWhatsApp}
+                    className="w-full flex items-center gap-3 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm"
+                  >
+                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                    </svg>
+                    Send via WhatsApp
+                    {proforma?.customers?.phone && (
+                      <span className="ml-auto text-white/70 text-xs">{proforma.customers.phone}</span>
+                    )}
+                  </button>
+
+                  {/* Email */}
+                  <button
+                    onClick={handleEmail}
+                    className="w-full flex items-center gap-3 bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm"
+                  >
+                    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    Send via Email
+                    {proforma?.customers?.email && (
+                      <span className="ml-auto text-white/60 text-xs">{proforma.customers.email}</span>
+                    )}
+                  </button>
+
+                  {/* Copy link */}
+                  <button
+                    onClick={handleCopySendLink}
+                    className="w-full flex items-center gap-3 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-slate-200 font-medium py-3 px-4 rounded-xl transition-colors text-sm border border-slate-200 dark:border-gray-700"
+                  >
+                    {copiedSendLink ? (
+                      <>
+                        <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Link copied!
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                        Copy client link
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setShowSendModal(false)}
+                    className="w-full text-center text-sm text-slate-400 hover:text-slate-600 pt-1"
+                  >
+                    Done
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

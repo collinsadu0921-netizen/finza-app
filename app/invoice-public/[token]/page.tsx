@@ -210,13 +210,21 @@ export default function PublicInvoicePage() {
           </div>
 
           {/* ── Invoice document ───────────────────────────── */}
-          {/* Bank/momo details appear inside this component at the bottom */}
+          {/* Bank/momo details appear inside this component at the bottom.
+              displayStatus converts internal "sent" → "Awaiting Payment" for the client. */}
           <InvoiceDocument
             invoice={invoice}
             business={business}
             items={items}
             settings={settings}
             className="print:shadow-none print:border-0 print:rounded-none"
+            displayStatus={
+              invoice.status === "sent" ? "awaiting_payment" :
+              invoice.status === "overdue" ? "overdue" :
+              invoice.status === "paid" ? "paid" :
+              invoice.status === "partially_paid" ? "partially_paid" :
+              undefined
+            }
           />
 
           {/* ── Pay online (no-print, only if unpaid) ──────── */}

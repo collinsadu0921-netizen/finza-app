@@ -1,9 +1,109 @@
 import { SupabaseClient } from "@supabase/supabase-js"
 
+// ─── localStorage helpers (client-side only) ──────────────────────────────────
+
+const WORKSPACE_KEY = "finza_selected_business_id"
+
+export function getSelectedBusinessId(): string | null {
+  if (typeof window === "undefined") return null
+  try {
+    return localStorage.getItem(WORKSPACE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setSelectedBusinessId(id: string | null): void {
+  if (typeof window === "undefined") return
+  try {
+    if (id) localStorage.setItem(WORKSPACE_KEY, id)
+    else localStorage.removeItem(WORKSPACE_KEY)
+  } catch {}
+}
+
+export function clearSelectedBusinessId(): void {
+  setSelectedBusinessId(null)
+}
+
+// ─── Get ALL businesses a user has access to ─────────────────────────────────
+
+export async function getAllUserBusinesses(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<Array<any & { _role: string }>> {
+  const results: Array<any & { _role: string }> = []
+  const seenIds = new Set<string>()
+
+  // 1. Businesses the user owns
+  const { data: owned } = await supabase
+    .from("businesses")
+    .select("*")
+    .eq("owner_id", userId)
+    .is("archived_at", null)
+    .order("created_at", { ascending: false })
+
+  for (const b of owned ?? []) {
+    if (!seenIds.has(b.id)) {
+      seenIds.add(b.id)
+      results.push({ ...b, _role: "owner" })
+    }
+  }
+
+  // 2. Businesses where user is a team member
+  const { data: memberOf } = await supabase
+    .from("business_users")
+    .select("role, business_id, businesses(*)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+
+  for (const bu of memberOf ?? []) {
+    const b = Array.isArray(bu.businesses) ? bu.businesses[0] : bu.businesses
+    if (b && b.archived_at == null && !seenIds.has(b.id)) {
+      seenIds.add(b.id)
+      results.push({ ...b, _role: bu.role || "member" })
+    }
+  }
+
+  return results
+}
+
+// ─── Get one business (respects localStorage workspace preference) ────────────
+
 export async function getCurrentBusiness(
   supabase: SupabaseClient,
   userId: string
 ) {
+  // On client side, honour a previously selected workspace
+  const preferredId = getSelectedBusinessId()
+  if (preferredId) {
+    const { data: preferred } = await supabase
+      .from("businesses")
+      .select("*")
+      .eq("id", preferredId)
+      .is("archived_at", null)
+      .maybeSingle()
+
+    if (preferred) {
+      // Verify the user actually has access to this business
+      const isOwner = preferred.owner_id === userId
+      if (isOwner) return preferred
+
+      const { data: bu } = await supabase
+        .from("business_users")
+        .select("id")
+        .eq("business_id", preferredId)
+        .eq("user_id", userId)
+        .maybeSingle()
+      if (bu) return preferred
+
+      // No access — clear stale preference and fall through
+      clearSelectedBusinessId()
+    } else {
+      // Business no longer exists — clear stale preference
+      clearSelectedBusinessId()
+    }
+  }
+
   // First, try to get business where user is owner (exclude archived)
   const { data: ownerBusiness, error: ownerError } = await supabase
     .from("businesses")
@@ -44,7 +144,7 @@ export async function getCurrentBusiness(
     return null
   }
 
-  // Fallback to original logic for error handling (only if ownerError exists)
+  // Fallback error handling
   if (ownerError) {
     const { data, error } = await supabase
       .from("businesses")
@@ -59,10 +159,7 @@ export async function getCurrentBusiness(
       const errMsg = (error as { message?: string }).message
       const errCode = (error as { code?: string }).code
 
-      // Benign/empty error (e.g. no rows from RLS) → treat as no business, don't throw
-      if (!errMsg && !errCode) {
-        return null
-      }
+      if (!errMsg && !errCode) return null
 
       console.error("Error fetching business:", {
         message: errMsg,
@@ -71,7 +168,6 @@ export async function getCurrentBusiness(
         hint: (error as { hint?: string }).hint,
       })
 
-      // If the error is about multiple rows, we can handle it gracefully
       if (errCode === "PGRST116" || errMsg?.includes("multiple")) {
         const { data: businessesData, error: businessesError } = await supabase
           .from("businesses")
@@ -95,7 +191,6 @@ export async function getCurrentBusiness(
         return businessesData && businessesData.length > 0 ? businessesData[0] : null
       }
 
-      // Create a more informative error for other cases
       const enhancedError = new Error(
         `Failed to fetch business: ${errMsg || errCode || "Unknown error"}`
       ) as any
@@ -109,24 +204,5 @@ export async function getCurrentBusiness(
     return data
   }
 
-  // If we get here, no business was found
   return null
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

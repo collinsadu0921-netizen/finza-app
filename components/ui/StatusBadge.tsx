@@ -24,6 +24,9 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
         cancelled: "bg-slate-100 text-slate-500 border border-slate-200 line-through decoration-slate-400", // Slate (History)
         void: "bg-slate-100 text-slate-500 border border-slate-200 line-through decoration-slate-400",
 
+        // Client-facing display statuses (override internal labels for public pages)
+        awaiting_payment: "bg-amber-50 text-amber-700 border border-amber-200",
+
         // VAT Return Statuses
         submitted: "bg-blue-50 text-blue-700 border border-blue-200",
 

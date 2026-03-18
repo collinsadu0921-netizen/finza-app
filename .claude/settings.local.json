@@ -63,7 +63,14 @@
       "Bash(grep -n \"notes\\\\|total_amount\\\\|status.*badge\\\\|accepted\\\\|signature\\\\|client_name\" /c/projects/finza-web/finza-web/app/estimates/[id]/view/page.tsx)",
       "Bash(grep -n \"public_token\\\\|client_name\\\\|select\\\\|\\\\.from.*estimates\" /c/projects/finza-web/finza-web/app/api/estimates/[id]/route.ts)",
       "Bash(ls /c/projects/finza-web/finza-web/app/quote-public/[token]/page.tsx /c/projects/finza-web/finza-web/app/proforma-public/[token]/page.tsx)",
-      "Bash(find /c/projects/finza-web/finza-web/app/api -path *invoice-settings* -name route.ts)"
+      "Bash(find /c/projects/finza-web/finza-web/app/api -path *invoice-settings* -name route.ts)",
+      "Bash(find /c/projects/finza-web/finza-web/components -name StatusBadge*)",
+      "Bash(grep -n \"SendInvoiceModal\\\\|SendMethodDropdown\\\\|whatsapp\\\\|sendModal\\\\|showSendModal\" /c/projects/finza-web/finza-web/app/service/invoices/[id]/view/page.tsx)",
+      "Bash(grep -n \"CREATE TABLE.*business_users\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -n \"CREATE TABLE.*businesses\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -n \"archived_at\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -n \"ADD COLUMN.*archived_at\\\\|archived_at.*TIMESTAMP\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(ls /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
     ]
   }
 }
