@@ -5,9 +5,10 @@ import { getCurrentBusiness } from "@/lib/business"
 // ── PATCH /api/service/team/[memberId] — update role ─────────────────────────
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { memberId: string } }
+  { params }: { params: Promise<{ memberId: string }> }
 ) {
   try {
+    const { memberId } = await params
     const supabase = await createSupabaseServerClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -36,7 +37,7 @@ export async function PATCH(
     const { data, error } = await supabase
       .from("business_users")
       .update({ role })
-      .eq("id", params.memberId)
+      .eq("id", memberId)
       .eq("business_id", business.id)
       .select()
       .single()
@@ -51,9 +52,10 @@ export async function PATCH(
 // ── DELETE /api/service/team/[memberId] — remove member ──────────────────────
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { memberId: string } }
+  { params }: { params: Promise<{ memberId: string }> }
 ) {
   try {
+    const { memberId } = await params
     const supabase = await createSupabaseServerClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -78,7 +80,7 @@ export async function DELETE(
     const { data: target } = await supabase
       .from("business_users")
       .select("user_id")
-      .eq("id", params.memberId)
+      .eq("id", memberId)
       .eq("business_id", business.id)
       .maybeSingle()
 
@@ -89,7 +91,7 @@ export async function DELETE(
     const { error } = await supabase
       .from("business_users")
       .delete()
-      .eq("id", params.memberId)
+      .eq("id", memberId)
       .eq("business_id", business.id)
 
     if (error) throw error
