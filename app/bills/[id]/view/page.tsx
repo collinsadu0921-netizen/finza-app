@@ -29,6 +29,24 @@ type Bill = {
   total: number
   notes: string | null
   attachment_path: string | null
+  wht_applicable: boolean
+  wht_rate: number | null
+  wht_amount: number
+  wht_remitted_at: string | null
+  wht_remittance_ref: string | null
+  // Import bill fields
+  bill_type: "standard" | "import"
+  import_description: string | null
+  cif_value: number | null
+  import_duty_rate: number | null
+  import_duty_amount: number | null
+  ecowas_levy: number | null
+  au_levy: number | null
+  exim_levy: number | null
+  sil_levy: number | null
+  examination_fee: number | null
+  clearing_agent_fee: number | null
+  landed_cost_account_code: string | null
 }
 
 type BillItem = {
@@ -224,17 +242,32 @@ export default function BillViewPage() {
           </div>
 
           {/* Bill Summary Cards - hidden in print/export */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 export-hide print-hide">
+          <div className={`grid grid-cols-1 gap-4 mb-6 export-hide print-hide ${bill.wht_applicable ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
             <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4">
               <div className="flex items-center justify-between">
-                <span className="text-purple-900 dark:text-purple-300 font-semibold">Total Amount:</span>
-                <span className="text-purple-900 dark:text-purple-300 font-bold text-xl">₵{Number(bill.total).toFixed(2)}</span>
+                <span className="text-purple-900 dark:text-purple-300 font-semibold">Gross Total:</span>
+                <span className="text-purple-900 dark:text-purple-300 font-bold text-xl">{currency}{Number(bill.total).toFixed(2)}</span>
               </div>
             </div>
+            {bill.wht_applicable && (
+              <div className={`bg-gradient-to-br rounded-xl p-4 border ${bill.wht_remitted_at ? 'from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border-green-200 dark:border-green-700' : 'from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border-orange-200 dark:border-orange-700'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`${bill.wht_remitted_at ? 'text-green-900 dark:text-green-300' : 'text-orange-900 dark:text-orange-300'} font-semibold text-sm`}>
+                    WHT ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%):
+                  </span>
+                  <span className={`${bill.wht_remitted_at ? 'text-green-900 dark:text-green-300' : 'text-orange-900 dark:text-orange-300'} font-bold text-xl`}>
+                    {currency}{Number(bill.wht_amount).toFixed(2)}
+                  </span>
+                </div>
+                <p className={`text-xs mt-1 ${bill.wht_remitted_at ? 'text-green-700 dark:text-green-400' : 'text-orange-700 dark:text-orange-400'}`}>
+                  {bill.wht_remitted_at ? '✓ Remitted to GRA' : 'Pending remittance to GRA'}
+                </p>
+              </div>
+            )}
             <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4">
               <div className="flex items-center justify-between">
                 <span className="text-green-900 dark:text-green-300 font-semibold">Total Paid:</span>
-                <span className="text-green-900 dark:text-green-300 font-bold text-xl">₵{totalPaid.toFixed(2)}</span>
+                <span className="text-green-900 dark:text-green-300 font-bold text-xl">{currency}{totalPaid.toFixed(2)}</span>
               </div>
             </div>
             <div className={`bg-gradient-to-br ${balance > 0 ? 'from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border-orange-200 dark:border-orange-700' : 'from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border-green-200 dark:border-green-700'} rounded-xl p-4`}>
@@ -291,36 +324,130 @@ export default function BillViewPage() {
                 )}
               </div>
 
-              {/* Line Items */}
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Line Items</h2>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 dark:bg-gray-700">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Description</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Qty</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Unit Price</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {items.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.description}</td>
-                          <td className="px-4 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{Number(item.qty)}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
-                            {currency}{Number(item.unit_price).toFixed(2)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-white">
-                            {currency}{Number(item.line_subtotal).toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Line Items / Import Breakdown */}
+              {bill.bill_type === "import" ? (
+                /* Import duty breakdown */
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center gap-3 mb-4">
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">Import / Customs Entry</h2>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300">
+                      📦 Import Bill
+                    </span>
+                  </div>
+
+                  {bill.import_description && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-5 italic">{bill.import_description}</p>
+                  )}
+
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                      <span className="text-gray-600 dark:text-gray-400">CIF Value <span className="text-xs">(Cost + Insurance + Freight)</span></span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{currency}{Number(bill.cif_value ?? 0).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
+                      <span className="text-gray-600 dark:text-gray-400">
+                        Import Duty <span className="text-xs">({((Number(bill.import_duty_rate ?? 0)) * 100).toFixed(0)}% ECOWAS CET)</span>
+                      </span>
+                      <span className="font-medium text-gray-900 dark:text-white">{currency}{Number(bill.import_duty_amount ?? 0).toFixed(2)}</span>
+                    </div>
+
+                    {/* Port levies */}
+                    {Number(bill.ecowas_levy) > 0 && (
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                        <span>ECOWAS Levy (0.5%)</span>
+                        <span>{currency}{Number(bill.ecowas_levy).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(bill.au_levy) > 0 && (
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                        <span>AU Levy (0.2%)</span>
+                        <span>{currency}{Number(bill.au_levy).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(bill.exim_levy) > 0 && (
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                        <span>EXIM Levy (0.75%)</span>
+                        <span>{currency}{Number(bill.exim_levy).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(bill.sil_levy) > 0 && (
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                        <span>SIL Levy (2% — used goods)</span>
+                        <span>{currency}{Number(bill.sil_levy).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {Number(bill.examination_fee) > 0 && (
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                        <span>Examination Fee (1%)</span>
+                        <span>{currency}{Number(bill.examination_fee).toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {/* VAT base */}
+                    {(() => {
+                      const vatBase = Number(bill.cif_value ?? 0)
+                        + Number(bill.import_duty_amount ?? 0)
+                        + Number(bill.ecowas_levy ?? 0)
+                        + Number(bill.au_levy ?? 0)
+                        + Number(bill.exim_levy ?? 0)
+                        + Number(bill.sil_levy ?? 0)
+                        + Number(bill.examination_fee ?? 0)
+                      return (
+                        <div className="flex justify-between py-2 border-t border-indigo-200 dark:border-indigo-700 mt-1">
+                          <span className="font-semibold text-indigo-900 dark:text-indigo-200">VAT Base (landed cost)</span>
+                          <span className="font-bold text-indigo-900 dark:text-indigo-200">{currency}{vatBase.toFixed(2)}</span>
+                        </div>
+                      )
+                    })()}
+
+                    {Number(bill.clearing_agent_fee) > 0 && (
+                      <div className="flex justify-between py-2 border-t border-dashed border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
+                        <span>Clearing Agent Fee (posted to 5220)</span>
+                        <span>{currency}{Number(bill.clearing_agent_fee).toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {bill.landed_cost_account_code && (
+                      <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                          Landed cost posted to account {bill.landed_cost_account_code}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Standard line items */
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Line Items</h2>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Description</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Qty</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Unit Price</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {items.map((item) => (
+                          <tr key={item.id}>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.description}</td>
+                            <td className="px-4 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{Number(item.qty)}</td>
+                            <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                              {currency}{Number(item.unit_price).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-white">
+                              {currency}{Number(item.line_subtotal).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Tax Breakdown */}
               {(bill.nhil > 0 || bill.vat > 0) && (
@@ -366,9 +493,29 @@ export default function BillViewPage() {
                       })()}
                     </div>
                     <div className="flex justify-between items-center pt-3 border-t-2 border-gray-300 dark:border-gray-600">
-                      <span className="text-gray-900 dark:text-white font-bold text-lg">Total:</span>
+                      <span className="text-gray-900 dark:text-white font-bold text-lg">
+                        {bill.wht_applicable ? 'Gross Total:' : 'Total:'}
+                      </span>
                       <span className="font-bold text-purple-600 dark:text-purple-400 text-xl">{currency}{Number(bill.total).toFixed(2)}</span>
                     </div>
+                    {bill.wht_applicable && bill.wht_amount > 0 && (
+                      <>
+                        <div className="flex justify-between items-center text-sm pt-2 border-t border-orange-200 dark:border-orange-700">
+                          <span className="text-orange-700 dark:text-orange-400 font-medium">
+                            WHT Deduction ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%):
+                          </span>
+                          <span className="text-orange-700 dark:text-orange-400 font-semibold">
+                            − {currency}{Number(bill.wht_amount).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t-2 border-orange-300 dark:border-orange-600">
+                          <span className="text-orange-900 dark:text-orange-200 font-bold text-lg">Net to Supplier:</span>
+                          <span className="font-bold text-orange-600 dark:text-orange-400 text-xl">
+                            {currency}{(Number(bill.total) - Number(bill.wht_amount)).toFixed(2)}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -437,6 +584,47 @@ export default function BillViewPage() {
                 )}
               </div>
 
+              {/* WHT Remittance Card */}
+              {bill.wht_applicable && bill.wht_amount > 0 && (
+                <div className={`rounded-2xl shadow-lg p-6 border ${bill.wht_remitted_at ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-700'}`}>
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Withholding Tax</h2>
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">WHT Amount:</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">{currency}{Number(bill.wht_amount).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">Status:</span>
+                      <span className={`font-semibold ${bill.wht_remitted_at ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                        {bill.wht_remitted_at ? 'Remitted to GRA' : 'Pending remittance'}
+                      </span>
+                    </div>
+                    {bill.wht_remitted_at && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Remitted on:</span>
+                        <span className="text-gray-900 dark:text-white">
+                          {new Date(bill.wht_remitted_at).toLocaleDateString("en-GB")}
+                        </span>
+                      </div>
+                    )}
+                    {bill.wht_remittance_ref && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">GRA Ref:</span>
+                        <span className="text-gray-900 dark:text-white">{bill.wht_remittance_ref}</span>
+                      </div>
+                    )}
+                  </div>
+                  {!bill.wht_remitted_at && (
+                    <a
+                      href="/service/accounting/wht"
+                      className="w-full block text-center bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 font-medium text-sm shadow transition-all"
+                    >
+                      Remit to GRA →
+                    </a>
+                  )}
+                </div>
+              )}
+
               {/* Actions */}
               <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Actions</h2>
@@ -480,6 +668,8 @@ export default function BillViewPage() {
             onSuccess={handlePaymentAdded}
             editingPayment={editingPayment}
             businessCountry={businessCountry}
+            whtApplicable={bill.wht_applicable}
+            whtAmount={Number(bill.wht_amount) || 0}
           />
         )}
       </div>
@@ -497,6 +687,8 @@ function AddPaymentModal({
   onSuccess,
   editingPayment,
   businessCountry,
+  whtApplicable = false,
+  whtAmount = 0,
 }: {
   billId: string
   businessId: string
@@ -506,6 +698,8 @@ function AddPaymentModal({
   onSuccess: () => void
   editingPayment: BillPayment | null
   businessCountry?: string | null
+  whtApplicable?: boolean
+  whtAmount?: number
 }) {
   // Get allowed payment methods based on country
   const countryCode = normalizeCountry(businessCountry)
@@ -521,6 +715,8 @@ function AddPaymentModal({
   // Determine default method (first available, or bank if available)
   const defaultMethod = canUseBank ? "bank" : (canUseCash ? "cash" : (canUseMobileMoney ? "momo" : (canUseCard ? "card" : "bank")))
   
+  // Net amount the supplier should receive (excludes WHT which goes to GRA)
+  const netBalance = whtApplicable && whtAmount > 0 ? balance - whtAmount : balance
   const [amount, setAmount] = useState(editingPayment ? editingPayment.amount.toString() : "")
   const [date, setDate] = useState(editingPayment ? editingPayment.date : new Date().toISOString().split("T")[0])
   const [method, setMethod] = useState(editingPayment ? editingPayment.method : defaultMethod)
@@ -539,8 +735,8 @@ function AddPaymentModal({
       return
     }
 
-    if (Number(amount) > balance && !editingPayment) {
-      setError(`Payment amount cannot exceed balance (${currencySymbol}${balance.toFixed(2)})`)
+    if (Number(amount) > netBalance && !editingPayment) {
+      setError(`Payment amount cannot exceed net payable (${currencySymbol}${netBalance.toFixed(2)})`)
       return
     }
 
@@ -609,18 +805,24 @@ function AddPaymentModal({
           <div>
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Amount *</label>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              min="0"
-              step="0.01"
-              max={editingPayment ? undefined : balance}
+              onFocus={(e) => e.target.select()}
               required
+              placeholder={editingPayment ? "" : currencySymbol + netBalance.toFixed(2)}
               className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
             />
-            {!editingPayment && (
+            {!editingPayment && whtApplicable && whtAmount > 0 ? (
+              <div className="mt-1 space-y-0.5">
+                <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+                  Net to supplier: {currencySymbol}{netBalance.toFixed(2)} (WHT of {currencySymbol}{whtAmount.toFixed(2)} remitted separately to GRA)
+                </p>
+              </div>
+            ) : !editingPayment ? (
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Balance: {currencySymbol}{balance.toFixed(2)}</p>
-            )}
+            ) : null}
           </div>
 
           <div>

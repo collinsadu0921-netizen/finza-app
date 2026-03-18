@@ -4,11 +4,13 @@ import Link from "next/link"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 
 const REPORTS = [
-  { label: "Trial Balance", path: "/accounting/reports/trial-balance" },
-  { label: "Profit & Loss", path: "/accounting/reports/profit-and-loss" },
-  { label: "Balance Sheet", path: "/accounting/reports/balance-sheet" },
-  { label: "General Ledger", path: "/accounting/ledger" },
-  { label: "Reconciliation", path: "/accounting/reconciliation" },
+  { label: "Trial Balance",       path: "/accounting/reports/trial-balance" },
+  { label: "Profit & Loss",       path: "/accounting/reports/profit-and-loss" },
+  { label: "Balance Sheet",       path: "/accounting/reports/balance-sheet" },
+  { label: "Cash Flow",           path: "/accounting/reports/cash-flow" },
+  { label: "Changes in Equity",   path: "/accounting/reports/equity-changes" },
+  { label: "General Ledger",      path: "/accounting/ledger" },
+  { label: "Reconciliation",      path: "/accounting/reconciliation" },
 ] as const
 
 export interface ReportsQuickAccessProps {

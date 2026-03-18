@@ -38,6 +38,11 @@ type InvoiceItem = {
   _rawPrice?: string
 }
 
+// Stable wrapper for service route: avoids defining a component inline inside
+// NewInvoicePage so that re-renders (e.g. typing in New Customer modal) don't
+// remount the whole tree and cause input focus loss / "snappy" behaviour.
+const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
+
 // ------------------------------------------------------------
 // LINE ITEM ROW — memoised so typing in description doesn't
 // cause the parent (and all siblings) to re-render on every
@@ -554,7 +559,7 @@ export default function NewInvoicePage() {
 
   // When under /service/*, the service layout already provides ProtectedLayout (sidebar + header).
   // Avoid double layout (double header/logout and shifted content).
-  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
+  const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
 
   return (
     <Wrapper>

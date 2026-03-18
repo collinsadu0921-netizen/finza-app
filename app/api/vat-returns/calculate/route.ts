@@ -129,9 +129,15 @@ export async function POST(request: NextRequest) {
     const total_input_covid   = Number(covid.period_debits)
     const total_input_tax     = total_input_vat + total_input_nhil + total_input_getfund + total_input_covid
 
-    // Net VAT for the period (output credits minus input debits)
-    // closing_balance already reflects opening + period movement, so use period net only
-    const periodNetVat = total_output_vat - total_input_vat
+    // Net tax payable for the period (output credits minus input debits)
+    // Act 1151 (VAT Act 2025, effective Jan 1 2026): NHIL and GETFund are now claimable
+    // as input tax credits — include all three levies in the net calculation post-2026.
+    // For historical periods (pre-2026), only VAT was claimable so use VAT-only net.
+    const periodIsPost2026 = new Date(period_end_date) >= new Date("2026-01-01")
+    const periodNetVat = periodIsPost2026
+      ? (total_output_vat + total_output_nhil + total_output_getfund)
+        - (total_input_vat + total_input_nhil + total_input_getfund)
+      : total_output_vat - total_input_vat
     const net_vat_payable = Math.max(periodNetVat, 0)
     const net_vat_refund  = Math.max(-periodNetVat, 0)
 

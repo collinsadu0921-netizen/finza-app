@@ -66,6 +66,8 @@ export async function GET(request: NextRequest) {
         logo_url: business.logo_url || null,
         default_currency: business.default_currency || null,
         start_date: (business as any).start_date || null,
+        cit_rate_code: (business as any).cit_rate_code || "standard_25",
+        vat_scheme: (business as any).vat_scheme || "standard",
         created_at: business.created_at || null,
       }
     })
@@ -111,6 +113,8 @@ export async function PUT(request: NextRequest) {
       logo_url,
       default_currency,
       start_date,
+      cit_rate_code,
+      vat_scheme,
     } = body
 
     // Validate required fields
@@ -220,6 +224,8 @@ export async function PUT(request: NextRequest) {
     if (logo_url !== undefined) updateData.logo_url = logo_url
     if (default_currency !== undefined) updateData.default_currency = default_currency
     if (start_date !== undefined) updateData.start_date = start_date || null
+    if (cit_rate_code !== undefined) updateData.cit_rate_code = cit_rate_code
+    if (vat_scheme !== undefined) updateData.vat_scheme = vat_scheme
 
     // ONBOARDING FIX: Advance onboarding_step when profile is saved during onboarding
     // This ensures onboarding always progresses after successful actions

@@ -28,8 +28,25 @@ export async function POST(request: NextRequest) {
       notes,
       items,
       apply_taxes = true,
+      apply_wht = false,
+      wht_rate_code = null,
+      wht_rate = null,
+      wht_amount = 0,
       status = "draft",
       attachment_path,
+      // Import bill fields
+      bill_type = "standard",
+      import_description = null,
+      cif_value = null,
+      import_duty_rate = 0,
+      import_duty_amount = 0,
+      ecowas_levy = 0,
+      au_levy = 0,
+      exim_levy = 0,
+      sil_levy = 0,
+      examination_fee = 0,
+      clearing_agent_fee = 0,
+      landed_cost_account_code = "5200",
     } = body
 
     // Validate required fields
@@ -57,9 +74,15 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    if (!items || items.length === 0) {
+    if (bill_type === "standard" && (!items || items.length === 0)) {
       return NextResponse.json(
         { success: false, error: "At least one bill item is required" },
+        { status: 400 }
+      )
+    }
+    if (bill_type === "import" && (!cif_value || Number(cif_value) <= 0)) {
+      return NextResponse.json(
+        { success: false, error: "CIF value is required for import bills" },
         { status: 400 }
       )
     }
@@ -71,39 +94,63 @@ export async function POST(request: NextRequest) {
     // }
 
     // Calculate totals using Ghana Tax Engine
-    // For bills, the line items represent amounts that INCLUDE taxes (like expenses)
-    // So we calculate subtotal first, then reverse-calculate base if taxes are applied
-    const subtotalIncludingTaxes = items.reduce((sum: number, item: any) => {
-      const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
-      const discount = Number(item.discount_amount) || 0
-      return sum + lineTotal - discount
-    }, 0)
-
     let taxResult
-    if (apply_taxes) {
-      // Reverse-calculate: total includes taxes, so extract base amount
-      const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
-        subtotalIncludingTaxes,
-        true
-      )
-      taxResult = {
-        subtotalBeforeTax: baseAmount,
-        nhil: taxBreakdown.nhil,
-        getfund: taxBreakdown.getfund,
-        covid: taxBreakdown.covid,
-        vat: taxBreakdown.vat,
-        totalTax: taxBreakdown.totalTax,
-        grandTotal: subtotalIncludingTaxes, // Total stays the same (includes taxes)
+
+    if (bill_type === "import") {
+      // Import bill: VAT/NHIL/GETFund applied ON TOP of the VAT base
+      // VAT base = CIF + import duty + all port levies
+      // The user enters CIF-inclusive total; taxes are added on top by ICUMS
+      const vatBase = Number(cif_value) + Number(import_duty_amount)
+        + Number(ecowas_levy) + Number(au_levy)
+        + Number(exim_levy) + Number(sil_levy) + Number(examination_fee)
+
+      if (apply_taxes) {
+        // For imports, taxes are applied ON TOP (exclusive), not extracted from total
+        const importTax = calculateGhanaTaxesFromLineItems([{ quantity: 1, unit_price: vatBase }])
+        taxResult = {
+          subtotalBeforeTax: vatBase,
+          nhil: importTax.nhil ?? 0,
+          getfund: importTax.getfund ?? 0,
+          covid: 0,
+          vat: importTax.vat ?? 0,
+          totalTax: importTax.totalTax ?? 0,
+          grandTotal: vatBase + (importTax.totalTax ?? 0) + Number(clearing_agent_fee),
+        }
+      } else {
+        taxResult = {
+          subtotalBeforeTax: vatBase,
+          nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0,
+          grandTotal: vatBase + Number(clearing_agent_fee),
+        }
       }
     } else {
-      taxResult = {
-        subtotalBeforeTax: subtotalIncludingTaxes,
-        nhil: 0,
-        getfund: 0,
-        covid: 0,
-        vat: 0,
-        totalTax: 0,
-        grandTotal: subtotalIncludingTaxes,
+      // Standard bill: line items come in tax-inclusive, extract base
+      const subtotalIncludingTaxes = (items ?? []).reduce((sum: number, item: any) => {
+        const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
+        const discount = Number(item.discount_amount) || 0
+        return sum + lineTotal - discount
+      }, 0)
+
+      if (apply_taxes) {
+        const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
+          subtotalIncludingTaxes,
+          true
+        )
+        taxResult = {
+          subtotalBeforeTax: baseAmount,
+          nhil: taxBreakdown.nhil,
+          getfund: taxBreakdown.getfund,
+          covid: taxBreakdown.covid,
+          vat: taxBreakdown.vat,
+          totalTax: taxBreakdown.totalTax,
+          grandTotal: subtotalIncludingTaxes,
+        }
+      } else {
+        taxResult = {
+          subtotalBeforeTax: subtotalIncludingTaxes,
+          nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0,
+          grandTotal: subtotalIncludingTaxes,
+        }
       }
     }
 
@@ -134,8 +181,25 @@ export async function POST(request: NextRequest) {
         vat: taxResult.vat,
         total_tax: taxResult.totalTax,
         total: taxResult.grandTotal,
+        wht_applicable: apply_wht,
+        wht_rate_code: apply_wht ? wht_rate_code : null,
+        wht_rate: apply_wht ? wht_rate : null,
+        wht_amount: apply_wht ? wht_amount : 0,
         status: finalStatus,
         attachment_path: attachment_path || null,
+        // Import bill fields
+        bill_type,
+        import_description: bill_type === "import" ? import_description : null,
+        cif_value: bill_type === "import" ? Number(cif_value) : null,
+        import_duty_rate: bill_type === "import" ? Number(import_duty_rate) : 0,
+        import_duty_amount: bill_type === "import" ? Number(import_duty_amount) : 0,
+        ecowas_levy: bill_type === "import" ? Number(ecowas_levy) : 0,
+        au_levy: bill_type === "import" ? Number(au_levy) : 0,
+        exim_levy: bill_type === "import" ? Number(exim_levy) : 0,
+        sil_levy: bill_type === "import" ? Number(sil_levy) : 0,
+        examination_fee: bill_type === "import" ? Number(examination_fee) : 0,
+        clearing_agent_fee: bill_type === "import" ? Number(clearing_agent_fee) : 0,
+        landed_cost_account_code: bill_type === "import" ? landed_cost_account_code : "5200",
       })
       .select()
       .single()
@@ -163,32 +227,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create bill items
-    const billItems = items.map((item: any) => ({
-      bill_id: bill.id,
-      description: item.description || "",
-      qty: Number(item.qty) || 0,
-      unit_price: Number(item.unit_price) || 0,
-      discount_amount: Number(item.discount_amount) || 0,
-      line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
-    }))
+    // Create bill items (standard bills only — import bills use the breakdown fields)
+    if (bill_type === "standard" && items?.length > 0) {
+      const billItems = items.map((item: any) => ({
+        bill_id: bill.id,
+        description: item.description || "",
+        qty: Number(item.qty) || 0,
+        unit_price: Number(item.unit_price) || 0,
+        discount_amount: Number(item.discount_amount) || 0,
+        line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
+      }))
 
-    const { error: itemsError } = await supabase
-      .from("bill_items")
-      .insert(billItems)
+      const { error: itemsError } = await supabase.from("bill_items").insert(billItems)
 
-    if (itemsError) {
-      console.error("Error creating bill items:", itemsError)
-      // Delete the bill if items fail
-      await supabase.from("bills").delete().eq("id", bill.id)
-      return NextResponse.json(
-        { 
-          success: false,
-          error: itemsError.message || "Failed to create bill items. Please check item details.",
-          details: itemsError
-        },
-        { status: 500 }
-      )
+      if (itemsError) {
+        console.error("Error creating bill items:", itemsError)
+        await supabase.from("bills").delete().eq("id", bill.id)
+        return NextResponse.json(
+          { success: false, error: itemsError.message || "Failed to create bill items.", details: itemsError },
+          { status: 500 }
+        )
+      }
     }
 
     // Log audit entry

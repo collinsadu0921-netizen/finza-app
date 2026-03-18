@@ -20,6 +20,7 @@ type Bill = {
   total: number
   total_paid: number
   balance: number
+  bill_type?: "standard" | "import"
 }
 
 export default function BillsPage() {
@@ -280,7 +281,14 @@ export default function BillsPage() {
                     {bills.map((bill) => (
                       <tr key={bill.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">{bill.bill_number}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{bill.bill_number}</span>
+                            {bill.bill_type === "import" && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                                Import
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-700 dark:text-gray-300">{bill.supplier_name}</div>

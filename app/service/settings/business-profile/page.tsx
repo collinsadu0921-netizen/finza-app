@@ -36,6 +36,8 @@ export default function ServiceBusinessProfilePage() {
     logo_url: "",
     default_currency: "",
     start_date: "",
+    cit_rate_code: "standard_25",
+    vat_scheme: "standard",
   })
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
@@ -90,6 +92,8 @@ export default function ServiceBusinessProfilePage() {
         logo_url: businessData.logo_url || "",
         default_currency: businessData.default_currency || "",
         start_date: businessData.start_date ? new Date(businessData.start_date).toISOString().split("T")[0] : "",
+        cit_rate_code: businessData.cit_rate_code || "standard_25",
+        vat_scheme: businessData.vat_scheme || "standard",
       })
 
       if (businessData.logo_url) setLogoPreview(businessData.logo_url)
@@ -281,6 +285,56 @@ export default function ServiceBusinessProfilePage() {
             </select>
           </div>
         </div>
+
+        {/* Tax Settings — Ghana only */}
+        {formData.address_country === "Ghana" && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tax Settings</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Used to automatically calculate your Corporate Income Tax (CIT) provisions.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                CIT Rate Category
+              </label>
+              <select
+                value={formData.cit_rate_code}
+                onChange={(e) => handleChange("cit_rate_code", e.target.value)}
+                className="w-full md:w-1/2 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="standard_25">Standard Company — 25% of net profit</option>
+                <option value="hotel_22">Hotel Industry — 22% of net profit</option>
+                <option value="bank_20">Bank / Financial (agri & leasing income) — 20%</option>
+                <option value="export_8">Non-Traditional Exports — 8% of net profit</option>
+                <option value="agro_1">Agro-processing (first 5 yrs) — 1% of net profit</option>
+                <option value="mining_35">Mining / Upstream Petroleum — 35% of net profit</option>
+                <option value="presumptive_3">Presumptive / Sole Trader — 3% of gross turnover</option>
+                <option value="exempt">Exempt (Free Zone / Tax Holiday) — 0%</option>
+              </select>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                Not sure? Most registered companies use <strong>Standard — 25%</strong>. Consult your accountant if you qualify for a reduced rate.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                VAT Registration Status
+              </label>
+              <select
+                value={formData.vat_scheme}
+                onChange={(e) => handleChange("vat_scheme", e.target.value)}
+                className="w-full md:w-1/2 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="standard">VAT Registered — Standard Rate (15% + NHIL + GETFund)</option>
+                <option value="none">Not VAT Registered — turnover below GHS 750,000</option>
+              </select>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                If you have a VAT certificate from GRA, select <strong>VAT Registered</strong>. Businesses with annual turnover below GHS 750,000 are not required to register (VAT Act 2025, Act 1151). The VAT Flat Rate Scheme (VFRS) was abolished effective January 1, 2026.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-3">
           <button type="button" onClick={() => router.back()} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 dark:bg-gray-700">

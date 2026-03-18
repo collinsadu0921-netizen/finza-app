@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     const { data: businessData } = await supabase
       .from("businesses")
-      .select("address_country")
+      .select("address_country, vat_scheme")
       .eq("id", business.id)
       .single()
 
@@ -46,6 +46,31 @@ export async function POST(request: NextRequest) {
         {
           error: "Business country is required. Please set your business country in Business Profile settings.",
           unsupported: true,
+        },
+        { status: 400 }
+      )
+    }
+
+    const vatScheme = (businessData as any).vat_scheme || "standard"
+    if (vatScheme === "none") {
+      return NextResponse.json(
+        {
+          error: "Your business is not VAT registered. VAT returns are only available for VAT-registered businesses. Update your VAT Registration Status in Business Profile settings if this is incorrect.",
+          unsupported: true,
+          vat_scheme: "none",
+        },
+        { status: 400 }
+      )
+    }
+    if (vatScheme === "vfrs") {
+      // VFRS was abolished under the Value Added Tax Act, 2025 (Act 1151), effective Jan 1, 2026.
+      // All previously VFRS-registered businesses are now on the standard rate.
+      // This guard remains for any legacy records not yet migrated.
+      return NextResponse.json(
+        {
+          error: "The VAT Flat Rate Scheme (VFRS) was abolished effective January 1, 2026 under the Value Added Tax Act, 2025 (Act 1151). Your business should now be on the Standard Rate. Please update your VAT Registration Status to 'VAT Registered — Standard Rate' in Business Profile settings.",
+          unsupported: true,
+          vat_scheme: "vfrs",
         },
         { status: 400 }
       )
