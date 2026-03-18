@@ -117,6 +117,10 @@ export function InvoiceDocument({
   const showTaxBreakdown =
     invoice.apply_taxes && (settings?.show_tax_breakdown !== false) && totalTax > 0
 
+  const hasBank = !!(settings?.bank_account_number)
+  const hasMomo = !!(settings?.momo_number)
+  const hasPaymentDetails = hasBank || hasMomo
+
   return (
     <div className={`bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden ${className}`}>
       {/* Header: logo + business + doc number + status */}
@@ -252,7 +256,7 @@ export function InvoiceDocument({
       </div>
 
       {/* Totals */}
-      <div className="p-8 border-t border-slate-200">
+      <div className="p-8">
         <div className="flex justify-end">
           <div className="w-full md:w-80 space-y-3">
             <div className="flex justify-between items-center text-sm text-slate-600">
@@ -265,19 +269,19 @@ export function InvoiceDocument({
               <>
                 {legacyTaxAmounts.nhil > 0 && (
                   <div className="flex justify-between items-center text-xs text-slate-500">
-                    <span>NHIL</span>
+                    <span>NHIL (2.5%)</span>
                     <span>{formatMoney(legacyTaxAmounts.nhil, invoice.currency_symbol)}</span>
                   </div>
                 )}
                 {legacyTaxAmounts.getfund > 0 && (
                   <div className="flex justify-between items-center text-xs text-slate-500">
-                    <span>GETFund</span>
+                    <span>GETFund (2.5%)</span>
                     <span>{formatMoney(legacyTaxAmounts.getfund, invoice.currency_symbol)}</span>
                   </div>
                 )}
                 {legacyTaxAmounts.vat > 0 && (
                   <div className="flex justify-between items-center text-xs text-slate-500">
-                    <span>VAT</span>
+                    <span>VAT (15%)</span>
                     <span>{formatMoney(legacyTaxAmounts.vat, invoice.currency_symbol)}</span>
                   </div>
                 )}
@@ -299,9 +303,73 @@ export function InvoiceDocument({
         </div>
       </div>
 
+      {/* Payment Details — shown on invoice body so it prints / appears in preview */}
+      {hasPaymentDetails && (
+        <div className="px-8 pb-8 border-t border-slate-100 pt-6">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+            </svg>
+            Payment Details
+          </h3>
+          <div className={`grid gap-6 ${hasBank && hasMomo ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 max-w-sm"}`}>
+            {hasBank && (
+              <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Bank Transfer</span>
+                </div>
+                <div className="space-y-1 text-sm">
+                  {settings?.bank_name && (
+                    <p className="font-semibold text-slate-800">{settings.bank_name}</p>
+                  )}
+                  {settings?.bank_account_name && (
+                    <p className="text-slate-600">
+                      <span className="text-slate-400">Account name: </span>{settings.bank_account_name}
+                    </p>
+                  )}
+                  <p className="font-mono text-slate-800 bg-white border border-slate-200 rounded px-2.5 py-1 inline-block mt-1 text-xs tracking-wider">
+                    {settings?.bank_account_number}
+                  </p>
+                </div>
+              </div>
+            )}
+            {hasMomo && (
+              <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-7 h-7 rounded-full bg-yellow-100 flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mobile Money</span>
+                </div>
+                <div className="space-y-1 text-sm">
+                  {settings?.momo_provider && (
+                    <p className="font-semibold text-slate-800">{settings.momo_provider} MoMo</p>
+                  )}
+                  {settings?.momo_name && (
+                    <p className="text-slate-600">
+                      <span className="text-slate-400">Name: </span>{settings.momo_name}
+                    </p>
+                  )}
+                  <p className="font-mono text-slate-800 bg-white border border-slate-200 rounded px-2.5 py-1 inline-block mt-1 text-xs tracking-wider">
+                    {settings?.momo_number}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Notes / footer */}
       {(invoice.notes || invoice.footer_message) && (
-        <div className="p-8 border-t border-slate-200 bg-slate-50/30">
+        <div className="px-8 pb-8 border-t border-slate-100 pt-6 bg-slate-50/30">
           {invoice.notes && (
             <div className="mb-4">
               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
@@ -311,7 +379,7 @@ export function InvoiceDocument({
             </div>
           )}
           {invoice.footer_message && (
-            <p className="text-sm text-slate-500 text-center">{invoice.footer_message}</p>
+            <p className="text-sm text-slate-500 text-center italic">{invoice.footer_message}</p>
           )}
         </div>
       )}

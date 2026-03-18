@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
-import { useToast } from "@/components/ui/ToastProvider"
 import { InvoiceDocument } from "@/components/invoices/InvoiceDocument"
 
 type Invoice = {
@@ -62,49 +61,46 @@ type InvoiceSettings = {
 export default function PublicInvoicePage() {
   const params = useParams()
   const token = params.token as string
-  const toast = useToast()
+
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [business, setBusiness] = useState<Business | null>(null)
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
   const [items, setItems] = useState<any[]>([])
   const [error, setError] = useState("")
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    loadInvoice()
+    fetch(`/api/invoices/public/${token}`)
+      .then(r => {
+        if (!r.ok) throw new Error("Invoice not found")
+        return r.json()
+      })
+      .then(d => {
+        setInvoice(d.invoice)
+        setBusiness(d.business)
+        setSettings(d.settings)
+        setItems(d.items || [])
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
   }, [token])
 
-  const loadInvoice = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(`/api/invoices/public/${token}`)
-
-      if (!response.ok) {
-        throw new Error("Invoice not found")
-      }
-
-      const data = await response.json()
-      setInvoice(data.invoice)
-      setBusiness(data.business)
-      setSettings(data.settings)
-      setItems(data.items || [])
-      setLoading(false)
-    } catch (err: any) {
-      setError(err.message || "Failed to load invoice")
-      setLoading(false)
-    }
-  }
-
-  const handleDownloadPdf = () => {
-    window.print()
+  const handleCopyPayLink = () => {
+    if (!invoice) return
+    const url = `${window.location.origin}/pay/${invoice.id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50/50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-900 mx-auto" />
-          <p className="mt-4 text-slate-600">Loading invoice...</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-slate-700 mx-auto" />
+          <p className="mt-3 text-slate-500 text-sm">Loading invoice…</p>
         </div>
       </div>
     )
@@ -112,128 +108,184 @@ export default function PublicInvoicePage() {
 
   if (error || !invoice) {
     return (
-      <div className="min-h-screen bg-gray-50/50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-rose-600 text-lg">{error || "Invoice not found"}</p>
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 rounded-full bg-slate-200 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="text-slate-700 font-medium">{error || "Invoice not found"}</p>
+          <p className="text-slate-400 text-sm mt-1">This link may be invalid or the invoice has been removed.</p>
         </div>
       </div>
     )
   }
 
+  const isPaid = invoice.status === "paid"
+  const isOverdue = invoice.status === "overdue"
+  const bizName = business?.trading_name ?? business?.legal_name ?? "Business"
+
+  // Status banner config
+  const bannerClass = isPaid
+    ? "bg-emerald-50 border-emerald-200"
+    : isOverdue
+    ? "bg-rose-50 border-rose-200"
+    : "bg-blue-50 border-blue-200"
+  const bannerTextClass = isPaid ? "text-emerald-800" : isOverdue ? "text-rose-800" : "text-blue-800"
+  const bannerIcon = isPaid ? (
+    <svg className="w-5 h-5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ) : isOverdue ? (
+    <svg className="w-5 h-5 text-rose-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ) : (
+    <svg className="w-5 h-5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+
   return (
     <>
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `@media print {
-            .no-print { display: none !important; }
-            body { background: #fff; }
-            .print\\:max-w-full { max-width: 100% !important; }
-            .print\\:shadow-none { box-shadow: none !important; }
-            .print\\:p-0 { padding: 0 !important; }
-          }`,
-        }}
-      />
-      <div className="min-h-screen bg-gray-50/50 py-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto space-y-6 print:max-w-full">
-          {/* Action bar (no-print): Download PDF + Pay online */}
-          <div className="no-print flex flex-wrap items-center justify-between gap-4">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          .no-print { display: none !important; }
+          body { background: #fff !important; }
+        }
+      ` }} />
+
+      <div className="min-h-screen bg-slate-100 py-6 px-4">
+        <div className="max-w-3xl mx-auto space-y-4">
+
+          {/* ── Top bar ─────────────────────────────────────── */}
+          <div className="no-print flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {business?.logo_url ? (
+                <img src={business.logo_url} alt="" className="h-6 w-6 rounded object-cover" />
+              ) : (
+                <div className="w-6 h-6 rounded bg-slate-800 flex items-center justify-center">
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+              )}
+              <span className="font-semibold text-slate-700 text-sm">{bizName}</span>
+            </div>
             <button
-              type="button"
-              onClick={handleDownloadPdf}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded shadow-sm text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
               </svg>
-              Download PDF
+              Print / Save PDF
             </button>
-            {invoice.status !== "paid" && (
-              <a
-                href={`/pay/${invoice.id}`}
-                className="inline-flex items-center gap-2 px-6 py-2 bg-slate-900 border border-transparent rounded shadow text-white text-sm font-medium hover:bg-black transition-colors"
-              >
-                Pay online
-              </a>
-            )}
           </div>
 
-          {/* Invoice document (shared component — matches create invoice page design) */}
+          {/* ── Status banner ──────────────────────────────── */}
+          <div className={`no-print rounded-2xl border p-4 flex items-center gap-3 ${bannerClass}`}>
+            {bannerIcon}
+            <div className="flex-1 min-w-0">
+              <p className={`font-semibold text-sm ${bannerTextClass}`}>
+                {isPaid
+                  ? "This invoice has been paid — thank you!"
+                  : isOverdue
+                  ? `Invoice #${invoice.invoice_number} is overdue`
+                  : `Invoice #${invoice.invoice_number} is awaiting payment`}
+              </p>
+              {!isPaid && invoice.due_date && (
+                <p className={`text-xs mt-0.5 ${bannerTextClass} opacity-70`}>
+                  Due {new Date(invoice.due_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                </p>
+              )}
+            </div>
+            <div className="shrink-0 text-right">
+              <p className={`text-xs ${bannerTextClass} opacity-60`}>{isPaid ? "Amount paid" : "Amount due"}</p>
+              <p className={`text-lg font-bold tabular-nums ${bannerTextClass}`}>
+                {invoice.currency_symbol}{Number(invoice.total).toFixed(2)}
+              </p>
+            </div>
+          </div>
+
+          {/* ── Invoice document ───────────────────────────── */}
+          {/* Bank/momo details appear inside this component at the bottom */}
           <InvoiceDocument
             invoice={invoice}
             business={business}
             items={items}
             settings={settings}
-            className="print:max-w-full print:shadow-none print:border-0"
+            className="print:shadow-none print:border-0 print:rounded-none"
           />
 
-          {/* Payment options (no-print): restyled to match create-page card */}
-          <div className="no-print bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-6 border-b border-slate-200">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Payment Options
-              </h3>
-            </div>
-            <div className="p-6 space-y-6">
-              {invoice.status !== "paid" && (
-                <>
+          {/* ── Pay online (no-print, only if unpaid) ──────── */}
+          {!isPaid && (
+            <div className="no-print bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Pay Online</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Secure payment via mobile money</p>
+                </div>
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                  isOverdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
+                }`}>
+                  {invoice.currency_symbol}{Number(invoice.total).toFixed(2)} due
+                </span>
+              </div>
+              <div className="p-5 flex flex-col sm:flex-row items-center gap-6">
+                {/* QR */}
+                <div className="shrink-0 flex flex-col items-center gap-1.5">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=4&data=${encodeURIComponent(typeof window !== "undefined" ? `${window.location.origin}/pay/${invoice.id}` : "")}`}
+                    alt="QR code"
+                    className="w-28 h-28 rounded-xl border border-slate-100 bg-white"
+                  />
+                  <p className="text-xs text-slate-400">Scan to pay</p>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex-1 w-full space-y-2.5">
                   <a
                     href={`/pay/${invoice.id}`}
-                    className="inline-flex items-center justify-center gap-2 w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded shadow-sm text-sm font-medium transition-colors"
+                    className="flex items-center justify-center gap-2 w-full bg-slate-900 hover:bg-black text-white font-semibold py-3 px-5 rounded-xl transition-colors text-sm"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                     Pay with Mobile Money
                   </a>
-                  <div className="text-center">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
-                      Scan QR Code to Pay
+                  <button
+                    onClick={handleCopyPayLink}
+                    className="flex items-center justify-center gap-2 w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 font-medium py-2.5 px-5 rounded-xl transition-colors text-sm"
+                  >
+                    {copied ? (
+                      <>
+                        <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Link copied!
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                        Copy payment link
+                      </>
+                    )}
+                  </button>
+                  {(settings?.bank_account_number || settings?.momo_number) && (
+                    <p className="text-xs text-slate-400 text-center pt-1">
+                      Or pay via bank/mobile money details shown on the invoice above
                     </p>
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(typeof window !== "undefined" ? `${window.location.origin}/pay/${invoice.id}` : "")}`}
-                      alt="Payment QR Code"
-                      className="border border-slate-200 rounded-lg p-2 bg-white inline-block"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const payUrl = typeof window !== "undefined" ? `${window.location.origin}/pay/${invoice.id}` : ""
-                        navigator.clipboard.writeText(payUrl)
-                        toast.showToast("Payment link copied to clipboard!", "success")
-                      }}
-                      className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium block mx-auto"
-                    >
-                      Copy Payment Link
-                    </button>
-                  </div>
-                </>
-              )}
-              {(settings?.bank_account_number || settings?.momo_number) && (
-                <div className="space-y-3 pt-4 border-t border-slate-100 text-sm">
-                  {settings.bank_account_number && (
-                    <div>
-                      <span className="font-medium text-slate-700">Bank Transfer</span>
-                      <p className="text-slate-600 mt-0.5">
-                        {settings.bank_name && `${settings.bank_name} — `}
-                        {settings.bank_account_name && `${settings.bank_account_name} — `}
-                        {settings.bank_account_number}
-                      </p>
-                    </div>
-                  )}
-                  {settings.momo_number && (
-                    <div>
-                      <span className="font-medium text-slate-700">Mobile Money</span>
-                      <p className="text-slate-600 mt-0.5">
-                        {settings.momo_provider && `${settings.momo_provider} — `}
-                        {settings.momo_name && `${settings.momo_name} — `}
-                        {settings.momo_number}
-                      </p>
-                    </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          )}
+
+          <p className="no-print text-center text-xs text-slate-400 pb-4">Powered by Finza</p>
         </div>
       </div>
     </>

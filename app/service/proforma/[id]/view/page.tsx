@@ -29,6 +29,14 @@ type ProformaInvoice = {
   currency_code: string | null
   currency_symbol: string | null
   converted_invoice_id: string | null
+  public_token: string | null
+  client_name_signed: string | null
+  client_id_type: string | null
+  client_id_number: string | null
+  client_signature: string | null
+  signed_at: string | null
+  rejected_reason: string | null
+  rejected_at: string | null
   customers?: {
     id: string
     name: string
@@ -69,6 +77,16 @@ export default function ProformaViewPage() {
   const [error, setError] = useState("")
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [copiedClientLink, setCopiedClientLink] = useState(false)
+
+  const handleCopyClientLink = () => {
+    if (!proforma?.public_token) return
+    const url = `${window.location.origin}/proforma-public/${proforma.public_token}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedClientLink(true)
+      setTimeout(() => setCopiedClientLink(false), 2000)
+    })
+  }
 
   useEffect(() => {
     if (proformaId) loadProforma()
@@ -335,6 +353,29 @@ export default function ProformaViewPage() {
 
           {proforma.status === "sent" && (
             <>
+              {/* Client acceptance link */}
+              {proforma.public_token && (
+                <button
+                  onClick={handleCopyClientLink}
+                  className="flex items-center gap-1.5 bg-slate-100 dark:bg-gray-700 text-slate-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-slate-200 dark:hover:bg-gray-600 text-sm font-medium transition-colors"
+                >
+                  {copiedClientLink ? (
+                    <>
+                      <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      Client Link
+                    </>
+                  )}
+                </button>
+              )}
               <button
                 onClick={handleAccept}
                 disabled={actionLoading}
@@ -572,6 +613,54 @@ export default function ProformaViewPage() {
           <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
             <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Footer</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{proforma.footer_message}</p>
+          </div>
+        )}
+
+        {/* Client acceptance details */}
+        {proforma.status === "accepted" && proforma.client_name_signed && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+              Accepted &amp; Signed by Client
+            </h3>
+            <div className="flex flex-wrap items-start gap-6">
+              {proforma.client_signature && (
+                <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
+                  <img src={proforma.client_signature} alt="Client signature" className="h-14 w-auto" />
+                </div>
+              )}
+              <div className="text-sm space-y-0.5">
+                <p className="font-semibold text-gray-800 dark:text-gray-200">{proforma.client_name_signed}</p>
+                {proforma.client_id_type && (
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {proforma.client_id_type === "ghana_card" ? "Ghana Card" :
+                     proforma.client_id_type === "national_id" ? "National ID" :
+                     proforma.client_id_type === "passport" ? "Passport" :
+                     proforma.client_id_type === "drivers_license" ? "Driver's License" :
+                     proforma.client_id_type === "voters_id" ? "Voter's ID" :
+                     proforma.client_id_type}
+                    {proforma.client_id_number && `: ${proforma.client_id_number}`}
+                  </p>
+                )}
+                {proforma.signed_at && (
+                  <p className="text-gray-400 dark:text-gray-500 text-xs">
+                    Signed {new Date(proforma.signed_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rejection details */}
+        {proforma.status === "rejected" && proforma.rejected_reason && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <h3 className="text-xs font-bold text-orange-500 uppercase tracking-wider mb-2">Declined by Client</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">{proforma.rejected_reason}</p>
+            {proforma.rejected_at && (
+              <p className="text-xs text-gray-400 mt-1">
+                {new Date(proforma.rejected_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+              </p>
+            )}
           </div>
         )}
       </div>

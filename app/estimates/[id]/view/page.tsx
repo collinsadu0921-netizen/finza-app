@@ -59,6 +59,16 @@ export default function EstimateViewPage() {
   const [showSendModal, setShowSendModal] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [convertingToProforma, setConvertingToProforma] = useState(false)
+  const [copiedClientLink, setCopiedClientLink] = useState(false)
+
+  const handleCopyClientLink = () => {
+    if (!estimate?.public_token) return
+    const url = `${window.location.origin}/quote-public/${estimate.public_token}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedClientLink(true)
+      setTimeout(() => setCopiedClientLink(false), 2000)
+    })
+  }
 
   useEffect(() => {
     if (estimateId) {
@@ -280,6 +290,29 @@ export default function EstimateViewPage() {
                 Resend Quote
               </button>
             )}
+            {/* Copy client acceptance link — show when sent */}
+            {estimate.status === "sent" && estimate.public_token && (
+              <button
+                onClick={handleCopyClientLink}
+                className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium"
+              >
+                {copiedClientLink ? (
+                  <>
+                    <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Client Link
+                  </>
+                )}
+              </button>
+            )}
             {/* Convert to Proforma Invoice - Show for sent and accepted */}
             {!estimate.converted_to && (estimate.status === "sent" || estimate.status === "accepted") && (
               <button
@@ -449,6 +482,49 @@ export default function EstimateViewPage() {
             <div className="mt-6 pt-6 border-t border-gray-200">
               <h3 className="text-sm font-medium text-gray-500 mb-2">Notes</h3>
               <p className="text-gray-700 whitespace-pre-wrap">{estimate.notes}</p>
+            </div>
+          )}
+
+          {/* Client acceptance details */}
+          {estimate.status === "accepted" && (estimate as any).client_name_signed && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+                Accepted &amp; Signed by Client
+              </h3>
+              <div className="flex flex-wrap items-start gap-6">
+                {(estimate as any).client_signature && (
+                  <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    <img src={(estimate as any).client_signature} alt="Client signature" className="h-14 w-auto" />
+                  </div>
+                )}
+                <div className="text-sm space-y-0.5">
+                  <p className="font-semibold text-gray-800">{(estimate as any).client_name_signed}</p>
+                  {(estimate as any).client_id_type && (
+                    <p className="text-gray-600">
+                      {(estimate as any).client_id_type === "ghana_card" ? "Ghana Card" :
+                       (estimate as any).client_id_type === "national_id" ? "National ID" :
+                       (estimate as any).client_id_type === "passport" ? "Passport" :
+                       (estimate as any).client_id_type === "drivers_license" ? "Driver's License" :
+                       (estimate as any).client_id_type === "voters_id" ? "Voter's ID" :
+                       (estimate as any).client_id_type}
+                      {(estimate as any).client_id_number && `: ${(estimate as any).client_id_number}`}
+                    </p>
+                  )}
+                  {(estimate as any).signed_at && (
+                    <p className="text-gray-400 text-xs">
+                      Signed {new Date((estimate as any).signed_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Rejection details */}
+          {estimate.status === "rejected" && (estimate as any).rejected_reason && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="text-xs font-bold text-red-500 uppercase tracking-wider mb-2">Declined by Client</h3>
+              <p className="text-sm text-gray-600">{(estimate as any).rejected_reason}</p>
             </div>
           )}
         </div>
