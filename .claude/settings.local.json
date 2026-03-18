@@ -46,7 +46,8 @@
       "Bash(grep -r \"1\\\\.219\\\\|1\\\\.20\\\\|0\\\\.005\\\\|deltaCents\\\\|rounding\" /c/projects/finza-web/finza-web/lib --include=*.ts)",
       "Bash(grep -r \"post_invoice\\\\|finalise_invoice\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -l \"CREATE OR REPLACE FUNCTION post_invoice_to_ledger\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(find /c/projects/finza-web/finza-web -type f \\\\\\(-name *sidebar* -o -name *navigation* -o -name *navbar* \\\\\\) -iname *.tsx -o -iname *.ts)"
     ]
   }
 }

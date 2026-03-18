@@ -158,31 +158,30 @@ export default function Sidebar() {
           title: "SERVICE OPERATIONS",
           items: [
             { label: "Dashboard", route: "/service/dashboard" },
-            { label: "Invoices", route: "/service/invoices" },
-            { label: "Payments", route: "/service/payments" },
+            { label: "Customers", route: "/service/customers" },
             { label: "Quotes", route: "/service/estimates" },
             { label: "Orders", route: "/service/orders" },
+            { label: "Jobs", route: "/service/jobs" },
+            { label: "Invoices", route: "/service/invoices" },
+            { label: "Credit Notes", route: "/credit-notes" },
             { label: "Recurring Invoices", route: "/recurring" },
-            { label: "Customers", route: "/service/customers" },
+            { label: "Payments", route: "/service/payments" },
             { label: "Expenses", route: "/service/expenses" },
+            { label: "Supplier Bills", route: "/bills" },
             { label: "Services", route: "/service/services" },
             { label: "Materials", route: "/service/materials" },
             { label: "Service Inventory", route: "/service/inventory" },
-            { label: "Jobs", route: "/service/jobs" },
           ],
         },
       ]
       if (!isAccountantFirmUser) {
         const financeItems: Array<{ label: string; route: string }> = [
-          { label: "Accounting Portal", route: "/portal/accounting" },
           { label: "Profit & Loss", route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined) },
           { label: "Balance Sheet", route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined) },
           { label: "Cash Flow", route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined) },
           { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined) },
           { label: "VAT Report", route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined) },
           { label: "VAT Returns", route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined) },
-          { label: "Credit Notes", route: "/credit-notes" },
-          { label: "Supplier Bills", route: "/bills" },
           { label: "Assets", route: "/assets" },
           { label: "Payroll", route: "/payroll" },
         ]
@@ -205,7 +204,10 @@ export default function Sidebar() {
         const healthRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/health", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined)
         const accountingItems: Array<{ label: string; route: string }> = [
           ...(effectiveIndustry === "service" && !isAccountantFirmUser
-            ? [{ label: "Service Accounting", route: "/service/accounting" }]
+            ? [
+                { label: "Accounting Portal", route: "/portal/accounting" },
+                { label: "Service Accounting", route: "/service/accounting" },
+              ]
             : []),
           { label: "General Ledger", route: ledgerRoute },
           { label: "Chart of Accounts", route: coaRoute },
@@ -234,13 +236,13 @@ export default function Sidebar() {
       sections.push({
           title: "SETTINGS",
           items: [
-            { label: "Accountant Requests", route: "/service/invitations" },
             { label: "Business Profile", route: "/service/settings/business-profile" },
             { label: "Invoice Settings", route: "/service/settings/invoice-settings" },
             { label: "Payment Settings", route: "/service/settings/payments" },
             { label: "WhatsApp Integration", route: "/service/settings/integrations/whatsapp" },
             { label: "Automations", route: "/service/settings/automations" },
             { label: "Staff Management", route: "/service/settings/staff" },
+            { label: "Accountant Requests", route: "/service/invitations" },
             { label: "Accounting Activity", route: settingsAuditRoute },
             { label: "System Activity", route: "/audit-log" },
           ],
