@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
-import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { calculateGhanaTaxes, calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
@@ -310,12 +310,12 @@ export default function CreateBillPage() {
   const ecowasAmt    = importLeviesManual ? (Number(ecowasLevy) || 0) : Math.round(cifNum * 0.005 * 100) / 100
   const auAmt        = importLeviesManual ? (Number(auLevy) || 0)    : Math.round(cifNum * 0.002 * 100) / 100
   const eximAmt      = importLeviesManual ? (Number(eximLevy) || 0)  : Math.round(cifNum * 0.0075 * 100) / 100
-  const silAmt       = importLeviesManual ? (Number(silLevy) || 0)   : 0
+  const silAmt       = importLeviesManual ? (Number(silLevy) || 0)   : Math.round(cifNum * 0.02 * 100) / 100
   const examAmt      = importLeviesManual ? (Number(examinationFee) || 0) : 0
   const clearingAmt  = Number(clearingAgentFee) || 0
   const vatBase      = cifNum + dutyAmt + ecowasAmt + auAmt + eximAmt + silAmt + examAmt
   const importTaxResult = applyTaxes
-    ? calculateGhanaTaxesFromLineItems([{ subtotal: vatBase }] as any)
+    ? calculateGhanaTaxes(vatBase)
     : { nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0, grandTotal: vatBase }
   const importGrandTotal = vatBase + (importTaxResult.totalTax ?? 0) + clearingAmt
 
@@ -819,17 +819,23 @@ export default function CreateBillPage() {
                             </div>
                           )}
                         </div>
-                        {/* SIL — used goods only */}
+                        {/* SIL — most imports, exemptions apply */}
                         <div>
-                          <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">SIL (2% — used goods)</label>
-                          <input
-                            type="number"
-                            value={silLevy}
-                            onChange={(e) => { setImportLeviesManual(true); setSilLevy(e.target.value) }}
-                            min="0" step="0.01"
-                            className="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:text-white"
-                            placeholder="0.00"
-                          />
+                          <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">SIL (2% — most imports)</label>
+                          {importLeviesManual ? (
+                            <input
+                              type="number"
+                              value={silLevy}
+                              onChange={(e) => setSilLevy(e.target.value)}
+                              min="0" step="0.01"
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:text-white"
+                              placeholder="0.00"
+                            />
+                          ) : (
+                            <div className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded">
+                              {currency}{silAmt.toFixed(2)}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -911,12 +917,10 @@ export default function CreateBillPage() {
                         <span>EXIM Levy (0.75%):</span>
                         <span>{currency}{eximAmt.toFixed(2)}</span>
                       </div>
-                      {silAmt > 0 && (
-                        <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
-                          <span>SIL Levy (2%):</span>
-                          <span>{currency}{silAmt.toFixed(2)}</span>
-                        </div>
-                      )}
+                      <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
+                        <span>SIL (2%):</span>
+                        <span>{currency}{silAmt.toFixed(2)}</span>
+                      </div>
                       {examAmt > 0 && (
                         <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
                           <span>Examination Fee (1%):</span>

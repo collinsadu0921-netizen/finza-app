@@ -372,7 +372,7 @@ export default function BillViewPage() {
                     )}
                     {Number(bill.sil_levy) > 0 && (
                       <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
-                        <span>SIL Levy (2% — used goods)</span>
+                        <span>SIL (2%)</span>
                         <span>{currency}{Number(bill.sil_levy).toFixed(2)}</span>
                       </div>
                     )}

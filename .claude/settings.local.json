@@ -40,7 +40,8 @@
       "Bash(grep -l \"fixed_asset\\\\|depreciat\\\\|inventory\\\\|cash_flow\\\\|equity\\\\|balance_sheet\\\\|ppe\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -r \"inventory_valuation\\\\|closing_stock\\\\|opening_stock\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --include=*.sql)",
       "Bash(grep -l \"get_account_movements\\\\|statement.*equity\\\\|cash.*flow\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(grep -r \"2[5-9][0-9][0-9]\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
+      "Bash(grep -r \"2[5-9][0-9][0-9]\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(python3:*)"
     ]
   }
 }
