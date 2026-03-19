@@ -86,7 +86,7 @@ export async function POST(
     }
 
     // Validate payment method
-    const allowedMethods = ['cash', 'bank', 'momo', 'cheque', 'card', 'other']
+    const allowedMethods = ['cash', 'bank', 'momo', 'cheque', 'card', 'paystack', 'other']
     if (!allowedMethods.includes(method)) {
       return NextResponse.json(
         { error: `Invalid payment method. Allowed values: ${allowedMethods.join(', ')}` },

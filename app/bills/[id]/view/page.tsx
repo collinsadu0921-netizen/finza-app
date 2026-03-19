@@ -166,6 +166,7 @@ export default function BillViewPage() {
       momo: "Mobile Money",
       cheque: "Cheque",
       card: "Card",
+      paystack: "Paystack",
       other: "Other",
     }
     return methods[method] || method
@@ -711,6 +712,7 @@ function AddPaymentModal({
   const canUseMobileMoney = allowedMethods.includes("mobile_money")
   const canUseCard = allowedMethods.includes("card")
   const canUseBank = allowedMethods.includes("bank_transfer")
+  const canUsePaystack = allowedMethods.includes("paystack")
   
   // Determine default method (first available, or bank if available)
   const defaultMethod = canUseBank ? "bank" : (canUseCash ? "cash" : (canUseMobileMoney ? "momo" : (canUseCard ? "card" : "bank")))
@@ -859,6 +861,7 @@ function AddPaymentModal({
               {canUseBank && <option value="bank">Bank Transfer</option>}
               {canUseMobileMoney && <option value="momo">{mobileMoneyLabel}</option>}
               {canUseCard && <option value="card">Card</option>}
+              {canUsePaystack && <option value="paystack">Paystack</option>}
               {/* Legacy methods always available for backward compatibility */}
               <option value="cheque">Cheque</option>
               <option value="other">Other</option>

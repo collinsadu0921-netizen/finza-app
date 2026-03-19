@@ -91,7 +91,7 @@ export async function PUT(
     }
 
     // Validate method
-    const validMethods = ["cash", "bank", "momo", "card", "cheque", "other"]
+    const validMethods = ["cash", "bank", "momo", "card", "cheque", "paystack", "other"]
     if (method && !validMethods.includes(method)) {
       return NextResponse.json(
         { error: "Invalid payment method" },

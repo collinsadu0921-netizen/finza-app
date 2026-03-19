@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
+
+const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
@@ -17,7 +19,7 @@ export default function CreateExpensePage() {
   const router = useRouter()
   const pathname = usePathname()
   const isUnderService = pathname?.startsWith("/service") ?? false
-  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
+  const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")

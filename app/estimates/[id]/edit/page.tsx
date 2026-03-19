@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter, useParams, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
+
+const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import type { TaxResult } from "@/lib/taxEngine/types"
@@ -39,7 +41,7 @@ export default function EstimateEditPage() {
   const pathname = usePathname()
   const estimateId = (params?.id as string) || ""
   const isUnderService = pathname?.startsWith("/service") ?? false
-  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
+  const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])

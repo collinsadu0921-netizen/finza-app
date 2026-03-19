@@ -11,7 +11,7 @@
 /**
  * Payment methods available in the system
  */
-export type PaymentMethod = "cash" | "card" | "mobile_money" | "bank_transfer"
+export type PaymentMethod = "cash" | "card" | "mobile_money" | "bank_transfer" | "paystack"
 
 /**
  * Payment providers (integrations that exist)
@@ -120,12 +120,12 @@ export function getAllowedMethods(countryCode: CountryCode | null): PaymentMetho
 
   // Country-specific rules
   const countryRules: Record<CountryCode, PaymentMethod[]> = {
-    // Ghana: all methods
-    GH: ["cash", "card", "mobile_money", "bank_transfer"],
+    // Ghana: all methods including Paystack
+    GH: ["cash", "card", "mobile_money", "bank_transfer", "paystack"],
     // Kenya: cash, card, mobile_money, bank_transfer (no Ghana providers)
     KE: ["cash", "card", "mobile_money", "bank_transfer"],
-    // Nigeria: cash, card, mobile_money, bank_transfer
-    NG: ["cash", "card", "mobile_money", "bank_transfer"],
+    // Nigeria: cash, card, mobile_money, bank_transfer, Paystack
+    NG: ["cash", "card", "mobile_money", "bank_transfer", "paystack"],
     // Tanzania: cash, card, mobile_money, bank_transfer
     TZ: ["cash", "card", "mobile_money", "bank_transfer"],
     // Uganda: cash, card, mobile_money, bank_transfer

@@ -92,7 +92,8 @@
       "Bash(find /c/projects/finza-web/finza-web/app -name *invoice*new* -o -name *invoice*create*)",
       "Bash(grep -r \"type Bill\\\\|interface Bill\\\\|type Expense\\\\|interface Expense\" /c/projects/finza-web/finza-web/lib --include=*.ts)",
       "Bash(grep -n \"ALTER TABLE expenses\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(sort -t_ -k1 -n)"
+      "Bash(sort -t_ -k1 -n)",
+      "Bash(grep -r \"nodemailer\\\\|sendEmail\\\\|email\" /c/projects/finza-web/finza-web/app/api --include=*.ts -l)"
     ]
   }
 }

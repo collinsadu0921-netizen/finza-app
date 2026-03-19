@@ -307,6 +307,7 @@ export default function InvoiceViewPage() {
       momo: "Mobile Money",
       card: "Card Payment",
       cheque: "Cheque",
+      paystack: "Paystack",
       other: "Other",
     }
     return methods[method] || method

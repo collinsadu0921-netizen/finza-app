@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter, useParams, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
+
+const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateTaxes, getLegacyTaxAmounts } from "@/lib/taxEngine"
 import SendInvoiceModal from "@/components/invoices/SendInvoiceModal"
@@ -60,7 +62,7 @@ export default function InvoiceEditPage() {
   const pathname = usePathname()
   const invoiceId = (params?.id as string) || ""
   const isUnderService = pathname?.startsWith("/service") ?? false
-  const Wrapper = isUnderService ? ({ children }: { children: React.ReactNode }) => <>{children}</> : ProtectedLayout
+  const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])

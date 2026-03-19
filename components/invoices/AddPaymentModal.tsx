@@ -58,7 +58,7 @@ export default function AddPaymentModal({
     // Form State
     const [date, setDate] = useState(new Date().toISOString().split("T")[0])
     const [amount, setAmount] = useState("")
-    const [method, setMethod] = useState<"cash" | "bank" | "momo" | "card" | "cheque" | "other">("cash")
+    const [method, setMethod] = useState<"cash" | "bank" | "momo" | "card" | "cheque" | "paystack" | "other">("cash")
     const [reference, setReference] = useState("")
     const [notes, setNotes] = useState("")
     const [settlementFxRate, setSettlementFxRate] = useState("")
@@ -90,6 +90,7 @@ export default function AddPaymentModal({
     const canUseBank = allowedMethods.includes("bank_transfer")
     const canUseMobileMoney = allowedMethods.includes("mobile_money")
     const canUseCard = allowedMethods.includes("card")
+    const canUsePaystack = allowedMethods.includes("paystack")
 
     // Auto-fill amount on mount
     useEffect(() => {
@@ -349,6 +350,7 @@ export default function AddPaymentModal({
                                                 {canUseBank && <option value="bank">Bank Transfer</option>}
                                                 {canUseMobileMoney && <option value="momo">{mobileMoneyLabel}</option>}
                                                 {canUseCard && <option value="card">Card</option>}
+                                                {canUsePaystack && <option value="paystack">Paystack</option>}
                                                 <option value="cheque">Cheque</option>
                                                 <option value="other">Other</option>
                                             </select>
