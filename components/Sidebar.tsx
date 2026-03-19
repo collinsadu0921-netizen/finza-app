@@ -384,37 +384,14 @@ export default function Sidebar() {
         `}
       >
         <div className="flex flex-col h-full">
-          {/* Sidebar Header: FINZA (primary) + Company (secondary) */}
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-2">
+          {/* Sidebar Header */}
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
             <button
               onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
               className="text-xl font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
             >
               FINZA
             </button>
-            {businessDisplay.name != null && (
-              <button
-                onClick={() => {
-                  const settingsPath =
-                    businessIndustry === "retail"
-                      ? "/retail/settings/business-profile"
-                      : "/service/settings/business-profile"
-                  router.push(settingsPath)
-                }}
-                className="w-full flex items-center gap-2 text-left rounded-md hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors py-1 -mx-1 px-1"
-              >
-                {businessDisplay.logo_url ? (
-                  <img
-                    src={businessDisplay.logo_url}
-                    alt=""
-                    className="h-5 w-5 rounded object-cover shrink-0"
-                  />
-                ) : null}
-                <span className="text-sm font-medium text-gray-500 dark:text-gray-400 truncate">
-                  {businessDisplay.name}
-                </span>
-              </button>
-            )}
           </div>
 
           {/* Navigation */}
