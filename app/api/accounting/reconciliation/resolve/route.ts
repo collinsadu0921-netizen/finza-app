@@ -298,10 +298,87 @@ export async function POST(request: NextRequest) {
 
     const codeToId = new Map<string, string>()
     accounts?.forEach((a: { id: string; code: string }) => codeToId.set(a.code, a.id))
-    const missing = codes.filter((c) => !codeToId.has(c))
+    let missing = codes.filter((c) => !codeToId.has(c))
+
+    // Fallback resolution for standard COA codes that may differ per business.
+    // AR codes (1100, 1200): resolve via control map 'AR', then any asset account.
+    // Revenue codes (4000, 4100): resolve via any income account.
+    // Cash/bank codes (1000, 1010): resolve via control map 'CASH' or 'BANK'.
+    if (missing.length > 0) {
+      const arCodes = missing.filter((c) => c === "1100" || c === "1200")
+      if (arCodes.length > 0) {
+        const { data: arMapping } = await supabase
+          .from("chart_of_accounts_control_map")
+          .select("account_code")
+          .eq("business_id", auth.businessId)
+          .eq("control_key", "AR")
+          .maybeSingle()
+        const arLookupCode = arMapping?.account_code ?? null
+        if (arLookupCode) {
+          const { data: arAcc } = await supabase
+            .from("accounts")
+            .select("id")
+            .eq("business_id", auth.businessId)
+            .eq("code", arLookupCode)
+            .is("deleted_at", null)
+            .maybeSingle()
+          if (arAcc?.id) arCodes.forEach((c) => codeToId.set(c, arAcc.id))
+        }
+        // Last resort: any non-deleted asset account
+        if (arCodes.some((c) => !codeToId.has(c))) {
+          const { data: anyAsset } = await supabase
+            .from("accounts")
+            .select("id")
+            .eq("business_id", auth.businessId)
+            .eq("type", "asset")
+            .is("deleted_at", null)
+            .limit(1)
+          if (anyAsset?.[0]?.id) arCodes.filter((c) => !codeToId.has(c)).forEach((c) => codeToId.set(c, anyAsset[0].id))
+        }
+      }
+
+      const revCodes = missing.filter((c) => c === "4000" || c === "4100")
+      if (revCodes.length > 0) {
+        const { data: anyIncome } = await supabase
+          .from("accounts")
+          .select("id")
+          .eq("business_id", auth.businessId)
+          .eq("type", "income")
+          .is("deleted_at", null)
+          .limit(1)
+        if (anyIncome?.[0]?.id) revCodes.filter((c) => !codeToId.has(c)).forEach((c) => codeToId.set(c, anyIncome[0].id))
+      }
+
+      const cashCodes = missing.filter((c) => c === "1000" || c === "1010" || c === "1020")
+      if (cashCodes.length > 0) {
+        for (const controlKey of ["CASH", "BANK"]) {
+          const { data: cashMapping } = await supabase
+            .from("chart_of_accounts_control_map")
+            .select("account_code")
+            .eq("business_id", auth.businessId)
+            .eq("control_key", controlKey)
+            .maybeSingle()
+          const cashLookupCode = cashMapping?.account_code ?? null
+          if (cashLookupCode) {
+            const { data: cashAcc } = await supabase
+              .from("accounts")
+              .select("id")
+              .eq("business_id", auth.businessId)
+              .eq("code", cashLookupCode)
+              .is("deleted_at", null)
+              .maybeSingle()
+            if (cashAcc?.id) cashCodes.filter((c) => !codeToId.has(c)).forEach((c) => codeToId.set(c, cashAcc.id))
+          }
+          if (cashCodes.every((c) => codeToId.has(c))) break
+        }
+      }
+
+      missing = codes.filter((c) => !codeToId.has(c))
+    }
+
     if (missing.length > 0) {
       return NextResponse.json(
-        { error: `Account(s) not found for code(s): ${missing.join(", ")}` },
+        { error: `Account(s) not found for code(s): ${missing.join(", ")}. Ensure your chart of accounts includes AR and Revenue accounts.` },
         { status: 400 }
       )
     }

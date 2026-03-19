@@ -117,10 +117,10 @@ export function createReconciliationEngine(supabase: SupabaseClient): Reconcilia
         ])
       }
 
-      // Load invoice
+      // Load invoice (include FX fields so we compare home-currency amounts in the ledger)
       const { data: invoice, error: invErr } = await supabase
         .from("invoices")
-        .select("id, business_id, total, issue_date, status")
+        .select("id, business_id, total, home_currency_total, fx_rate, issue_date, status")
         .eq("id", scope.invoiceId)
         .eq("business_id", scope.businessId)
         .maybeSingle()
@@ -145,13 +145,33 @@ export function createReconciliationEngine(supabase: SupabaseClient): Reconcilia
         }
       }
 
-      const invoiceTotal = Number(invoice.total)
+      // For FX invoices, ledger posts home_currency_total (= total × fx_rate).
+      // Expected balance must also be in home currency.
+      const invoiceFxRate = invoice.fx_rate != null ? Number(invoice.fx_rate) : null
+      const invoiceTotal = invoiceFxRate != null
+        ? Number(invoice.home_currency_total ?? (Number(invoice.total) * invoiceFxRate))
+        : Number(invoice.total)
       const issueDate = (invoice.issue_date as string) || ""
+
+      // Fetch operational data upfront — needed for both expectedBalance and fallback ledger filter.
+      // Include settlement_fx_rate so we can compute the home-currency AR credit for FX payments.
+      const { data: payments } = await supabase
+        .from("payments")
+        .select("id, amount, settlement_fx_rate")
+        .eq("invoice_id", scope.invoiceId)
+        .is("deleted_at", null)
+
+      const { data: creditNotes } = await supabase
+        .from("credit_notes")
+        .select("id, total")
+        .eq("invoice_id", scope.invoiceId)
+        .eq("status", "applied")
+        .is("deleted_at", null)
 
       let ledgerBalance: number
 
       if (scope.periodId) {
-        // Canonical RPC: period-native, no client-side grouping
+        // Canonical RPC: period-native, includes invoice + payment + credit_note JEs.
         try {
           const rows = await getArBalancesByInvoice(supabase, {
             businessId: scope.businessId,
@@ -169,7 +189,8 @@ export function createReconciliationEngine(supabase: SupabaseClient): Reconcilia
           ])
         }
       } else {
-        // Fallback when periodId missing: get_general_ledger + filter by invoice
+        // Fallback when periodId missing: get_general_ledger filtered by invoice +
+        // its payment and credit_note references (mirrors get_ar_balances_by_invoice logic).
         const startDate = issueDate || new Date().toISOString().slice(0, 10)
         const endDate = new Date().toISOString().slice(0, 10)
         const ar = await resolveARAccountId(supabase, scope.businessId)
@@ -190,35 +211,49 @@ export function createReconciliationEngine(supabase: SupabaseClient): Reconcilia
           ])
         }
         notes.push("Ledger balance computed from AR account via get_general_ledger (fallback, no periodId).")
+
+        // Build ID sets so we can match payment/credit_note JEs back to this invoice.
+        const paymentIds = new Set((payments || []).map((p) => (p as { id: string }).id))
+        const creditNoteIds = new Set((creditNotes || []).map((cn) => (cn as { id: string }).id))
+
         const rows = (ledgerRows as Array<{ reference_type?: string; reference_id?: string; debit?: number; credit?: number }>) || []
-        const invoiceRows = rows.filter(
-          (r) => r.reference_type === "invoice" && r.reference_id === scope.invoiceId
+        // Include: (a) the invoice JE itself, (b) payment JEs for this invoice,
+        // (c) credit_note JEs for applied credits on this invoice.
+        // This matches the RPC logic in get_ar_balances_by_invoice (migration 288).
+        const relevantRows = rows.filter(
+          (r) =>
+            (r.reference_type === "invoice" && r.reference_id === scope.invoiceId) ||
+            (r.reference_type === "payment" && r.reference_id != null && paymentIds.has(r.reference_id)) ||
+            (r.reference_type === "credit_note" && r.reference_id != null && creditNoteIds.has(r.reference_id))
         )
-        ledgerBalance = invoiceRows.reduce(
+        ledgerBalance = relevantRows.reduce(
           (sum, r) => sum + (Number(r.debit) || 0) - (Number(r.credit) || 0),
           0
         )
-        if (invoiceRows.length === 0) {
-          notes.push("No ledger rows found for this invoice; ledgerBalance = 0.")
+        if (relevantRows.length === 0) {
+          notes.push("No ledger rows found for this invoice (including payments and credit notes); ledgerBalance = 0.")
         }
       }
 
-      // Expected: invoice.total - sum(payments.amount) - sum(applied credit_notes.total)
-      const { data: payments } = await supabase
-        .from("payments")
-        .select("amount")
-        .eq("invoice_id", scope.invoiceId)
-        .is("deleted_at", null)
-
-      const { data: creditNotes } = await supabase
-        .from("credit_notes")
-        .select("total")
-        .eq("invoice_id", scope.invoiceId)
-        .eq("status", "applied")
-        .is("deleted_at", null)
-
-      const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0)
-      const totalCredits = (creditNotes || []).reduce((s, cn) => s + Number(cn.total || 0), 0)
+      // Expected balance in home currency:
+      //   invoiceTotal (already home-currency for FX invoices)
+      //   − sum of AR credits from payments (home currency)
+      //   − sum of applied credit notes (assumed home currency)
+      //
+      // For FX payments (invoice has fx_rate AND payment has settlement_fx_rate):
+      //   AR credit = payment.amount × invoice.fx_rate  (original booking rate)
+      // For home-currency payments (no settlement_fx_rate or no invoice fx_rate):
+      //   AR credit = payment.amount  (already home currency)
+      const totalPaid = (payments || []).reduce((s, p) => {
+        const pmt = p as { amount: number; settlement_fx_rate: number | null }
+        const amt = Number(pmt.amount || 0)
+        // FX payment: amount is in foreign currency; AR cleared at invoice booking rate
+        if (invoiceFxRate != null && pmt.settlement_fx_rate != null) {
+          return s + Math.round(amt * invoiceFxRate * 100) / 100
+        }
+        return s + amt
+      }, 0)
+      const totalCredits = (creditNotes || []).reduce((s, cn) => s + Number((cn as { total: number }).total || 0), 0)
       const expectedBalance = invoiceTotal - totalPaid - totalCredits
       notes.push("Expected balance computed from invoices/payments/credit_notes operational tables.")
 

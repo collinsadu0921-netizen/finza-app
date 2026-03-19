@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 
 export async function GET(
   _request: NextRequest,
@@ -11,7 +11,10 @@ export async function GET(
   }
 
   try {
-    const supabase = await createSupabaseServerClient()
+    // Use admin client (service role) so RLS does not block joins on
+    // payroll_entries, staff, payroll_runs for unauthenticated requests.
+    // Access is controlled by the public_token itself.
+    const supabase = createSupabaseAdminClient()
 
     const { data: payslip, error } = await supabase
       .from("payslips")
@@ -57,7 +60,7 @@ export async function GET(
       return NextResponse.json({ error: "Payslip not found" }, { status: 404 })
     }
 
-    // Fetch business info separately (not a direct FK on payslips)
+    // Fetch business info separately
     const run = payslip.payroll_runs as any
     const { data: business } = await supabase
       .from("businesses")

@@ -54,12 +54,12 @@ export async function POST(
     // Generate payslips for each entry
     const payslips = []
     for (const entry of entries || []) {
-      // Check if payslip already exists
+      // Check if payslip already exists for this entry
       const { data: existingPayslip } = await supabase
         .from("payslips")
         .select("id")
         .eq("payroll_entry_id", entry.id)
-        .single()
+        .maybeSingle()
 
       if (existingPayslip) {
         continue // Skip if already exists
