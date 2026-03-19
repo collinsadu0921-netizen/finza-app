@@ -17,6 +17,10 @@ type AddPaymentModalProps = {
     creditsApplied: number
     currencySymbol: string
     businessCountry: string | null
+    // FX invoice fields — present only when the invoice is in a foreign currency
+    invoiceFxRate?: number | null       // original rate when invoice was issued
+    invoiceCurrencyCode?: string | null // e.g. "USD"
+    homeCurrencyCode?: string | null    // e.g. "GHS"
     onClose: () => void
     onSuccess: () => void
 }
@@ -39,6 +43,9 @@ export default function AddPaymentModal({
     creditsApplied,
     currencySymbol,
     businessCountry,
+    invoiceFxRate,
+    invoiceCurrencyCode,
+    homeCurrencyCode,
     onClose,
     onSuccess,
 }: AddPaymentModalProps) {
@@ -54,6 +61,21 @@ export default function AddPaymentModal({
     const [method, setMethod] = useState<"cash" | "bank" | "momo" | "card" | "cheque" | "other">("cash")
     const [reference, setReference] = useState("")
     const [notes, setNotes] = useState("")
+    const [settlementFxRate, setSettlementFxRate] = useState("")
+
+    // FX helpers
+    const isFxInvoice = !!(invoiceFxRate && invoiceCurrencyCode && homeCurrencyCode)
+    const parsedSettlementRate = parseFloat(settlementFxRate) || 0
+    const amountInHomeCurrency = isFxInvoice && parsedSettlementRate > 0
+        ? (parseFloat(amount) || 0) * parsedSettlementRate
+        : null
+    const originalRate = invoiceFxRate ?? 0
+    const arClearAmount = isFxInvoice && parsedSettlementRate > 0
+        ? (parseFloat(amount) || 0) * originalRate
+        : null
+    const fxDiff = amountInHomeCurrency !== null && arClearAmount !== null
+        ? amountInHomeCurrency - arClearAmount
+        : null
 
     // Derived Values
     const remainingBalance = Math.max(0, invoiceTotal - totalPaid - creditsApplied)
@@ -111,6 +133,11 @@ export default function AddPaymentModal({
             return
         }
 
+        if (isFxInvoice && parsedSettlementRate <= 0) {
+            setError(`Settlement rate is required for ${invoiceCurrencyCode} invoices. Enter today's exchange rate.`)
+            return
+        }
+
         if (isOverpayment) {
             setError(`Amount cannot exceed remaining balance of ${currencySymbol}${remainingBalance.toFixed(2)}`)
             return
@@ -151,6 +178,7 @@ export default function AddPaymentModal({
                     method: method,
                     reference: reference || null,
                     notes: notes || null,
+                    settlement_fx_rate: isFxInvoice ? parsedSettlementRate : null,
                 }),
             })
 
@@ -355,6 +383,45 @@ export default function AddPaymentModal({
                                     />
                                 </div>
 
+                                {/* FX Settlement Rate — only shown for foreign-currency invoices */}
+                                {isFxInvoice && (
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                            Settlement Rate <span className="text-red-500">*</span>
+                                        </label>
+                                        <div className="relative">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500 text-sm">
+                                                1 {invoiceCurrencyCode} =
+                                            </div>
+                                            <input
+                                                type="number"
+                                                step="0.0001"
+                                                min="0.0001"
+                                                required
+                                                value={settlementFxRate}
+                                                onChange={(e) => setSettlementFxRate(e.target.value)}
+                                                className="block w-full pl-20 pr-16 py-3 rounded-lg border-2 border-gray-200 focus:border-blue-500 hover:border-gray-300 font-mono"
+                                                placeholder="e.g. 15.20"
+                                            />
+                                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-500 text-sm">
+                                                {homeCurrencyCode}
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-slate-500">
+                                            Invoice was issued at 1 {invoiceCurrencyCode} = {originalRate.toFixed(4)} {homeCurrencyCode}
+                                        </p>
+                                        {parsedSettlementRate > 0 && fxDiff !== null && (
+                                            <div className={`text-xs font-medium px-3 py-2 rounded-md ${fxDiff > 0 ? "bg-emerald-50 text-emerald-700" : fxDiff < 0 ? "bg-red-50 text-red-700" : "bg-slate-50 text-slate-600"}`}>
+                                                {fxDiff > 0
+                                                    ? `FX Gain: +${fxDiff.toFixed(2)} ${homeCurrencyCode}`
+                                                    : fxDiff < 0
+                                                    ? `FX Loss: ${fxDiff.toFixed(2)} ${homeCurrencyCode}`
+                                                    : `No FX difference`}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {/* Ledger Preview Panel */}
                                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex items-start gap-3">
                                     <div className="bg-blue-100 text-blue-600 rounded-full p-1.5 flex-shrink-0 mt-0.5">
@@ -364,8 +431,10 @@ export default function AddPaymentModal({
                                         <h4 className="text-sm font-semibold text-blue-900">Ledger Impact Preview</h4>
                                         <p className="text-xs text-blue-700 mt-1 mb-2">This payment will:</p>
                                         <ul className="text-xs text-blue-800 list-disc list-inside space-y-0.5 font-medium">
-                                            <li>Debit Cash/Bank</li>
-                                            <li>Credit Accounts Receivable</li>
+                                            <li>Debit Cash/Bank {isFxInvoice && amountInHomeCurrency ? `(${homeCurrencyCode} ${amountInHomeCurrency.toFixed(2)})` : ""}</li>
+                                            <li>Credit Accounts Receivable {isFxInvoice && arClearAmount ? `(${homeCurrencyCode} ${arClearAmount.toFixed(2)})` : ""}</li>
+                                            {isFxInvoice && fxDiff !== null && fxDiff > 0 && <li>Credit FX Gain ({homeCurrencyCode} {fxDiff.toFixed(2)})</li>}
+                                            {isFxInvoice && fxDiff !== null && fxDiff < 0 && <li>Debit FX Loss ({homeCurrencyCode} {Math.abs(fxDiff).toFixed(2)})</li>}
                                         </ul>
                                     </div>
                                 </div>

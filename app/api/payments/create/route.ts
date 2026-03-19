@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
       method,
       reference,
       notes,
+      settlement_fx_rate, // Rate at time of payment for FX invoices (1 FX unit = X home currency)
     } = body
 
     // Validate method
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
     // Verify invoice exists and belongs to session business only (never trust body.business_id)
     const { data: invoice } = await supabase
       .from("invoices")
-      .select("id, business_id, total, status")
+      .select("id, business_id, total, status, fx_rate, currency_code")
       .eq("id", invoice_id)
       .eq("business_id", business.id)
       .single()
@@ -128,6 +129,20 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         )
       }
+    }
+
+    // For FX invoices, settlement_fx_rate is required
+    const isFxInvoice = !!(invoice as any).fx_rate
+    const parsedSettlementFxRate = settlement_fx_rate ? Number(settlement_fx_rate) : null
+    if (isFxInvoice && (!parsedSettlementFxRate || parsedSettlementFxRate <= 0)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Settlement rate is required for ${(invoice as any).currency_code} invoices. Please enter today's exchange rate.`,
+          message: "Settlement rate required for FX invoice payment",
+        },
+        { status: 400 }
+      )
     }
 
     if (invoice.status === "draft") {
@@ -220,6 +235,7 @@ export async function POST(request: NextRequest) {
         notes: notes || null,
         e_levy_amount: eLevyAmount,
         public_token: publicToken,
+        settlement_fx_rate: isFxInvoice ? parsedSettlementFxRate : null,
       })
       .select()
       .single()

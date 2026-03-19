@@ -48,6 +48,8 @@ type Invoice = {
   source_type: string | null
   source_id: string | null
   tax_lines?: any | null
+  fx_rate?: number | null
+  home_currency_code?: string | null
   orders?: {
     id: string
     order_number: string | null
@@ -738,6 +740,9 @@ export default function InvoiceViewPage() {
           creditsApplied={totalCredits}
           currencySymbol={currency}
           businessCountry={businessCountry}
+          invoiceFxRate={invoice.fx_rate ?? null}
+          invoiceCurrencyCode={invoice.currency_code ?? null}
+          homeCurrencyCode={invoice.home_currency_code ?? null}
           onClose={() => setShowPaymentModal(false)}
           onSuccess={handlePaymentAdded}
         />
