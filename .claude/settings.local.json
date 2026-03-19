@@ -70,7 +70,13 @@
       "Bash(grep -n \"CREATE TABLE.*businesses\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -n \"archived_at\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -n \"ADD COLUMN.*archived_at\\\\|archived_at.*TIMESTAMP\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(ls /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
+      "Bash(ls /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -n \"brand_color\\\\|brand_colour\\\\|primary_color\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(find /c/projects/finza-web/finza-web/app/api/ -path */public/* -name *.ts)",
+      "Bash(grep -n \"return\\\\|business\\\\.\\\\|bizName\\\\|logo_url\\\\|Powered\\\\|header\\\\|top bar\\\\|bg-slate\\\\|font-bold.*text\" /c/projects/finza-web/finza-web/app/proforma-public/[token]/page.tsx)",
+      "Bash(grep -n \"setBusiness\\\\|setEstimate\\\\|setItems\\\\|brand\\\\|logo_url\\\\|bg-blue\\\\|bg-slate-900\\\\|Accept\" /c/projects/finza-web/finza-web/app/quote-public/[token]/page.tsx)",
+      "Bash(grep -n \"bg-emerald\\\\|bg-indigo\\\\|Accept.*Sign\\\\|Decline\\\\|Powered\" /c/projects/finza-web/finza-web/app/quote-public/[token]/page.tsx)",
+      "Bash(grep -n \"Powered by Finza\" /c/projects/finza-web/finza-web/app/invoice-public/[token]/page.tsx)"
     ]
   }
 }

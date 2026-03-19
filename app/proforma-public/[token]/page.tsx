@@ -81,6 +81,7 @@ export default function ProformaPublicPage() {
   const [proforma, setProforma] = useState<ProformaInvoice | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [business, setBusiness] = useState<Business | null>(null)
+  const [brand, setBrand] = useState("#0f172a")
 
   // Accept modal
   const [showAccept, setShowAccept] = useState(false)
@@ -116,6 +117,7 @@ export default function ProformaPublicPage() {
         setProforma(d.proforma)
         setItems(d.items ?? [])
         setBusiness(d.business)
+        if (d.settings?.brand_color) setBrand(d.settings.brand_color)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -250,22 +252,26 @@ export default function ProformaPublicPage() {
 
           {/* Document card */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {/* Header */}
-            <div className="bg-violet-600 px-6 py-5 text-white">
+            {/* Header — brand colour */}
+            <div className="px-6 py-5 text-white" style={{ backgroundColor: brand }}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  {business?.logo_url && (
+                  {business?.logo_url ? (
                     <img src={business.logo_url} alt="" className="h-10 w-auto mb-3 rounded" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-bold text-lg mb-3">
+                      {bizName.charAt(0).toUpperCase()}
+                    </div>
                   )}
                   <h1 className="text-xl font-bold">{bizName}</h1>
-                  <p className="text-violet-200 text-sm mt-0.5">
+                  <p className="text-white/70 text-sm mt-0.5">
                     {[business?.address_street, business?.address_city, business?.address_region].filter(Boolean).join(", ")}
                   </p>
-                  {business?.phone && <p className="text-violet-200 text-sm">{business.phone}</p>}
-                  {business?.email && <p className="text-violet-200 text-sm">{business.email}</p>}
+                  {business?.phone && <p className="text-white/70 text-sm">{business.phone}</p>}
+                  {business?.email && <p className="text-white/70 text-sm">{business.email}</p>}
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-violet-200 text-xs uppercase tracking-wider font-medium">Proforma Invoice</p>
+                  <p className="text-white/70 text-xs uppercase tracking-wider font-medium">Proforma Invoice</p>
                   <p className="text-2xl font-bold mt-1">{proforma.proforma_number ?? "PRF"}</p>
                   {/* Show a client-friendly status — never show internal "sent" label */}
                   {isAccepted && (
@@ -279,7 +285,7 @@ export default function ProformaPublicPage() {
                     </span>
                   )}
                   {isConverted && (
-                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-violet-100">
+                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-white/80">
                       Converted
                     </span>
                   )}
@@ -420,7 +426,8 @@ export default function ProformaPublicPage() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={() => setShowAccept(true)}
-                  className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition-colors text-base"
+                  className="flex-1 flex items-center justify-center gap-2 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition-opacity hover:opacity-90 text-base"
+                  style={{ backgroundColor: brand }}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -440,7 +447,12 @@ export default function ProformaPublicPage() {
             </div>
           )}
 
-          <p className="text-center text-xs text-slate-400 pb-4">Powered by Finza</p>
+          <div className="flex items-center justify-center gap-1.5 pb-4">
+            <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <p className="text-xs text-slate-400">Powered by <span className="font-semibold text-slate-500">Finza</span></p>
+          </div>
         </div>
       </div>
 

@@ -56,6 +56,7 @@ type InvoiceSettings = {
   momo_provider: string | null
   momo_name: string | null
   momo_number: string | null
+  brand_color: string | null
 }
 
 export default function PublicInvoicePage() {
@@ -125,6 +126,7 @@ export default function PublicInvoicePage() {
   const isPaid = invoice.status === "paid"
   const isOverdue = invoice.status === "overdue"
   const bizName = business?.trading_name ?? business?.legal_name ?? "Business"
+  const brand = settings?.brand_color || "#0f172a"
 
   // Status banner config
   const bannerClass = isPaid
@@ -163,12 +165,10 @@ export default function PublicInvoicePage() {
           <div className="no-print flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               {business?.logo_url ? (
-                <img src={business.logo_url} alt="" className="h-6 w-6 rounded object-cover" />
+                <img src={business.logo_url} alt="" className="h-7 w-7 rounded-lg object-cover" />
               ) : (
-                <div className="w-6 h-6 rounded bg-slate-800 flex items-center justify-center">
-                  <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: brand }}>
+                  {bizName.charAt(0).toUpperCase()}
                 </div>
               )}
               <span className="font-semibold text-slate-700 text-sm">{bizName}</span>
@@ -217,6 +217,7 @@ export default function PublicInvoicePage() {
             business={business}
             items={items}
             settings={settings}
+            brandColor={brand}
             className="print:shadow-none print:border-0 print:rounded-none"
             displayStatus={
               invoice.status === "sent" ? "awaiting_payment" :
@@ -256,7 +257,8 @@ export default function PublicInvoicePage() {
                 <div className="flex-1 w-full space-y-2.5">
                   <a
                     href={`/pay/${invoice.id}`}
-                    className="flex items-center justify-center gap-2 w-full bg-slate-900 hover:bg-black text-white font-semibold py-3 px-5 rounded-xl transition-colors text-sm"
+                    className="flex items-center justify-center gap-2 w-full text-white font-semibold py-3 px-5 rounded-xl transition-opacity hover:opacity-90 text-sm"
+                    style={{ backgroundColor: brand }}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
@@ -293,7 +295,12 @@ export default function PublicInvoicePage() {
             </div>
           )}
 
-          <p className="no-print text-center text-xs text-slate-400 pb-4">Powered by Finza</p>
+          <div className="no-print flex items-center justify-center gap-1.5 pb-4">
+            <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <p className="text-xs text-slate-400">Powered by <span className="font-semibold text-slate-500">Finza</span></p>
+          </div>
         </div>
       </div>
     </>

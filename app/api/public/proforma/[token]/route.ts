@@ -27,7 +27,7 @@ export async function GET(
       return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
     }
 
-    const [{ data: items }, { data: biz }] = await Promise.all([
+    const [{ data: items }, { data: biz }, { data: settings }] = await Promise.all([
       supabase
         .from("proforma_invoice_items")
         .select("id, description, qty, unit_price, discount_amount, line_subtotal")
@@ -38,12 +38,18 @@ export async function GET(
         .select("legal_name, trading_name, address_street, address_city, address_region, phone, email, website, tin, logo_url")
         .eq("id", proforma.business_id)
         .single(),
+      supabase
+        .from("invoice_settings")
+        .select("brand_color")
+        .eq("business_id", proforma.business_id)
+        .maybeSingle(),
     ])
 
     return NextResponse.json({
       proforma,
       items: items ?? [],
       business: biz ?? null,
+      settings: settings ?? null,
     })
   } catch (err: any) {
     console.error("public/proforma GET error:", err)

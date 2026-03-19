@@ -11,7 +11,10 @@ export default function ServiceInvoiceSettingsPage() {
   const [success, setSuccess] = useState("")
 
   const [formData, setFormData] = useState({
+    brand_color: "#0f172a",
     invoice_prefix: "INV-",
+    quote_prefix: "QUO-",
+    proforma_prefix: "PRF-",
     starting_number: 1,
     due_days_default: 30,
     default_payment_terms: "",
@@ -44,7 +47,10 @@ export default function ServiceInvoiceSettingsPage() {
 
       if (settings) {
         setFormData({
+          brand_color: settings.brand_color || "#0f172a",
           invoice_prefix: settings.invoice_prefix || "INV-",
+          quote_prefix: settings.quote_prefix || "QUO-",
+          proforma_prefix: settings.proforma_prefix || "PRF-",
           starting_number: settings.starting_number || 1,
           due_days_default: settings.due_days_default || 30,
           default_payment_terms: settings.default_payment_terms || "",
@@ -139,10 +145,106 @@ export default function ServiceInvoiceSettingsPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Invoice Numbering */}
+
+          {/* Brand Identity */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Invoice Numbering</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Brand Identity</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              Your brand colour appears on all client-facing documents and invoice links.
+            </p>
+            <div className="flex items-start gap-6 flex-wrap">
+              {/* Colour picker */}
+              <div className="flex flex-col gap-2">
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  Brand Colour
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <input
+                      type="color"
+                      value={formData.brand_color}
+                      onChange={(e) => setFormData({ ...formData, brand_color: e.target.value })}
+                      className="w-14 h-14 rounded-xl cursor-pointer border-0 p-1 bg-transparent"
+                      style={{ outline: `3px solid ${formData.brand_color}22` }}
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={formData.brand_color}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setFormData({ ...formData, brand_color: v })
+                      }}
+                      className="w-28 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="#0f172a"
+                      maxLength={7}
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Hex colour code</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Live preview strip */}
+              <div className="flex-1 min-w-[220px]">
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Preview</p>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden">
+                  <div className="h-2 w-full" style={{ backgroundColor: formData.brand_color }} />
+                  <div className="bg-white dark:bg-gray-700 p-3 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: formData.brand_color }}>
+                      AB
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">Your Business Name</p>
+                      <p className="text-xs text-gray-400">Invoice #INV-0001</p>
+                    </div>
+                    <div className="ml-auto">
+                      <span className="text-xs font-semibold text-white px-2.5 py-1 rounded-full" style={{ backgroundColor: formData.brand_color }}>
+                        Pay Now
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">This is how your invoice header will look to clients</p>
+              </div>
+            </div>
+
+            {/* Quick colour presets */}
+            <div className="mt-4">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">Quick presets</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "Slate",   hex: "#0f172a" },
+                  { label: "Blue",    hex: "#1d4ed8" },
+                  { label: "Indigo",  hex: "#4338ca" },
+                  { label: "Violet",  hex: "#7c3aed" },
+                  { label: "Rose",    hex: "#e11d48" },
+                  { label: "Orange",  hex: "#ea580c" },
+                  { label: "Emerald", hex: "#059669" },
+                  { label: "Teal",    hex: "#0d9488" },
+                ].map(({ label, hex }) => (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, brand_color: hex })}
+                    title={label}
+                    className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${
+                      formData.brand_color === hex ? "border-gray-900 dark:border-white scale-110" : "border-transparent"
+                    }`}
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Document Numbering */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Document Numbering</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              Customise the prefix for each document type so they feel like yours.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                   Invoice Prefix
@@ -154,10 +256,36 @@ export default function ServiceInvoiceSettingsPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                   placeholder="INV-"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Prefix for invoice numbers (e.g., "INV-", "INV-GH-")
-                </p>
+                <p className="text-xs text-gray-400 mt-1">e.g. <span className="font-mono">ACME-INV-0001</span></p>
               </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  Quote Prefix
+                </label>
+                <input
+                  type="text"
+                  value={formData.quote_prefix}
+                  onChange={(e) => setFormData({ ...formData, quote_prefix: e.target.value })}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="QUO-"
+                />
+                <p className="text-xs text-gray-400 mt-1">e.g. <span className="font-mono">ACME-QUO-0001</span></p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  Proforma Prefix
+                </label>
+                <input
+                  type="text"
+                  value={formData.proforma_prefix}
+                  onChange={(e) => setFormData({ ...formData, proforma_prefix: e.target.value })}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="PRF-"
+                />
+                <p className="text-xs text-gray-400 mt-1">e.g. <span className="font-mono">ACME-PRF-0001</span></p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                   Starting Number
@@ -170,7 +298,7 @@ export default function ServiceInvoiceSettingsPage() {
                   min="1"
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  First invoice number (only used once to initialize)
+                  First invoice number (only used once to initialise)
                 </p>
               </div>
             </div>

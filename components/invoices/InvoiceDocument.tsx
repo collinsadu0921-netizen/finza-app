@@ -83,6 +83,11 @@ export type InvoiceDocumentProps = {
    * (e.g. "awaiting_payment" instead of the internal "sent").
    */
   displayStatus?: string
+  /**
+   * Brand colour from invoice settings — renders a top accent strip.
+   * Defaults to slate-900 (#0f172a).
+   */
+  brandColor?: string
 }
 
 function formatDate(dateString: string) {
@@ -104,6 +109,7 @@ export function InvoiceDocument({
   settings,
   className = "",
   displayStatus,
+  brandColor = "#0f172a",
 }: InvoiceDocumentProps) {
   const businessName = business?.trading_name || business?.legal_name || "Business"
   const businessAddress =
@@ -130,6 +136,9 @@ export function InvoiceDocument({
 
   return (
     <div className={`bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden ${className}`}>
+      {/* Brand accent strip */}
+      <div className="h-1.5 w-full" style={{ backgroundColor: brandColor }} />
+
       {/* Header: logo + business + doc number + status */}
       <div className="p-8 border-b border-slate-200">
         <div className="flex flex-col md:flex-row justify-between items-start gap-8">
