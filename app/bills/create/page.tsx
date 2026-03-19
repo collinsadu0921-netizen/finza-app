@@ -48,6 +48,15 @@ export default function CreateBillPage() {
   const [currencySymbol, setCurrencySymbol] = useState<string>("")
   const [currencyCode, setCurrencyCode] = useState<string>("")
 
+  // FX (foreign currency) settings
+  const [fxEnabled, setFxEnabled] = useState(false)
+  const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
+  const [fxRate, setFxRate] = useState<string>("")
+
+  const displaySymbol = fxEnabled && fxCurrencyCode
+    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
+    : currencySymbol
+
   // Import bill state
   const [isImportBill, setIsImportBill] = useState(false)
   const [importDescription, setImportDescription] = useState("")
@@ -301,7 +310,9 @@ export default function CreateBillPage() {
         grandTotal: subtotalIncludingTaxes,
       }
 
-  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
+  const currency = fxEnabled && fxCurrencyCode
+    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
+    : resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
 
   // Import bill calculations
   const cifNum   = Number(cifValue) || 0
@@ -376,6 +387,11 @@ export default function CreateBillPage() {
       }
     }
 
+    if (fxEnabled && fxCurrencyCode && (!fxRate || parseFloat(fxRate) <= 0)) {
+      setError(`Exchange rate is required for ${fxCurrencyCode} bills. Please enter the current rate.`)
+      return
+    }
+
     try {
       setLoading(true)
 
@@ -404,6 +420,10 @@ export default function CreateBillPage() {
           wht_amount: applyWHT ? whtCalc.whtAmount : 0,
           status,
           attachment_path: attachmentPath || null,
+          ...(fxEnabled && fxCurrencyCode && fxRate ? {
+            currency_code: fxCurrencyCode,
+            fx_rate: parseFloat(fxRate),
+          } : {}),
           bill_type: isImportBill ? "import" : "standard",
           ...(isImportBill ? {
             import_description: importDescription.trim() || null,
@@ -579,6 +599,66 @@ export default function CreateBillPage() {
                   />
                 </div>
               </div>
+
+              {/* FX Currency Section */}
+              <div className="mt-4">
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Bill in foreign currency?</span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Supplier invoiced you in USD, EUR, GBP, etc. — booked in {currencyCode || "home currency"}</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={fxEnabled}
+                    onClick={() => setFxEnabled(!fxEnabled)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${fxEnabled ? "bg-purple-600" : "bg-gray-200 dark:bg-gray-600"}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fxEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </button>
+                </div>
+                {fxEnabled && (
+                  <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-700">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Bill Currency</label>
+                      <select
+                        value={fxCurrencyCode}
+                        onChange={(e) => setFxCurrencyCode(e.target.value)}
+                        className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-md p-2 focus:ring-purple-500 focus:border-purple-500"
+                      >
+                        <option value="USD">USD — US Dollar</option>
+                        <option value="EUR">EUR — Euro</option>
+                        <option value="GBP">GBP — British Pound</option>
+                        <option value="KES">KES — Kenyan Shilling</option>
+                        <option value="NGN">NGN — Nigerian Naira</option>
+                        <option value="ZAR">ZAR — South African Rand</option>
+                        <option value="CNY">CNY — Chinese Yuan</option>
+                        <option value="INR">INR — Indian Rupee</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                        Rate: 1 {fxCurrencyCode} = ? {currencyCode || "home"}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        value={fxRate}
+                        onChange={(e) => setFxRate(e.target.value)}
+                        placeholder="e.g. 14.50"
+                        className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-md p-2 focus:ring-purple-500 focus:border-purple-500"
+                      />
+                    </div>
+                    {fxRate && !isNaN(parseFloat(fxRate)) && parseFloat(fxRate) > 0 && (
+                      <p className="col-span-2 text-xs text-purple-700 dark:text-purple-300">
+                        Amounts entered in {fxCurrencyCode}. Booked in {currencyCode} at rate {parseFloat(fxRate).toFixed(4)}.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="mt-4">
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                   Notes

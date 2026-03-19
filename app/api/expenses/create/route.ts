@@ -4,6 +4,7 @@ import { getUserRole } from "@/lib/userRoles"
 import { createAuditLog } from "@/lib/auditLog"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,6 +31,9 @@ export async function POST(request: NextRequest) {
       date,
       notes,
       receipt_path,
+      // FX fields
+      currency_code,
+      fx_rate,
     } = body
 
     // Validate required fields
@@ -73,6 +77,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const homeCurrencyCode = businessProfile.default_currency
+    const parsedFxRate = fx_rate ? Number(fx_rate) : null
+    const isFxExpense = !!(currency_code && currency_code !== homeCurrencyCode)
+
+    if (isFxExpense && (!parsedFxRate || parsedFxRate <= 0)) {
+      return NextResponse.json(
+        { error: `Exchange rate is required for ${currency_code} expenses. Please enter the current rate.` },
+        { status: 400 }
+      )
+    }
+
+    const fxCurrencySymbol = isFxExpense ? (getCurrencySymbol(currency_code) || currency_code) : null
+
     const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, business_id)
     if (bootstrapErr) {
       return NextResponse.json(
@@ -97,6 +114,14 @@ export async function POST(request: NextRequest) {
         date,
         notes: notes || null,
         receipt_path: receipt_path || null,
+        // FX fields
+        currency_code: isFxExpense ? currency_code : null,
+        currency_symbol: isFxExpense ? fxCurrencySymbol : null,
+        fx_rate: isFxExpense ? parsedFxRate : null,
+        home_currency_code: isFxExpense ? homeCurrencyCode : null,
+        home_currency_total: isFxExpense && parsedFxRate
+          ? Math.round(Number(total || amount) * parsedFxRate * 100) / 100
+          : null,
       })
       .select(
         `

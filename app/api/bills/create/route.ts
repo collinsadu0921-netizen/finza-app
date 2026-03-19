@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,6 +48,9 @@ export async function POST(request: NextRequest) {
       examination_fee = 0,
       clearing_agent_fee = 0,
       landed_cost_account_code = "5200",
+      // FX fields
+      currency_code,
+      fx_rate,
     } = body
 
     // Validate required fields
@@ -92,6 +96,26 @@ export async function POST(request: NextRequest) {
     // if (!business || business.id !== business_id) {
     //   return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     // }
+
+    // Resolve home currency for FX validation
+    const { data: businessProfile } = await supabase
+      .from("businesses")
+      .select("default_currency")
+      .eq("id", business_id)
+      .single()
+
+    const homeCurrencyCode = businessProfile?.default_currency || null
+    const parsedFxRate = fx_rate ? Number(fx_rate) : null
+    const isFxBill = !!(currency_code && homeCurrencyCode && currency_code !== homeCurrencyCode)
+
+    if (isFxBill && (!parsedFxRate || parsedFxRate <= 0)) {
+      return NextResponse.json(
+        { success: false, error: `Exchange rate is required for ${currency_code} bills. Please enter the current rate.` },
+        { status: 400 }
+      )
+    }
+
+    const fxCurrencySymbol = isFxBill ? (getCurrencySymbol(currency_code) || currency_code) : null
 
     // Calculate totals using Ghana Tax Engine
     let taxResult
@@ -205,6 +229,14 @@ export async function POST(request: NextRequest) {
         examination_fee: bill_type === "import" ? Number(examination_fee) : 0,
         clearing_agent_fee: bill_type === "import" ? Number(clearing_agent_fee) : 0,
         landed_cost_account_code: bill_type === "import" ? landed_cost_account_code : "5200",
+        // FX fields
+        currency_code: isFxBill ? currency_code : null,
+        currency_symbol: isFxBill ? fxCurrencySymbol : null,
+        fx_rate: isFxBill ? parsedFxRate : null,
+        home_currency_code: isFxBill ? homeCurrencyCode : null,
+        home_currency_total: isFxBill && parsedFxRate
+          ? Math.round(taxResult.grandTotal * parsedFxRate * 100) / 100
+          : null,
       })
       .select()
       .single()

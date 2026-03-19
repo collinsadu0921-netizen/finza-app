@@ -86,7 +86,13 @@
       "Bash(grep -o text:[^]*355[^]* C:/Users/colli/.claude/projects/C--projects-finza-web-finza-web/c1dcfd81-8d7f-4282-90ce-8bf19ea00804.jsonl)",
       "Bash(grep -n \"address_country\\\\|default_currency\\\\|currency_code\\\\|fx_rate\\\\|home_currency\" C:/projects/finza-web/finza-web/app/api/estimates/[id]/pdf-preview/route.ts)",
       "Bash(find C:projectsfinza-webfinza-web -name *.sql -type f)",
-      "Bash(head -5 grep -rn \"7[0-9][0-9][0-9].*income\\\\|7[0-9][0-9][0-9].*gain\\\\|other.income\" \"C:/projects/finza-web/finza-web/supabase/migrations/\")"
+      "Bash(head -5 grep -rn \"7[0-9][0-9][0-9].*income\\\\|7[0-9][0-9][0-9].*gain\\\\|other.income\" \"C:/projects/finza-web/finza-web/supabase/migrations/\")",
+      "Bash(xargs basename:*)",
+      "Bash(grep -r \"fx_rate\\\\|currency_code\\\\|currency_symbol\\\\|home_currency_total\" /c/projects/finza-web/finza-web/supabase/migrations/ --include=*.sql)",
+      "Bash(find /c/projects/finza-web/finza-web/app -name *invoice*new* -o -name *invoice*create*)",
+      "Bash(grep -r \"type Bill\\\\|interface Bill\\\\|type Expense\\\\|interface Expense\" /c/projects/finza-web/finza-web/lib --include=*.ts)",
+      "Bash(grep -n \"ALTER TABLE expenses\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(sort -t_ -k1 -n)"
     ]
   }
 }
