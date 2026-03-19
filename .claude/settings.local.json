@@ -83,7 +83,8 @@
       "Bash(find C:projectsfinza-webfinza-web/supabase/migrations -name \"*.sql\" -exec grep -l \"currency_code\\\\|currency_symbol\" {})",
       "Bash(find 'C:\\\\projects\\\\finza-web\\\\finza-web\\\\supabase\\\\migrations' -name \"*.sql\" -exec grep -l \"currency_code\\\\|currency_symbol\" {})",
       "Bash(grep -o post_invoice_to_ledger[^]* C:/Users/colli/.claude/projects/C--projects-finza-web-finza-web/c1dcfd81-8d7f-4282-90ce-8bf19ea00804.jsonl)",
-      "Bash(grep -o text:[^]*355[^]* C:/Users/colli/.claude/projects/C--projects-finza-web-finza-web/c1dcfd81-8d7f-4282-90ce-8bf19ea00804.jsonl)"
+      "Bash(grep -o text:[^]*355[^]* C:/Users/colli/.claude/projects/C--projects-finza-web-finza-web/c1dcfd81-8d7f-4282-90ce-8bf19ea00804.jsonl)",
+      "Bash(grep -n \"address_country\\\\|default_currency\\\\|currency_code\\\\|fx_rate\\\\|home_currency\" C:/projects/finza-web/finza-web/app/api/estimates/[id]/pdf-preview/route.ts)"
     ]
   }
 }

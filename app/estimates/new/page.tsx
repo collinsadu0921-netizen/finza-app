@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { getCurrencySymbol } from "@/lib/currency"
 
 type Customer = {
   id: string
@@ -49,6 +50,12 @@ export default function NewEstimatePage() {
   const [fxEnabled, setFxEnabled] = useState(false)
   const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
   const [fxRate, setFxRate] = useState<string>("")
+
+  // Symbol used for all amount displays — switches to FX symbol when FX is enabled
+  const homeCurrencySymbol = getCurrencySymbol(businessCurrencyCode || "") || "GHS"
+  const displaySymbol = fxEnabled && fxCurrencyCode
+    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
+    : homeCurrencySymbol
 
   useEffect(() => {
     loadData()
@@ -627,7 +634,7 @@ export default function NewEstimatePage() {
                                   ) : (
                                     products.map((product) => (
                                       <option key={product.id} value={product.id}>
-                                        {product.name} — GHS {Number(product.price || 0).toFixed(2)}
+                                        {product.name} — {homeCurrencySymbol} {Number(product.price || 0).toFixed(2)}
                                       </option>
                                     ))
                                   )}
@@ -674,7 +681,7 @@ export default function NewEstimatePage() {
                               />
                             </td>
                             <td className="px-6 py-3 align-top text-right font-medium text-slate-900 pt-5">
-                              GHS {item.total.toFixed(2)}
+                              {displaySymbol} {item.total.toFixed(2)}
                             </td>
                             <td className="px-2 py-3 align-top pt-4">
                               <button
@@ -724,7 +731,7 @@ export default function NewEstimatePage() {
                   {/* Subtotal */}
                   <div className="flex justify-between items-center text-sm text-slate-600">
                     <span>Subtotal</span>
-                    <span className="font-medium">GHS {(applyGhanaTax ? total : baseSubtotal).toFixed(2)}</span>
+                    <span className="font-medium">{displaySymbol} {(applyGhanaTax ? total : baseSubtotal).toFixed(2)}</span>
                   </div>
 
                   {/* Tax breakdown */}
@@ -733,29 +740,29 @@ export default function NewEstimatePage() {
                       {taxBreakdown.nhil > 0 && (
                         <div className="flex justify-between items-center text-xs text-slate-500">
                           <span>NHIL (2.5%)</span>
-                          <span>GHS {taxBreakdown.nhil.toFixed(2)}</span>
+                          <span>{displaySymbol} {taxBreakdown.nhil.toFixed(2)}</span>
                         </div>
                       )}
                       {taxBreakdown.getfund > 0 && (
                         <div className="flex justify-between items-center text-xs text-slate-500">
                           <span>GETFund (2.5%)</span>
-                          <span>GHS {taxBreakdown.getfund.toFixed(2)}</span>
+                          <span>{displaySymbol} {taxBreakdown.getfund.toFixed(2)}</span>
                         </div>
                       )}
                       {taxBreakdown.vat > 0 && (
                         <div className="flex justify-between items-center text-xs text-slate-500">
                           <span>VAT</span>
-                          <span>GHS {taxBreakdown.vat.toFixed(2)}</span>
+                          <span>{displaySymbol} {taxBreakdown.vat.toFixed(2)}</span>
                         </div>
                       )}
                       <div className="mt-2 bg-blue-50 rounded p-2 text-[10px] text-blue-700">
                         <div className="flex justify-between mb-1">
                           <span>Base Amount:</span>
-                          <span>GHS {baseSubtotal.toFixed(2)}</span>
+                          <span>{displaySymbol} {baseSubtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Tax Component:</span>
-                          <span>GHS {tax.toFixed(2)}</span>
+                          <span>{displaySymbol} {tax.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
@@ -764,7 +771,7 @@ export default function NewEstimatePage() {
                   {/* Grand Total */}
                   <div className="flex justify-between items-center pt-2">
                     <span className="text-base font-bold text-slate-900">Total</span>
-                    <span className="text-xl font-bold text-slate-900">GHS {total.toFixed(2)}</span>
+                    <span className="text-xl font-bold text-slate-900">{displaySymbol} {total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>

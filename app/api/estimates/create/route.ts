@@ -5,6 +5,8 @@ import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxRe
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { getCurrencySymbol } from "@/lib/currency"
+import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 
 export async function POST(request: NextRequest) {
@@ -88,8 +90,42 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    try {
+      await assertBusinessNotArchived(supabase, businessId)
+    } catch (e: any) {
+      return NextResponse.json(
+        { success: false, error: e?.message || "Business is archived" },
+        { status: 403 }
+      )
+    }
+
     // Resolve FX fields
     const homeCurrencyCode = businessData.default_currency || null
+
+    if (!homeCurrencyCode) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Business currency is required. Please set your default currency in Business Profile settings.",
+          message: "Currency required for estimate creation",
+        },
+        { status: 400 }
+      )
+    }
+
+    const countryCode = normalizeCountry(businessData.address_country)
+    try {
+      assertCountryCurrency(countryCode, homeCurrencyCode)
+    } catch (error: any) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: error.message || "Currency does not match business country.",
+          message: error.message || "Currency-country mismatch",
+        },
+        { status: 400 }
+      )
+    }
     const estimateCurrencyCode = currency_code || homeCurrencyCode
     const isFxEstimate = !!(estimateCurrencyCode && homeCurrencyCode &&
       estimateCurrencyCode.toUpperCase() !== homeCurrencyCode.toUpperCase())
@@ -135,7 +171,7 @@ export async function POST(request: NextRequest) {
     const effectiveDate = issue_date || new Date().toISOString().split('T')[0]
 
     // Calculate taxes using canonical tax engine (tax-inclusive mode)
-    const jurisdiction = normalizeCountry(businessData.address_country)
+    const jurisdiction = countryCode
     if (!jurisdiction) {
       return NextResponse.json({ success: false, error: "Jurisdiction required", message: "Business country could not be resolved for tax calculation." }, { status: 400 })
     }

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
+import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxResult } from "@/lib/taxEngine/types"
 
@@ -51,6 +52,11 @@ function ProformaCreateForm() {
   const [fxEnabled, setFxEnabled] = useState(false)
   const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
   const [fxRate, setFxRate] = useState<string>("")
+
+  // Symbol used for all amount displays — switches to FX symbol when FX is enabled
+  const effectiveCurrencyDisplay = fxEnabled && fxCurrencyCode
+    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
+    : currencyDisplay
 
   // Create customer modal state
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -665,7 +671,7 @@ function ProformaCreateForm() {
                             />
                           </td>
                           <td className="px-6 py-3 align-top text-right font-medium text-slate-900 dark:text-white pt-5">
-                            {currencyDisplay} {lineTotal.toFixed(2)}
+                            {effectiveCurrencyDisplay} {lineTotal.toFixed(2)}
                           </td>
                           <td className="px-2 py-3 align-top pt-4">
                             <button
@@ -727,7 +733,7 @@ function ProformaCreateForm() {
             <div className="space-y-3">
               <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                 <span>Subtotal</span>
-                <span className="font-medium">{currencyDisplay} {displaySubtotal.toFixed(2)}</span>
+                <span className="font-medium">{effectiveCurrencyDisplay} {displaySubtotal.toFixed(2)}</span>
               </div>
 
               {applyTaxes && taxResult && (
@@ -737,19 +743,19 @@ function ProformaCreateForm() {
                     .map((line) => (
                       <div key={line.code} className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
                         <span>{line.code}</span>
-                        <span>{currencyDisplay} {Number(line.amount).toFixed(2)}</span>
+                        <span>{effectiveCurrencyDisplay} {Number(line.amount).toFixed(2)}</span>
                       </div>
                     ))}
                   <div className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400 pt-1">
                     <span>Total Tax</span>
-                    <span className="font-medium">{currencyDisplay} {displayTax.toFixed(2)}</span>
+                    <span className="font-medium">{effectiveCurrencyDisplay} {displayTax.toFixed(2)}</span>
                   </div>
                 </div>
               )}
 
               <div className="flex justify-between items-center pt-2">
                 <span className="text-base font-bold text-slate-900 dark:text-white">Total</span>
-                <span className="text-xl font-bold text-slate-900 dark:text-white">{currencyDisplay} {displayTotal.toFixed(2)}</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-white">{effectiveCurrencyDisplay} {displayTotal.toFixed(2)}</span>
               </div>
             </div>
           </div>

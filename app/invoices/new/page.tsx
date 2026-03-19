@@ -186,6 +186,11 @@ export default function NewInvoicePage() {
   const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
   const [fxRate, setFxRate] = useState<string>("")
 
+  // Symbol used for all amount displays — switches to FX symbol when FX is enabled
+  const displaySymbol = fxEnabled && fxCurrencyCode
+    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
+    : currencySymbol
+
   // Modals & Navigation
   const [showSendChoiceModal, setShowSendChoiceModal] = useState(false)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
@@ -849,7 +854,7 @@ export default function NewInvoicePage() {
                           key={item.id}
                           item={item}
                           products={products}
-                          currencySymbol={currencySymbol}
+                          currencySymbol={displaySymbol}
                           businessIndustry={businessIndustry}
                           onUpdate={updateItem}
                           onCommit={commitItem}
@@ -891,7 +896,7 @@ export default function NewInvoicePage() {
                 <div className="flex justify-between items-center text-sm text-slate-600">
                   <span>Subtotal</span>
                   <span className="font-medium">
-                    <Money amount={applyGhanaTax ? total : baseSubtotal} currency={currencySymbol} />
+                    <Money amount={applyGhanaTax ? total : baseSubtotal} currency={displaySymbol} />
                   </span>
                 </div>
 
@@ -903,31 +908,31 @@ export default function NewInvoicePage() {
                         {legacyTaxAmounts.nhil > 0 && (
                           <div className="flex justify-between items-center text-xs text-slate-500">
                             <span>NHIL (2.5%)</span>
-                            <Money amount={legacyTaxAmounts.nhil} currency={currencySymbol} />
+                            <Money amount={legacyTaxAmounts.nhil} currency={displaySymbol} />
                           </div>
                         )}
                         {legacyTaxAmounts.getfund > 0 && (
                           <div className="flex justify-between items-center text-xs text-slate-500">
                             <span>GETFund (2.5%)</span>
-                            <Money amount={legacyTaxAmounts.getfund} currency={currencySymbol} />
+                            <Money amount={legacyTaxAmounts.getfund} currency={displaySymbol} />
                           </div>
                         )}
                       </>
                     )}
                     <div className="flex justify-between items-center text-xs text-slate-500">
                       <span>VAT</span>
-                      <Money amount={legacyTaxAmounts.vat} currency={currencySymbol} />
+                      <Money amount={legacyTaxAmounts.vat} currency={displaySymbol} />
                     </div>
 
                     {/* Realtime Breakdown Block */}
                     <div className="mt-2 bg-blue-50 rounded p-2 text-[10px] text-blue-700">
                       <div className="flex justify-between mb-1">
                         <span>Base Amount:</span>
-                        <Money amount={baseSubtotal} currency={currencySymbol} />
+                        <Money amount={baseSubtotal} currency={displaySymbol} />
                       </div>
                       <div className="flex justify-between">
                         <span>Tax Component:</span>
-                        <Money amount={tax} currency={currencySymbol} />
+                        <Money amount={tax} currency={displaySymbol} />
                       </div>
                     </div>
                   </div>
@@ -937,7 +942,7 @@ export default function NewInvoicePage() {
                 <div className="flex justify-between items-center pt-2">
                   <span className="text-base font-bold text-slate-900">Total</span>
                   <span className="text-xl font-bold text-slate-900">
-                    <Money amount={total} currency={currencySymbol} />
+                    <Money amount={total} currency={displaySymbol} />
                   </span>
                 </div>
               </div>
