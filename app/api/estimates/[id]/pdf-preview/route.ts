@@ -125,8 +125,8 @@ export async function GET(
     // Determine if taxes are applied (based on whether tax amounts exist)
     const applyTaxes = estimate.total_tax_amount && estimate.total_tax_amount > 0
 
-    // Get currency from business - required for PDF generation
-    const businessCurrencyCode = estimate.businesses?.default_currency
+    // Get currency — prefer stored estimate currency (FX), fall back to business default
+    const businessCurrencyCode = estimate.currency_code || estimate.businesses?.default_currency
     if (!businessCurrencyCode) {
       return NextResponse.json(
         { error: "Business currency is required for estimate PDF generation. Please set your default currency in Business Profile settings." },
@@ -151,6 +151,10 @@ export async function GET(
       apply_taxes: applyTaxes,
       currency_symbol: businessCurrencySymbol,
       currency_code: businessCurrencyCode,
+      // FX fields
+      fx_rate: estimate.fx_rate ?? null,
+      home_currency_code: estimate.home_currency_code ?? null,
+      home_currency_total: estimate.home_currency_total ?? null,
     })
 
     return new NextResponse(htmlPreview, {

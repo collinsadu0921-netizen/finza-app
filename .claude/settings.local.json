@@ -76,7 +76,14 @@
       "Bash(grep -n \"return\\\\|business\\\\.\\\\|bizName\\\\|logo_url\\\\|Powered\\\\|header\\\\|top bar\\\\|bg-slate\\\\|font-bold.*text\" /c/projects/finza-web/finza-web/app/proforma-public/[token]/page.tsx)",
       "Bash(grep -n \"setBusiness\\\\|setEstimate\\\\|setItems\\\\|brand\\\\|logo_url\\\\|bg-blue\\\\|bg-slate-900\\\\|Accept\" /c/projects/finza-web/finza-web/app/quote-public/[token]/page.tsx)",
       "Bash(grep -n \"bg-emerald\\\\|bg-indigo\\\\|Accept.*Sign\\\\|Decline\\\\|Powered\" /c/projects/finza-web/finza-web/app/quote-public/[token]/page.tsx)",
-      "Bash(grep -n \"Powered by Finza\" /c/projects/finza-web/finza-web/app/invoice-public/[token]/page.tsx)"
+      "Bash(grep -n \"Powered by Finza\" /c/projects/finza-web/finza-web/app/invoice-public/[token]/page.tsx)",
+      "Bash(find /c/projects/finza-web/finza-web -path */node_modules -prune -o -type f -name *.ts -path */lib/* -print)",
+      "Bash(find /c/projects/finza-web/finza-web -path */node_modules -prune -o -type f \\\\\\(-name *model* -o -name *schema* -o -name *db* \\\\\\) -print)",
+      "Bash(find /c/projects/finza-web/finza-web/supabase/migrations -type f -name \"*.sql\" -exec grep -l \"CREATE TABLE.*businesses\" {})",
+      "Bash(find C:projectsfinza-webfinza-web/supabase/migrations -name \"*.sql\" -exec grep -l \"currency_code\\\\|currency_symbol\" {})",
+      "Bash(find 'C:\\\\projects\\\\finza-web\\\\finza-web\\\\supabase\\\\migrations' -name \"*.sql\" -exec grep -l \"currency_code\\\\|currency_symbol\" {})",
+      "Bash(grep -o post_invoice_to_ledger[^]* C:/Users/colli/.claude/projects/C--projects-finza-web-finza-web/c1dcfd81-8d7f-4282-90ce-8bf19ea00804.jsonl)",
+      "Bash(grep -o text:[^]*355[^]* C:/Users/colli/.claude/projects/C--projects-finza-web-finza-web/c1dcfd81-8d7f-4282-90ce-8bf19ea00804.jsonl)"
     ]
   }
 }

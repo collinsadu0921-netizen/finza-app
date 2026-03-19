@@ -43,6 +43,12 @@ export default function NewEstimatePage() {
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
+  const [businessCurrencyCode, setBusinessCurrencyCode] = useState<string | null>(null)
+
+  // FX (foreign currency) settings
+  const [fxEnabled, setFxEnabled] = useState(false)
+  const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
+  const [fxRate, setFxRate] = useState<string>("")
 
   useEffect(() => {
     loadData()
@@ -62,6 +68,13 @@ export default function NewEstimatePage() {
       setBusinessId(business.id)
       const industry = (business as { industry?: string }).industry ?? null
       setBusinessIndustry(industry)
+
+      const { data: bizDetails } = await supabase
+        .from("businesses")
+        .select("default_currency")
+        .eq("id", business.id)
+        .single()
+      setBusinessCurrencyCode(bizDetails?.default_currency || null)
 
       // Load customers
       const { data: customersData } = await supabase
@@ -336,6 +349,10 @@ export default function NewEstimatePage() {
             unit_price: Number(item.price) || 0,
           })),
           apply_taxes: applyGhanaTax,
+          ...(fxEnabled && fxCurrencyCode && fxRate ? {
+            currency_code: fxCurrencyCode,
+            fx_rate: parseFloat(fxRate),
+          } : {}),
         }),
       })
       const data = await response.json()
@@ -503,6 +520,63 @@ export default function NewEstimatePage() {
                         <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyGhanaTax ? "translate-x-4" : "translate-x-0"}`} />
                       </button>
                     </div>
+                  </div>
+
+                  {/* FX Currency Section */}
+                  <div className="col-span-2 pt-1">
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-md border border-slate-100">
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-slate-700">Quote in foreign currency?</span>
+                        <p className="text-xs text-slate-500">Issue this quote in USD, EUR, GBP, etc. — booked in {businessCurrencyCode || "home currency"}</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={fxEnabled}
+                        onClick={() => setFxEnabled(!fxEnabled)}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${fxEnabled ? "bg-blue-600" : "bg-slate-300"}`}
+                      >
+                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fxEnabled ? "translate-x-4" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                    {fxEnabled && (
+                      <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-blue-50 rounded-md border border-blue-100">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Quote Currency</label>
+                          <select
+                            value={fxCurrencyCode}
+                            onChange={(e) => setFxCurrencyCode(e.target.value)}
+                            className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="USD">USD — US Dollar</option>
+                            <option value="EUR">EUR — Euro</option>
+                            <option value="GBP">GBP — British Pound</option>
+                            <option value="KES">KES — Kenyan Shilling</option>
+                            <option value="NGN">NGN — Nigerian Naira</option>
+                            <option value="ZAR">ZAR — South African Rand</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                            Rate: 1 {fxCurrencyCode} = ? {businessCurrencyCode || "home"}
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            value={fxRate}
+                            onChange={(e) => setFxRate(e.target.value)}
+                            placeholder="e.g. 14.50"
+                            className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        {fxRate && !isNaN(parseFloat(fxRate)) && parseFloat(fxRate) > 0 && (
+                          <p className="col-span-2 text-xs text-blue-700">
+                            Prices entered in {fxCurrencyCode}. Booked in {businessCurrencyCode} at rate {parseFloat(fxRate).toFixed(4)}.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

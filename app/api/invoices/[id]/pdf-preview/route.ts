@@ -149,6 +149,10 @@ export async function GET(
       // Use stored tax_lines from database (preferred over recalculating)
       tax_lines: taxLines.length > 0 ? taxLines : undefined,
       business_country: invoice.businesses?.address_country || null,
+      // FX fields
+      fx_rate: invoice.fx_rate ?? null,
+      home_currency_code: invoice.home_currency_code ?? null,
+      home_currency_total: invoice.home_currency_total ?? null,
     })
 
     // Return HTML for preview

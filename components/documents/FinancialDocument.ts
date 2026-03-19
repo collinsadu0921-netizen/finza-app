@@ -92,6 +92,10 @@ export interface FinancialDocumentProps {
   tax_lines?: TaxLine[]
   // Optional: business country for tax calculation if tax_lines not provided
   business_country?: string | null
+  // FX fields: present when document is issued in a foreign currency
+  fx_rate?: number | null
+  home_currency_code?: string | null
+  home_currency_total?: number | null
 }
 
 /**
@@ -146,7 +150,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     apply_taxes = false,
     currency_symbol,
     currency_code,
+    fx_rate,
+    home_currency_code,
+    home_currency_total,
   } = props
+
+  const isFxDocument = !!(fx_rate && home_currency_code && home_currency_total != null)
 
   // Require currencyCode for PDF/print templates - no fallbacks allowed
   if (!currency_code) {
@@ -520,6 +529,16 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           <span>Total</span>
           <span>${currency_symbol} ${total.toFixed(2)}</span>
         </div>
+        ${isFxDocument ? `
+        <div class="total-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #e2e8f0;font-size:11px;color:#64748b">
+          <span>Exchange Rate</span>
+          <span>1 ${currency_code} = ${fx_rate!.toFixed(4)} ${home_currency_code}</span>
+        </div>
+        <div class="total-row" style="font-size:11px;color:#64748b">
+          <span>${home_currency_code} Equivalent</span>
+          <span>${home_currency_total!.toFixed(2)} ${home_currency_code}</span>
+        </div>
+        ` : ""}
       </div>
 
       ${notes ? `

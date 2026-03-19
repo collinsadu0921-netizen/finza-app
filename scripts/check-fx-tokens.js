@@ -22,7 +22,9 @@
 const fs = require('fs');
 const path = require('path');
 
-// FX tokens to check for
+// FX tokens to check for (POS/sales-specific fields - not to be used in UI without proper FX pipeline)
+// NOTE: Document FX fields (fx_rate, home_currency_code, home_currency_total) are intentional
+// and supported end-to-end for invoices/quotes/proforma — they are NOT blocked by this guard.
 const FX_TOKENS = [
   'foreign_currency',
   'foreign_amount',

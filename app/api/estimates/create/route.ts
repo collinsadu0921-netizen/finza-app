@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { getCurrencySymbol } from "@/lib/currency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 
 export async function POST(request: NextRequest) {
@@ -26,6 +27,8 @@ export async function POST(request: NextRequest) {
       notes,
       items,
       apply_taxes = true,
+      currency_code, // FX currency for this document (e.g. "USD"). Defaults to business home currency.
+      fx_rate,       // Exchange rate: 1 unit of currency_code = fx_rate units of home currency
     } = body
 
     // Validate required fields
@@ -69,14 +72,14 @@ export async function POST(request: NextRequest) {
     // CRITICAL: Fetch country - required for tax calculation
     const { data: businessData } = await supabase
       .from("businesses")
-      .select("address_country")
+      .select("address_country, default_currency")
       .eq("id", businessId)
       .single()
 
     // BLOCK estimate creation if business country is missing (no silent fallback)
     if (!businessData?.address_country) {
       return NextResponse.json(
-        { 
+        {
           success: false,
           error: "Business country is required. Please set your business country in Business Profile settings.",
           message: "Country required for tax calculation"
@@ -84,6 +87,24 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Resolve FX fields
+    const homeCurrencyCode = businessData.default_currency || null
+    const estimateCurrencyCode = currency_code || homeCurrencyCode
+    const isFxEstimate = !!(estimateCurrencyCode && homeCurrencyCode &&
+      estimateCurrencyCode.toUpperCase() !== homeCurrencyCode.toUpperCase())
+    const parsedFxRate = fx_rate ? Number(fx_rate) : null
+    if (isFxEstimate && (!parsedFxRate || parsedFxRate <= 0)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Exchange rate is required when quoting in ${estimateCurrencyCode}. Please provide the rate (e.g. 1 ${estimateCurrencyCode} = X ${homeCurrencyCode}).`,
+          message: "FX rate required for foreign currency quote",
+        },
+        { status: 400 }
+      )
+    }
+    const estimateCurrencySymbol = getCurrencySymbol(estimateCurrencyCode || "")
 
     // Prepare line items for tax calculation
     const lineItems = items.map((item: any) => ({
@@ -192,6 +213,13 @@ export async function POST(request: NextRequest) {
         issue_date,
         expiry_date: expiry_date || null,
         notes: notes || null,
+        currency_code: estimateCurrencyCode || null,
+        currency_symbol: estimateCurrencySymbol || null,
+        fx_rate: isFxEstimate ? parsedFxRate : null,
+        home_currency_code: isFxEstimate ? homeCurrencyCode : null,
+        home_currency_total: isFxEstimate && parsedFxRate
+          ? Math.round(estimateTotal * parsedFxRate * 100) / 100
+          : null,
         // Canonical tax values from TaxResult (already rounded to 2dp)
         subtotal: baseSubtotal, // result.base_amount
         total_tax_amount: taxResult ? Math.round(taxResult.total_tax * 100) / 100 : 0, // result.total_tax

@@ -40,8 +40,9 @@ export async function POST(request: NextRequest) {
       footer_message,
       items,
       apply_taxes = true,
-      currency_code, // No default - must come from business
-      currency_symbol, // No default - must come from business
+      currency_code, // FX currency for this document (e.g. "USD"). Defaults to business home currency.
+      currency_symbol, // Optional override symbol
+      fx_rate,         // Exchange rate: 1 unit of currency_code = fx_rate units of home currency
       status = "draft", // Allow status to be passed (defaults to draft)
     } = body
 
@@ -107,12 +108,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get currency from business settings (no hard-coded defaults)
-    // Currency must be explicitly set in business profile
-    const businessCurrencyCode = currency_code || businessProfile?.default_currency
-    if (!businessCurrencyCode) {
+    // Validate home currency (business.default_currency) against country — always required
+    const homeCurrencyCode = businessProfile?.default_currency
+    if (!homeCurrencyCode) {
       return NextResponse.json(
-        { 
+        {
           success: false,
           error: "Business currency is required. Please set your default currency in Business Profile settings.",
           message: "Currency required for invoice creation"
@@ -120,14 +120,13 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    
-    // Validate country-currency match
+
     const countryCode = normalizeCountry(businessProfile!.address_country)
     try {
-      assertCountryCurrency(countryCode, businessCurrencyCode)
+      assertCountryCurrency(countryCode, homeCurrencyCode)
     } catch (error: any) {
       return NextResponse.json(
-        { 
+        {
           success: false,
           error: error.message || "Currency does not match business country.",
           message: error.message || "Currency-country mismatch"
@@ -135,12 +134,29 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    
-    // Map currency code to symbol (no hard-coded Cedi)
-    const businessCurrencySymbol = currency_symbol || getCurrencySymbol(businessCurrencyCode)
-    if (!businessCurrencySymbol) {
+
+    // Invoice currency: may be a foreign currency (FX) or the home currency
+    const invoiceCurrencyCode = currency_code || homeCurrencyCode
+    const isFxInvoice = invoiceCurrencyCode.toUpperCase() !== homeCurrencyCode.toUpperCase()
+
+    // FX rate is required when invoicing in a foreign currency
+    const parsedFxRate = fx_rate ? Number(fx_rate) : null
+    if (isFxInvoice && (!parsedFxRate || parsedFxRate <= 0)) {
       return NextResponse.json(
-        { 
+        {
+          success: false,
+          error: `Exchange rate is required when invoicing in ${invoiceCurrencyCode}. Please provide the rate (e.g. 1 ${invoiceCurrencyCode} = X ${homeCurrencyCode}).`,
+          message: "FX rate required for foreign currency invoice",
+        },
+        { status: 400 }
+      )
+    }
+
+    // Map currency code to symbol
+    const invoiceCurrencySymbol = currency_symbol || getCurrencySymbol(invoiceCurrencyCode)
+    if (!invoiceCurrencySymbol) {
+      return NextResponse.json(
+        {
           success: false,
           error: "Currency symbol could not be determined. Please verify your currency code is valid.",
           message: "Invalid currency code"
@@ -148,6 +164,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Keep legacy variable names for the rest of the route
+    const businessCurrencyCode = invoiceCurrencyCode
+    const businessCurrencySymbol = invoiceCurrencySymbol
 
     const { data: invoiceSettings } = await supabase
       .from("invoice_settings")
@@ -289,6 +309,11 @@ export async function POST(request: NextRequest) {
       footer_message: finalFooterMessage,
       currency_code: businessCurrencyCode,
       currency_symbol: businessCurrencySymbol,
+      fx_rate: isFxInvoice ? parsedFxRate : null,
+      home_currency_code: isFxInvoice ? homeCurrencyCode : null,
+      home_currency_total: isFxInvoice && parsedFxRate
+        ? Math.round(invoiceTotal * parsedFxRate * 100) / 100
+        : null,
       // Canonical tax values from TaxResult (already rounded to 2dp)
       subtotal: baseSubtotal, // result.base_amount
       total_tax: taxResult ? Math.round(taxResult.total_tax * 100) / 100 : 0, // result.total_tax

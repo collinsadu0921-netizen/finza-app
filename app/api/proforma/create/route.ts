@@ -41,6 +41,8 @@ export async function POST(request: NextRequest) {
       status = "draft",
       source_estimate_id,
       items,
+      currency_code, // FX currency for this document (e.g. "USD"). Defaults to business home currency.
+      fx_rate,       // Exchange rate: 1 unit of currency_code = fx_rate units of home currency
     } = body
 
     // Validate required fields
@@ -81,9 +83,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get currency from business settings (no hard-coded defaults)
-    const businessCurrencyCode = businessProfile?.default_currency
-    if (!businessCurrencyCode) {
+    // Validate home currency (business.default_currency) against country — always required
+    const homeCurrencyCode = businessProfile?.default_currency
+    if (!homeCurrencyCode) {
       return NextResponse.json(
         {
           success: false,
@@ -94,10 +96,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate country-currency match
     const countryCode = normalizeCountry(businessProfile!.address_country)
     try {
-      assertCountryCurrency(countryCode, businessCurrencyCode)
+      assertCountryCurrency(countryCode, homeCurrencyCode)
     } catch (error: any) {
       return NextResponse.json(
         {
@@ -109,8 +110,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Proforma currency: may be a foreign currency (FX) or the home currency
+    const proformaCurrencyCode = currency_code || homeCurrencyCode
+    const isFxProforma = proformaCurrencyCode.toUpperCase() !== homeCurrencyCode.toUpperCase()
+    const parsedFxRate = fx_rate ? Number(fx_rate) : null
+
+    if (isFxProforma && (!parsedFxRate || parsedFxRate <= 0)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Exchange rate is required when issuing a proforma in ${proformaCurrencyCode}. Please provide the rate (e.g. 1 ${proformaCurrencyCode} = X ${homeCurrencyCode}).`,
+          message: "FX rate required for foreign currency proforma",
+        },
+        { status: 400 }
+      )
+    }
+
     // Map currency code to symbol
-    const businessCurrencySymbol = getCurrencySymbol(businessCurrencyCode)
+    const businessCurrencyCode = proformaCurrencyCode
+    const businessCurrencySymbol = getCurrencySymbol(proformaCurrencyCode)
     if (!businessCurrencySymbol) {
       return NextResponse.json(
         {
@@ -251,6 +269,11 @@ export async function POST(request: NextRequest) {
       footer_message: footer_message || null,
       currency_code: businessCurrencyCode,
       currency_symbol: businessCurrencySymbol,
+      fx_rate: isFxProforma ? parsedFxRate : null,
+      home_currency_code: isFxProforma ? homeCurrencyCode : null,
+      home_currency_total: isFxProforma && parsedFxRate
+        ? Math.round(proformaTotal * parsedFxRate * 100) / 100
+        : null,
       subtotal: baseSubtotal,
       total_tax: taxResult ? Math.round(taxResult.total_tax * 100) / 100 : 0,
       total: proformaTotal,

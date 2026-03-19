@@ -181,6 +181,11 @@ export default function NewInvoicePage() {
   const [currencySymbol, setCurrencySymbol] = useState<string>("")
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
 
+  // FX (foreign currency) settings
+  const [fxEnabled, setFxEnabled] = useState(false)
+  const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
+  const [fxRate, setFxRate] = useState<string>("")
+
   // Modals & Navigation
   const [showSendChoiceModal, setShowSendChoiceModal] = useState(false)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
@@ -489,7 +494,7 @@ export default function NewInvoicePage() {
     try {
       setLoading(true)
 
-      const payload = {
+      const payload: Record<string, any> = {
         business_id: businessId,
         customer_id: selectedCustomerId,
         issue_date: issueDate,
@@ -497,6 +502,10 @@ export default function NewInvoicePage() {
         notes: notes || null,
         apply_taxes: applyGhanaTax,
         status: "draft", // Always create as draft first
+        ...(fxEnabled && fxCurrencyCode && fxRate ? {
+          currency_code: fxCurrencyCode,
+          fx_rate: parseFloat(fxRate),
+        } : {}),
         items: items.map(item => ({
           product_service_id: item.product_id || null,
           description: item.description || "",
@@ -708,6 +717,63 @@ export default function NewInvoicePage() {
                       <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyGhanaTax ? 'translate-x-4' : 'translate-x-0'}`} />
                     </button>
                   </div>
+                </div>
+
+                {/* FX Currency Section */}
+                <div className="col-span-2 pt-1">
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-md border border-slate-100">
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-slate-700">Invoice in foreign currency?</span>
+                      <p className="text-xs text-slate-500">Issue this invoice in USD, EUR, GBP, etc. — booked in {currencyCode || "home currency"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={fxEnabled}
+                      onClick={() => setFxEnabled(!fxEnabled)}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${fxEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fxEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                  {fxEnabled && (
+                    <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-blue-50 rounded-md border border-blue-100">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Invoice Currency</label>
+                        <select
+                          value={fxCurrencyCode}
+                          onChange={(e) => setFxCurrencyCode(e.target.value)}
+                          className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="USD">USD — US Dollar</option>
+                          <option value="EUR">EUR — Euro</option>
+                          <option value="GBP">GBP — British Pound</option>
+                          <option value="KES">KES — Kenyan Shilling</option>
+                          <option value="NGN">NGN — Nigerian Naira</option>
+                          <option value="ZAR">ZAR — South African Rand</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                          Rate: 1 {fxCurrencyCode} = ? {currencyCode || "home"}
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.0001"
+                          value={fxRate}
+                          onChange={(e) => setFxRate(e.target.value)}
+                          placeholder="e.g. 14.50"
+                          className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      {fxRate && !isNaN(parseFloat(fxRate)) && parseFloat(fxRate) > 0 && (
+                        <p className="col-span-2 text-xs text-blue-700">
+                          Prices entered in {fxCurrencyCode}. Booked in {currencyCode} at rate {parseFloat(fxRate).toFixed(4)}.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

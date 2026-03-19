@@ -135,17 +135,15 @@ export default function ServiceBusinessProfilePage() {
       if (updateError) throw updateError
 
       setFormData((prev) => ({ ...prev, logo_url: publicUrl }))
+      setLogoPreview(publicUrl)
+      URL.revokeObjectURL(previewUrl)
       setSuccess("Logo uploaded successfully!")
       toast.showToast("Logo uploaded successfully!", "success")
     } catch {
+      URL.revokeObjectURL(previewUrl)
+      setLogoPreview(null)
       setError("Logo upload failed. Please try again.")
       toast.showToast("Logo upload failed. Please try again.", "error")
-    } finally {
-      try {
-        URL.revokeObjectURL(previewUrl)
-      } catch {
-        // noop
-      }
     }
   }
 
