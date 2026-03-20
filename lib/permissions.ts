@@ -197,3 +197,51 @@ export function getPermissionLabel(key: string): string {
   }
   return key
 }
+
+// ── Named permission constants ────────────────────────────────────────────────
+// Convenience namespace so API routes can write PERMISSIONS.PAYROLL_VIEW
+// instead of the raw string "payroll.view".
+
+export const PERMISSIONS = {
+  // Customers
+  CUSTOMERS_VIEW:        "customers.view"            as Permission,
+  CUSTOMERS_CREATE:      "customers.create"          as Permission,
+  CUSTOMERS_DELETE:      "customers.delete"          as Permission,
+  // Invoices & Estimates
+  INVOICES_VIEW:         "invoices.view"             as Permission,
+  INVOICES_CREATE:       "invoices.create"           as Permission,
+  INVOICES_SEND:         "invoices.send"             as Permission,
+  INVOICES_DELETE:       "invoices.delete"           as Permission,
+  ESTIMATES_VIEW:        "estimates.view"            as Permission,
+  ESTIMATES_CREATE:      "estimates.create"          as Permission,
+  // Jobs & Operations
+  JOBS_VIEW:             "jobs.view"                 as Permission,
+  JOBS_CREATE:           "jobs.create"               as Permission,
+  JOBS_UPDATE:           "jobs.update"               as Permission,
+  // Bills & Expenses
+  BILLS_VIEW:            "bills.view"                as Permission,
+  BILLS_CREATE:          "bills.create"              as Permission,
+  EXPENSES_VIEW:         "expenses.view"             as Permission,
+  EXPENSES_CREATE:       "expenses.create"           as Permission,
+  // Accounting & Reports
+  REPORTS_VIEW:          "reports.view"              as Permission,
+  ACCOUNTING_VIEW:       "accounting.view"           as Permission,
+  ACCOUNTING_RECONCILE:  "accounting.reconcile"      as Permission,
+  ACCOUNTING_CLOSE:      "accounting.close_period"   as Permission,
+  // Payroll
+  PAYROLL_VIEW:          "payroll.view"              as Permission,
+  PAYROLL_CREATE:        "payroll.run"               as Permission,
+  PAYROLL_APPROVE:       "payroll.approve"           as Permission,
+  PAYROLL_LOCK:          "payroll.approve"           as Permission, // locking = highest payroll privilege
+  PAYROLL_PAYSLIPS:      "payroll.approve"           as Permission, // generating payslips requires an approved run
+  // Settings & Admin
+  SETTINGS_VIEW:         "settings.view"             as Permission,
+  SETTINGS_EDIT:         "settings.edit"             as Permission,
+  SETTINGS_TEAM:         "team.manage"               as Permission,
+  STAFF_MANAGE:          "staff.manage"              as Permission,
+} as const
+
+// ── Permission metadata alias ─────────────────────────────────────────────────
+// PERMISSION_META is an alias for PERMISSION_GROUPS; exported so API routes
+// can send it to the UI for building the permission editor.
+export const PERMISSION_META = PERMISSION_GROUPS
