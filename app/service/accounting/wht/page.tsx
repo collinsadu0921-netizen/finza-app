@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCurrencySymbol } from "@/lib/currency"
@@ -128,15 +127,11 @@ export default function WHTRegisterPage() {
   const displayBills = tab === "pending" ? pending : remitted
 
   if (loading) {
-    return (
-      <ProtectedLayout>
-        <div className="p-6"><p className="text-gray-500">Loading WHT register…</p></div>
-      </ProtectedLayout>
-    )
+    return <div className="p-6"><p className="text-gray-500">Loading WHT register…</p></div>
   }
 
   return (
-    <ProtectedLayout>
+    <>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -407,6 +402,6 @@ export default function WHTRegisterPage() {
           </div>
         </div>
       )}
-    </ProtectedLayout>
+    </>
   )
 }
