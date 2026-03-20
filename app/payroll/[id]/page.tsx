@@ -70,6 +70,7 @@ export default function PayrollRunViewPage() {
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [updating, setUpdating] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [sendingAll, setSendingAll] = useState(false)
 
   // Send modal state
   const [sendModal, setSendModal] = useState<SendModalState>(null)
@@ -195,6 +196,25 @@ export default function PayrollRunViewPage() {
     }
   }
 
+  const handleSendAll = async () => {
+    setSendingAll(true)
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/send-all`, { method: "POST" })
+      const data = await res.json()
+      if (res.ok) {
+        const msg = `Sent to ${data.sent} employee${data.sent !== 1 ? "s" : ""}${data.skipped > 0 ? ` (${data.skipped} skipped)` : ""}`
+        toast.showToast(msg, "success")
+        await loadPayslips()
+      } else {
+        toast.showToast(data.error || "Failed to send payslips", "error")
+      }
+    } catch {
+      toast.showToast("Failed to send payslips", "error")
+    } finally {
+      setSendingAll(false)
+    }
+  }
+
   const openSendModal = (entry: PayrollEntry, payslip: Payslip) => {
     setSendError("")
     setSendEmailInput(entry.staff.email || "")
@@ -296,6 +316,20 @@ export default function PayrollRunViewPage() {
                   {hasPayslips ? "Regenerate Payslips" : "Generate Payslips"}</>
                 )}
               </button>
+              {hasPayslips && (
+                <button
+                  onClick={handleSendAll}
+                  disabled={sendingAll}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {sendingAll ? (
+                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Sending…</>
+                  ) : (
+                    <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                    Send All Payslips</>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -391,7 +425,7 @@ export default function PayrollRunViewPage() {
                                 </button>
                                 {payslip.public_token && (
                                   <a
-                                    href={`/payslips/${payslip.public_token}`}
+                                    href={`/payslips/${encodeURIComponent(payslip.public_token)}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600"

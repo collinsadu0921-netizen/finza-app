@@ -55,7 +55,12 @@ function formatMonth(dateStr: string) {
 
 export default function PublicPayslipPage() {
   const params = useParams()
-  const token = params.token as string
+  // Catch-all route: params.token is string[] when the path has multiple segments
+  // (e.g. /payslips/abc/def from a legacy base64 token containing a slash).
+  // Join the segments and URL-encode when fetching the API.
+  const rawToken = params.token
+  const token = Array.isArray(rawToken) ? rawToken.join("/") : (rawToken as string)
+
   const [payslip, setPayslip] = useState<PayslipData | null>(null)
   const [business, setBusiness] = useState<BusinessData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -63,7 +68,7 @@ export default function PublicPayslipPage() {
 
   useEffect(() => {
     if (!token) return
-    fetch(`/api/payroll/payslips/public/${token}`)
+    fetch(`/api/payroll/payslips/public/${encodeURIComponent(token)}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) { setNotFound(true); return }

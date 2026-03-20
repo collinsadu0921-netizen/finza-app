@@ -12,10 +12,9 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT - Keep login check only
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const body = await request.json()
     const {
@@ -51,6 +50,9 @@ export async function POST(request: NextRequest) {
       // FX fields
       currency_code,
       fx_rate,
+      // Import bill inventory linkage
+      material_id: import_material_id = null,
+      quantity: import_quantity = 1,
     } = body
 
     // Validate required fields
@@ -91,11 +93,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // AUTH DISABLED FOR DEVELOPMENT - Bypass business ownership check
-    // const business = await getCurrentBusiness(supabase, user.id)
-    // if (!business || business.id !== business_id) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
-    // }
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business || business.id !== business_id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
 
     // Resolve home currency for FX validation
     const { data: businessProfile } = await supabase
@@ -229,6 +230,9 @@ export async function POST(request: NextRequest) {
         examination_fee: bill_type === "import" ? Number(examination_fee) : 0,
         clearing_agent_fee: bill_type === "import" ? Number(clearing_agent_fee) : 0,
         landed_cost_account_code: bill_type === "import" ? landed_cost_account_code : "5200",
+        // Import inventory linkage
+        material_id: bill_type === "import" ? (import_material_id || null) : null,
+        quantity: bill_type === "import" ? Number(import_quantity) || 1 : null,
         // FX fields
         currency_code: isFxBill ? currency_code : null,
         currency_symbol: isFxBill ? fxCurrencySymbol : null,
@@ -266,6 +270,19 @@ export async function POST(request: NextRequest) {
 
     // Create bill items (standard bills only — import bills use the breakdown fields)
     if (bill_type === "standard" && items?.length > 0) {
+      // Resolve inventory account UUID (1450) once if any line has a material_id
+      const hasInventoryLines = items.some((item: any) => item.material_id)
+      let inventoryAccountId: string | null = null
+      if (hasInventoryLines) {
+        const { data: invAcct } = await supabase
+          .from("chart_of_accounts")
+          .select("id")
+          .eq("business_id", business_id)
+          .eq("code", "1450")
+          .single()
+        inventoryAccountId = invAcct?.id ?? null
+      }
+
       const billItems = items.map((item: any) => ({
         bill_id: bill.id,
         description: item.description || "",
@@ -273,6 +290,8 @@ export async function POST(request: NextRequest) {
         unit_price: Number(item.unit_price) || 0,
         discount_amount: Number(item.discount_amount) || 0,
         line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
+        material_id: item.material_id || null,
+        account_id: item.material_id ? inventoryAccountId : null,
       }))
 
       const { error: itemsError } = await supabase.from("bill_items").insert(billItems)

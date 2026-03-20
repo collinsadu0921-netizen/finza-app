@@ -44,7 +44,7 @@ export default function ServiceJobsPage() {
         .eq("business_id", business.id)
         .order("created_at", { ascending: false })
       if (qErr) {
-        setError(qErr.message || "Failed to load jobs")
+        setError(qErr.message || "Failed to load projects")
         setLoading(false)
         return
       }
@@ -62,12 +62,12 @@ export default function ServiceJobsPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Jobs</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Projects</h1>
           <button
             onClick={() => router.push("/service/jobs/new")}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium"
           >
-            Create Job
+            Create Project
           </button>
         </div>
         {error && (
@@ -91,7 +91,7 @@ export default function ServiceJobsPage() {
                 {rows.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
-                      No jobs yet. Create your first job to get started.
+                      No projects yet. Create your first project to get started.
                     </td>
                   </tr>
                 ) : (

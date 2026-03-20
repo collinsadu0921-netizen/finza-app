@@ -108,7 +108,8 @@
       "Bash(do echo:*)",
       "Read(//c/projects/finza-web/finza-web/**)",
       "Bash(done)",
-      "Bash(grep -l \"business_users\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
+      "Bash(grep -l \"business_users\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -r \"cit\\\\|CIT\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --include=*.js --include=*.jsx)"
     ]
   }
 }

@@ -11,41 +11,17 @@ export async function POST(
     const accountId = resolvedParams.accountId
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
-    // Verify account exists
+    // Verify account exists and belongs to business
     const { data: account } = await supabase
       .from("accounts")
       .select("id")
       .eq("id", accountId)
+      .eq("business_id", business.id)
       .single()
 
     if (!account) {

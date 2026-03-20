@@ -184,7 +184,8 @@ export default function Sidebar() {
         {
           title: "PAYROLL",
           items: [
-            { label: "Payroll",   route: "/payroll" },
+            { label: "Payroll",          route: "/payroll" },
+            { label: "Salary Advances",  route: "/payroll/advances" },
           ],
         },
       ]
@@ -218,14 +219,16 @@ export default function Sidebar() {
         const coaRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/chart-of-accounts", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/chart-of-accounts", accountingBusinessId ?? undefined)
         const trialBalanceRoute = useServiceRoutes ? buildServiceRoute("/service/reports/trial-balance", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reports/trial-balance", accountingBusinessId ?? undefined)
         const reconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reconciliation", accountingBusinessId ?? undefined)
+        const bankReconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/bank-reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/bank-reconciliation", accountingBusinessId ?? undefined)
         const periodsRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/periods", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/periods", accountingBusinessId ?? undefined)
 
         const accountingItems: Array<{ label: string; route: string }> = [
-          { label: "General Ledger",     route: ledgerRoute },
-          { label: "Chart of Accounts",  route: coaRoute },
-          { label: "Trial Balance",      route: trialBalanceRoute },
-          { label: "Reconciliation",     route: reconciliationRoute },
-          { label: "Accounting Periods", route: periodsRoute },
+          { label: "General Ledger",        route: ledgerRoute },
+          { label: "Chart of Accounts",     route: coaRoute },
+          { label: "Trial Balance",         route: trialBalanceRoute },
+          { label: "Reconciliation",        route: reconciliationRoute },
+          { label: "Bank Reconciliation",   route: bankReconciliationRoute },
+          { label: "Accounting Periods",    route: periodsRoute },
           ...(isAccountantFirmUser === true
             ? [
                 { label: "Health",        route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
@@ -234,7 +237,7 @@ export default function Sidebar() {
                 { label: "Tenants",       route: "/admin/accounting/tenants" },
               ]
             : [
-                { label: "Loan Tracker", route: "/service/accounting/loan" },
+                { label: "Loans & Equity", route: "/service/accounting/loan" },
               ]),
         ]
         sections.push({

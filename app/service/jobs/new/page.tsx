@@ -91,7 +91,7 @@ export default function ServiceJobsNewPage() {
       if (err) throw err
       if (job) router.push(`/service/jobs/${job.id}`)
     } catch (e: any) {
-      setError(e.message || "Failed to create job")
+      setError(e.message || "Failed to create project")
     } finally {
       setLoading(false)
     }
@@ -101,11 +101,11 @@ export default function ServiceJobsNewPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
-          title="New Job"
+          title="New Project"
           subtitle="Create a service engagement"
           actions={
             <Button variant="outline" onClick={() => router.push("/service/jobs")}>
-              Back to Jobs
+              Back to Projects
             </Button>
           }
         />
@@ -179,12 +179,12 @@ export default function ServiceJobsNewPage() {
               ))}
             </select>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Link this job to an accepted or sent Proforma Invoice
+              Link this project to an accepted or sent Proforma Invoice
             </p>
           </div>
           <div className="flex gap-3 pt-4">
             <Button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create Job"}
+              {loading ? "Creating..." : "Create Project"}
             </Button>
             <Button type="button" variant="outline" onClick={() => router.push("/service/jobs")}>
               Cancel

@@ -23,7 +23,7 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { start_date, end_date, date_tolerance_days = 3 } = body
+    const { start_date, end_date, date_tolerance_days = 3, amount_tolerance_pct = 0 } = body
 
     // Get unreconciled bank transactions
     let bankQuery = supabase
@@ -74,9 +74,21 @@ export async function POST(
       )
     }
 
-    // Auto-match logic
+    // Collect system transaction IDs already referenced by any matched bank transaction
+    // (prevents the same system txn being matched to two bank transactions)
+    const { data: alreadyMatched } = await supabase
+      .from("bank_transactions")
+      .select("matches")
+      .eq("business_id", business.id)
+      .eq("account_id", accountId)
+      .eq("status", "matched")
+      .is("deleted_at", null)
+
+    const matchedSystemIds = new Set<string>(
+      (alreadyMatched || []).flatMap((t: any) => t.matches ?? [])
+    )
+
     const matches: Array<{ bank_id: string; system_ids: string[] }> = []
-    const matchedSystemIds = new Set<string>()
 
     for (const bankTx of bankTransactions || []) {
       const bankDate = new Date(bankTx.date)
@@ -91,8 +103,11 @@ export async function POST(
         const sysType = sysTx.type
         const sysDate = new Date(sysTx.date)
 
-        // Amount must match exactly
-        if (Math.abs(bankAmount - sysAmount) > 0.01) return false
+        // Amount must match within tolerance
+        const tolerance = amount_tolerance_pct > 0
+          ? bankAmount * (amount_tolerance_pct / 100)
+          : 0.01
+        if (Math.abs(bankAmount - sysAmount) > tolerance) return false
 
         // Type must match
         if (bankType !== sysType) return false

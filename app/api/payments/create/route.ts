@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
       reference,
       notes,
       settlement_fx_rate, // Rate at time of payment for FX invoices (1 FX unit = X home currency)
+      wht_amount = 0,     // WHT deducted by customer — recorded as WHT Receivable (2155), not cash
     } = body
 
     // Validate method
@@ -236,6 +237,7 @@ export async function POST(request: NextRequest) {
         e_levy_amount: eLevyAmount,
         public_token: publicToken,
         settlement_fx_rate: isFxInvoice ? parsedSettlementFxRate : null,
+        wht_amount: Number(wht_amount) || 0,
       })
       .select()
       .single()

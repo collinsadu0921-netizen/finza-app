@@ -32,11 +32,11 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
-    group: "Jobs & Operations",
+    group: "Projects & Operations",
     permissions: [
-      { key: "jobs.view",   label: "View jobs" },
-      { key: "jobs.create", label: "Create & edit jobs" },
-      { key: "jobs.update", label: "Update job status / progress" },
+      { key: "jobs.view",   label: "View projects" },
+      { key: "jobs.create", label: "Create & edit projects" },
+      { key: "jobs.update", label: "Update project status / progress" },
     ],
   },
   {

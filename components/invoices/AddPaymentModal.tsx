@@ -21,6 +21,9 @@ type AddPaymentModalProps = {
     invoiceFxRate?: number | null       // original rate when invoice was issued
     invoiceCurrencyCode?: string | null // e.g. "USD"
     homeCurrencyCode?: string | null    // e.g. "GHS"
+    // WHT suffered — pre-filled when invoice has wht_receivable_applicable = true
+    invoiceWhtApplicable?: boolean
+    invoiceWhtAmount?: number
     onClose: () => void
     onSuccess: () => void
 }
@@ -46,6 +49,8 @@ export default function AddPaymentModal({
     invoiceFxRate,
     invoiceCurrencyCode,
     homeCurrencyCode,
+    invoiceWhtApplicable = false,
+    invoiceWhtAmount = 0,
     onClose,
     onSuccess,
 }: AddPaymentModalProps) {
@@ -62,6 +67,10 @@ export default function AddPaymentModal({
     const [reference, setReference] = useState("")
     const [notes, setNotes] = useState("")
     const [settlementFxRate, setSettlementFxRate] = useState("")
+
+    // WHT suffered state
+    const [whtEnabled, setWhtEnabled] = useState(invoiceWhtApplicable)
+    const [whtAmountStr, setWhtAmountStr] = useState(invoiceWhtAmount > 0 ? invoiceWhtAmount.toFixed(2) : "")
 
     // FX helpers
     const isFxInvoice = !!(invoiceFxRate && invoiceCurrencyCode && homeCurrencyCode)
@@ -81,6 +90,10 @@ export default function AddPaymentModal({
     const remainingBalance = Math.max(0, invoiceTotal - totalPaid - creditsApplied)
     const amountNum = Number(amount) || 0
     const isOverpayment = amountNum > remainingBalance + 0.01 // 0.01 tolerance
+
+    // WHT derived
+    const whtNum = whtEnabled ? (Number(whtAmountStr) || 0) : 0
+    const netCashReceived = amountNum - whtNum
 
     // Eligibility
     const countryCode = normalizeCountry(businessCountry)
@@ -180,6 +193,7 @@ export default function AddPaymentModal({
                     reference: reference || null,
                     notes: notes || null,
                     settlement_fx_rate: isFxInvoice ? parsedSettlementRate : null,
+                    wht_amount: whtNum > 0 ? whtNum : 0,
                 }),
             })
 
@@ -424,6 +438,55 @@ export default function AddPaymentModal({
                                     </div>
                                 )}
 
+                                {/* WHT Suffered Section */}
+                                <div className={`rounded-lg border p-4 ${whtEnabled ? "border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-600" : "border-gray-200 bg-gray-50 dark:bg-gray-700/30 dark:border-gray-600"}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                                Customer deducted WHT
+                                            </span>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                WHT is recorded as a tax credit asset (account 2155)
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={whtEnabled}
+                                            onClick={() => setWhtEnabled(!whtEnabled)}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${whtEnabled ? "bg-amber-500" : "bg-gray-200 dark:bg-gray-600"}`}
+                                        >
+                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${whtEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                                        </button>
+                                    </div>
+                                    {whtEnabled && (
+                                        <div className="mt-3 space-y-2">
+                                            <label className="block text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                                                WHT Amount Deducted
+                                            </label>
+                                            <div className="relative">
+                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <span className="text-gray-500 font-bold text-sm">{currencySymbol}</span>
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    min="0"
+                                                    value={whtAmountStr}
+                                                    onChange={(e) => setWhtAmountStr(e.target.value)}
+                                                    className="block w-full pl-10 pr-4 py-2.5 rounded-lg border-2 border-amber-300 focus:border-amber-500 bg-white dark:bg-gray-700 dark:text-white font-mono"
+                                                    placeholder="0.00"
+                                                />
+                                            </div>
+                                            {whtNum > 0 && (
+                                                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                                                    You received {currencySymbol}{netCashReceived.toFixed(2)} in your bank. The {currencySymbol}{whtNum.toFixed(2)} WHT credit offsets future tax.
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* Ledger Preview Panel */}
                                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex items-start gap-3">
                                     <div className="bg-blue-100 text-blue-600 rounded-full p-1.5 flex-shrink-0 mt-0.5">
@@ -433,7 +496,8 @@ export default function AddPaymentModal({
                                         <h4 className="text-sm font-semibold text-blue-900">Ledger Impact Preview</h4>
                                         <p className="text-xs text-blue-700 mt-1 mb-2">This payment will:</p>
                                         <ul className="text-xs text-blue-800 list-disc list-inside space-y-0.5 font-medium">
-                                            <li>Debit Cash/Bank {isFxInvoice && amountInHomeCurrency ? `(${homeCurrencyCode} ${amountInHomeCurrency.toFixed(2)})` : ""}</li>
+                                            <li>Debit Cash/Bank {whtNum > 0 ? `(${currencySymbol}${netCashReceived.toFixed(2)} net of WHT)` : isFxInvoice && amountInHomeCurrency ? `(${homeCurrencyCode} ${amountInHomeCurrency.toFixed(2)})` : ""}</li>
+                                            {whtNum > 0 && <li>Debit WHT Receivable — tax credit ({currencySymbol}{whtNum.toFixed(2)})</li>}
                                             <li>Credit Accounts Receivable {isFxInvoice && arClearAmount ? `(${homeCurrencyCode} ${arClearAmount.toFixed(2)})` : ""}</li>
                                             {isFxInvoice && fxDiff !== null && fxDiff > 0 && <li>Credit FX Gain ({homeCurrencyCode} {fxDiff.toFixed(2)})</li>}
                                             {isFxInvoice && fxDiff !== null && fxDiff < 0 && <li>Debit FX Loss ({homeCurrencyCode} {Math.abs(fxDiff).toFixed(2)})</li>}

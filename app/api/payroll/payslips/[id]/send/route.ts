@@ -103,7 +103,7 @@ export async function POST(
         { status: 400 }
       )
     }
-    const publicUrl = `${baseUrl}/payslips/${publicToken}`
+    const publicUrl = `${baseUrl}/payslips/${encodeURIComponent(publicToken)}`
 
     // Business currency
     const { data: bizProfile } = await supabase

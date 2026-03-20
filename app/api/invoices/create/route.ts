@@ -44,6 +44,10 @@ export async function POST(request: NextRequest) {
       currency_symbol, // Optional override symbol
       fx_rate,         // Exchange rate: 1 unit of currency_code = fx_rate units of home currency
       status = "draft", // Allow status to be passed (defaults to draft)
+      // WHT suffered — when a customer is required by GRA to withhold tax from payment
+      wht_receivable_applicable = false,
+      wht_receivable_rate = null,
+      wht_receivable_amount = 0,
     } = body
 
     // Validate required fields (business comes from session)
@@ -331,6 +335,10 @@ export async function POST(request: NextRequest) {
       getfund: apply_taxes ? Math.round(legacyTaxColumns.getfund * 100) / 100 : 0,
       covid: apply_taxes ? Math.round(legacyTaxColumns.covid * 100) / 100 : 0,
       vat: apply_taxes ? Math.round(legacyTaxColumns.vat * 100) / 100 : 0,
+      // WHT suffered by this company (customer withholds from payment)
+      wht_receivable_applicable: wht_receivable_applicable || false,
+      wht_receivable_rate: wht_receivable_applicable ? (wht_receivable_rate ?? null) : null,
+      wht_receivable_amount: wht_receivable_applicable ? (Number(wht_receivable_amount) || 0) : 0,
     }
 
     // If status is "sent", set sent_at timestamp (this is the tax effective date)

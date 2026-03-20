@@ -12,6 +12,9 @@
     "test:opening-balances": "jest --testPathPattern=opening-balances",
     "test:opening-balances:watch": "jest --testPathPattern=opening-balances --watch",
     "test:flash-sale": "vitest run --testPathPattern=flash-sale-race",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:install": "playwright install chromium",
     "ci:accounting-audit": "ts-node scripts/accounting-ci-audit.ts",
     "ci:detect-bypass": "ts-node scripts/detect-report-bypass.ts",
     "ci:detect-non-ledger": "ts-node scripts/detect-non-ledger-reports.ts",
@@ -33,6 +36,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",

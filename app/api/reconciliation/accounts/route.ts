@@ -5,42 +5,21 @@ import { getCurrentBusiness } from "@/lib/business"
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    const { searchParams } = new URL(request.url)
+    const typesParam = searchParams.get("types") ?? "asset"
+    const types = typesParam.split(",").map(t => t.trim()).filter(Boolean)
 
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
-    // Get all asset accounts
+    // Get accounts of requested types
     const { data: accounts, error } = await supabase
       .from("accounts")
-      .select("*")
+      .select("id, name, code, type")
       .eq("business_id", business.id)
-      .eq("type", "asset")
+      .in("type", types)
       .is("deleted_at", null)
       .order("code", { ascending: true })
 
@@ -65,35 +44,10 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
     const body = await request.json()
     const { account_id, is_reconcilable } = body

@@ -11,46 +11,22 @@ export async function GET(
     const accountId = resolvedParams.accountId
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
     const status = searchParams.get("status")
 
-    // Verify account exists
+    // Verify account exists and belongs to business
     const { data: account } = await supabase
       .from("accounts")
       .select("id, name, code, type")
       .eq("id", accountId)
+      .eq("business_id", business.id)
       .single()
 
     if (!account) {
@@ -115,10 +91,12 @@ export async function GET(
       })
       : { data: 0 }
 
-    const bankEndingBalance = bankTransactions?.reduce((sum: number, t: any) => {
+    // Exclude ignored transactions from balance — they're intentionally out of scope
+    const activeBankTxns = (bankTransactions || []).filter((t: any) => t.status !== "ignored")
+    const bankEndingBalance = activeBankTxns.reduce((sum: number, t: any) => {
       if (t.type === "credit") return sum + Number(t.amount)
       return sum - Number(t.amount)
-    }, 0) || 0
+    }, 0)
 
     const systemEndingBalance = systemTransactions?.reduce((sum: number, t: any) => {
       if (t.type === "credit") return sum + Number(t.amount)

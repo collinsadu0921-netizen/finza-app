@@ -50,6 +50,8 @@ type Invoice = {
   tax_lines?: any | null
   fx_rate?: number | null
   home_currency_code?: string | null
+  wht_receivable_applicable?: boolean | null
+  wht_receivable_amount?: number | null
   orders?: {
     id: string
     order_number: string | null
@@ -744,6 +746,8 @@ export default function InvoiceViewPage() {
           invoiceFxRate={invoice.fx_rate ?? null}
           invoiceCurrencyCode={invoice.currency_code ?? null}
           homeCurrencyCode={invoice.home_currency_code ?? null}
+          invoiceWhtApplicable={invoice.wht_receivable_applicable ?? false}
+          invoiceWhtAmount={Number(invoice.wht_receivable_amount ?? 0)}
           onClose={() => setShowPaymentModal(false)}
           onSuccess={handlePaymentAdded}
         />

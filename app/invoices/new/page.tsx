@@ -12,6 +12,7 @@ import InvoicePreviewModal from "@/components/invoices/InvoicePreviewModal"
 import Toast from "@/components/Toast"
 import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 
 // FINZA Design System Components (Phase 2 Refactor)
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -185,6 +186,10 @@ export default function NewInvoicePage() {
   const [fxEnabled, setFxEnabled] = useState(false)
   const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
   const [fxRate, setFxRate] = useState<string>("")
+
+  // WHT suffered — when a corporate customer withholds tax from payment
+  const [applyWHTReceivable, setApplyWHTReceivable] = useState(false)
+  const [whtReceivableRateCode, setWhtReceivableRateCode] = useState("GH_SVC_5")
 
   // Symbol used for all amount displays — switches to FX symbol when FX is enabled
   const displaySymbol = fxEnabled && fxCurrencyCode
@@ -435,6 +440,12 @@ export default function NewInvoicePage() {
     legacyTaxAmounts = getLegacyTaxAmounts(taxCalculationResult)
   }
 
+  // WHT receivable — derived from invoice total
+  const selectedWHTRecvRate = GH_WHT_RATES.find(r => r.code === whtReceivableRateCode) ?? GH_WHT_RATES[0]
+  const whtRecvCalc = applyWHTReceivable
+    ? calculateWHT(total, selectedWHTRecvRate?.rate ?? 0)
+    : { whtAmount: 0, netPayable: total }
+
   // -- Actions --
   const handleCreateCustomer = async (e?: React.SyntheticEvent) => {
     e?.preventDefault()
@@ -507,6 +518,9 @@ export default function NewInvoicePage() {
         notes: notes || null,
         apply_taxes: applyGhanaTax,
         status: "draft", // Always create as draft first
+        wht_receivable_applicable: applyWHTReceivable,
+        wht_receivable_rate: applyWHTReceivable ? (selectedWHTRecvRate?.rate ?? null) : null,
+        wht_receivable_amount: applyWHTReceivable ? whtRecvCalc.whtAmount : 0,
         ...(fxEnabled && fxCurrencyCode && fxRate ? {
           currency_code: fxCurrencyCode,
           fx_rate: parseFloat(fxRate),
@@ -798,22 +812,22 @@ export default function NewInvoicePage() {
                     className="rounded border-slate-300"
                   />
                   <label htmlFor="invoiceFromJob" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Invoice from Job?
+                    Invoice from Project?
                   </label>
                 </div>
                 {invoiceFromJob && (
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Job</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Project</label>
                       <select
                         value={selectedJobId}
                         onChange={(e) => setSelectedJobId(e.target.value)}
                         className="w-full max-w-md bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-md p-3"
                       >
-                        <option value="">Select a job...</option>
+                        <option value="">Select a project...</option>
                         {jobs.map((j) => (
                           <option key={j.id} value={j.id}>
-                            {(j as any).customers?.name ?? "Job"} — {j.status} {j.start_date ? `(${j.start_date})` : ""}
+                            {(j as any).customers?.name ?? "Project"} — {j.status} {j.start_date ? `(${j.start_date})` : ""}
                           </option>
                         ))}
                       </select>
@@ -944,6 +958,50 @@ export default function NewInvoicePage() {
                   <span className="text-xl font-bold text-slate-900">
                     <Money amount={total} currency={displaySymbol} />
                   </span>
+                </div>
+
+                {/* WHT Receivable — customer withholds tax */}
+                <div className={`mt-4 rounded-lg border p-4 ${applyWHTReceivable ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-sm font-semibold text-slate-800">Customer will deduct WHT</span>
+                      <p className="text-xs text-slate-500 mt-0.5">Withheld amount recorded as tax credit (account 2155) when paid</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={applyWHTReceivable}
+                      onClick={() => setApplyWHTReceivable(!applyWHTReceivable)}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${applyWHTReceivable ? "bg-amber-500" : "bg-slate-300"}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyWHTReceivable ? "translate-x-5" : "translate-x-0"}`} />
+                    </button>
+                  </div>
+                  {applyWHTReceivable && (
+                    <div className="mt-3 space-y-2">
+                      <select
+                        value={whtReceivableRateCode}
+                        onChange={(e) => setWhtReceivableRateCode(e.target.value)}
+                        className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-amber-400"
+                      >
+                        {GH_WHT_RATES.map(r => (
+                          <option key={r.code} value={r.code}>{r.name}</option>
+                        ))}
+                      </select>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-amber-700">WHT deducted:</span>
+                        <span className="font-semibold text-amber-800">
+                          <Money amount={whtRecvCalc.whtAmount} currency={displaySymbol} />
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Net you receive:</span>
+                        <span className="font-bold text-slate-900">
+                          <Money amount={whtRecvCalc.netPayable} currency={displaySymbol} />
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

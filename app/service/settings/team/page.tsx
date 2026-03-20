@@ -32,7 +32,7 @@ const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string; de
     label: "Manager",
     color: "text-blue-700",
     bg: "bg-blue-100",
-    desc: "Operational access — jobs, invoices, customers",
+    desc: "Operational access — projects, invoices, customers",
   },
   accountant: {
     label: "Accountant",
@@ -44,7 +44,7 @@ const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string; de
     label: "Staff",
     color: "text-slate-600",
     bg: "bg-slate-100",
-    desc: "View and update assigned jobs",
+    desc: "View and update assigned projects",
   },
 }
 

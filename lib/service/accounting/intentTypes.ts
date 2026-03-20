@@ -8,6 +8,7 @@ export const SERVICE_INTENT_TYPES = [
   "OWNER_WITHDRAWAL",
   "LOAN_DRAWDOWN",
   "LOAN_REPAYMENT",
+  "LOAN_INTEREST_PAYMENT",
 ] as const
 
 export type ServiceIntentType = (typeof SERVICE_INTENT_TYPES)[number]
@@ -59,11 +60,20 @@ export interface LoanRepaymentIntent extends ServiceIntentBase {
   loan_account_id: string
 }
 
+/** LOAN_INTEREST_PAYMENT: Dr interest expense, Cr bank/cash. Amount > 0. */
+export interface LoanInterestPaymentIntent extends ServiceIntentBase {
+  intent_type: "LOAN_INTEREST_PAYMENT"
+  amount: number
+  bank_or_cash_account_id: string
+  expense_account_id: string
+}
+
 export type ServiceIntent =
   | OwnerContributionIntent
   | OwnerWithdrawalIntent
   | LoanDrawdownIntent
   | LoanRepaymentIntent
+  | LoanInterestPaymentIntent
 
 /** Per-intent required account roles and allowed types */
 export const INTENT_ACCOUNT_RULES: Record<
@@ -85,6 +95,10 @@ export const INTENT_ACCOUNT_RULES: Record<
   LOAN_REPAYMENT: {
     bank_or_cash_account_id: { type: "asset", subType: "bank" },
     loan_account_id:         { type: "liability", subType: "loan" },
+  },
+  LOAN_INTEREST_PAYMENT: {
+    bank_or_cash_account_id: { type: "asset", subType: "bank" },
+    expense_account_id:      { type: "expense" },
   },
 }
 
@@ -157,6 +171,14 @@ export function validateServiceIntent(
     if (typeof i.amount !== "number" || i.amount <= 0) return "amount must be a positive number"
     if (!i.bank_or_cash_account_id || !i.loan_account_id) {
       return "bank_or_cash_account_id and loan_account_id are required"
+    }
+  }
+
+  if (intent.intent_type === "LOAN_INTEREST_PAYMENT") {
+    const i = intent as LoanInterestPaymentIntent
+    if (typeof i.amount !== "number" || i.amount <= 0) return "amount must be a positive number"
+    if (!i.bank_or_cash_account_id || !i.expense_account_id) {
+      return "bank_or_cash_account_id and expense_account_id are required"
     }
   }
 

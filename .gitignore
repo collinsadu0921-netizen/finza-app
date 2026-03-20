@@ -9,3 +9,6 @@ dist/
 build/
 coverage/
 *.log
+
+# Playwright — saved Supabase session (never commit)
+e2e/.auth/
