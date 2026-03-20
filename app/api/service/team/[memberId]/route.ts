@@ -1,6 +1,25 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { hasPermission, type CustomPermissions } from "@/lib/permissions"
+import type { SupabaseClient } from "@supabase/supabase-js"
+
+async function getCallerPermissions(
+  supabase: SupabaseClient,
+  businessId: string,
+  userId: string,
+  ownerId: string
+): Promise<{ role: string; customPermissions: CustomPermissions | null } | null> {
+  if (userId === ownerId) return { role: "owner", customPermissions: null }
+  const { data } = await supabase
+    .from("business_users")
+    .select("role, custom_permissions")
+    .eq("business_id", businessId)
+    .eq("user_id", userId)
+    .maybeSingle()
+  if (!data) return null
+  return { role: data.role, customPermissions: (data.custom_permissions as CustomPermissions) ?? null }
+}
 
 // ── PATCH /api/service/team/[memberId] — update role ─────────────────────────
 export async function PATCH(
@@ -16,27 +35,39 @@ export async function PATCH(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const isOwner = business.owner_id === user.id
-    if (!isOwner) {
-      const { data: caller } = await supabase
-        .from("business_users")
-        .select("role")
-        .eq("business_id", business.id)
-        .eq("user_id", user.id)
-        .maybeSingle()
-      if (!caller || caller.role !== "admin") {
-        return NextResponse.json({ error: "Only owners and admins can change roles" }, { status: 403 })
-      }
+    const caller = await getCallerPermissions(supabase, business.id, user.id, business.owner_id)
+    if (!caller || !hasPermission(caller.role, caller.customPermissions, "team.manage")) {
+      return NextResponse.json({ error: "Forbidden: requires team.manage permission" }, { status: 403 })
     }
 
-    const { role } = await request.json()
-    if (!["admin", "manager", "staff"].includes(role)) {
+    const body = await request.json()
+    const { role, custom_permissions } = body
+
+    if (!["admin", "manager", "accountant", "staff"].includes(role)) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 })
+    }
+
+    const updatePayload: Record<string, unknown> = { role }
+
+    // custom_permissions: {"granted": [...], "revoked": [...]}
+    // Effective permissions = ROLE_DEFAULTS[role] + granted − revoked
+    if (custom_permissions !== undefined) {
+      if (
+        typeof custom_permissions !== "object" ||
+        !Array.isArray(custom_permissions.granted) ||
+        !Array.isArray(custom_permissions.revoked)
+      ) {
+        return NextResponse.json(
+          { error: 'custom_permissions must be { granted: string[], revoked: string[] }' },
+          { status: 400 }
+        )
+      }
+      updatePayload.custom_permissions = custom_permissions
     }
 
     const { data, error } = await supabase
       .from("business_users")
-      .update({ role })
+      .update(updatePayload)
       .eq("id", memberId)
       .eq("business_id", business.id)
       .select()
@@ -63,17 +94,9 @@ export async function DELETE(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const isOwner = business.owner_id === user.id
-    if (!isOwner) {
-      const { data: caller } = await supabase
-        .from("business_users")
-        .select("role")
-        .eq("business_id", business.id)
-        .eq("user_id", user.id)
-        .maybeSingle()
-      if (!caller || caller.role !== "admin") {
-        return NextResponse.json({ error: "Only owners and admins can remove members" }, { status: 403 })
-      }
+    const caller = await getCallerPermissions(supabase, business.id, user.id, business.owner_id)
+    if (!caller || !hasPermission(caller.role, caller.customPermissions, "team.manage")) {
+      return NextResponse.json({ error: "Forbidden: requires team.manage permission" }, { status: 403 })
     }
 
     // Prevent removing yourself

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export async function POST(
   request: NextRequest,
@@ -20,6 +22,13 @@ export async function POST(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed: canManagePayslips } = await requirePermission(
+      supabase, user.id, business.id, PERMISSIONS.PAYROLL_PAYSLIPS
+    )
+    if (!canManagePayslips) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     // Verify payroll run belongs to business

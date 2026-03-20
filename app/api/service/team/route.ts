@@ -3,8 +3,27 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createClient } from "@supabase/supabase-js"
 import { randomBytes } from "node:crypto"
+import { hasPermission, type CustomPermissions } from "@/lib/permissions"
+import type { SupabaseClient } from "@supabase/supabase-js"
 
-const VALID_ROLES = ["admin", "manager", "staff"]
+const VALID_ROLES = ["admin", "manager", "accountant", "staff"]
+
+async function getCallerPermissions(
+  supabase: SupabaseClient,
+  businessId: string,
+  userId: string,
+  ownerId: string
+): Promise<{ role: string; customPermissions: CustomPermissions | null } | null> {
+  if (userId === ownerId) return { role: "owner", customPermissions: null }
+  const { data } = await supabase
+    .from("business_users")
+    .select("role, custom_permissions")
+    .eq("business_id", businessId)
+    .eq("user_id", userId)
+    .maybeSingle()
+  if (!data) return null
+  return { role: data.role, customPermissions: (data.custom_permissions as CustomPermissions) ?? null }
+}
 
 function getSupabaseAdmin() {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -28,23 +47,15 @@ export async function GET(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    // Check caller is owner or admin
-    const isOwner = business.owner_id === user.id
-    if (!isOwner) {
-      const { data: caller } = await supabase
-        .from("business_users")
-        .select("role")
-        .eq("business_id", business.id)
-        .eq("user_id", user.id)
-        .maybeSingle()
-      if (!caller || !["admin", "manager"].includes(caller.role)) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-      }
+    // Check caller has team.manage permission (respects custom_permissions overrides)
+    const caller = await getCallerPermissions(supabase, business.id, user.id, business.owner_id)
+    if (!caller || !hasPermission(caller.role, caller.customPermissions, "team.manage")) {
+      return NextResponse.json({ error: "Forbidden: requires team.manage permission" }, { status: 403 })
     }
 
     const { data: members, error } = await supabase
       .from("business_users")
-      .select("id, user_id, role, display_name, email, invited_at, created_at")
+      .select("id, user_id, role, display_name, email, invited_at, created_at, custom_permissions")
       .eq("business_id", business.id)
       .order("created_at", { ascending: true })
 
@@ -68,18 +79,10 @@ export async function POST(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    // Only owner or admin can invite
-    const isOwner = business.owner_id === user.id
-    if (!isOwner) {
-      const { data: caller } = await supabase
-        .from("business_users")
-        .select("role")
-        .eq("business_id", business.id)
-        .eq("user_id", user.id)
-        .maybeSingle()
-      if (!caller || caller.role !== "admin") {
-        return NextResponse.json({ error: "Only owners and admins can invite team members" }, { status: 403 })
-      }
+    // Inviting requires team.manage permission
+    const caller = await getCallerPermissions(supabase, business.id, user.id, business.owner_id)
+    if (!caller || !hasPermission(caller.role, caller.customPermissions, "team.manage")) {
+      return NextResponse.json({ error: "Forbidden: requires team.manage permission" }, { status: 403 })
     }
 
     const body = await request.json()

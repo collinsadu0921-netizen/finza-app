@@ -20,6 +20,7 @@ import { getActiveStoreId } from "./storeSession"
 import { isCashierAuthenticated } from "./cashierSession"
 import { getCurrentBusiness } from "./business"
 import { logAccessDeniedAttempt } from "./firmActivityLog"
+import { hasPermission, type CustomPermissions } from "./permissions"
 
 export type Workspace = "retail" | "service" | "accounting"
 
@@ -228,6 +229,7 @@ export async function resolveAccess(
   let businessId: string | null = null
   let role: UserRole = null
   let accountantReadonly = false
+  let customPermissions: CustomPermissions | null = null
 
   try {
     business = await getCurrentBusiness(supabase, userId)
@@ -357,17 +359,61 @@ export async function resolveAccess(
     return debugDecision({ allowed: false, redirectTo: "/pos", reason: "Cashiers can only access POS" })
   }
 
-  // Manager rules: Block admin-only settings
-  if (role === "manager") {
+  // Fetch custom_permissions now (after cashier early-return to avoid wasted DB query)
+  if (role && role !== "owner" && business) {
+    try {
+      const { data: buRow } = await supabase
+        .from("business_users")
+        .select("custom_permissions")
+        .eq("business_id", business.id)
+        .eq("user_id", userId)
+        .maybeSingle()
+      customPermissions = (buRow?.custom_permissions as CustomPermissions) ?? null
+    } catch (_) {
+      // Non-fatal — fall back to role defaults only
+    }
+  }
+
+  // Permission-based route guards (applies to all non-owner roles using effective permissions)
+  // Effective permissions = ROLE_DEFAULTS[role] + custom_permissions.granted − custom_permissions.revoked
+  if (role && role !== "owner") {
     const path = (pathname || "").split("?")[0]
     const normalizedPath = path.endsWith("/") && path !== "/" ? path.slice(0, -1) : path
+    const landing = businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard"
 
-    const adminOnlyRoutes = ["/settings/staff", "/admin"]
+    // Map route prefixes to the permission required to access them
+    // IMPORTANT: more-specific prefixes MUST come before general ones.
+    // The loop breaks on the first match, so /service/settings/team must appear
+    // before /service/settings, otherwise the general entry would swallow it.
+    const routePermissionMap: Array<{ prefix: string; permission: Parameters<typeof hasPermission>[2] }> = [
+      { prefix: "/payroll",                       permission: "payroll.view" },
+      // Settings — specific first, general last
+      { prefix: "/service/settings/team",         permission: "team.manage" },
+      { prefix: "/service/settings/staff",        permission: "staff.manage" },
+      { prefix: "/service/settings/automations",  permission: "settings.edit" },
+      { prefix: "/settings/staff",                permission: "staff.manage" },
+      { prefix: "/service/settings",              permission: "settings.view" }, // catch-all for other settings pages
+      { prefix: "/admin",                         permission: "settings.edit" },
+      { prefix: "/retail/admin",                  permission: "settings.edit" },
+      { prefix: "/bills",                         permission: "bills.view" },
+      { prefix: "/accounting",                    permission: "accounting.view" },
+      { prefix: "/service/accounting",            permission: "accounting.view" },
+      { prefix: "/reports/vat",                   permission: "reports.view" },
+      { prefix: "/vat-returns",                   permission: "reports.view" },
+      { prefix: "/assets",                        permission: "reports.view" },
+    ]
 
-    const isBlocked = adminOnlyRoutes.some((route) => normalizedPath.startsWith(route))
-
-    if (isBlocked) {
-      return debugDecision({ allowed: false, redirectTo: "/retail/dashboard", reason: "Manager: admin-only route" })
+    for (const { prefix, permission } of routePermissionMap) {
+      if (normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")) {
+        if (!hasPermission(role, customPermissions, permission)) {
+          return debugDecision({
+            allowed: false,
+            redirectTo: landing,
+            reason: `Permission denied: ${permission}`,
+          })
+        }
+        break
+      }
     }
   }
 

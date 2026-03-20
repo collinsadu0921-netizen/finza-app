@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export async function GET(
   request: NextRequest,
@@ -22,6 +24,13 @@ export async function GET(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed: canView } = await requirePermission(
+      supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW
+    )
+    if (!canView) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     // Get payroll run
@@ -112,6 +121,21 @@ export async function PUT(
         { error: "Payroll run not found" },
         { status: 404 }
       )
+    }
+
+    // Permission check — depends on the requested status transition
+    if (status && status !== existingRun.status) {
+      const permissionRequired =
+        status === "locked"   ? PERMISSIONS.PAYROLL_LOCK    :
+        status === "approved" ? PERMISSIONS.PAYROLL_APPROVE :
+        PERMISSIONS.PAYROLL_CREATE
+
+      const { allowed } = await requirePermission(
+        supabase, user.id, business.id, permissionRequired
+      )
+      if (!allowed) {
+        return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+      }
     }
 
     // Validate status transitions (enforce workflow: draft → approved → locked)

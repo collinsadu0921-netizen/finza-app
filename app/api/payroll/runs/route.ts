@@ -3,6 +3,8 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculatePayroll } from "@/lib/payrollEngine"
 import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +20,13 @@ export async function GET(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed: canView } = await requirePermission(
+      supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW
+    )
+    if (!canView) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     const { data: runs, error } = await supabase
@@ -59,6 +68,13 @@ export async function POST(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed: canCreate } = await requirePermission(
+      supabase, user.id, business.id, PERMISSIONS.PAYROLL_CREATE
+    )
+    if (!canCreate) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     const body = await request.json()
