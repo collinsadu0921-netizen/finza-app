@@ -174,9 +174,11 @@ export default function Sidebar() {
         {
           title: "BILLING",
           items: [
-            { label: "Invoices",  route: "/service/invoices" },
-            { label: "Payments",  route: "/service/payments" },
-            { label: "Expenses",  route: "/service/expenses" },
+            { label: "Proforma Invoices", route: "/service/proforma" },
+            { label: "Invoices",          route: "/service/invoices" },
+            { label: "Payments",          route: "/service/payments" },
+            { label: "Supplier Bills",    route: "/bills" },
+            { label: "Expenses",          route: "/service/expenses" },
           ],
         },
         {
@@ -187,18 +189,24 @@ export default function Sidebar() {
         },
       ]
       if (!isAccountantFirmUser) {
-        const reportsItems: Array<{ label: string; route: string }> = [
-          { label: "Profit & Loss",     route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined) },
-          { label: "Balance Sheet",     route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined) },
-          { label: "Cash Flow",         route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined) },
-          { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined) },
-          { label: "VAT Report",        route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined) },
-          { label: "VAT Returns",       route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined) },
-          { label: "Assets",            route: "/assets" },
-        ]
         sections.push({
           title: "REPORTS",
-          items: reportsItems,
+          items: [
+            { label: "Profit & Loss",     route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined) },
+            { label: "Balance Sheet",     route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined) },
+            { label: "Cash Flow",         route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined) },
+            { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined) },
+            { label: "Assets",            route: "/assets" },
+          ],
+        })
+        sections.push({
+          title: "TAX & COMPLIANCE",
+          items: [
+            { label: "VAT Report",     route: buildServiceRoute("/reports/vat",    effectiveServiceBusinessId ?? undefined) },
+            { label: "VAT Returns",    route: buildServiceRoute("/vat-returns",    effectiveServiceBusinessId ?? undefined) },
+            { label: "WHT Returns",    route: "/service/accounting/wht" },
+            { label: "CIT Provisions", route: "/service/accounting/cit" },
+          ],
         })
       }
       // Service users: use URL business_id first so direct /service/* deep links render without waiting for getCurrentBusiness().
@@ -225,7 +233,9 @@ export default function Sidebar() {
                 { label: "Forensic Runs", route: "/admin/accounting/forensic-runs" },
                 { label: "Tenants",       route: "/admin/accounting/tenants" },
               ]
-            : []),
+            : [
+                { label: "Loan Tracker", route: "/service/accounting/loan" },
+              ]),
         ]
         sections.push({
           title: "ACCOUNTING",
