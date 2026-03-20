@@ -5,6 +5,7 @@ import { calculatePayroll } from "@/lib/payrollEngine"
 import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { logAudit } from "@/lib/auditLog"
 
 export async function GET(request: NextRequest) {
   try {
@@ -300,6 +301,23 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       )
     }
+
+    await logAudit({
+      businessId: business.id,
+      userId: user.id,
+      actionType: "payroll.run_created",
+      entityType: "payroll_run",
+      entityId: payrollRun.id,
+      newValues: {
+        payroll_month,
+        total_gross_salary: totalGross,
+        total_net_salary: totalNet,
+        staff_count: staffList.length,
+        status: "draft",
+      },
+      description: `Created payroll run for ${payroll_month} (${staffList.length} staff, gross ${totalGross})`,
+      request,
+    })
 
     return NextResponse.json({ payrollRun }, { status: 201 })
   } catch (error: any) {

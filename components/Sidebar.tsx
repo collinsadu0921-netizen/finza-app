@@ -152,53 +152,53 @@ export default function Sidebar() {
     }
 
     if (effectiveIndustry === "service") {
-      // Resolve business for service-scoped links (FINANCE & REPORTING and Accounting).
+      // Resolve business for service-scoped links (REPORTS and Accounting).
       const effectiveServiceBusinessId = urlBusinessId ?? serviceBusinessId ?? null
       const sections: MenuSection[] = [
         {
-          title: "JOB MANAGEMENT",
+          title: "OPERATIONS",
           items: [
             { label: "Dashboard", route: "/service/dashboard" },
             { label: "Customers", route: "/service/customers" },
-            { label: "Quotes", route: "/service/estimates" },
-            { label: "Proforma Invoices", route: "/service/proforma" },
-            { label: "Jobs", route: "/service/jobs" },
-            { label: "Services", route: "/service/services" },
+            { label: "Quotes",    route: "/service/estimates" },
+            { label: "Projects",  route: "/service/jobs" },
+          ],
+        },
+        {
+          title: "CATALOG",
+          items: [
+            { label: "Services",  route: "/service/services" },
             { label: "Materials", route: "/service/materials" },
-            { label: "Inventory", route: "/service/inventory" },
           ],
         },
         {
-          title: "BILLING & PAYMENTS",
+          title: "BILLING",
           items: [
-            { label: "Invoices", route: "/service/invoices" },
-            { label: "Credit Notes", route: "/credit-notes" },
-            { label: "Recurring Invoices", route: "/recurring" },
-            { label: "Payments", route: "/service/payments" },
+            { label: "Invoices",  route: "/service/invoices" },
+            { label: "Payments",  route: "/service/payments" },
+            { label: "Expenses",  route: "/service/expenses" },
           ],
         },
         {
-          title: "COSTS",
+          title: "PAYROLL",
           items: [
-            { label: "Expenses", route: "/service/expenses" },
-            { label: "Supplier Bills", route: "/bills" },
+            { label: "Payroll",   route: "/payroll" },
           ],
         },
       ]
       if (!isAccountantFirmUser) {
-        const financeItems: Array<{ label: string; route: string }> = [
-          { label: "Profit & Loss", route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined) },
-          { label: "Balance Sheet", route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined) },
-          { label: "Cash Flow", route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined) },
+        const reportsItems: Array<{ label: string; route: string }> = [
+          { label: "Profit & Loss",     route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined) },
+          { label: "Balance Sheet",     route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined) },
+          { label: "Cash Flow",         route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined) },
           { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined) },
-          { label: "VAT Report", route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined) },
-          { label: "VAT Returns", route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined) },
-          { label: "Assets", route: "/assets" },
-          { label: "Payroll", route: "/payroll" },
+          { label: "VAT Report",        route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined) },
+          { label: "VAT Returns",       route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined) },
+          { label: "Assets",            route: "/assets" },
         ]
         sections.push({
-          title: "FINANCE & REPORTING",
-          items: financeItems,
+          title: "REPORTS",
+          items: reportsItems,
         })
       }
       // Service users: use URL business_id first so direct /service/* deep links render without waiting for getCurrentBusiness().
@@ -213,28 +213,22 @@ export default function Sidebar() {
         const periodsRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/periods", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/periods", accountingBusinessId ?? undefined)
 
         const accountingItems: Array<{ label: string; route: string }> = [
-          ...(effectiveIndustry === "service" && !isAccountantFirmUser
-            ? [
-                { label: "Accounting Portal", route: "/portal/accounting" },
-                { label: "Service Accounting", route: "/service/accounting" },
-              ]
-            : []),
-          { label: "General Ledger", route: ledgerRoute },
-          { label: "Chart of Accounts", route: coaRoute },
-          { label: "Trial Balance", route: trialBalanceRoute },
-          { label: "Reconciliation", route: reconciliationRoute },
+          { label: "General Ledger",     route: ledgerRoute },
+          { label: "Chart of Accounts",  route: coaRoute },
+          { label: "Trial Balance",      route: trialBalanceRoute },
+          { label: "Reconciliation",     route: reconciliationRoute },
           { label: "Accounting Periods", route: periodsRoute },
           ...(isAccountantFirmUser === true
             ? [
-                { label: "Health", route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
+                { label: "Health",        route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
                 { label: "Control Tower", route: buildAccountingRoute("/accounting/control-tower") },
                 { label: "Forensic Runs", route: "/admin/accounting/forensic-runs" },
-                { label: "Tenants", route: "/admin/accounting/tenants" },
+                { label: "Tenants",       route: "/admin/accounting/tenants" },
               ]
             : []),
         ]
         sections.push({
-          title: "Accounting",
+          title: "ACCOUNTING",
           items: accountingItems,
         })
       }
@@ -400,8 +394,8 @@ export default function Sidebar() {
             <div className="space-y-1">
               {effectiveIndustry ? (
                 menuSections.map((section, sectionIdx) => {
-                  // JOB MANAGEMENT and BILLING & PAYMENTS expanded by default, others collapsed
-                  const defaultExpanded = section.title === "JOB MANAGEMENT" || section.title === "BILLING & PAYMENTS"
+                  // OPERATIONS and BILLING expanded by default, others collapsed
+                  const defaultExpanded = section.title === "OPERATIONS" || section.title === "BILLING"
                   const isExpanded = expandedSections[section.title] ?? defaultExpanded
                   
                   return (

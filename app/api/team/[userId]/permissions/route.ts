@@ -26,6 +26,7 @@ import {
   PERMISSION_META,
   type Permission,
 } from "@/lib/permissions"
+import { logAudit } from "@/lib/auditLog"
 
 export async function GET(
   _request: NextRequest,
@@ -162,7 +163,26 @@ export async function PUT(
       )
     }
 
+    // Capture old custom_permissions before updating
+    const { data: memberBefore } = await supabase
+      .from("business_users")
+      .select("custom_permissions, email")
+      .eq("business_id", business.id)
+      .eq("user_id", targetUserId)
+      .maybeSingle()
+
     await setCustomPermissions(supabase, targetUserId, business.id, granted, revoked)
+
+    await logAudit({
+      businessId: business.id,
+      userId: user.id,
+      actionType: "team.permissions_updated",
+      entityType: "team_member",
+      oldValues: { custom_permissions: memberBefore?.custom_permissions ?? null },
+      newValues: { custom_permissions: { granted, revoked } },
+      description: `Updated custom permissions for ${memberBefore?.email ?? targetUserId} (role: ${targetRole})`,
+      request,
+    })
 
     // Return the updated effective permissions
     const effective = await getEffectivePermissions(supabase, targetUserId, business.id)

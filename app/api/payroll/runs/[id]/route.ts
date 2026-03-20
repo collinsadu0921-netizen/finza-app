@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { logAudit } from "@/lib/auditLog"
 
 export async function GET(
   request: NextRequest,
@@ -209,6 +210,26 @@ export async function PUT(
         { error: error.message },
         { status: 500 }
       )
+    }
+
+    // Audit the status change
+    if (status && status !== existingRun.status) {
+      const actionType =
+        status === "approved" ? "payroll.run_approved" :
+        status === "locked"   ? "payroll.run_locked"   :
+        "payroll.run_updated"
+
+      await logAudit({
+        businessId: business.id,
+        userId: user.id,
+        actionType,
+        entityType: "payroll_run",
+        entityId: runId,
+        oldValues: { status: existingRun.status },
+        newValues: { status, journal_entry_id: journalEntryId ?? undefined },
+        description: `Payroll run ${runId} status changed from ${existingRun.status} to ${status}`,
+        request,
+      })
     }
 
     return NextResponse.json({ payrollRun })

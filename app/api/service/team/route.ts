@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js"
 import { randomBytes } from "node:crypto"
 import { hasPermission, type CustomPermissions } from "@/lib/permissions"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { logAudit } from "@/lib/auditLog"
 
 const VALID_ROLES = ["admin", "manager", "accountant", "staff"]
 
@@ -161,6 +162,17 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (insertError) throw insertError
+
+    await logAudit({
+      businessId: business.id,
+      userId: user.id,
+      actionType: "team.member_invited",
+      entityType: "team_member",
+      entityId: memberRow.id,
+      newValues: { email: email.trim().toLowerCase(), role, display_name: display_name || null, is_existing_user: !!existingAuthUser },
+      description: `Invited ${email.trim()} as ${role}`,
+      request,
+    })
 
     return NextResponse.json({
       success: true,

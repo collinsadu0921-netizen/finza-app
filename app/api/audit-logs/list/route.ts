@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { getEffectivePermissions } from "@/lib/userPermissions"
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,30 +10,22 @@ export async function GET(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    // Only owner, admin, and users with accounting.view permission can see audit logs
+    const isOwner = business.owner_id === user.id
+    if (!isOwner) {
+      const effective = await getEffectivePermissions(supabase, user.id, business.id)
+      if (!effective.has("accounting.view")) {
+        return NextResponse.json({ error: "Forbidden: requires accounting.view permission" }, { status: 403 })
+      }
     }
 
     const { searchParams } = new URL(request.url)
