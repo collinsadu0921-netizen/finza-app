@@ -21,8 +21,6 @@ export async function GET(
       .select(`
         id,
         public_token,
-        sent_via_whatsapp,
-        sent_via_email,
         sent_at,
         created_at,
         payroll_entries (

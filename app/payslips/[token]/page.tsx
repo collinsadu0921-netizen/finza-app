@@ -8,6 +8,7 @@ type PayslipData = {
   id: string
   public_token: string
   sent_at: string | null
+  created_at: string | null
   payroll_entries: {
     basic_salary: number
     allowances_total: number
