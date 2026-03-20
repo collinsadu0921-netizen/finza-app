@@ -274,17 +274,20 @@ export default function PayrollRunViewPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleApprove}
-                disabled={updating}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                {payrollRun.status === "approved" ? "Re-approve" : "Approve Payroll"}
-              </button>
+              {payrollRun.status === "draft" && (
+                <button
+                  onClick={handleApprove}
+                  disabled={updating}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {updating ? "Approving…" : "Approve Payroll"}
+                </button>
+              )}
               <button
                 onClick={handleGeneratePayslips}
-                disabled={generating}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                disabled={generating || payrollRun.status === "draft"}
+                title={payrollRun.status === "draft" ? "Approve payroll first before generating payslips" : undefined}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {generating ? (
                   <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Generating…</>

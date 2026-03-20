@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
+import { getCurrencySymbol } from "@/lib/currency"
 
 type PayslipData = {
   id: string
@@ -104,7 +105,7 @@ export default function PublicPayslipPage() {
   const run = payslip.payroll_runs
   const businessName = business?.trading_name || business?.legal_name || "Your Employer"
   const currencyCode = business?.default_currency ?? null
-  const sym = currencyCode === "GHS" ? "₵" : (currencyCode ?? "₵")
+  const sym = currencyCode ? (getCurrencySymbol(currencyCode) ?? currencyCode) : "₵"
   const payrollMonth = run?.payroll_month ? formatMonth(run.payroll_month) : "N/A"
   const totalStatDeductions = Number(entry.paye ?? 0) + Number(entry.ssnit_employee ?? 0)
   const totalDeductions = totalStatDeductions + Number(entry.deductions_total ?? 0)

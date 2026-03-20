@@ -37,6 +37,13 @@ export async function POST(
       )
     }
 
+    if (payrollRun.status === "draft") {
+      return NextResponse.json(
+        { error: "Payroll must be approved before payslips can be generated." },
+        { status: 400 }
+      )
+    }
+
     // Get all payroll entries for this run
     const { data: entries, error: entriesError } = await supabase
       .from("payroll_entries")

@@ -102,7 +102,13 @@
       "Bash(find /c/projects/finza-web/finza-web/supabase/migrations -name *ledger* -o -name *approval*)",
       "Bash(xargs ls:*)",
       "Bash(grep -rn \"throw new Error\" /c/projects/finza-web/finza-web/lib/accounting/reconciliation/*.ts)",
-      "Bash(wc -l /c/projects/finza-web/finza-web/app/payroll/[id]/page.tsx)"
+      "Bash(wc -l /c/projects/finza-web/finza-web/app/payroll/[id]/page.tsx)",
+      "Bash(find /c/projects/finza-web/finza-web/supabase/migrations -name \"*.sql\" -exec grep -l \"businesses\" {})",
+      "Bash(while read:*)",
+      "Bash(do echo:*)",
+      "Read(//c/projects/finza-web/finza-web/**)",
+      "Bash(done)",
+      "Bash(grep -l \"business_users\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
     ]
   }
 }
