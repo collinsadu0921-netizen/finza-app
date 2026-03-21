@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
+import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 
 type Bill = {
   id: string
@@ -13,6 +14,8 @@ type Bill = {
   due_date: string | null
   total: number
   status: string
+  wht_applicable?: boolean | null
+  wht_amount?: number | null
 }
 
 type Payment = {
@@ -227,7 +230,12 @@ export default function SupplierStatementPage() {
                   {bills.map((bill) => {
                     const billPayments = paymentsByBill[bill.id] || []
                     const totalPaid = billPayments.reduce((sum, p) => sum + Number(p.amount), 0)
-                    const balance = Number(bill.total) - totalPaid
+                    const balance = billSupplierBalanceRemaining(
+                      Number(bill.total),
+                      bill.wht_applicable,
+                      bill.wht_amount,
+                      totalPaid
+                    )
                     return (
                       <tr key={bill.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{bill.bill_number}</td>

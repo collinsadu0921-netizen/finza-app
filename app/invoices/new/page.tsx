@@ -1044,8 +1044,15 @@ export default function NewInvoicePage() {
                     unit_price: Number(item.price) || 0,
                     discount_amount: 0,
                   })),
-                  currency_symbol: currencySymbol,
-                  currency_code: currencyCode,
+                  // Use FX currency when FX is enabled; fall back to home currency
+                  currency_symbol: fxEnabled && fxCurrencyCode
+                    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
+                    : currencySymbol,
+                  currency_code: fxEnabled && fxCurrencyCode ? fxCurrencyCode : currencyCode,
+                  // Pass FX rate so preview-draft can compute home_currency_total
+                  ...(fxEnabled && fxCurrencyCode && fxRate ? {
+                    fx_rate: parseFloat(fxRate),
+                  } : {}),
                 };
                 (window as any).__previewData = previewData
                 setPreviewInvoiceId("preview")

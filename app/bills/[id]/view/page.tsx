@@ -150,7 +150,11 @@ export default function BillViewPage() {
       return
     }
 
-    const message = `Hello, here is our record of your bill ${bill.bill_number}.\n\nTotal: ${currency}${bill.total.toFixed(2)}.\nOutstanding: ${currency}${balance.toFixed(2)}.\n\nFor confirmation or clarifications, please reply here.`
+    const outstandingLabel =
+      bill.wht_applicable && Number(bill.wht_amount) > 0
+        ? "Outstanding (net to you after WHT)"
+        : "Outstanding"
+    const message = `Hello, here is our record of your bill ${bill.bill_number}.\n\nTotal: ${currency}${bill.total.toFixed(2)}.\n${outstandingLabel}: ${currency}${balance.toFixed(2)}.\n\nFor confirmation or clarifications, please reply here.`
     const result = buildWhatsAppLink(bill.supplier_phone, message)
     if (!result.ok) {
       toast.showToast(result.error, "error")
@@ -273,9 +277,16 @@ export default function BillViewPage() {
             </div>
             <div className={`bg-gradient-to-br ${balance > 0 ? 'from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border-orange-200 dark:border-orange-700' : 'from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border-green-200 dark:border-green-700'} rounded-xl p-4`}>
               <div className="flex items-center justify-between">
-                <span className={`${balance > 0 ? 'text-orange-900 dark:text-orange-300' : 'text-green-900 dark:text-green-300'} font-semibold`}>Remaining:</span>
+                <span className={`${balance > 0 ? 'text-orange-900 dark:text-orange-300' : 'text-green-900 dark:text-green-300'} font-semibold`}>
+                  {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier):" : "Remaining:"}
+                </span>
                 <span className={`${balance > 0 ? 'text-orange-900 dark:text-orange-300' : 'text-green-900 dark:text-green-300'} font-bold text-xl`}>{currency}{balance.toFixed(2)}</span>
               </div>
+              {bill.wht_applicable && Number(bill.wht_amount) > 0 ? (
+                <p className={`text-xs mt-1 ${balance > 0 ? "text-orange-800 dark:text-orange-400" : "text-green-800 dark:text-green-400"}`}>
+                  Net of WHT — supplier cash portion only (WHT is a separate GRA liability).
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -575,7 +586,9 @@ export default function BillViewPage() {
                         <span className="font-semibold text-gray-900 dark:text-white">{currency}{totalPaid.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm mt-1">
-                        <span className="text-gray-600 dark:text-gray-400">Remaining:</span>
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier):" : "Remaining:"}
+                        </span>
                         <span className={`font-semibold ${balance > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}>
                           {currency}{balance.toFixed(2)}
                         </span>
@@ -717,8 +730,8 @@ function AddPaymentModal({
   // Determine default method (first available, or bank if available)
   const defaultMethod = canUseBank ? "bank" : (canUseCash ? "cash" : (canUseMobileMoney ? "momo" : (canUseCard ? "card" : "bank")))
   
-  // Net amount the supplier should receive (excludes WHT which goes to GRA)
-  const netBalance = whtApplicable && whtAmount > 0 ? balance - whtAmount : balance
+  // balance from API is already net to supplier when WHT applies
+  const supplierRemaining = balance
   const [amount, setAmount] = useState(editingPayment ? editingPayment.amount.toString() : "")
   const [date, setDate] = useState(editingPayment ? editingPayment.date : new Date().toISOString().split("T")[0])
   const [method, setMethod] = useState(editingPayment ? editingPayment.method : defaultMethod)
@@ -737,8 +750,8 @@ function AddPaymentModal({
       return
     }
 
-    if (Number(amount) > netBalance && !editingPayment) {
-      setError(`Payment amount cannot exceed net payable (${currencySymbol}${netBalance.toFixed(2)})`)
+    if (Number(amount) > supplierRemaining && !editingPayment) {
+      setError(`Payment amount cannot exceed amount owed to supplier (${currencySymbol}${supplierRemaining.toFixed(2)})`)
       return
     }
 
@@ -813,13 +826,13 @@ function AddPaymentModal({
               onChange={(e) => setAmount(e.target.value)}
               onFocus={(e) => e.target.select()}
               required
-              placeholder={editingPayment ? "" : currencySymbol + netBalance.toFixed(2)}
+              placeholder={editingPayment ? "" : currencySymbol + supplierRemaining.toFixed(2)}
               className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
             />
             {!editingPayment && whtApplicable && whtAmount > 0 ? (
               <div className="mt-1 space-y-0.5">
                 <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
-                  Net to supplier: {currencySymbol}{netBalance.toFixed(2)} (WHT of {currencySymbol}{whtAmount.toFixed(2)} remitted separately to GRA)
+                  Max payment to supplier: {currencySymbol}{supplierRemaining.toFixed(2)} (WHT {currencySymbol}{whtAmount.toFixed(2)} is a separate GRA liability)
                 </p>
               </div>
             ) : !editingPayment ? (

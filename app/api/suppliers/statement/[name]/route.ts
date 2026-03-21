@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 
 export async function GET(
   request: NextRequest,
@@ -118,10 +119,26 @@ export async function GET(
     const nonDraftPayments = payments.filter((p) => nonDraftBillIds.includes(p.bill_id))
     const totalPaid = nonDraftPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
     
-    // Outstanding = bills total - payments (for non-draft bills only)
-    const totalOutstanding = totalBilled - totalPaid
+    // Outstanding = sum of net supplier balance per unpaid bill (gross − WHT when applicable − payments)
+    const apBills = (bills || []).filter(
+      (bill: any) => bill.status !== "draft" && bill.status !== "paid"
+    )
+    const totalOutstanding = apBills.reduce((sum, bill: any) => {
+      const billPaid = payments
+        .filter((p) => p.bill_id === bill.id)
+        .reduce((s, p) => s + Number(p.amount || 0), 0)
+      return (
+        sum +
+        billSupplierBalanceRemaining(
+          Number(bill.total || 0),
+          bill.wht_applicable,
+          bill.wht_amount,
+          billPaid
+        )
+      )
+    }, 0)
 
-    // Calculate overdue
+    // Calculate overdue (use same net balance as bill view / AP)
     const today = new Date()
     const overdueBills = (bills || []).filter((bill: any) => {
       if (bill.status === "paid") return false
@@ -131,10 +148,17 @@ export async function GET(
     })
 
     const totalOverdue = overdueBills.reduce((sum, bill: any) => {
-      const billTotal = Number(bill.total || 0)
       const billPayments = payments.filter((p) => p.bill_id === bill.id)
       const billPaid = billPayments.reduce((s, p) => s + Number(p.amount || 0), 0)
-      return sum + (billTotal - billPaid)
+      return (
+        sum +
+        billSupplierBalanceRemaining(
+          Number(bill.total || 0),
+          bill.wht_applicable,
+          bill.wht_amount,
+          billPaid
+        )
+      )
     }, 0)
 
     // Group bills by status

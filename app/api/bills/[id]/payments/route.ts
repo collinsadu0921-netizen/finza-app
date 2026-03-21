@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
+import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 
 export async function GET(
   request: NextRequest,
@@ -104,7 +105,7 @@ export async function POST(
     // Verify bill exists and is open (payments only for open bills)
     const { data: bill } = await supabase
       .from("bills")
-      .select("id, total, business_id, status")
+      .select("id, total, business_id, status, wht_applicable, wht_amount")
       .eq("id", billId)
       .eq("business_id", business_id)
       .is("deleted_at", null)
@@ -117,9 +118,22 @@ export async function POST(
       )
     }
 
-    if (bill.status !== "open") {
+    const canReceivePayment = ["open", "partially_paid", "overdue"].includes(bill.status)
+    if (!canReceivePayment) {
+      if (bill.status === "draft") {
+        return NextResponse.json(
+          { error: "Cannot add payment to a draft bill. Mark bill as Open first." },
+          { status: 400 }
+        )
+      }
+      if (bill.status === "paid") {
+        return NextResponse.json(
+          { error: "This bill is already fully paid." },
+          { status: 400 }
+        )
+      }
       return NextResponse.json(
-        { error: "Cannot add payment to a draft bill. Mark bill as Open first." },
+        { error: "Payments cannot be added to this bill in its current status." },
         { status: 400 }
       )
     }
@@ -174,11 +188,16 @@ export async function POST(
       .is("deleted_at", null)
 
     const totalPaid = existingPayments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0
-    const balance = Number(bill.total) - totalPaid
+    const balance = billSupplierBalanceRemaining(
+      Number(bill.total),
+      bill.wht_applicable,
+      bill.wht_amount,
+      totalPaid
+    )
 
     if (Number(amount) > balance) {
       return NextResponse.json(
-        { error: `Payment amount (₵${Number(amount).toFixed(2)}) exceeds bill balance (₵${balance.toFixed(2)})` },
+        { error: `Payment amount (₵${Number(amount).toFixed(2)}) exceeds amount owed to supplier (₵${balance.toFixed(2)})` },
         { status: 400 }
       )
     }

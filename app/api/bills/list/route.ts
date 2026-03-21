@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 
 export async function GET(request: NextRequest) {
   try {
@@ -72,12 +73,17 @@ export async function GET(request: NextRequest) {
           .is("deleted_at", null)
 
         const totalPaid = payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0
-        const balance = Number(bill.total) - totalPaid
+        const balance = billSupplierBalanceRemaining(
+          Number(bill.total),
+          bill.wht_applicable,
+          bill.wht_amount,
+          totalPaid
+        )
 
         return {
           ...bill,
           total_paid: totalPaid,
-          balance: balance,
+          balance,
         }
       })
     )

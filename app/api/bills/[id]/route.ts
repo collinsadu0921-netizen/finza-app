@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
+import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 
 export async function GET(
   request: NextRequest,
@@ -69,14 +70,19 @@ export async function GET(
     }
 
     const totalPaid = payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0
-    const balance = Number(bill.total) - totalPaid
+    const balance = billSupplierBalanceRemaining(
+      Number(bill.total),
+      bill.wht_applicable,
+      bill.wht_amount,
+      totalPaid
+    )
 
     return NextResponse.json({
       bill,
       items: items || [],
       payments: payments || [],
       total_paid: totalPaid,
-      balance: balance,
+      balance,
     })
   } catch (error: any) {
     console.error("Error fetching bill:", error)

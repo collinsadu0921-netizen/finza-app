@@ -106,7 +106,18 @@ export async function POST(request: NextRequest) {
 
     if (ledgerErr) {
       console.error("WHT ledger post error:", ledgerErr)
-      // Non-fatal: remittance is recorded, ledger will be out of sync but recoverable
+      // Ledger posting failed — return error so the UI can surface it.
+      // The remittance row and bill updates are still committed (no transaction wrapping),
+      // so the ledger can be corrected manually, but the user must know it failed.
+      return NextResponse.json(
+        {
+          success: false,
+          error: `WHT remittance recorded but ledger posting failed: ${ledgerErr.message}. Please contact support to correct the journal entry.`,
+          remittance,
+          total_remitted: totalWHT,
+        },
+        { status: 207 }  // 207 Multi-Status: partial success
+      )
     }
 
     await createAuditLog({

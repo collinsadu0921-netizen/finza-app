@@ -109,7 +109,11 @@
       "Read(//c/projects/finza-web/finza-web/**)",
       "Bash(done)",
       "Bash(grep -l \"business_users\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(grep -r \"cit\\\\|CIT\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --include=*.js --include=*.jsx)"
+      "Bash(grep -r \"cit\\\\|CIT\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --include=*.js --include=*.jsx)",
+      "Bash(ls -la \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\supabase\\\\migrations\\\\37\"*.sql)",
+      "Bash(dir \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\supabase\\\\migrations\\\\37\"*.sql /B)",
+      "Bash(echo \"EXIT_CODE:$?\")",
+      "Bash(timeout 180 npm run build)"
     ]
   }
 }
