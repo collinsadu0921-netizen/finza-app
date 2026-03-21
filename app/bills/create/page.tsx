@@ -10,6 +10,7 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
+import { readApiJson } from "@/lib/readApiJson"
 
 type LineItem = {
   id: string
@@ -241,14 +242,34 @@ export default function CreateBillPage() {
           document_type: "supplier_bill",
         }),
       })
-      const data = await res.json()
+      const parsed = await readApiJson<{
+        ok?: boolean
+        error?: string
+        suggestions?: Record<string, unknown>
+        confidence?: Record<string, string>
+      }>(res)
+      if (!parsed.ok) {
+        const looksLikeHtml = /An error occurred|<!DOCTYPE/i.test(parsed.snippet)
+        setOcrError(
+          looksLikeHtml
+            ? "Receipt scan failed: the server returned an error page (often OCR timeout or crash on serverless). Try a smaller/clearer image, add RECEIPT_OCR_USE_STUB=true in .env.local to test without OCR, or fill the form manually."
+            : `Receipt scan failed (${parsed.snippet || "invalid response"}). Try again or fill manually.`
+        )
+        setOcrLoading(false)
+        return
+      }
+      const data = parsed.data
       if (!res.ok) {
-        setOcrError(data.error ?? "OCR failed")
+        setOcrError(typeof data.error === "string" ? data.error : "OCR failed")
         setOcrLoading(false)
         return
       }
       if (!data.ok || !data.suggestions) {
-        setOcrError(data.error ?? "Couldn't confidently read this receipt. Please fill manually.")
+        setOcrError(
+          typeof data.error === "string"
+            ? data.error
+            : "Couldn't confidently read this receipt. Please fill manually."
+        )
         setOcrLoading(false)
         return
       }

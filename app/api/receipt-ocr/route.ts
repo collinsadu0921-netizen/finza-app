@@ -17,6 +17,9 @@ const DEV = process.env.NODE_ENV === "development"
 /** Tesseract first run can exceed default serverless limits */
 export const maxDuration = 60
 
+/** Tesseract / Buffer require Node; Edge would crash or return HTML error pages */
+export const runtime = "nodejs"
+
 export const OCR_ERROR_CODES = {
   OCR_FETCH_FAILED: "OCR_FETCH_FAILED",
   OCR_UNSUPPORTED_CONTENT_TYPE: "OCR_UNSUPPORTED_CONTENT_TYPE",
@@ -90,8 +93,13 @@ export async function POST(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const body = await request.json()
-    const { receipt_path, business_id, document_type } = body ?? {}
+    let body: Record<string, unknown>
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+    }
+    const { receipt_path, business_id, document_type } = body
     if (!receipt_path || typeof receipt_path !== "string" || !business_id) {
       return NextResponse.json({ error: "receipt_path and business_id are required" }, { status: 400 })
     }
@@ -161,8 +169,15 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ ok: true, suggestions: parsed.suggestions, confidence: parsed.confidence })
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
     if (DEV) console.error("[receipt-ocr] error", error)
-    return NextResponse.json({ error: "OCR extraction failed" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "OCR extraction failed",
+        ...(DEV ? { detail: message, code: "OCR_INTERNAL" } : { code: "OCR_INTERNAL" }),
+      },
+      { status: 500 }
+    )
   }
 }
