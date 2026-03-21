@@ -99,8 +99,15 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
     }
-    const { receipt_path, business_id, document_type } = body
-    if (!receipt_path || typeof receipt_path !== "string" || !business_id) {
+    const receipt_path = body.receipt_path
+    const business_id = body.business_id
+    const document_type = body.document_type
+    if (
+      typeof receipt_path !== "string" ||
+      !receipt_path.trim() ||
+      typeof business_id !== "string" ||
+      !business_id.trim()
+    ) {
       return NextResponse.json({ error: "receipt_path and business_id are required" }, { status: 400 })
     }
 
