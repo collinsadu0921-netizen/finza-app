@@ -282,6 +282,7 @@ export default function CreateBillPage() {
             qty: 1,
             unit_price: subtotalAmount,
             discount_amount: 0,
+            material_id: null,
           },
         ])
         next.subtotal = true
