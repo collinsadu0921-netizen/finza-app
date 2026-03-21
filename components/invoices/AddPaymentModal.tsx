@@ -212,7 +212,7 @@ export default function AddPaymentModal({
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full flex min-h-0 flex-col max-h-[90vh] overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800">
                     <div>
@@ -284,7 +284,8 @@ export default function AddPaymentModal({
                     </div>
                 ) : (
                     <>
-                        <div className="overflow-y-auto p-6 space-y-8">
+                        {/* flex-1 min-h-0: required so overflow-y-auto can scroll inside max-h-[90vh]; without it the WHT block and footer are clipped off-screen */}
+                        <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-8">
                             {/* Payment Context Panel - FinancialPositionBar */}
                             <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm">
                                 <FinancialPositionBar
@@ -348,6 +349,56 @@ export default function AddPaymentModal({
                                             </p>
                                         )}
                                     </div>
+                                </div>
+
+                                {/* WHT — placed high so it is visible without scrolling (modal body scrolls with flex-1 min-h-0) */}
+                                <div className={`rounded-lg border p-4 ${whtEnabled ? "border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-600" : "border-gray-200 bg-gray-50 dark:bg-gray-700/30 dark:border-gray-600"}`}>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                                Customer deducted WHT
+                                            </span>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                Turn on if the payer withheld tax; net cash + WHT receivable (2155)
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={whtEnabled}
+                                            aria-label="Customer deducted withholding tax"
+                                            onClick={() => setWhtEnabled(!whtEnabled)}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${whtEnabled ? "bg-amber-500" : "bg-gray-200 dark:bg-gray-600"}`}
+                                        >
+                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${whtEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                                        </button>
+                                    </div>
+                                    {whtEnabled && (
+                                        <div className="mt-3 space-y-2">
+                                            <label className="block text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                                                WHT amount withheld
+                                            </label>
+                                            <div className="relative">
+                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                    <span className="text-gray-500 font-bold text-sm">{currencySymbol}</span>
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    min="0"
+                                                    value={whtAmountStr}
+                                                    onChange={(e) => setWhtAmountStr(e.target.value)}
+                                                    className="block w-full pl-10 pr-4 py-2.5 rounded-lg border-2 border-amber-300 focus:border-amber-500 bg-white dark:bg-gray-700 dark:text-white font-mono"
+                                                    placeholder="0.00"
+                                                />
+                                            </div>
+                                            {whtNum > 0 && (
+                                                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                                                    Bank received {currencySymbol}{netCashReceived.toFixed(2)}; WHT credit {currencySymbol}{whtNum.toFixed(2)}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -437,55 +488,6 @@ export default function AddPaymentModal({
                                         )}
                                     </div>
                                 )}
-
-                                {/* WHT Suffered Section */}
-                                <div className={`rounded-lg border p-4 ${whtEnabled ? "border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-600" : "border-gray-200 bg-gray-50 dark:bg-gray-700/30 dark:border-gray-600"}`}>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                                                Customer deducted WHT
-                                            </span>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                                WHT is recorded as a tax credit asset (account 2155)
-                                            </p>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={whtEnabled}
-                                            onClick={() => setWhtEnabled(!whtEnabled)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${whtEnabled ? "bg-amber-500" : "bg-gray-200 dark:bg-gray-600"}`}
-                                        >
-                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${whtEnabled ? "translate-x-5" : "translate-x-0"}`} />
-                                        </button>
-                                    </div>
-                                    {whtEnabled && (
-                                        <div className="mt-3 space-y-2">
-                                            <label className="block text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
-                                                WHT Amount Deducted
-                                            </label>
-                                            <div className="relative">
-                                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                    <span className="text-gray-500 font-bold text-sm">{currencySymbol}</span>
-                                                </div>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0"
-                                                    value={whtAmountStr}
-                                                    onChange={(e) => setWhtAmountStr(e.target.value)}
-                                                    className="block w-full pl-10 pr-4 py-2.5 rounded-lg border-2 border-amber-300 focus:border-amber-500 bg-white dark:bg-gray-700 dark:text-white font-mono"
-                                                    placeholder="0.00"
-                                                />
-                                            </div>
-                                            {whtNum > 0 && (
-                                                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-                                                    You received {currencySymbol}{netCashReceived.toFixed(2)} in your bank. The {currencySymbol}{whtNum.toFixed(2)} WHT credit offsets future tax.
-                                                </p>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
 
                                 {/* Ledger Preview Panel */}
                                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex items-start gap-3">
