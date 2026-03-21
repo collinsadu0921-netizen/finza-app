@@ -51,6 +51,7 @@ export type PnLReportResponse = {
   totals: {
     gross_profit: number
     operating_profit: number
+    profit_before_tax: number  // gross_profit minus operating+other expenses; BEFORE taxes/CIT
     net_profit: number
   }
   telemetry: {
@@ -171,11 +172,12 @@ export async function getProfitAndLossReport(
     sections.find((s) => s.key === "other_income")!.subtotal
   const totalCogs = sections.find((s) => s.key === "cogs")!.subtotal
   const grossProfit = Math.round((totalIncome - totalCogs) * 100) / 100
-  const totalOperating =
+  const totalOperatingAndOther =
     sections.find((s) => s.key === "operating_expenses")!.subtotal +
-    sections.find((s) => s.key === "other_expenses")!.subtotal +
-    sections.find((s) => s.key === "taxes")!.subtotal
-  const operatingProfit = Math.round((grossProfit - totalOperating) * 100) / 100
+    sections.find((s) => s.key === "other_expenses")!.subtotal
+  const totalTaxes = sections.find((s) => s.key === "taxes")!.subtotal
+  const profitBeforeTax = Math.round((grossProfit - totalOperatingAndOther) * 100) / 100
+  const operatingProfit = Math.round((profitBeforeTax - totalTaxes) * 100) / 100
   const netProfit = operatingProfit
 
   return {
@@ -191,6 +193,7 @@ export async function getProfitAndLossReport(
       totals: {
         gross_profit: grossProfit,
         operating_profit: operatingProfit,
+        profit_before_tax: profitBeforeTax,
         net_profit: netProfit,
       },
       telemetry: {

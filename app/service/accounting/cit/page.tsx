@@ -47,6 +47,7 @@ export default function CITPage() {
   // P&L summary
   const [plLoading, setPlLoading] = useState(false)
   const [netProfit, setNetProfit] = useState<number | null>(null)
+  const [grossRevenue, setGrossRevenue] = useState("")   // for AMT calculation
   const [plError, setPlError] = useState("")
 
   // New provision form
@@ -123,30 +124,45 @@ export default function CITPage() {
       }
       const data = await res.json()
 
+      // Always extract gross revenue (income + other_income) for AMT
+      const incomeSection      = data.sections?.find((s: any) => s.key === "income")
+      const otherIncomeSection = data.sections?.find((s: any) => s.key === "other_income")
+      const grossRev = (incomeSection?.subtotal ?? 0) + (otherIncomeSection?.subtotal ?? 0)
+
       if (isPresumptive) {
         // For presumptive tax: base is gross revenue (income sections)
-        const incomeSection = data.sections?.find((s: any) => s.key === "income")
-        const otherIncomeSection = data.sections?.find((s: any) => s.key === "other_income")
-        const grossRevenue =
-          (incomeSection?.subtotal ?? 0) + (otherIncomeSection?.subtotal ?? 0)
-        setNetProfit(grossRevenue)
-        setChargeableIncome(Math.max(0, grossRevenue).toFixed(2))
+        setNetProfit(grossRev)
+        setChargeableIncome(Math.max(0, grossRev).toFixed(2))
+        setGrossRevenue(Math.max(0, grossRev).toFixed(2))
       } else {
-        // For standard CIT: base is net profit before tax
-        const profit = data.net_profit ?? data.totals?.net_profit ?? null
+        // For standard CIT: base is profit BEFORE income tax (chargeable income)
+        // Use profit_before_tax (excludes taxes/CIT section) to avoid circular deduction.
+        // Fall back to net_profit only if profit_before_tax is absent (older API).
+        const pbt = data.totals?.profit_before_tax ?? null
+        const profit = pbt ?? data.totals?.net_profit ?? data.net_profit ?? null
         if (profit != null) {
           setNetProfit(Number(profit))
           setChargeableIncome(Math.max(0, Number(profit)).toFixed(2))
         } else {
           setPlError("P&L data format not recognised. Please enter income manually.")
         }
+        // Always set gross revenue for AMT even when profit fetch fails
+        setGrossRevenue(Math.max(0, grossRev).toFixed(2))
       }
     } finally {
       setPlLoading(false)
     }
   }
 
-  const citAmount = Math.round(Math.max(0, Number(chargeableIncome) || 0) * citRate * 100) / 100
+  const isExempt = citRateCode === "exempt"
+  // AMT = 0.5% of gross revenue; doesn't apply to presumptive (already turnover-based) or exempt
+  const amtApplicable = !isPresumptive && !isExempt
+  const standardCit   = Math.round(Math.max(0, Number(chargeableIncome) || 0) * citRate * 100) / 100
+  const amtAmount     = amtApplicable && Number(grossRevenue) > 0
+    ? Math.round(Number(grossRevenue) * 0.005 * 100) / 100
+    : 0
+  const amtApplies    = amtApplicable && amtAmount > standardCit
+  const citAmount     = amtApplicable ? Math.max(standardCit, amtAmount) : standardCit
   const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
 
   const handleCreate = async () => {
@@ -169,6 +185,7 @@ export default function CITPage() {
           provision_type:    provType,
           chargeable_income: Number(chargeableIncome),
           cit_rate:          citRate,
+          gross_revenue:     Number(grossRevenue) || 0,
           notes:             formNotes || null,
           auto_post:         autoPost,
         }),
@@ -184,6 +201,8 @@ export default function CITPage() {
       )
       setShowForm(false)
       setChargeableIncome("")
+      setGrossRevenue("")
+      setNetProfit(null)
       setFormNotes("")
       await loadData()
     } finally {
@@ -424,7 +443,7 @@ export default function CITPage() {
       {/* New Provision Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">New CIT Provision</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
               Creates a CIT provision entry for the selected period.
@@ -463,7 +482,7 @@ export default function CITPage() {
                     Auto-fill from {isPresumptive ? "Revenue" : "P&L"}
                   </p>
                   <p className="text-xs text-blue-700 dark:text-blue-400">
-                    Pulls YTD {isPresumptive ? "gross revenue" : "net profit"} for {currentYear}
+                    Pulls YTD {isPresumptive ? "gross revenue" : "profit before tax"} for {currentYear}
                     {netProfit != null && ` → ${currency}${netProfit.toFixed(2)}`}
                   </p>
                 </div>
@@ -506,6 +525,27 @@ export default function CITPage() {
                 </p>
               </div>
 
+              {/* Gross Revenue field — needed for AMT (0.5% of revenue floor) */}
+              {amtApplicable && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Gross Revenue <span className="text-xs font-normal text-gray-500">(for AMT calculation)</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={grossRevenue}
+                    onChange={e => setGrossRevenue(e.target.value)}
+                    onFocus={e => e.target.select()}
+                    placeholder="0.00"
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Total income before expenses — auto-filled when you click Fetch above
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">CIT Rate</label>
                 <select
@@ -520,16 +560,33 @@ export default function CITPage() {
               </div>
 
               {/* CIT Preview */}
-              <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Computed CIT</p>
-                  <p className="text-xs text-gray-400">
-                    {currency}{(Number(chargeableIncome) || 0).toFixed(2)} × {(citRate * 100).toFixed(0)}%
+              <div className={`rounded-lg p-4 ${amtApplies ? "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700" : "bg-gray-50 dark:bg-gray-700"}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {amtApplies ? "Minimum Tax (AMT)" : "Computed CIT"}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {amtApplies
+                        ? `0.5% × ${currency}${(Number(grossRevenue) || 0).toFixed(2)} gross revenue`
+                        : `${currency}${(Number(chargeableIncome) || 0).toFixed(2)} × ${(citRate * 100).toFixed(0)}%`}
+                    </p>
+                  </div>
+                  <p className={`text-2xl font-bold ${amtApplies ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"}`}>
+                    {currency}{citAmount.toFixed(2)}
                   </p>
                 </div>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                  {currency}{citAmount.toFixed(2)}
-                </p>
+                {amtApplies && (
+                  <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-700 flex justify-between text-xs text-amber-700 dark:text-amber-400">
+                    <span>Standard CIT ({(citRate * 100).toFixed(0)}% × chargeable income)</span>
+                    <span>{currency}{standardCit.toFixed(2)}</span>
+                  </div>
+                )}
+                {amtApplicable && !amtApplies && amtAmount > 0 && (
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    AMT floor: {currency}{amtAmount.toFixed(2)} — standard CIT is higher ✓
+                  </p>
+                )}
               </div>
 
               <div>

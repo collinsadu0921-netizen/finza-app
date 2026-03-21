@@ -218,21 +218,34 @@ function extractCovid(text: string): number | undefined {
   return undefined
 }
 
+function stubReceiptTextForDev(): string {
+  const d = new Date()
+  const iso = d.toISOString().split("T")[0]
+  return [
+    "Receipt supplier",
+    "Invoice No: INV-001",
+    `Date: ${iso.split("-").reverse().join("/")}`,
+    "VAT 125.00",
+    "NHIL 20.83",
+    "GETFund 20.83",
+    "TOTAL GHS 1000.00",
+  ].join("\n")
+}
+
+/** Set RECEIPT_OCR_USE_STUB=true to skip Tesseract (faster local dev, no WASM download). */
 const defaultProvider: ReceiptOcrProvider = {
   async extractText(imageDataUrl: string): Promise<string> {
     if (!imageDataUrl?.startsWith("data:")) return ""
-    // Stub: return sample text so UI gets pre-fill until real OCR is plugged
-    const d = new Date()
-    const iso = d.toISOString().split("T")[0]
-    return [
-      "Receipt supplier",
-      "Invoice No: INV-001",
-      `Date: ${iso.split("-").reverse().join("/")}`,
-      "VAT 125.00",
-      "NHIL 20.83",
-      "GETFund 20.83",
-      "TOTAL GHS 1000.00",
-    ].join("\n")
+    if (process.env.RECEIPT_OCR_USE_STUB === "true") {
+      return stubReceiptTextForDev()
+    }
+    try {
+      const { extractTextWithTesseract } = await import("./tesseractReceiptOcr")
+      return await extractTextWithTesseract(imageDataUrl)
+    } catch (e) {
+      console.error("[receipt-ocr] Tesseract OCR failed:", e)
+      return ""
+    }
   },
 }
 

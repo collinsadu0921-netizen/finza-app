@@ -14,6 +14,9 @@ import type { DocumentType } from "@/lib/receipt/receiptOcr"
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
 const DEV = process.env.NODE_ENV === "development"
 
+/** Tesseract first run can exceed default serverless limits */
+export const maxDuration = 60
+
 export const OCR_ERROR_CODES = {
   OCR_FETCH_FAILED: "OCR_FETCH_FAILED",
   OCR_UNSUPPORTED_CONTENT_TYPE: "OCR_UNSUPPORTED_CONTENT_TYPE",

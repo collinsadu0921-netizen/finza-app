@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
       provision_type = "quarterly",
       chargeable_income,
       cit_rate = GH_CIT_RATE,
+      gross_revenue = 0,   // used for Alternative Minimum Tax (AMT) calculation
       notes,
       auto_post = false,
     } = body
@@ -124,7 +125,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "business_id, period_label, and chargeable_income required" }, { status: 400 })
     }
 
-    const citAmount = Math.round(Math.max(0, chargeable_income) * cit_rate * 100) / 100
+    // Ghana AMT: 0.5% of gross revenue — applies when standard CIT would be lower.
+    // Exempt (rate=0) and presumptive (rate=0.03 turnover-based) are not subject to AMT.
+    const isExemptOrPresumptive = cit_rate === 0 || cit_rate === 0.03
+    const standardCit = Math.round(Math.max(0, chargeable_income) * cit_rate * 100) / 100
+    const amtAmount   = (!isExemptOrPresumptive && gross_revenue > 0)
+      ? Math.round(gross_revenue * 0.005 * 100) / 100
+      : 0
+    const amtApplies  = amtAmount > standardCit
+    const citAmount   = Math.max(standardCit, amtAmount)
+
+    // Append AMT note when minimum tax overrides standard CIT
+    let finalNotes = notes || null
+    if (amtApplies) {
+      const amtNote = `AMT applied: ${citAmount.toFixed(2)} (0.5% × ${gross_revenue.toFixed(2)} gross revenue) > Standard CIT: ${standardCit.toFixed(2)}`
+      finalNotes = finalNotes ? `${finalNotes}\n${amtNote}` : amtNote
+    }
 
     const { data: provision, error: provErr } = await supabase
       .from("cit_provisions")
@@ -136,7 +152,7 @@ export async function POST(request: NextRequest) {
         cit_rate,
         cit_amount: citAmount,
         status: "draft",
-        notes: notes || null,
+        notes: finalNotes,
         created_by: user?.id || null,
       })
       .select()
@@ -156,7 +172,7 @@ export async function POST(request: NextRequest) {
       entityType: "cit_provision",
       entityId: provision.id,
       oldValues: null,
-      newValues: { period_label, chargeable_income, cit_amount: citAmount },
+      newValues: { period_label, chargeable_income, gross_revenue, cit_amount: citAmount, amt_applied: amtApplies },
       request,
     })
 
