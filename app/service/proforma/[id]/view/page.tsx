@@ -57,12 +57,12 @@ type ProformaItem = {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
-  sent: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  accepted: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  converted: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-  cancelled: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  rejected: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  draft: "bg-slate-100 text-slate-700",
+  sent: "bg-blue-100 text-blue-700",
+  accepted: "bg-emerald-100 text-emerald-700",
+  converted: "bg-purple-100 text-purple-700",
+  cancelled: "bg-red-100 text-red-700",
+  rejected: "bg-red-100 text-red-700",
 }
 
 export default function ProformaViewPage() {
@@ -297,21 +297,33 @@ export default function ProformaViewPage() {
   }
 
   if (loading) {
-    return <div className="p-6"><p className="text-gray-500">Loading...</p></div>
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
+    )
   }
 
   if (error || (!loading && !proforma)) {
     return (
-      <div className="p-6">
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-sm">
-          {error || "Unable to load this proforma invoice."}
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="space-y-4 max-w-md w-full">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+            {error || "Unable to load this proforma invoice."}
+          </div>
+          <button
+            onClick={() => router.push("/service/proforma")}
+            className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-sm font-medium"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Proformas
+          </button>
         </div>
-        <button
-          onClick={() => router.push("/service/proforma")}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm"
-        >
-          Back to Proformas
-        </button>
       </div>
     )
   }
@@ -324,357 +336,356 @@ export default function ProformaViewPage() {
   const allTaxLines = proforma.tax_lines ? getTaxBreakdown(proforma.tax_lines) : null
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-      {/* Header */}
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <button
-              onClick={() => router.push("/service/proforma")}
-              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Proformas
-            </button>
-          </div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Proforma Invoice</h1>
-            {proforma.proforma_number && (
-              <span className="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-full text-sm font-mono font-medium">
-                {proforma.proforma_number}
-              </span>
-            )}
-          </div>
-        </div>
+        {/* Back */}
+        <button
+          onClick={() => router.push("/service/proforma")}
+          className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-sm font-medium transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Proformas
+        </button>
 
-        {/* Action Buttons — status-based */}
-        <div className="flex gap-2 flex-wrap justify-end items-center">
-
-          {/* DRAFT */}
-          {proforma.status === "draft" && (
-            <>
-              <button
-                onClick={() => router.push(`/service/proforma/${proformaId}/edit`)}
-                className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm"
-              >
-                Edit
-              </button>
-              <button
-                onClick={openSendModal}
-                disabled={actionLoading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50 flex items-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-                Send to Client
-              </button>
-              <button
-                onClick={handleCancel}
-                disabled={actionLoading}
-                className="text-gray-500 hover:text-gray-700 text-sm px-2 py-2"
-              >
-                Cancel
-              </button>
-            </>
-          )}
-
-          {/* SENT — focus on sharing; Accept/Reject are manual overrides */}
-          {proforma.status === "sent" && (
-            <>
-              <button
-                onClick={openSendModal}
-                className="flex items-center gap-1.5 bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-black text-sm font-medium transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
-                Share Link
-              </button>
-              {/* Manual record buttons — secondary */}
-              <button
-                onClick={handleMarkAccepted}
-                disabled={actionLoading}
-                className="text-emerald-700 hover:text-emerald-800 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-lg text-sm disabled:opacity-50 transition-colors"
-              >
-                Mark as Accepted
-              </button>
-              <button
-                onClick={handleMarkRejected}
-                disabled={actionLoading}
-                className="text-orange-600 hover:text-orange-700 border border-orange-200 bg-orange-50 hover:bg-orange-100 px-3 py-2 rounded-lg text-sm disabled:opacity-50 transition-colors"
-              >
-                Mark as Declined
-              </button>
-              <button
-                onClick={handleCancel}
-                disabled={actionLoading}
-                className="text-gray-500 hover:text-gray-700 text-sm px-2 py-2"
-              >
-                Cancel
-              </button>
-            </>
-          )}
-
-          {/* ACCEPTED — convert to invoice */}
-          {proforma.status === "accepted" && (
-            <>
-              <button
-                onClick={handleConvertToInvoice}
-                disabled={actionLoading}
-                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm disabled:opacity-50 flex items-center gap-2"
-              >
-                {actionLoading ? "Converting..." : "Convert to Invoice"}
-                {!actionLoading && (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
+        {/* Header card */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <h1 className="text-xl font-bold text-slate-900">Proforma Invoice</h1>
+                {proforma.proforma_number && (
+                  <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-full text-sm font-mono font-medium">
+                    {proforma.proforma_number}
+                  </span>
                 )}
-              </button>
-              <button
-                onClick={handleCancel}
-                disabled={actionLoading}
-                className="text-gray-500 hover:text-gray-700 text-sm px-2 py-2"
-              >
-                Cancel
-              </button>
-            </>
-          )}
-
-          {/* CONVERTED */}
-          {proforma.status === "converted" && proforma.converted_invoice_id && (
-            <button
-              onClick={() => router.push(`/service/invoices/${proforma.converted_invoice_id}/view`)}
-              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm"
-            >
-              View Invoice
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Status */}
-      <div className="mb-6 flex items-center gap-3">
-        {getStatusBadge(proforma.status)}
-        {proforma.status === "sent" && (
-          <span className="text-sm text-blue-600 dark:text-blue-400">Awaiting client response</span>
-        )}
-        {proforma.status === "converted" && proforma.converted_invoice_id && (
-          <span className="text-sm text-purple-600 dark:text-purple-400">Converted to Invoice</span>
-        )}
-      </div>
-
-      {/* Main Details Card */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 mb-6">
-
-        {/* Customer & Details Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div>
-            <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Customer</h3>
-            {proforma.customers ? (
-              <div>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white">{proforma.customers.name}</p>
-                {proforma.customers.email && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{proforma.customers.email}</p>}
-                {proforma.customers.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{proforma.customers.phone}</p>}
-                {proforma.customers.address && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">{proforma.customers.address}</p>}
-                {proforma.customers.tin && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">TIN: {proforma.customers.tin}</p>}
               </div>
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400">No customer assigned</p>
-            )}
-          </div>
-          <div>
-            <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Proforma Details</h3>
-            <div className="space-y-1.5">
-              <div className="flex gap-4">
-                <span className="text-sm text-gray-500 dark:text-gray-400 w-28">Issue Date:</span>
-                <span className="text-sm text-gray-900 dark:text-white font-medium">{formatDate(proforma.issue_date)}</span>
-              </div>
-              <div className="flex gap-4">
-                <span className="text-sm text-gray-500 dark:text-gray-400 w-28">Validity Date:</span>
-                <span className="text-sm text-gray-900 dark:text-white font-medium">{formatDate(proforma.validity_date)}</span>
-              </div>
-              {proforma.payment_terms && (
-                <div className="flex gap-4">
-                  <span className="text-sm text-gray-500 dark:text-gray-400 w-28">Payment Terms:</span>
-                  <span className="text-sm text-gray-900 dark:text-white font-medium">{proforma.payment_terms}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Line Items */}
-        <div className="mb-6">
-          <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Line Items</h3>
-          {items && items.length > 0 ? (
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-900/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">Description</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">Qty</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">Unit Price</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">Discount</th>
-                    <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {items.map((item, index) => (
-                    <tr key={item.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                      <td className="px-4 py-3 text-gray-900 dark:text-white">{item.description || "—"}</td>
-                      <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">{Number(item.qty) || 0}</td>
-                      <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">
-                        {currencyDisplay} {Number(item.unit_price || 0).toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300 tabular-nums">
-                        {Number(item.discount_amount || 0) > 0
-                          ? `${currencyDisplay} ${Number(item.discount_amount).toFixed(2)}`
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-white tabular-nums">
-                        {currencyDisplay} {Number(item.line_subtotal || 0).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg">
-              No line items found.
-            </div>
-          )}
-        </div>
-
-        {/* Totals */}
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-          <div className="flex justify-end">
-            <div className="w-72 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                <span className="font-medium text-gray-900 dark:text-white tabular-nums">
-                  {currencyDisplay} {Number(proforma.subtotal).toFixed(2)}
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_STYLES[proforma.status] || STATUS_STYLES.draft}`}>
+                  {proforma.status.charAt(0).toUpperCase() + proforma.status.slice(1)}
                 </span>
+                {proforma.status === "sent" && (
+                  <span className="text-xs text-blue-600">Awaiting client response</span>
+                )}
+                {proforma.status === "converted" && proforma.converted_invoice_id && (
+                  <span className="text-xs text-purple-600">Converted to Invoice</span>
+                )}
               </div>
-              {Number(proforma.total_tax) > 0 && (
+            </div>
+            {/* Action Buttons */}
+            <div className="flex gap-2 flex-wrap items-center">
+              {/* DRAFT */}
+              {proforma.status === "draft" && (
                 <>
-                  {proforma.tax_lines && allTaxLines ? (
-                    Object.entries(allTaxLines)
-                      .filter(([code, amount]) => Number(amount) > 0 && code.toUpperCase() !== "COVID")
-                      .map(([code, amount]) => (
-                        <div key={code} className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                          <span>{code}:</span>
-                          <span className="tabular-nums">{currencyDisplay} {Number(amount).toFixed(2)}</span>
-                        </div>
-                      ))
-                  ) : (
-                    <>
-                      {taxBreakdown.nhil > 0 && (
-                        <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                          <span>NHIL:</span>
-                          <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.nhil).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {taxBreakdown.getfund > 0 && (
-                        <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                          <span>GETFund:</span>
-                          <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.getfund).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {taxBreakdown.vat > 0 && (
-                        <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                          <span>VAT:</span>
-                          <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.vat).toFixed(2)}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  <div className="flex justify-between text-sm pt-1 border-t border-gray-200 dark:border-gray-700">
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">Total Tax:</span>
-                    <span className="font-medium text-gray-900 dark:text-white tabular-nums">
-                      {currencyDisplay} {Number(proforma.total_tax).toFixed(2)}
-                    </span>
-                  </div>
+                  <button
+                    onClick={() => router.push(`/service/proforma/${proformaId}/edit`)}
+                    className="px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={openSendModal}
+                    disabled={actionLoading}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    Send to Client
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={actionLoading}
+                    className="text-slate-400 hover:text-slate-600 text-sm px-2 py-2 transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </>
               )}
-              <div className="flex justify-between text-lg pt-2 border-t-2 border-gray-300 dark:border-gray-600">
-                <span className="font-bold text-gray-900 dark:text-white">Total:</span>
-                <span className="font-bold text-gray-900 dark:text-white tabular-nums">
-                  {currencyDisplay} {Number(proforma.total).toFixed(2)}
-                </span>
-              </div>
+              {/* SENT */}
+              {proforma.status === "sent" && (
+                <>
+                  <button
+                    onClick={openSendModal}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                    Share Link
+                  </button>
+                  <button
+                    onClick={handleMarkAccepted}
+                    disabled={actionLoading}
+                    className="px-3 py-2 text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-sm disabled:opacity-50 transition-colors"
+                  >
+                    Mark as Accepted
+                  </button>
+                  <button
+                    onClick={handleMarkRejected}
+                    disabled={actionLoading}
+                    className="px-3 py-2 text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-lg text-sm disabled:opacity-50 transition-colors"
+                  >
+                    Mark as Declined
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={actionLoading}
+                    className="text-slate-400 hover:text-slate-600 text-sm px-2 py-2 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+              {/* ACCEPTED */}
+              {proforma.status === "accepted" && (
+                <>
+                  <button
+                    onClick={handleConvertToInvoice}
+                    disabled={actionLoading}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-semibold rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                  >
+                    {actionLoading ? "Converting..." : "Convert to Invoice"}
+                    {!actionLoading && (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={actionLoading}
+                    className="text-slate-400 hover:text-slate-600 text-sm px-2 py-2 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+              {/* CONVERTED */}
+              {proforma.status === "converted" && proforma.converted_invoice_id && (
+                <button
+                  onClick={() => router.push(`/service/invoices/${proforma.converted_invoice_id}/view`)}
+                  className="px-4 py-2 bg-purple-600 text-white text-sm font-semibold rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  View Invoice
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Notes */}
-        {proforma.notes && (
-          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Notes</h3>
-            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{proforma.notes}</p>
-          </div>
-        )}
+        {/* Main Details Card */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
 
-        {/* Footer Message */}
-        {proforma.footer_message && (
-          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <p className="text-sm text-gray-600 dark:text-gray-400 italic whitespace-pre-wrap">{proforma.footer_message}</p>
-          </div>
-        )}
-
-        {/* Client acceptance details */}
-        {proforma.status === "accepted" && proforma.client_name_signed && (
-          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-              Accepted &amp; Signed by Client
-            </h3>
-            <div className="flex flex-wrap items-start gap-6">
-              {proforma.client_signature && (
-                <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50">
-                  <img src={proforma.client_signature} alt="Client signature" className="h-14 w-auto" />
+          {/* Customer & Details Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div>
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Customer</h3>
+              {proforma.customers ? (
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">{proforma.customers.name}</p>
+                  {proforma.customers.email && <p className="text-sm text-slate-500 mt-1">{proforma.customers.email}</p>}
+                  {proforma.customers.phone && <p className="text-sm text-slate-500">{proforma.customers.phone}</p>}
+                  {proforma.customers.address && <p className="text-sm text-slate-500 mt-1 whitespace-pre-line">{proforma.customers.address}</p>}
+                  {proforma.customers.tin && <p className="text-sm text-slate-500 mt-1">TIN: {proforma.customers.tin}</p>}
                 </div>
+              ) : (
+                <p className="text-slate-400">No customer assigned</p>
               )}
-              <div className="text-sm space-y-0.5">
-                <p className="font-semibold text-gray-800 dark:text-gray-200">{proforma.client_name_signed}</p>
-                {proforma.client_id_type && (
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {proforma.client_id_type === "ghana_card" ? "Ghana Card" :
-                     proforma.client_id_type === "national_id" ? "National ID" :
-                     proforma.client_id_type === "passport" ? "Passport" :
-                     proforma.client_id_type === "drivers_license" ? "Driver's License" :
-                     proforma.client_id_type === "voters_id" ? "Voter's ID" :
-                     proforma.client_id_type}
-                    {proforma.client_id_number && `: ${proforma.client_id_number}`}
-                  </p>
-                )}
-                {proforma.signed_at && (
-                  <p className="text-gray-400 dark:text-gray-500 text-xs">
-                    Signed {new Date(proforma.signed_at).toLocaleDateString("en-GB", {
-                      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-                    })}
-                  </p>
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Proforma Details</h3>
+              <div className="space-y-1.5">
+                <div className="flex gap-4">
+                  <span className="text-sm text-slate-500 w-28">Issue Date:</span>
+                  <span className="text-sm text-slate-800 font-medium">{formatDate(proforma.issue_date)}</span>
+                </div>
+                <div className="flex gap-4">
+                  <span className="text-sm text-slate-500 w-28">Validity Date:</span>
+                  <span className="text-sm text-slate-800 font-medium">{formatDate(proforma.validity_date)}</span>
+                </div>
+                {proforma.payment_terms && (
+                  <div className="flex gap-4">
+                    <span className="text-sm text-slate-500 w-28">Payment Terms:</span>
+                    <span className="text-sm text-slate-800 font-medium">{proforma.payment_terms}</span>
+                  </div>
                 )}
               </div>
             </div>
           </div>
-        )}
 
-        {/* Rejection details */}
-        {(proforma.status === "rejected") && proforma.rejected_reason && (
-          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="text-xs font-bold text-orange-500 uppercase tracking-wider mb-2">Declined by Client</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">{proforma.rejected_reason}</p>
-            {proforma.rejected_at && (
-              <p className="text-xs text-gray-400 mt-1">
-                {new Date(proforma.rejected_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-              </p>
+          {/* Line Items */}
+          <div className="mb-6">
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Line Items</h3>
+            {items && items.length > 0 ? (
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Description</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit Price</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Discount</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {items.map((item, index) => (
+                      <tr key={item.id || index} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-slate-800">{item.description || "—"}</td>
+                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">{Number(item.qty) || 0}</td>
+                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                          {currencyDisplay} {Number(item.unit_price || 0).toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                          {Number(item.discount_amount || 0) > 0
+                            ? `${currencyDisplay} ${Number(item.discount_amount).toFixed(2)}`
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-slate-800 tabular-nums">
+                          {currencyDisplay} {Number(item.line_subtotal || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-400 border border-slate-200 rounded-xl">
+                No line items found.
+              </div>
             )}
           </div>
-        )}
+
+          {/* Totals */}
+          <div className="border-t border-slate-100 pt-4">
+            <div className="flex justify-end">
+              <div className="w-72 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Subtotal:</span>
+                  <span className="font-medium text-slate-800 tabular-nums">
+                    {currencyDisplay} {Number(proforma.subtotal).toFixed(2)}
+                  </span>
+                </div>
+                {Number(proforma.total_tax) > 0 && (
+                  <>
+                    {proforma.tax_lines && allTaxLines ? (
+                      Object.entries(allTaxLines)
+                        .filter(([code, amount]) => Number(amount) > 0 && code.toUpperCase() !== "COVID")
+                        .map(([code, amount]) => (
+                          <div key={code} className="flex justify-between text-sm text-slate-500">
+                            <span>{code}:</span>
+                            <span className="tabular-nums">{currencyDisplay} {Number(amount).toFixed(2)}</span>
+                          </div>
+                        ))
+                    ) : (
+                      <>
+                        {taxBreakdown.nhil > 0 && (
+                          <div className="flex justify-between text-sm text-slate-500">
+                            <span>NHIL:</span>
+                            <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.nhil).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {taxBreakdown.getfund > 0 && (
+                          <div className="flex justify-between text-sm text-slate-500">
+                            <span>GETFund:</span>
+                            <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.getfund).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {taxBreakdown.vat > 0 && (
+                          <div className="flex justify-between text-sm text-slate-500">
+                            <span>VAT:</span>
+                            <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.vat).toFixed(2)}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="flex justify-between text-sm pt-1 border-t border-slate-100">
+                      <span className="text-slate-500 font-medium">Total Tax:</span>
+                      <span className="font-medium text-slate-800 tabular-nums">
+                        {currencyDisplay} {Number(proforma.total_tax).toFixed(2)}
+                      </span>
+                    </div>
+                  </>
+                )}
+                <div className="flex justify-between text-lg pt-2 border-t-2 border-slate-800">
+                  <span className="font-bold text-slate-900">Total:</span>
+                  <span className="font-bold text-slate-900 tabular-nums">
+                    {currencyDisplay} {Number(proforma.total).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          {proforma.notes && (
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Notes</h3>
+              <p className="text-sm text-slate-700 whitespace-pre-wrap">{proforma.notes}</p>
+            </div>
+          )}
+
+          {/* Footer Message */}
+          {proforma.footer_message && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-sm text-slate-500 italic whitespace-pre-wrap">{proforma.footer_message}</p>
+            </div>
+          )}
+
+          {/* Client acceptance details */}
+          {proforma.status === "accepted" && proforma.client_name_signed && (
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                Accepted &amp; Signed by Client
+              </h3>
+              <div className="flex flex-wrap items-start gap-6">
+                {proforma.client_signature && (
+                  <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                    <img src={proforma.client_signature} alt="Client signature" className="h-14 w-auto" />
+                  </div>
+                )}
+                <div className="text-sm space-y-0.5">
+                  <p className="font-semibold text-slate-800">{proforma.client_name_signed}</p>
+                  {proforma.client_id_type && (
+                    <p className="text-slate-600">
+                      {proforma.client_id_type === "ghana_card" ? "Ghana Card" :
+                       proforma.client_id_type === "national_id" ? "National ID" :
+                       proforma.client_id_type === "passport" ? "Passport" :
+                       proforma.client_id_type === "drivers_license" ? "Driver's License" :
+                       proforma.client_id_type === "voters_id" ? "Voter's ID" :
+                       proforma.client_id_type}
+                      {proforma.client_id_number && `: ${proforma.client_id_number}`}
+                    </p>
+                  )}
+                  {proforma.signed_at && (
+                    <p className="text-slate-400 text-xs">
+                      Signed {new Date(proforma.signed_at).toLocaleDateString("en-GB", {
+                        day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+                      })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Rejection details */}
+          {(proforma.status === "rejected") && proforma.rejected_reason && (
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <h3 className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-2">Declined by Client</h3>
+              <p className="text-sm text-slate-600">{proforma.rejected_reason}</p>
+              {proforma.rejected_at && (
+                <p className="text-xs text-slate-400 mt-1">
+                  {new Date(proforma.rejected_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Toast */}
@@ -683,13 +694,13 @@ export default function ProformaViewPage() {
       {/* ── SEND MODAL ─────────────────────────────────────── */}
       {showSendModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
 
             {/* Step 1: Confirm send */}
             {!sendDone && (
               <>
-                <div className="px-6 py-4 border-b border-slate-100 dark:border-gray-700 flex items-center justify-between">
-                  <h2 className="text-lg font-bold text-slate-800 dark:text-white">Send Proforma Invoice</h2>
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-slate-800">Send Proforma Invoice</h2>
                   <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -697,13 +708,13 @@ export default function ProformaViewPage() {
                   </button>
                 </div>
                 <div className="p-6 space-y-4">
-                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                  <p className="text-sm text-slate-600">
                     This will assign a proforma number <span className="font-semibold">PRF-XXXXXX</span> and mark the invoice as sent. You can then share the client link via WhatsApp, email, or copy it directly.
                   </p>
                   {proforma?.customers?.name && (
-                    <div className="bg-slate-50 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm">
+                    <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm">
                       <p className="text-slate-400 text-xs uppercase tracking-wide font-medium mb-1">Sending to</p>
-                      <p className="font-semibold text-slate-800 dark:text-white">{proforma.customers.name}</p>
+                      <p className="font-semibold text-slate-800">{proforma.customers.name}</p>
                       {proforma.customers.email && <p className="text-slate-500">{proforma.customers.email}</p>}
                       {proforma.customers.phone && <p className="text-slate-500">{proforma.customers.phone}</p>}
                     </div>
@@ -711,7 +722,7 @@ export default function ProformaViewPage() {
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setShowSendModal(false)}
-                      className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-gray-700 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-gray-800"
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
                     >
                       Cancel
                     </button>
@@ -730,14 +741,14 @@ export default function ProformaViewPage() {
             {/* Step 2: Share options */}
             {sendDone && (
               <>
-                <div className="px-6 py-4 border-b border-slate-100 dark:border-gray-700 flex items-center justify-between">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center">
                       <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                       </svg>
                     </div>
-                    <h2 className="text-lg font-bold text-slate-800 dark:text-white">
+                    <h2 className="text-lg font-bold text-slate-800">
                       {proforma?.proforma_number ?? "Proforma"} sent!
                     </h2>
                   </div>
@@ -748,7 +759,7 @@ export default function ProformaViewPage() {
                   </button>
                 </div>
                 <div className="p-6 space-y-3">
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                  <p className="text-sm text-slate-500 mb-4">
                     Share the client link so they can review, accept, and sign.
                   </p>
 
@@ -783,7 +794,7 @@ export default function ProformaViewPage() {
                   {/* Copy link */}
                   <button
                     onClick={handleCopySendLink}
-                    className="w-full flex items-center gap-3 bg-slate-100 hover:bg-slate-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-slate-700 dark:text-slate-200 font-medium py-3 px-4 rounded-xl transition-colors text-sm border border-slate-200 dark:border-gray-700"
+                    className="w-full flex items-center gap-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-3 px-4 rounded-xl transition-colors text-sm border border-slate-200"
                   >
                     {copiedSendLink ? (
                       <>

@@ -20,22 +20,31 @@ type ProformaInvoice = {
   } | null
 }
 
-const STATUS_TABS = [
-  { key: "all", label: "All" },
-  { key: "draft", label: "Draft" },
-  { key: "sent", label: "Sent" },
-  { key: "accepted", label: "Accepted" },
-  { key: "converted", label: "Converted" },
-  { key: "cancelled", label: "Cancelled" },
-]
+const STATUS_DOT: Record<string, string> = {
+  draft: "bg-slate-400",
+  sent: "bg-blue-500",
+  accepted: "bg-emerald-500",
+  converted: "bg-purple-500",
+  cancelled: "bg-red-500",
+  rejected: "bg-red-400",
+}
 
-const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300",
-  sent: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  accepted: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  converted: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-  cancelled: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  rejected: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  accepted: "Accepted",
+  converted: "Converted",
+  cancelled: "Cancelled",
+  rejected: "Rejected",
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_DOT[status] ?? "bg-slate-400"}`} />
+      {STATUS_LABEL[status] ?? status}
+    </span>
+  )
 }
 
 export default function ProformaListPage() {
@@ -44,6 +53,7 @@ export default function ProformaListPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [search, setSearch] = useState("")
 
   useEffect(() => {
     loadProformas()
@@ -55,9 +65,7 @@ export default function ProformaListPage() {
       setError("")
 
       const url = new URL("/api/proforma/list", window.location.origin)
-      if (statusFilter !== "all") {
-        url.searchParams.set("status", statusFilter)
-      }
+      if (statusFilter !== "all") url.searchParams.set("status", statusFilter)
 
       const response = await fetch(url.toString())
       if (!response.ok) {
@@ -74,152 +82,218 @@ export default function ProformaListPage() {
     }
   }
 
-  const getStatusBadge = (status: string) => (
-    <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_STYLES[status] || STATUS_STYLES.draft}`}>
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  )
+  const formatDate = (d: string | null) => {
+    if (!d) return "—"
+    return new Date(d).toLocaleDateString("en-GH", { year: "numeric", month: "short", day: "numeric" })
+  }
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return "—"
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+  // Derived stats
+  const total = proformas.length
+  const open = proformas.filter((p) => p.status === "sent").length
+  const converted = proformas.filter((p) => p.status === "converted").length
+
+  // Client-side search
+  const visible = search.trim()
+    ? proformas.filter(
+        (p) =>
+          (p.proforma_number ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (p.customers?.name ?? "").toLowerCase().includes(search.toLowerCase())
+      )
+    : proformas
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
+    )
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Page Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold mb-1 text-slate-900 dark:text-white">Proforma Invoices</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">Manage your proforma invoices</p>
-        </div>
-        <button
-          onClick={() => router.push("/service/proforma/create")}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Proforma
-        </button>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-      {/* Error Banner */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Status Filter Tabs */}
-      <div className="mb-6 flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {STATUS_TABS.map((tab) => (
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Proforma Invoices</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Manage your proforma invoices</p>
+          </div>
           <button
-            key={tab.key}
-            onClick={() => setStatusFilter(tab.key)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              statusFilter === tab.key
-                ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            }`}
+            onClick={() => router.push("/service/proforma/create")}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
           >
-            {tab.label}
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Proforma
           </button>
-        ))}
-      </div>
-
-      {/* Table / Empty State */}
-      {loading ? (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-8 text-center text-gray-500">
-          Loading...
         </div>
-      ) : proformas.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-12 text-center">
-          <svg className="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          <p className="text-gray-500 dark:text-gray-400 mb-4">
-            {statusFilter === "all" ? "No proforma invoices yet" : `No ${statusFilter} proformas`}
-          </p>
-          {statusFilter === "all" && (
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
+        )}
+
+        {/* Stat Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{total}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Total Proformas</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{open}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Sent / Open</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{converted}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Converted</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search proformas or customers…"
+              className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+          >
+            <option value="all">All Status</option>
+            <option value="draft">Draft</option>
+            <option value="sent">Sent</option>
+            <option value="accepted">Accepted</option>
+            <option value="converted">Converted</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          {(search || statusFilter !== "all") && (
             <button
-              onClick={() => router.push("/service/proforma/create")}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm"
+              onClick={() => { setSearch(""); setStatusFilter("all") }}
+              className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
             >
-              Create Your First Proforma
+              Clear
             </button>
           )}
         </div>
-      ) : (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Proforma #
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Customer
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Issue Date
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Validity Date
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Total
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {proformas.map((pf) => (
-                <tr
-                  key={pf.id}
-                  onClick={() => router.push(`/service/proforma/${pf.id}/view`)}
-                  className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-                >
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-gray-900 dark:text-white font-mono">
-                      {pf.proforma_number ?? "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                      {pf.customers?.name ?? "—"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {formatDate(pf.issue_date)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {formatDate(pf.validity_date)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <span className="text-sm font-medium text-gray-900 dark:text-white tabular-nums">
-                      {Number(pf.total).toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {getStatusBadge(pf.status)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+
+        {/* Table / Empty State */}
+        {visible.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <p className="text-slate-700 font-semibold mb-1">
+              {search || statusFilter !== "all" ? "No proformas match your filters" : "No proforma invoices yet"}
+            </p>
+            <p className="text-slate-500 text-sm mb-4">
+              {search || statusFilter !== "all" ? "Try adjusting your search or filters." : "Create your first proforma invoice to get started."}
+            </p>
+            {!search && statusFilter === "all" && (
+              <button
+                onClick={() => router.push("/service/proforma/create")}
+                className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+              >
+                Create Proforma
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Proforma #</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Issue Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Validity</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Total</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((pf) => (
+                    <tr
+                      key={pf.id}
+                      onClick={() => router.push(`/service/proforma/${pf.id}/view`)}
+                      className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="text-sm font-mono font-medium text-slate-800">{pf.proforma_number ?? "—"}</span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{pf.customers?.name ?? "—"}</span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="text-sm text-slate-500">{formatDate(pf.issue_date)}</span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="text-sm text-slate-500">{formatDate(pf.validity_date)}</span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                        <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                          {Number(pf.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <StatusBadge status={pf.status} />
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                        <span className="text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors">View →</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

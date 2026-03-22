@@ -94,7 +94,7 @@ export default function BillViewPage() {
     try {
       setLoading(true)
       const response = await fetch(`/api/bills/${id}`)
-      
+
       if (!response.ok) {
         throw new Error("Failed to load bill")
       }
@@ -105,7 +105,7 @@ export default function BillViewPage() {
       setPayments(data.payments || [])
       setTotalPaid(data.total_paid || 0)
       setBalance(data.balance || 0)
-      
+
       // Load business country and currency
       if (data.bill?.business_id) {
         const { data: business } = await supabase
@@ -114,7 +114,7 @@ export default function BillViewPage() {
           .eq("id", data.bill.business_id)
           .single()
         setBusinessCountry(business?.address_country || null)
-        
+
         // CRITICAL: Get currency symbol from business currency code
         if (business?.default_currency) {
           setCurrencyCode(business.default_currency)
@@ -128,7 +128,7 @@ export default function BillViewPage() {
           setError("Business currency is required. Please set your business currency in Business Profile settings.")
         }
       }
-      
+
       setLoading(false)
     } catch (err: any) {
       setError(err.message || "Failed to load bill")
@@ -177,16 +177,24 @@ export default function BillViewPage() {
   }
 
   const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      draft: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300",
-      open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-      partially_paid: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      paid: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      overdue: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+    const dots: Record<string, string> = {
+      draft: "bg-slate-400",
+      open: "bg-blue-500",
+      partially_paid: "bg-amber-500",
+      paid: "bg-emerald-500",
+      overdue: "bg-red-500",
+    }
+    const labels: Record<string, string> = {
+      draft: "Draft",
+      open: "Open",
+      partially_paid: "Partially Paid",
+      paid: "Paid",
+      overdue: "Overdue",
     }
     return (
-      <span className={`px-3 py-1 rounded-full text-sm font-medium ${styles[status] || styles.draft}`}>
-        {status.charAt(0).toUpperCase() + status.slice(1).replace("_", " ")}
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dots[status] ?? "bg-slate-400"}`} />
+        {labels[status] ?? status}
       </span>
     )
   }
@@ -194,8 +202,11 @@ export default function BillViewPage() {
   if (loading) {
     return (
       <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
         </div>
       </ProtectedLayout>
     )
@@ -204,8 +215,8 @@ export default function BillViewPage() {
   if (error || !bill) {
     return (
       <ProtectedLayout>
-        <div className="p-6">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm max-w-md w-full">
             {error || "Bill not found"}
           </div>
         </div>
@@ -215,78 +226,70 @@ export default function BillViewPage() {
 
   return (
     <ProtectedLayout>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="min-h-screen bg-slate-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="mb-8 export-hide print-hide">
-            <button
-              onClick={() => router.back()}
-              className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4 flex items-center gap-2 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
-            </button>
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent mb-2">
-                  Bill #{bill.bill_number}
-                </h1>
-                <p className="text-gray-600 dark:text-gray-400">Supplier bill details and payment tracking</p>
-              </div>
-              <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.back()}
+            className="text-slate-500 hover:text-slate-800 mb-4 flex items-center gap-2 transition-colors export-hide print-hide"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+
+          {/* Header card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex items-center justify-between gap-4 mb-6 export-hide print-hide">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Bill #{bill.bill_number}</h1>
+              <div className="flex items-center gap-2 mt-1">
                 {getStatusBadge(bill.status)}
-                <button
-                  onClick={() => router.push(`/bills/${id}/edit`)}
-                  className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-lg hover:from-purple-700 hover:to-pink-700 font-medium shadow-lg transition-all"
-                >
-                  Edit
-                </button>
+                {bill.bill_type === "import" && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Import Bill
+                  </span>
+                )}
               </div>
+              <p className="text-sm text-slate-500 mt-0.5">Supplier bill details and payment tracking</p>
             </div>
+            <button
+              onClick={() => router.push(`/bills/${id}/edit`)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors flex-shrink-0"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Edit
+            </button>
           </div>
 
-          {/* Bill Summary Cards - hidden in print/export */}
-          <div className={`grid grid-cols-1 gap-4 mb-6 export-hide print-hide ${bill.wht_applicable ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-purple-900 dark:text-purple-300 font-semibold">Gross Total:</span>
-                <span className="text-purple-900 dark:text-purple-300 font-bold text-xl">{currency}{Number(bill.total).toFixed(2)}</span>
-              </div>
+          {/* Summary stat cards */}
+          <div className={`grid grid-cols-1 gap-4 mb-6 export-hide print-hide ${bill.wht_applicable ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Gross Total</p>
+              <p className="text-2xl font-bold text-slate-900">{currency}{Number(bill.total).toFixed(2)}</p>
             </div>
             {bill.wht_applicable && (
-              <div className={`bg-gradient-to-br rounded-xl p-4 border ${bill.wht_remitted_at ? 'from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border-green-200 dark:border-green-700' : 'from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border-orange-200 dark:border-orange-700'}`}>
-                <div className="flex items-center justify-between">
-                  <span className={`${bill.wht_remitted_at ? 'text-green-900 dark:text-green-300' : 'text-orange-900 dark:text-orange-300'} font-semibold text-sm`}>
-                    WHT ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%):
-                  </span>
-                  <span className={`${bill.wht_remitted_at ? 'text-green-900 dark:text-green-300' : 'text-orange-900 dark:text-orange-300'} font-bold text-xl`}>
-                    {currency}{Number(bill.wht_amount).toFixed(2)}
-                  </span>
-                </div>
-                <p className={`text-xs mt-1 ${bill.wht_remitted_at ? 'text-green-700 dark:text-green-400' : 'text-orange-700 dark:text-orange-400'}`}>
-                  {bill.wht_remitted_at ? '✓ Remitted to GRA' : 'Pending remittance to GRA'}
+              <div className={`rounded-xl border shadow-sm p-4 ${bill.wht_remitted_at ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">WHT ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%)</p>
+                <p className={`text-2xl font-bold ${bill.wht_remitted_at ? 'text-emerald-700' : 'text-amber-700'}`}>{currency}{Number(bill.wht_amount).toFixed(2)}</p>
+                <p className={`text-xs mt-1 ${bill.wht_remitted_at ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {bill.wht_remitted_at ? '✓ Remitted to GRA' : 'Pending remittance'}
                 </p>
               </div>
             )}
-            <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-green-900 dark:text-green-300 font-semibold">Total Paid:</span>
-                <span className="text-green-900 dark:text-green-300 font-bold text-xl">{currency}{totalPaid.toFixed(2)}</span>
-              </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Total Paid</p>
+              <p className="text-2xl font-bold text-emerald-600">{currency}{totalPaid.toFixed(2)}</p>
             </div>
-            <div className={`bg-gradient-to-br ${balance > 0 ? 'from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border-orange-200 dark:border-orange-700' : 'from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border-green-200 dark:border-green-700'} rounded-xl p-4`}>
-              <div className="flex items-center justify-between">
-                <span className={`${balance > 0 ? 'text-orange-900 dark:text-orange-300' : 'text-green-900 dark:text-green-300'} font-semibold`}>
-                  {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier):" : "Remaining:"}
-                </span>
-                <span className={`${balance > 0 ? 'text-orange-900 dark:text-orange-300' : 'text-green-900 dark:text-green-300'} font-bold text-xl`}>{currency}{balance.toFixed(2)}</span>
-              </div>
-              {bill.wht_applicable && Number(bill.wht_amount) > 0 ? (
-                <p className={`text-xs mt-1 ${balance > 0 ? "text-orange-800 dark:text-orange-400" : "text-green-800 dark:text-green-400"}`}>
-                  Net of WHT — supplier cash portion only (WHT is a separate GRA liability).
-                </p>
-              ) : null}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+                {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier)" : "Remaining"}
+              </p>
+              <p className={`text-2xl font-bold ${balance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{currency}{balance.toFixed(2)}</p>
+              {bill.wht_applicable && Number(bill.wht_amount) > 0 && (
+                <p className="text-xs text-slate-500 mt-1">Net of WHT — supplier cash portion only.</p>
+              )}
             </div>
           </div>
 
@@ -294,44 +297,44 @@ export default function BillViewPage() {
             {/* Bill Details */}
             <div className="lg:col-span-2 space-y-6">
               {/* Supplier & Bill Info */}
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Bill Information</h2>
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Bill Information</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-semibold text-gray-500 dark:text-gray-400">Supplier</label>
-                    <p className="text-lg font-medium text-gray-900 dark:text-white mt-1">{bill.supplier_name}</p>
+                    <label className="text-xs text-slate-500">Supplier</label>
+                    <p className="text-sm font-semibold text-slate-800 mt-1">{bill.supplier_name}</p>
                   </div>
                   <div>
-                    <label className="text-sm font-semibold text-gray-500 dark:text-gray-400">Issue Date</label>
-                    <p className="text-lg font-medium text-gray-900 dark:text-white mt-1">
+                    <label className="text-xs text-slate-500">Issue Date</label>
+                    <p className="text-sm font-semibold text-slate-800 mt-1">
                       {new Date(bill.issue_date).toLocaleDateString("en-GH")}
                     </p>
                   </div>
                   {bill.supplier_phone && (
                     <div>
-                      <label className="text-sm font-semibold text-gray-500 dark:text-gray-400">Phone</label>
-                      <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">{bill.supplier_phone}</p>
+                      <label className="text-xs text-slate-500">Phone</label>
+                      <p className="text-sm text-slate-700 mt-1">{bill.supplier_phone}</p>
                     </div>
                   )}
                   {bill.supplier_email && (
                     <div>
-                      <label className="text-sm font-semibold text-gray-500 dark:text-gray-400">Email</label>
-                      <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">{bill.supplier_email}</p>
+                      <label className="text-xs text-slate-500">Email</label>
+                      <p className="text-sm text-slate-700 mt-1">{bill.supplier_email}</p>
                     </div>
                   )}
                   {bill.due_date && (
                     <div>
-                      <label className="text-sm font-semibold text-gray-500 dark:text-gray-400">Due Date</label>
-                      <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+                      <label className="text-xs text-slate-500">Due Date</label>
+                      <p className="text-sm text-slate-700 mt-1">
                         {new Date(bill.due_date).toLocaleDateString("en-GH")}
                       </p>
                     </div>
                   )}
                 </div>
                 {bill.notes && (
-                  <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <label className="text-sm font-semibold text-gray-500 dark:text-gray-400">Notes</label>
-                    <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 whitespace-pre-wrap">{bill.notes}</p>
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    <label className="text-xs text-slate-500">Notes</label>
+                    <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">{bill.notes}</p>
                   </div>
                 )}
               </div>
@@ -339,57 +342,57 @@ export default function BillViewPage() {
               {/* Line Items / Import Breakdown */}
               {bill.bill_type === "import" ? (
                 /* Import duty breakdown */
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                   <div className="flex items-center gap-3 mb-4">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">Import / Customs Entry</h2>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300">
+                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Import / Customs Entry</h2>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
                       📦 Import Bill
                     </span>
                   </div>
 
                   {bill.import_description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-5 italic">{bill.import_description}</p>
+                    <p className="text-sm text-slate-600 mb-5 italic">{bill.import_description}</p>
                   )}
 
                   <div className="space-y-2 text-sm">
-                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
-                      <span className="text-gray-600 dark:text-gray-400">CIF Value <span className="text-xs">(Cost + Insurance + Freight)</span></span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currency}{Number(bill.cif_value ?? 0).toFixed(2)}</span>
+                    <div className="flex justify-between py-2 border-b border-slate-100">
+                      <span className="text-slate-600">CIF Value <span className="text-xs">(Cost + Insurance + Freight)</span></span>
+                      <span className="font-semibold text-slate-800">{currency}{Number(bill.cif_value ?? 0).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700">
-                      <span className="text-gray-600 dark:text-gray-400">
+                    <div className="flex justify-between py-2 border-b border-slate-100">
+                      <span className="text-slate-600">
                         Import Duty <span className="text-xs">({((Number(bill.import_duty_rate ?? 0)) * 100).toFixed(0)}% ECOWAS CET)</span>
                       </span>
-                      <span className="font-medium text-gray-900 dark:text-white">{currency}{Number(bill.import_duty_amount ?? 0).toFixed(2)}</span>
+                      <span className="font-medium text-slate-800">{currency}{Number(bill.import_duty_amount ?? 0).toFixed(2)}</span>
                     </div>
 
                     {/* Port levies */}
                     {Number(bill.ecowas_levy) > 0 && (
-                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>ECOWAS Levy (0.5%)</span>
                         <span>{currency}{Number(bill.ecowas_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.au_levy) > 0 && (
-                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>AU Levy (0.2%)</span>
                         <span>{currency}{Number(bill.au_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.exim_levy) > 0 && (
-                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>EXIM Levy (0.75%)</span>
                         <span>{currency}{Number(bill.exim_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.sil_levy) > 0 && (
-                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>SIL (2%)</span>
                         <span>{currency}{Number(bill.sil_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.examination_fee) > 0 && (
-                      <div className="flex justify-between py-1.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>Examination Fee (1%)</span>
                         <span>{currency}{Number(bill.examination_fee).toFixed(2)}</span>
                       </div>
@@ -405,23 +408,23 @@ export default function BillViewPage() {
                         + Number(bill.sil_levy ?? 0)
                         + Number(bill.examination_fee ?? 0)
                       return (
-                        <div className="flex justify-between py-2 border-t border-indigo-200 dark:border-indigo-700 mt-1">
-                          <span className="font-semibold text-indigo-900 dark:text-indigo-200">VAT Base (landed cost)</span>
-                          <span className="font-bold text-indigo-900 dark:text-indigo-200">{currency}{vatBase.toFixed(2)}</span>
+                        <div className="flex justify-between py-2 border-t border-indigo-200 mt-1">
+                          <span className="font-semibold text-indigo-800">VAT Base (landed cost)</span>
+                          <span className="font-bold text-indigo-800">{currency}{vatBase.toFixed(2)}</span>
                         </div>
                       )
                     })()}
 
                     {Number(bill.clearing_agent_fee) > 0 && (
-                      <div className="flex justify-between py-2 border-t border-dashed border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex justify-between py-2 border-t border-dashed border-slate-200 text-xs text-slate-400">
                         <span>Clearing Agent Fee (posted to 5220)</span>
                         <span>{currency}{Number(bill.clearing_agent_fee).toFixed(2)}</span>
                       </div>
                     )}
 
                     {bill.landed_cost_account_code && (
-                      <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
-                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                      <div className="mt-3 pt-2 border-t border-slate-100">
+                        <span className="text-xs text-slate-400">
                           Landed cost posted to account {bill.landed_cost_account_code}
                         </span>
                       </div>
@@ -430,27 +433,29 @@ export default function BillViewPage() {
                 </div>
               ) : (
                 /* Standard line items */
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Line Items</h2>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100">
+                    <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Line Items</h2>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
-                      <thead className="bg-gray-50 dark:bg-gray-700">
+                      <thead className="bg-slate-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Description</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Qty</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Unit Price</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Total</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Description</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit Price</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Total</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      <tbody className="divide-y divide-slate-100">
                         {items.map((item) => (
                           <tr key={item.id}>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.description}</td>
-                            <td className="px-4 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{Number(item.qty)}</td>
-                            <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                            <td className="px-4 py-3 text-sm text-slate-800">{item.description}</td>
+                            <td className="px-4 py-3 text-sm text-center text-slate-600">{Number(item.qty)}</td>
+                            <td className="px-4 py-3 text-sm text-right text-slate-600">
                               {currency}{Number(item.unit_price).toFixed(2)}
                             </td>
-                            <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-white">
+                            <td className="px-4 py-3 text-sm text-right font-medium text-slate-800">
                               {currency}{Number(item.line_subtotal).toFixed(2)}
                             </td>
                           </tr>
@@ -463,33 +468,33 @@ export default function BillViewPage() {
 
               {/* Tax Breakdown */}
               {(bill.nhil > 0 || bill.vat > 0) && (
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Tax Breakdown</h2>
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Tax Breakdown</h2>
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currency}{Number(bill.subtotal).toFixed(2)}</span>
+                      <span className="text-slate-500">Subtotal:</span>
+                      <span className="font-semibold text-slate-800">{currency}{Number(bill.subtotal).toFixed(2)}</span>
                     </div>
-                    <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
                       {(() => {
                         const countryCode = businessCountry ? normalizeCountry(businessCountry) : null
                         const isGhana = countryCode === "GH"
-                        
+
                         // CRITICAL: Only show Ghana tax labels for GH businesses
                         if (isGhana) {
                           return (
                             <>
                               <div className="flex justify-between items-center text-sm">
-                                <span className="text-gray-600 dark:text-gray-400">NHIL (2.5%):</span>
-                                <span className="text-gray-900 dark:text-white">{currency}{Number(bill.nhil || 0).toFixed(2)}</span>
+                                <span className="text-slate-500">NHIL (2.5%):</span>
+                                <span className="text-slate-800">{currency}{Number(bill.nhil || 0).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
-                                <span className="text-gray-600 dark:text-gray-400">GETFund (2.5%):</span>
-                                <span className="text-gray-900 dark:text-white">{currency}{Number(bill.getfund || 0).toFixed(2)}</span>
+                                <span className="text-slate-500">GETFund (2.5%):</span>
+                                <span className="text-slate-800">{currency}{Number(bill.getfund || 0).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
-                                <span className="text-gray-600 dark:text-gray-400">VAT (15%):</span>
-                                <span className="text-gray-900 dark:text-white">{currency}{Number(bill.vat || 0).toFixed(2)}</span>
+                                <span className="text-slate-500">VAT (15%):</span>
+                                <span className="text-slate-800">{currency}{Number(bill.vat || 0).toFixed(2)}</span>
                               </div>
                             </>
                           )
@@ -497,32 +502,32 @@ export default function BillViewPage() {
                           // Non-GH: Show generic VAT only
                           return (
                             <div className="flex justify-between items-center text-sm">
-                              <span className="text-gray-600 dark:text-gray-400">VAT:</span>
-                              <span className="text-gray-900 dark:text-white">{currency}{Number(bill.vat || 0).toFixed(2)}</span>
+                              <span className="text-slate-500">VAT:</span>
+                              <span className="text-slate-800">{currency}{Number(bill.vat || 0).toFixed(2)}</span>
                             </div>
                           )
                         }
                       })()}
                     </div>
-                    <div className="flex justify-between items-center pt-3 border-t-2 border-gray-300 dark:border-gray-600">
-                      <span className="text-gray-900 dark:text-white font-bold text-lg">
+                    <div className="flex justify-between items-center pt-3 border-t-2 border-slate-800">
+                      <span className="text-slate-800 font-bold text-lg">
                         {bill.wht_applicable ? 'Gross Total:' : 'Total:'}
                       </span>
-                      <span className="font-bold text-purple-600 dark:text-purple-400 text-xl">{currency}{Number(bill.total).toFixed(2)}</span>
+                      <span className="font-bold text-slate-900 text-xl">{currency}{Number(bill.total).toFixed(2)}</span>
                     </div>
                     {bill.wht_applicable && bill.wht_amount > 0 && (
                       <>
-                        <div className="flex justify-between items-center text-sm pt-2 border-t border-orange-200 dark:border-orange-700">
-                          <span className="text-orange-700 dark:text-orange-400 font-medium">
+                        <div className="flex justify-between items-center text-sm pt-2 border-t border-amber-200">
+                          <span className="text-amber-700 font-medium">
                             WHT Deduction ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%):
                           </span>
-                          <span className="text-orange-700 dark:text-orange-400 font-semibold">
+                          <span className="text-amber-700 font-semibold">
                             − {currency}{Number(bill.wht_amount).toFixed(2)}
                           </span>
                         </div>
-                        <div className="flex justify-between items-center pt-2 border-t-2 border-orange-300 dark:border-orange-600">
-                          <span className="text-orange-900 dark:text-orange-200 font-bold text-lg">Net to Supplier:</span>
-                          <span className="font-bold text-orange-600 dark:text-orange-400 text-xl">
+                        <div className="flex justify-between items-center pt-2 border-t-2 border-amber-300">
+                          <span className="text-amber-800 font-bold text-lg">Net to Supplier:</span>
+                          <span className="font-bold text-amber-700 text-xl">
                             {currency}{(Number(bill.total) - Number(bill.wht_amount)).toFixed(2)}
                           </span>
                         </div>
@@ -536,13 +541,13 @@ export default function BillViewPage() {
             {/* Payments & Actions - hidden in print/export */}
             <div className="lg:col-span-1 space-y-6 export-hide print-hide">
               {/* Payments */}
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">Payments</h2>
+                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Payments</h2>
                   {bill.status !== "paid" && (
                     <button
                       onClick={() => setShowPaymentModal(true)}
-                      className="bg-gradient-to-r from-green-600 to-green-700 text-white px-4 py-2 rounded-lg hover:from-green-700 hover:to-green-800 font-medium text-sm shadow-lg transition-all flex items-center gap-2"
+                      className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 font-medium text-sm transition-all flex items-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -553,24 +558,24 @@ export default function BillViewPage() {
                 </div>
 
                 {payments.length === 0 ? (
-                  <p className="text-gray-500 dark:text-gray-400 text-sm text-center py-4">No payments recorded</p>
+                  <p className="text-slate-400 text-sm text-center py-4">No payments recorded</p>
                 ) : (
                   <div className="space-y-3">
                     {payments.map((payment) => (
-                      <div key={payment.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                      <div key={payment.id} className="border border-slate-100 rounded-lg p-3">
                         <div className="flex justify-between items-start mb-2">
                           <div>
-                            <p className="font-semibold text-gray-900 dark:text-white">{currency}{Number(payment.amount).toFixed(2)}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <p className="font-semibold text-slate-800">{currency}{Number(payment.amount).toFixed(2)}</p>
+                            <p className="text-xs text-slate-500">
                               {formatMethod(payment.method)} • {new Date(payment.date).toLocaleDateString("en-GH")}
                             </p>
                             {payment.reference && (
-                              <p className="text-xs text-gray-500 dark:text-gray-400">Ref: {payment.reference}</p>
+                              <p className="text-xs text-slate-500">Ref: {payment.reference}</p>
                             )}
                           </div>
                           <button
                             onClick={() => setEditingPayment(payment)}
-                            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 p-1"
+                            className="text-slate-400 hover:text-slate-600 p-1"
                             title="Edit payment"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -580,16 +585,16 @@ export default function BillViewPage() {
                         </div>
                       </div>
                     ))}
-                    <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <div className="pt-3 border-t border-slate-100">
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600 dark:text-gray-400">Total Paid:</span>
-                        <span className="font-semibold text-gray-900 dark:text-white">{currency}{totalPaid.toFixed(2)}</span>
+                        <span className="text-slate-500">Total Paid:</span>
+                        <span className="font-semibold text-slate-800">{currency}{totalPaid.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm mt-1">
-                        <span className="text-gray-600 dark:text-gray-400">
+                        <span className="text-slate-500">
                           {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier):" : "Remaining:"}
                         </span>
-                        <span className={`font-semibold ${balance > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}>
+                        <span className={`font-semibold ${balance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                           {currency}{balance.toFixed(2)}
                         </span>
                       </div>
@@ -600,38 +605,38 @@ export default function BillViewPage() {
 
               {/* WHT Remittance Card */}
               {bill.wht_applicable && bill.wht_amount > 0 && (
-                <div className={`rounded-2xl shadow-lg p-6 border ${bill.wht_remitted_at ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-700'}`}>
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Withholding Tax</h2>
+                <div className={`rounded-xl p-6 border ${bill.wht_remitted_at ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Withholding Tax</h2>
                   <div className="space-y-2 mb-4">
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">WHT Amount:</span>
-                      <span className="font-semibold text-gray-900 dark:text-white">{currency}{Number(bill.wht_amount).toFixed(2)}</span>
+                      <span className="text-slate-500">WHT Amount:</span>
+                      <span className="font-semibold text-slate-800">{currency}{Number(bill.wht_amount).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Status:</span>
-                      <span className={`font-semibold ${bill.wht_remitted_at ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                      <span className="text-slate-500">Status:</span>
+                      <span className={`font-semibold ${bill.wht_remitted_at ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {bill.wht_remitted_at ? 'Remitted to GRA' : 'Pending remittance'}
                       </span>
                     </div>
                     {bill.wht_remitted_at && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-600 dark:text-gray-400">Remitted on:</span>
-                        <span className="text-gray-900 dark:text-white">
+                        <span className="text-slate-500">Remitted on:</span>
+                        <span className="text-slate-800">
                           {new Date(bill.wht_remitted_at).toLocaleDateString("en-GB")}
                         </span>
                       </div>
                     )}
                     {bill.wht_remittance_ref && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-600 dark:text-gray-400">GRA Ref:</span>
-                        <span className="text-gray-900 dark:text-white">{bill.wht_remittance_ref}</span>
+                        <span className="text-slate-500">GRA Ref:</span>
+                        <span className="text-slate-800">{bill.wht_remittance_ref}</span>
                       </div>
                     )}
                   </div>
                   {!bill.wht_remitted_at && (
                     <a
                       href="/service/accounting/wht"
-                      className="w-full block text-center bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 font-medium text-sm shadow transition-all"
+                      className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 font-medium text-sm transition-all w-full block text-center"
                     >
                       Remit to GRA →
                     </a>
@@ -640,13 +645,13 @@ export default function BillViewPage() {
               )}
 
               {/* Actions */}
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Actions</h2>
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Actions</h2>
                 <div className="space-y-3">
                   {bill.supplier_phone && (
                     <button
                       onClick={sendViaWhatsApp}
-                      className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 font-medium shadow-lg transition-all flex items-center justify-center gap-2"
+                      className="bg-[#25D366] text-white px-4 py-2.5 rounded-lg hover:bg-[#1ebe5d] font-medium text-sm transition-colors flex items-center justify-center gap-2 w-full"
                     >
                       <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
@@ -657,7 +662,7 @@ export default function BillViewPage() {
                   {bill.attachment_path && (
                     <button
                       onClick={() => window.open(bill.attachment_path || "", "_blank")}
-                      className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 font-medium shadow-lg transition-all flex items-center justify-center gap-2"
+                      className="bg-white text-slate-700 px-4 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-sm transition-colors flex items-center justify-center gap-2 w-full"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -719,17 +724,17 @@ function AddPaymentModal({
   const countryCode = normalizeCountry(businessCountry)
   const allowedMethods = getAllowedMethods(countryCode)
   const mobileMoneyLabel = getMobileMoneyLabel(countryCode)
-  
+
   // Map eligibility methods to legacy method names
   const canUseCash = allowedMethods.includes("cash")
   const canUseMobileMoney = allowedMethods.includes("mobile_money")
   const canUseCard = allowedMethods.includes("card")
   const canUseBank = allowedMethods.includes("bank_transfer")
   const canUsePaystack = allowedMethods.includes("paystack")
-  
+
   // Determine default method (first available, or bank if available)
   const defaultMethod = canUseBank ? "bank" : (canUseCash ? "cash" : (canUseMobileMoney ? "momo" : (canUseCard ? "card" : "bank")))
-  
+
   // balance from API is already net to supplier when WHT applies
   const supplierRemaining = balance
   const [amount, setAmount] = useState(editingPayment ? editingPayment.amount.toString() : "")
@@ -792,15 +797,15 @@ function AddPaymentModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] flex flex-col">
         {/* Header - Fixed */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100 flex-shrink-0">
+          <h2 className="text-lg font-bold text-slate-900">
             {editingPayment ? "Edit Payment" : "Add Payment"}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            className="text-slate-400 hover:text-slate-600"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -811,14 +816,14 @@ function AddPaymentModal({
         {/* Scrollable Content */}
         <div className="overflow-y-auto flex-1 p-6">
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-4">
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4">
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} id="bill-payment-form" className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Amount *</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Amount *</label>
             <input
               type="text"
               inputMode="decimal"
@@ -827,33 +832,33 @@ function AddPaymentModal({
               onFocus={(e) => e.target.select()}
               required
               placeholder={editingPayment ? "" : currencySymbol + supplierRemaining.toFixed(2)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
             />
             {!editingPayment && whtApplicable && whtAmount > 0 ? (
               <div className="mt-1 space-y-0.5">
-                <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
+                <p className="text-xs text-amber-600 font-medium">
                   Max payment to supplier: {currencySymbol}{supplierRemaining.toFixed(2)} (WHT {currencySymbol}{whtAmount.toFixed(2)} is a separate GRA liability)
                 </p>
               </div>
             ) : !editingPayment ? (
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Balance: {currencySymbol}{balance.toFixed(2)}</p>
+              <p className="text-xs text-slate-500 mt-1">Balance: {currencySymbol}{balance.toFixed(2)}</p>
             ) : null}
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Date *</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Date *</label>
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
               required
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
             />
           </div>
 
           {/* Blocking banner if no methods allowed */}
           {hasNoAllowedMethods && (
-            <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 text-red-800 dark:text-red-300 px-4 py-3 rounded mb-4">
+            <div className="bg-red-50 border-2 border-red-200 text-red-800 px-4 py-3 rounded-xl mb-4">
               <p className="font-semibold mb-2">No payment methods available</p>
               <p className="text-sm mb-2">
                 Please set your business country in <a href="/settings/business-profile" className="underline font-semibold">Business Profile</a> to enable payment methods.
@@ -862,12 +867,12 @@ function AddPaymentModal({
           )}
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Payment Method *</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Payment Method *</label>
             <select
               value={method}
               onChange={(e) => setMethod(e.target.value)}
               required
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
               disabled={hasNoAllowedMethods}
             >
               {canUseCash && <option value="cash">Cash</option>}
@@ -882,23 +887,23 @@ function AddPaymentModal({
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Reference</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Reference</label>
             <input
               type="text"
               value={reference}
               onChange={(e) => setReference(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
               placeholder="Transaction reference"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Notes</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Notes</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
               placeholder="Additional notes"
             />
           </div>
@@ -906,11 +911,11 @@ function AddPaymentModal({
         </div>
 
         {/* Sticky Footer - Fixed */}
-        <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 flex gap-4 flex-shrink-0">
+        <div className="sticky bottom-0 bg-slate-50 border-t border-slate-100 p-4 flex gap-3 flex-shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-4 py-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 font-medium transition-all"
+            className="flex-1 border border-slate-200 text-slate-700 px-4 py-2.5 rounded-lg hover:bg-slate-100 font-medium text-sm transition-colors"
           >
             Cancel
           </button>
@@ -918,7 +923,7 @@ function AddPaymentModal({
             type="submit"
             form="bill-payment-form"
             disabled={loading || hasNoAllowedMethods}
-            className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-3 rounded-lg hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 font-medium shadow-lg transition-all"
+            className="flex-1 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-semibold text-sm transition-colors"
           >
             {loading ? "Saving..." : editingPayment ? "Update Payment" : "Add Payment"}
           </button>
