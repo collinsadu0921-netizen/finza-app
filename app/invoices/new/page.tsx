@@ -440,10 +440,15 @@ export default function NewInvoicePage() {
     legacyTaxAmounts = getLegacyTaxAmounts(taxCalculationResult)
   }
 
-  // WHT receivable — derived from invoice total
+  // WHT receivable — applied on pre-tax base, NOT the VAT-inclusive total.
+  // GRA: you do not withhold tax on tax (NHIL/GETFund/VAT are excluded from the WHT base).
+  // baseSubtotal = subtotal_excl_tax when Ghana tax is on; equals subtotal when tax is off.
   const selectedWHTRecvRate = GH_WHT_RATES.find(r => r.code === whtReceivableRateCode) ?? GH_WHT_RATES[0]
   const whtRecvCalc = applyWHTReceivable
-    ? calculateWHT(total, selectedWHTRecvRate?.rate ?? 0)
+    ? (() => {
+        const { whtAmount } = calculateWHT(baseSubtotal, selectedWHTRecvRate?.rate ?? 0)
+        return { whtAmount, netPayable: Math.round((total - whtAmount) * 100) / 100 }
+      })()
     : { whtAmount: 0, netPayable: total }
 
   // -- Actions --
@@ -1052,6 +1057,11 @@ export default function NewInvoicePage() {
                   // Pass FX rate so preview-draft can compute home_currency_total
                   ...(fxEnabled && fxCurrencyCode && fxRate ? {
                     fx_rate: parseFloat(fxRate),
+                  } : {}),
+                  // WHT — so the preview PDF shows the deduction and net payable line
+                  ...(applyWHTReceivable && whtRecvCalc.whtAmount > 0 ? {
+                    wht_applicable: true,
+                    wht_rate:       selectedWHTRecvRate?.rate ?? 0,
                   } : {}),
                 };
                 (window as any).__previewData = previewData

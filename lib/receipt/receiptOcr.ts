@@ -55,9 +55,10 @@ const CURRENCY_PATTERNS: Array<{ re: RegExp; code: string }> = [
   { re: /CFA|XOF|XAF/i, code: "XOF" },
 ]
 
-const TOTAL_LABELS = /\b(TOTAL|Grand Total|Amount Due|Balance Due|Net Total|Amount Payable|AMOUNT)\s*[:]?\s*(?:GH[S¢₵]|GHS|₵|Cedi)?\s*([\d,]+\.?\d*)/gi
-const AMOUNT_LINE = /\bAMOUNT\s*:\s*(?:GH[S¢₵]|GHS|₵|Cedi)?\s*([\d,]+\.?\d*)/gi
-const CURRENCY_AMOUNT = /(?:GH[S¢₵]|GHS|₵|Cedi)\s*([\d,]+\.?\d*)|([\d,]+\.?\d*)\s*(?:GH[S¢₵]|GHS|₵|Cedi)/gi
+const ALL_CCY = `(?:GH[S¢₵]|GHS|₵|Cedi|₦|NGN|KES|KSh|UGX|TZS|TSh|ZAR|CFA|XOF|XAF)`
+const TOTAL_LABELS = new RegExp(`\\b(TOTAL|Grand Total|Amount Due|Balance Due|Net Total|Amount Payable|AMOUNT)\\s*[:]?\\s*${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)`, "gi")
+const AMOUNT_LINE = new RegExp(`\\bAMOUNT\\s*:\\s*${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)`, "gi")
+const CURRENCY_AMOUNT = new RegExp(`${ALL_CCY}\\s*([\\d,]+\\.?\\d*)|([\\d,]+\\.?\\d*)\\s*${ALL_CCY}`, "gi")
 const TENDERED_LABELS = /\b(Tendered|Cash|Change)\s*[:]?\s*([\d,]+\.?\d*)/gi
 
 const MONTH_NAMES: Record<string, string> = {
@@ -137,6 +138,22 @@ function extractTotal(text: string): { value: number; confidence: ConfidenceLeve
   while ((m = amountRe.exec(text)) !== null) {
     const value = parseNumber(m[1]!)
     if (value != null && value > 0) candidates.push({ value, label: "AMOUNT", isAmountLine: true })
+  }
+  // Multi-line totals: label on one line, amount (optionally prefixed with currency) on the next
+  if (candidates.length === 0) {
+    const labelOnlyRe = /^\s*(TOTAL|Grand\s+Total|Amount\s+Due|Balance\s+Due|Net\s+Total|Amount\s+Payable|AMOUNT)\s*[:]?\s*$/i
+    const amountOnlyRe = new RegExp(`^${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)\\s*${ALL_CCY}?$`)
+    const splitLines = text.split(/\r?\n/)
+    for (let i = 0; i < splitLines.length - 1; i++) {
+      if (labelOnlyRe.test(splitLines[i]!)) {
+        const next = (splitLines[i + 1] ?? "").trim()
+        const nm = next.match(amountOnlyRe)
+        if (nm && nm[1]) {
+          const value = parseNumber(nm[1])
+          if (value != null && value > 0) candidates.push({ value, label: "TOTAL", isAmountLine: false })
+        }
+      }
+    }
   }
   if (candidates.length === 0) {
     const currencyAmountRe = new RegExp(CURRENCY_AMOUNT.source, "gi")

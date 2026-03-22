@@ -113,7 +113,12 @@
       "Bash(ls -la \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\supabase\\\\migrations\\\\37\"*.sql)",
       "Bash(dir \"C:\\\\projects\\\\finza-web\\\\finza-web\\\\supabase\\\\migrations\\\\37\"*.sql /B)",
       "Bash(echo \"EXIT_CODE:$?\")",
-      "Bash(timeout 180 npm run build)"
+      "Bash(timeout 180 npm run build)",
+      "Bash(find /c/projects/finza-web/finza-web/app/api -type f -name *preview*)",
+      "Bash(grep -E \"\\\\.ts$|\\\\.js$|preview|draft\")",
+      "Bash(grep -r \"wht_receivable\\\\|withholding\" /c/projects/finza-web/finza-web/app/api/invoices --include=*.ts)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js\\)$\")",
+      "Bash(npx jest:*)"
     ]
   }
 }

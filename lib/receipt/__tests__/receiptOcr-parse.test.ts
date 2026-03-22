@@ -131,4 +131,36 @@ describe("receiptOcr parse", () => {
     const { suggestions } = parseReceiptText(text, "expense")
     expect(suggestions.document_date).toBe("2019-09-25")
   })
+
+  it("multi-line total: label on one line, amount on next", () => {
+    const text = "SUPPLIER\nTOTAL\nGHS 1,500.00"
+    const { suggestions } = parseReceiptText(text, "expense", "GHS")
+    expect(suggestions.total).toBe(1500)
+  })
+
+  it("multi-line total: amount without currency symbol on next line", () => {
+    const text = "TOTAL:\n850.00"
+    const { suggestions } = parseReceiptText(text, "expense", "GHS")
+    expect(suggestions.total).toBe(850)
+  })
+
+  it("multi-line total: AMOUNT label on one line", () => {
+    const text = "AMOUNT\n₦5,000.00"
+    const { suggestions } = parseReceiptText(text, "expense", "NGN")
+    expect(suggestions.total).toBe(5000)
+  })
+
+  it("non-GHS currency fallback: NGN receipt without TOTAL label", () => {
+    const text = "Vendor\n₦ 3,200.00"
+    const { suggestions } = parseReceiptText(text, "expense", "NGN")
+    expect(suggestions.total).toBe(3200)
+    expect(suggestions.currency_code).toBe("NGN")
+  })
+
+  it("non-GHS currency fallback: KES receipt without TOTAL label", () => {
+    const text = "Vendor\nKES 450.00"
+    const { suggestions } = parseReceiptText(text, "expense", "KES")
+    expect(suggestions.total).toBe(450)
+    expect(suggestions.currency_code).toBe("KES")
+  })
 })

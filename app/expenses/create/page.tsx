@@ -37,6 +37,7 @@ export default function CreateExpensePage() {
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrError, setOcrError] = useState("")
   const [ocrSuggestedFields, setOcrSuggestedFields] = useState<{ supplier?: boolean; date?: boolean; amount?: boolean }>({})
+  const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null)
   
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [showCategoryModal, setShowCategoryModal] = useState(false)
@@ -179,6 +180,7 @@ export default function CreateExpensePage() {
         setOcrLoading(false)
         return
       }
+      setUploadedReceiptPath(receiptPath)
       const res = await fetch("/api/receipt-ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -267,11 +269,7 @@ export default function CreateExpensePage() {
         return null
       }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("receipts")
-        .getPublicUrl(filePath)
-
-      return publicUrl
+      return filePath
     } catch (err) {
       console.error("Error uploading receipt:", err)
       return null
@@ -328,9 +326,9 @@ export default function CreateExpensePage() {
 
       const total = totalIncludingTaxes // Total is what user entered
 
-      // Upload receipt if provided
-      let receiptPath = null
-      if (receiptFile) {
+      // Upload receipt if provided (reuse path from OCR extract if already uploaded)
+      let receiptPath = uploadedReceiptPath ?? null
+      if (!receiptPath && receiptFile) {
         receiptPath = await uploadReceipt()
       }
 

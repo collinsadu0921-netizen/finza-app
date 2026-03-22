@@ -29,19 +29,23 @@ export const GH_WHT_RATES: WHTRate[] = [
 ]
 
 /**
- * Calculate WHT amount from a gross bill total.
- * WHT is calculated on the gross (VAT-inclusive) amount.
+ * Calculate WHT amount from a pre-tax base amount.
+ * WHT is calculated on the taxable value BEFORE VAT/NHIL/GETFund —
+ * you do not withhold tax on tax (GRA position).
  *
- * @param grossAmount  Total amount including VAT (what you'd normally pay the supplier)
+ * For tax-inclusive invoices, pass the back-calculated pre-tax base
+ * (subtotal_excl_tax from the tax engine), NOT the VAT-inclusive total.
+ *
+ * @param baseAmount   Pre-tax amount (excludes VAT, NHIL, GETFund)
  * @param rate         WHT rate as decimal (e.g. 0.05)
  * @returns            WHT amount (rounded to 2dp), and the net amount to pay supplier
  */
-export function calculateWHT(grossAmount: number, rate: number): {
+export function calculateWHT(baseAmount: number, rate: number): {
   whtAmount: number
   netPayable: number
 } {
-  const whtAmount = Math.round(grossAmount * rate * 100) / 100
-  const netPayable = Math.round((grossAmount - whtAmount) * 100) / 100
+  const whtAmount = Math.round(baseAmount * rate * 100) / 100
+  const netPayable = Math.round((baseAmount - whtAmount) * 100) / 100
   return { whtAmount, netPayable }
 }
 

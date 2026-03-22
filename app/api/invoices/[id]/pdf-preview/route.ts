@@ -99,16 +99,28 @@ export async function GET(
     const storedTaxResult = invoice.tax_lines ? jsonbToTaxResult(invoice.tax_lines) : null
     const taxLines = storedTaxResult?.taxLines || []
 
+    const invoiceTotal     = Number(invoice.total || 0)
+    const whtApplicable    = Boolean(invoice.wht_receivable_applicable)
+    const whtRate          = Number(invoice.wht_receivable_rate  || 0)
+    const whtAmount        = Number(invoice.wht_receivable_amount || 0)
+
     const documentTotals: DocumentTotals = {
       subtotal: Number(invoice.subtotal || 0),
       total_tax: Number(invoice.total_tax || 0),
-      total: Number(invoice.total || 0),
+      total: invoiceTotal,
       tax_lines: taxLines,
       // Legacy fields kept for backward compatibility but not used for rendering
       nhil_amount: Number(invoice.nhil || 0),
       getfund_amount: Number(invoice.getfund || 0),
       covid_amount: Number(invoice.covid || 0),
       vat_amount: Number(invoice.vat || 0),
+      // WHT deduction — shown when customer withholds tax at source
+      ...(whtApplicable && whtAmount > 0 ? {
+        wht_applicable: true,
+        wht_rate:       whtRate,
+        wht_amount:     whtAmount,
+        net_payable:    Math.round((invoiceTotal - whtAmount) * 100) / 100,
+      } : {}),
     }
 
     const documentMeta: DocumentMeta = {

@@ -44,6 +44,8 @@ export async function POST(request: NextRequest) {
       items,
       currency_symbol,
       currency_code,
+      wht_applicable,
+      wht_rate,
     } = body
 
     const supabase = await createSupabaseServerClient()
@@ -163,10 +165,21 @@ export async function POST(request: NextRequest) {
       }
     })
 
+    // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total
+    const whtAmount = (wht_applicable && wht_rate && subtotal > 0)
+      ? Math.round(subtotal * Number(wht_rate) * 100) / 100
+      : 0
+
     const documentTotals: DocumentTotals = {
       subtotal,
       total_tax: totalTax,
       total,
+      ...(wht_applicable && whtAmount > 0 ? {
+        wht_applicable: true,
+        wht_rate:       Number(wht_rate),
+        wht_amount:     whtAmount,
+        net_payable:    Math.round((total - whtAmount) * 100) / 100,
+      } : {}),
     }
 
     const documentMeta: DocumentMeta = {

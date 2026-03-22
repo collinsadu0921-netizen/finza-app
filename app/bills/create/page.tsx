@@ -238,7 +238,7 @@ export default function CreateBillPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           business_id: businessId,
-          receipt_path: uploaded.publicUrl,
+          receipt_path: uploaded.storagePath,
           document_type: "supplier_bill",
         }),
       })
@@ -376,10 +376,18 @@ export default function CreateBillPage() {
     ? { ...importTaxResult, grandTotal: importGrandTotal }
     : taxResult
 
-  // WHT: calculated on the grand total (gross, VAT-inclusive)
+  // WHT: applied on pre-tax base — not on VAT/NHIL/GETFund (GRA: you don't withhold tax on tax).
+  // For import bills the base is CIF + import duties + levies (vatBase), before VAT.
+  // For standard bills the base is grandTotal minus the tax component.
+  const whtBase = isImportBill
+    ? vatBase
+    : (activeTaxResult.grandTotal - (activeTaxResult.totalTax ?? 0))
   const selectedWHTRate = GH_WHT_RATES.find(r => r.code === whtRateCode) ?? GH_WHT_RATES[0]
   const whtCalc = applyWHT
-    ? calculateWHT(activeTaxResult.grandTotal, selectedWHTRate.rate)
+    ? (() => {
+        const { whtAmount } = calculateWHT(whtBase, selectedWHTRate.rate)
+        return { whtAmount, netPayable: Math.round((activeTaxResult.grandTotal - whtAmount) * 100) / 100 }
+      })()
     : { whtAmount: 0, netPayable: activeTaxResult.grandTotal }
 
   const handleSubmit = async (e: React.FormEvent) => {

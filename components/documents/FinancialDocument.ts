@@ -74,6 +74,11 @@ export interface DocumentTotals {
   vat_amount?: number
   // Generic tax lines (source of truth)
   tax_lines?: TaxLine[]
+  // WHT deduction — shown on invoice when customer will withhold tax at source
+  wht_applicable?: boolean
+  wht_rate?: number      // decimal e.g. 0.05 for 5%
+  wht_amount?: number    // amount to be withheld (applied on pre-tax base, not on VAT)
+  net_payable?: number   // total - wht_amount (what client actually pays)
 }
 
 export interface FinancialDocumentProps {
@@ -529,6 +534,16 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           <span>Total</span>
           <span>${currency_symbol} ${total.toFixed(2)}</span>
         </div>
+        ${totals.wht_applicable && totals.wht_amount ? `
+        <div class="total-row" style="color:#92400e;margin-top:4px">
+          <span>Less WHT (${((totals.wht_rate ?? 0) * 100).toFixed(0)}% withheld by customer)</span>
+          <span>(${currency_symbol} ${totals.wht_amount.toFixed(2)})</span>
+        </div>
+        <div class="total-row final" style="border-top:2px solid #1e40af;margin-top:4px;color:#1e40af">
+          <span>Net Payable to Us</span>
+          <span>${currency_symbol} ${(totals.net_payable ?? (total - totals.wht_amount)).toFixed(2)}</span>
+        </div>
+        ` : ""}
         ${isFxDocument ? `
         <div class="total-row" style="margin-top:8px;padding-top:8px;border-top:1px dashed #e2e8f0;font-size:11px;color:#64748b">
           <span>Exchange Rate</span>
