@@ -248,28 +248,7 @@ export async function POST(
         (invoice.businesses as { legal_name?: string } | null)?.legal_name ||
         "Our Business"
 
-      const template = await getBusinessWhatsAppTemplate(supabase, invoice.business_id, "invoice")
-      const message = renderWhatsAppTemplate(template, {
-        customer_name: customer?.name || "Valued Customer",
-        invoice_number: invoice.invoice_number ? `#${invoice.invoice_number}` : "",
-        total: Number(invoice.total).toFixed(2),
-        currency: currencySymbol,
-        due_date: invoice.payment_terms || "Due on receipt",
-        public_url: publicInvoiceUrl,
-        pay_url: payUrl,
-        business_name: businessName,
-      })
-
-      const linkResult = buildWhatsAppLink(phone, message)
-      if (!linkResult.ok) {
-        return NextResponse.json(
-          { success: false, error: linkResult.error, message: linkResult.error },
-          { status: 400 }
-        )
-      }
-      const { whatsappUrl, digits } = linkResult
-      const e164Phone = `+${digits}`
-
+      // Run the send transition FIRST so the invoice number is assigned before we build the message
       const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
       if (bootstrapErr) {
         return NextResponse.json(
@@ -305,6 +284,30 @@ export async function POST(
         )
       }
 
+      // Build message AFTER transition so the assigned invoice number is used
+      const invoiceNumberForMsg = updatedInvoice.invoice_number ?? invoice.invoice_number
+      const template = await getBusinessWhatsAppTemplate(supabase, invoice.business_id, "invoice")
+      const message = renderWhatsAppTemplate(template, {
+        customer_name: (customer as any)?.name || "Valued Customer",
+        invoice_number: invoiceNumberForMsg ? `#${invoiceNumberForMsg}` : "",
+        total: Number(invoice.total).toFixed(2),
+        currency: currencySymbol,
+        due_date: invoice.payment_terms || "Due on receipt",
+        public_url: publicInvoiceUrl,
+        pay_url: payUrl,
+        business_name: businessName,
+      })
+
+      const linkResult = buildWhatsAppLink(phone, message)
+      if (!linkResult.ok) {
+        return NextResponse.json(
+          { success: false, error: linkResult.error, message: linkResult.error },
+          { status: 400 }
+        )
+      }
+      const { whatsappUrl, digits } = linkResult
+      const e164Phone = `+${digits}`
+
       try {
         await createAuditLog({
           businessId: invoice.business_id || "00000000-0000-0000-0000-000000000000",
@@ -313,7 +316,7 @@ export async function POST(
           entityType: "invoice",
           entityId: invoiceId,
           newValues: {
-            invoice_number: updatedInvoice.invoice_number ?? invoice.invoice_number,
+            invoice_number: invoiceNumberForMsg,
             recipient_phone: e164Phone,
           },
           ipAddress: getIpAddress(request),
@@ -330,7 +333,7 @@ export async function POST(
         await sendWhatsAppMessage({
           to: e164Phone,
           body: message,
-          reference: `inv-${invoiceId}-${updatedInvoice.invoice_number ?? ""}`,
+          reference: `inv-${invoiceId}-${invoiceNumberForMsg ?? ""}`,
           businessId: invoice.business_id,
           entityType: "invoice",
           entityId: invoiceId,

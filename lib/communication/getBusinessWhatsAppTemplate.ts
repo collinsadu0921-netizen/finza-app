@@ -13,44 +13,46 @@ export const TEMPLATE_VARIABLES: Record<WhatsAppTemplateType, string[]> = {
   order: ["customer_name", "order_number", "total", "currency", "public_url", "business_name"],
 }
 
-const DEFAULT_INVOICE_TEMPLATE = `Hello {{customer_name}},
+const DEFAULT_INVOICE_TEMPLATE = `Hi {{customer_name}} 👋,
 
-Your invoice {{invoice_number}} for {{currency}}{{total}} is ready.
+You have a new invoice from *{{business_name}}*:
 
-View invoice: {{public_url}}
+🧾 Invoice {{invoice_number}}
+💰 Amount Due: {{currency}}{{total}}
+📅 Payment Terms: {{due_date}}
 
-💳 Pay Now: {{pay_url}}
+View your invoice here:
+{{public_url}}
 
-Payment Terms: {{due_date}}
+💳 Pay online:
+{{pay_url}}
 
-Thank you for your business!`
+Thank you for your business! Please reach out if you have any questions.`
 
-const DEFAULT_ESTIMATE_TEMPLATE = `Hello {{customer_name}},
+const DEFAULT_ESTIMATE_TEMPLATE = `Hi {{customer_name}} 👋,
 
-We're pleased to share your estimate from {{business_name}}:
+Here is your estimate from *{{business_name}}*:
 
-📋 Estimate #{{estimate_number}}
+📋 Estimate {{estimate_number}}
 💰 Total Amount: {{currency}}{{total}}
 📅 Valid Until: {{valid_until}}
 
-View full estimate: {{public_url}}
+View your estimate here:
+{{public_url}}
 
-Please review and let us know if you have any questions.
+Please review and let us know if you'd like to proceed or have any questions. We're happy to help!`
 
-Thank you!`
+const DEFAULT_ORDER_TEMPLATE = `Hi {{customer_name}} 👋,
 
-const DEFAULT_ORDER_TEMPLATE = `Hello {{customer_name}},
+Thank you for your order with *{{business_name}}*!
 
-We're pleased to confirm your order from {{business_name}}:
-
-📋 Order #{{order_number}}
+📦 Order {{order_number}}
 💰 Total Amount: {{currency}}{{total}}
 
-View full order: {{public_url}}
+View your order details here:
+{{public_url}}
 
-This is a confirmation of your order. An invoice will be sent separately upon completion.
-
-Thank you for your business!`
+We'll send your invoice once everything is ready. Thank you for choosing us!`
 
 const DEFAULTS: Record<WhatsAppTemplateType, string> = {
   invoice: DEFAULT_INVOICE_TEMPLATE,
