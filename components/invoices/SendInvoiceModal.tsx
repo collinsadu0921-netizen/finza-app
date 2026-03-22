@@ -33,6 +33,8 @@ export default function SendInvoiceModal({
   const [sendMethod, setSendMethod] = useState<SendMethod>(defaultMethod)
   const [whatsappConnected, setWhatsappConnected] = useState(false)
   const [checkingWhatsApp, setCheckingWhatsApp] = useState(true)
+  /** When pop-ups are blocked, we keep the modal open with a real &lt;a href&gt; to wa.me (user click always works). */
+  const [waOpenLinkUrl, setWaOpenLinkUrl] = useState<string | null>(null)
 
   useEffect(() => {
     // Check WhatsApp connection status
@@ -55,6 +57,10 @@ export default function SendInvoiceModal({
     checkWhatsAppStatus()
   }, [])
 
+  useEffect(() => {
+    setWaOpenLinkUrl(null)
+  }, [sendMethod])
+
   const publicInvoiceUrl = invoice.public_token
     ? `${window.location.origin}/invoice-public/${invoice.public_token}`
     : ""
@@ -73,7 +79,6 @@ export default function SendInvoiceModal({
     }
 
     try {
-      setLoading(true)
       setError("")
 
       const customer = invoice.customers
@@ -121,22 +126,42 @@ export default function SendInvoiceModal({
       const data = await response.json()
 
       if (data.whatsappUrl && /^https:\/\/wa\.me\//i.test(String(data.whatsappUrl))) {
+        const url = String(data.whatsappUrl)
+        let opened = false
+        let navigatedPrep = false
         if (waPrepWindow && !waPrepWindow.closed) {
-          waPrepWindow.location.href = data.whatsappUrl
-        } else {
-          const opened = window.open(data.whatsappUrl, "_blank", "noopener,noreferrer")
-          if (!opened) {
-            throw new Error(
-              "Pop-up was blocked. Allow pop-ups for this site to open WhatsApp, or copy the public link below."
-            )
+          try {
+            waPrepWindow.location.href = url
+            opened = true
+            navigatedPrep = true
+          } catch {
+            opened = false
           }
+        }
+        // No noopener — Chromium often returns null from window.open(..., "noopener") even when a tab opens.
+        if (!opened) {
+          const w = window.open(url, "_blank")
+          opened = !!w
+        }
+        if (opened) {
+          // If we still have a blank prep tab because we used a second window for wa.me, close it.
+          if (waPrepWindow && !waPrepWindow.closed && !navigatedPrep) {
+            try {
+              waPrepWindow.close()
+            } catch {
+              /* ignore */
+            }
+          }
+          onSuccess()
+        } else {
+          closePrep()
+          setError("")
+          setWaOpenLinkUrl(url)
         }
       } else {
         closePrep()
         throw new Error("No WhatsApp link returned from server. Try again or use Copy link.")
       }
-
-      onSuccess()
     } catch (err: any) {
       const friendlyError = err.message || "We couldn't send the invoice. Please check the customer's phone number and try again."
       setError(friendlyError)
@@ -144,7 +169,8 @@ export default function SendInvoiceModal({
     }
   }
 
-  const handleSendEmail = async () => {
+  /** @param skipOnSuccess - when sending Email+WhatsApp, defer onSuccess until WhatsApp step finishes */
+  const handleSendEmail = async (skipOnSuccess = false) => {
     if (!email) {
       setError("Please enter an email address")
       return
@@ -180,10 +206,11 @@ export default function SendInvoiceModal({
         throw new Error(friendlyError + (detail ? detail : ""))
       }
 
-      onSuccess()
+      if (!skipOnSuccess) onSuccess()
     } catch (err: any) {
       setError(err.message || "We couldn't send the email. Please check the email address and try again.")
       setLoading(false)
+      throw err
     }
   }
 
@@ -236,8 +263,9 @@ export default function SendInvoiceModal({
         return
       }
 
-      const openWaPrepTab = (): Window | null =>
-        window.open("about:blank", "_blank", "noopener,noreferrer")
+      // No "noopener" — we need a real Window to assign .location.href after the API returns.
+      // (Chromium returns null from window.open when noopener is set.)
+      const openWaPrepTab = (): Window | null => window.open("about:blank", "_blank")
 
       switch (sendMethod) {
         case "whatsapp": {
@@ -253,12 +281,6 @@ export default function SendInvoiceModal({
             return
           }
           const waPrep = openWaPrepTab()
-          if (!waPrep) {
-            setError(
-              "Pop-up blocked. Allow pop-ups for this site to open WhatsApp, or use Link only and share the invoice manually."
-            )
-            return
-          }
           await handleSendWhatsApp(waPrep)
           break
         }
@@ -279,15 +301,10 @@ export default function SendInvoiceModal({
             const phone = customer?.whatsapp_phone || customer?.phone
             const phoneOk = phone ? normalizePhoneForWaMe(phone).ok : false
             const waPrep = phoneOk ? openWaPrepTab() : null
-            if (phoneOk && !waPrep) {
-              setError(
-                "Pop-up blocked. Allow pop-ups to open WhatsApp after email, or choose Email only and share the link manually."
-              )
-              return
-            }
-            await handleSendEmail()
+            await handleSendEmail(true)
             await new Promise((resolve) => setTimeout(resolve, 500))
             if (phoneOk) await handleSendWhatsApp(waPrep)
+            else onSuccess()
           }
           break
         default: {
@@ -303,12 +320,6 @@ export default function SendInvoiceModal({
             return
           }
           const waPrep = openWaPrepTab()
-          if (!waPrep) {
-            setError(
-              "Pop-up blocked. Allow pop-ups for this site to open WhatsApp, or use Link only and share the invoice manually."
-            )
-            return
-          }
           await handleSendWhatsApp(waPrep)
           break
         }
@@ -341,6 +352,32 @@ export default function SendInvoiceModal({
           </div>
         )}
 
+        {waOpenLinkUrl && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 space-y-3">
+            <p className="text-sm font-semibold text-emerald-900">
+              Invoice updated. Your browser blocked an automatic window — use the button below (opens WhatsApp in a new tab).
+            </p>
+            <a
+              href={waOpenLinkUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-full justify-center items-center gap-2 bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold py-3 px-4 rounded-lg shadow-sm transition-colors"
+            >
+              Open WhatsApp
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setWaOpenLinkUrl(null)
+                onSuccess()
+              }}
+              className="w-full text-sm text-emerald-800 font-medium py-2 rounded-lg hover:bg-emerald-100/80"
+            >
+              Done — I opened WhatsApp or will send later
+            </button>
+          </div>
+        )}
+
         <div className="space-y-4">
           {/* Send Method Dropdown + Send Button */}
           <div className="flex items-center gap-2">
@@ -353,6 +390,7 @@ export default function SendInvoiceModal({
             <button
               onClick={handleSendInvoice}
               disabled={
+                !!waOpenLinkUrl ||
                 loading ||
                 (sendMethod !== "link" && sendMethod !== "whatsapp" && !email)
               }
