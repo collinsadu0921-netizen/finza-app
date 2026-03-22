@@ -24,7 +24,7 @@ export default function CreateExpensePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
-  
+
   const [supplier, setSupplier] = useState("")
   const [categoryId, setCategoryId] = useState("")
   const [amount, setAmount] = useState("")
@@ -38,7 +38,7 @@ export default function CreateExpensePage() {
   const [ocrError, setOcrError] = useState("")
   const [ocrSuggestedFields, setOcrSuggestedFields] = useState<{ supplier?: boolean; date?: boolean; amount?: boolean }>({})
   const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null)
-  
+
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
@@ -121,7 +121,7 @@ export default function CreateExpensePage() {
       }
 
       const { category } = await response.json()
-      
+
       // Refresh categories list
       const { data: categoriesData } = await supabase
         .from("expense_categories")
@@ -131,10 +131,10 @@ export default function CreateExpensePage() {
         .order("name", { ascending: true })
 
       setCategories(categoriesData || [])
-      
+
       // Auto-select the newly created category
       setCategoryId(category.id)
-      
+
       // Close modal and reset form
       setShowCategoryModal(false)
       setNewCategoryName("")
@@ -301,7 +301,7 @@ export default function CreateExpensePage() {
       // Calculate taxes if applicable
       // The amount field represents the TOTAL including taxes
       const totalIncludingTaxes = Number(amount)
-      
+
       let baseAmount = totalIncludingTaxes
       let taxBreakdown = {
         nhil: 0,
@@ -371,7 +371,7 @@ export default function CreateExpensePage() {
   // Calculate tax breakdown for display
   // The amount field represents the TOTAL including taxes
   const totalIncludingTaxes = Number(amount) || 0
-  
+
   let baseAmount = totalIncludingTaxes
   let taxBreakdown = {
     nhil: 0,
@@ -398,39 +398,39 @@ export default function CreateExpensePage() {
 
   return (
     <Wrapper>
-      <div className="bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="min-h-screen bg-slate-50">
         <div className="max-w-3xl mx-auto p-6">
           <div className="mb-6">
             <button
               onClick={() => router.back()}
-              className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4 flex items-center gap-2 transition-colors"
+              className="text-slate-500 hover:text-slate-800 flex items-center gap-2 transition-colors mb-4"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
               Back to Expenses
             </button>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+            <h1 className="text-xl font-bold text-slate-900 mb-1">
               Create Expense
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Record a new business expense</p>
+            <p className="text-sm text-slate-500">Record a new business expense</p>
           </div>
 
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-4">
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4 text-sm">
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="flex flex-col" style={{ minHeight: 'calc(100vh - 200px)' }}>
             <div className="overflow-y-auto pr-2 space-y-6 flex-1" style={{ maxHeight: 'calc(100vh - 240px)' }}>
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700 space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Supplier *
                     {ocrSuggestedFields.supplier && (
-                      <span className="ml-2 text-xs font-normal italic text-blue-600 dark:text-blue-400" title="Suggested by receipt OCR">
+                      <span className="text-xs font-medium text-emerald-600 ml-2" title="Suggested by receipt OCR">
                         From receipt
                       </span>
                     )}
@@ -443,20 +443,20 @@ export default function CreateExpensePage() {
                       setOcrSuggestedFields((prev) => ({ ...prev, supplier: false }))
                     }}
                     required
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                     placeholder="Supplier name"
                   />
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    <label className="block text-sm font-semibold text-slate-700">
                       Category
                     </label>
                     <button
                       type="button"
                       onClick={() => setShowCategoryModal(true)}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                      className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -467,7 +467,7 @@ export default function CreateExpensePage() {
                   <select
                     value={categoryId}
                     onChange={(e) => setCategoryId(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                   >
                     <option value="">Select category</option>
                     {categories.map((cat) => (
@@ -479,10 +479,10 @@ export default function CreateExpensePage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Amount {applyTaxes ? "(including taxes)" : ""} *
                     {ocrSuggestedFields.amount && (
-                      <span className="ml-2 text-xs font-normal italic text-blue-600 dark:text-blue-400" title="Suggested by receipt OCR">
+                      <span className="text-xs font-medium text-emerald-600 ml-2" title="Suggested by receipt OCR">
                         From receipt
                       </span>
                     )}
@@ -497,21 +497,21 @@ export default function CreateExpensePage() {
                     }}
                     onFocus={(e) => e.target.select()}
                     required
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                     placeholder="0.00"
                   />
                   {applyTaxes && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       Enter the total amount including all taxes
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Date *
                     {ocrSuggestedFields.date && (
-                      <span className="ml-2 text-xs font-normal italic text-blue-600 dark:text-blue-400" title="Suggested by receipt OCR">
+                      <span className="text-xs font-medium text-emerald-600 ml-2" title="Suggested by receipt OCR">
                         From receipt
                       </span>
                     )}
@@ -524,33 +524,33 @@ export default function CreateExpensePage() {
                       setOcrSuggestedFields((prev) => ({ ...prev, date: false }))
                     }}
                     required
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Notes
                 </label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   rows={3}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                   placeholder="Additional notes about this expense..."
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Receipt (Image/PDF)
                 </label>
                 <input
                   type="file"
                   accept="image/*,.pdf"
                   onChange={handleFileChange}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                 />
                 {receiptPreview && receiptFile?.type.startsWith("image/") && (
                   <div className="mt-3 flex flex-col gap-2">
@@ -558,7 +558,7 @@ export default function CreateExpensePage() {
                       type="button"
                       onClick={handleExtractFromReceipt}
                       disabled={ocrLoading}
-                      className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 disabled:opacity-50 text-sm font-medium"
+                      className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 text-sm font-medium"
                     >
                       {ocrLoading ? (
                         <>
@@ -577,30 +577,30 @@ export default function CreateExpensePage() {
                         </>
                       )}
                     </button>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <p className="text-xs text-slate-500">
                       Pre-fills supplier, date, and amount. You must still click &quot;Create Expense&quot; to save.
                     </p>
                   </div>
                 )}
                 {ocrError && (
-                  <p className="mt-2 text-sm text-amber-600 dark:text-amber-400" role="alert">
+                  <p className="mt-2 text-sm text-amber-600" role="alert">
                     {ocrError}
                   </p>
                 )}
                 {receiptPreview && (
                   <div className="mt-4">
-                    <img src={receiptPreview} alt="Receipt preview" className="max-w-xs rounded-lg border border-gray-300 dark:border-gray-600" />
+                    <img src={receiptPreview} alt="Receipt preview" className="max-w-xs rounded-xl border border-slate-200" />
                   </div>
                 )}
               </div>
 
-              <div className="pt-4 border-t border-gray-200">
+              <div className="border-t border-slate-100 pt-4">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <label className="text-sm font-medium text-gray-900">
+                    <label className="text-sm font-medium text-slate-800">
                       Apply Ghana Taxes
                     </label>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       Include NHIL, GETFund, and VAT
                     </p>
                   </div>
@@ -612,7 +612,7 @@ export default function CreateExpensePage() {
                     className={`
                       relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
                       transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-                      ${applyTaxes ? 'bg-blue-600' : 'bg-gray-200'}
+                      ${applyTaxes ? 'bg-slate-800' : 'bg-slate-200'}
                     `}
                   >
                     <span
@@ -627,13 +627,13 @@ export default function CreateExpensePage() {
               </div>
 
               {/* FX Currency Section */}
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="border-t border-slate-100">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <label className="text-sm font-medium text-slate-800">
                       Paid in foreign currency?
                     </label>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                       Expense was paid in USD, EUR, GBP, etc. — booked in {currencyCode || "home currency"}
                     </p>
                   </div>
@@ -642,19 +642,19 @@ export default function CreateExpensePage() {
                     role="switch"
                     aria-checked={fxEnabled}
                     onClick={() => setFxEnabled(!fxEnabled)}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${fxEnabled ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-600"}`}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${fxEnabled ? "bg-slate-800" : "bg-slate-200"}`}
                   >
                     <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fxEnabled ? "translate-x-5" : "translate-x-0"}`} />
                   </button>
                 </div>
                 {fxEnabled && (
-                  <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700">
+                  <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Expense Currency</label>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Expense Currency</label>
                       <select
                         value={fxCurrencyCode}
                         onChange={(e) => setFxCurrencyCode(e.target.value)}
-                        className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full border border-slate-200 text-sm rounded-md p-2 focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
                       >
                         <option value="USD">USD — US Dollar</option>
                         <option value="EUR">EUR — Euro</option>
@@ -667,7 +667,7 @@ export default function CreateExpensePage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
                         Rate: 1 {fxCurrencyCode} = ? {currencyCode || "home"}
                       </label>
                       <input
@@ -677,11 +677,11 @@ export default function CreateExpensePage() {
                         value={fxRate}
                         onChange={(e) => setFxRate(e.target.value)}
                         placeholder="e.g. 14.50"
-                        className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="w-full border border-slate-200 text-sm rounded-md p-2 focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
                       />
                     </div>
                     {fxRate && !isNaN(parseFloat(fxRate)) && parseFloat(fxRate) > 0 && (
-                      <p className="col-span-2 text-xs text-blue-700 dark:text-blue-300">
+                      <p className="col-span-2 text-xs text-slate-600">
                         Amount entered in {fxCurrencyCode}. Booked in {currencyCode} at rate {parseFloat(fxRate).toFixed(4)}.
                       </p>
                     )}
@@ -692,58 +692,58 @@ export default function CreateExpensePage() {
 
             {/* Tax Breakdown */}
             {applyTaxes && totalIncludingTaxes > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Tax Breakdown</h3>
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Tax Breakdown</h3>
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">Subtotal (before tax):</span>
-                    <span className="font-semibold text-gray-900 dark:text-white">₵{baseAmount.toFixed(2)}</span>
+                    <span className="text-slate-500">Subtotal (before tax):</span>
+                    <span className="font-semibold text-slate-800">₵{baseAmount.toFixed(2)}</span>
                   </div>
-                  <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">NHIL (2.5%):</span>
-                      <span className="text-gray-700 dark:text-gray-300">₵{taxBreakdown.nhil.toFixed(2)}</span>
+                      <span className="text-slate-500">NHIL (2.5%):</span>
+                      <span className="text-slate-600">₵{taxBreakdown.nhil.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">GETFund (2.5%):</span>
-                      <span className="text-gray-700 dark:text-gray-300">₵{taxBreakdown.getfund.toFixed(2)}</span>
+                      <span className="text-slate-500">GETFund (2.5%):</span>
+                      <span className="text-slate-600">₵{taxBreakdown.getfund.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">VAT (15%):</span>
-                      <span className="text-gray-700 dark:text-gray-300">₵{taxBreakdown.vat.toFixed(2)}</span>
+                      <span className="text-slate-500">VAT (15%):</span>
+                      <span className="text-slate-600">₵{taxBreakdown.vat.toFixed(2)}</span>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pt-3 border-t-2 border-gray-300 dark:border-gray-600">
-                    <span className="text-gray-900 dark:text-white font-bold text-lg">Total:</span>
-                    <span className="font-bold text-blue-600 dark:text-blue-400 text-xl">₵{total.toFixed(2)}</span>
+                  <div className="flex justify-between items-center pt-3 border-t-2 border-slate-800">
+                    <span className="text-slate-800 font-bold text-lg">Total:</span>
+                    <span className="font-bold text-slate-900 text-xl">₵{total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
             )}
 
             {!applyTaxes && totalIncludingTaxes > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-900 dark:text-white font-bold text-lg">Total:</span>
-                  <span className="font-bold text-blue-600 dark:text-blue-400 text-xl">₵{totalIncludingTaxes.toFixed(2)}</span>
+                  <span className="text-slate-800 font-bold text-lg">Total:</span>
+                  <span className="font-bold text-slate-900 text-xl">₵{totalIncludingTaxes.toFixed(2)}</span>
                 </div>
               </div>
             )}
             </div>
 
             {/* Sticky Action Bar */}
-            <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 flex gap-4 z-20 mt-4 shadow-lg">
+            <div className="sticky bottom-0 bg-slate-50 border-t border-slate-100 p-4 flex gap-4 z-20 mt-4">
               <button
                 type="button"
                 onClick={() => router.back()}
-                className="flex-1 bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 font-medium transition-all"
+                className="flex-1 border border-slate-200 text-slate-700 px-6 py-3 rounded-lg hover:bg-slate-50 font-medium transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 font-medium shadow-lg transition-all flex items-center justify-center gap-2"
+                className="flex-1 bg-slate-800 text-white px-6 py-3 rounded-lg hover:bg-slate-700 disabled:opacity-50 font-semibold transition-colors flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
@@ -762,13 +762,13 @@ export default function CreateExpensePage() {
 
           {/* Add Category Modal */}
           {showCategoryModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Add New Category</h2>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-6">
+                <h2 className="text-xl font-bold text-slate-900 mb-4">Add New Category</h2>
                 <form onSubmit={handleCreateCategory}>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
                         Category Name *
                       </label>
                       <input
@@ -776,19 +776,19 @@ export default function CreateExpensePage() {
                         value={newCategoryName}
                         onChange={(e) => setNewCategoryName(e.target.value)}
                         required
-                        className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                         placeholder="e.g., Fuel, Materials, Office Supplies"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
                         Description (optional)
                       </label>
                       <textarea
                         value={newCategoryDescription}
                         onChange={(e) => setNewCategoryDescription(e.target.value)}
                         rows={3}
-                        className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                         placeholder="Optional description..."
                       />
                     </div>
@@ -801,14 +801,14 @@ export default function CreateExpensePage() {
                         setNewCategoryName("")
                         setNewCategoryDescription("")
                       }}
-                      className="flex-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                      className="flex-1 border border-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
                       disabled={creatingCategory || !newCategoryName.trim()}
-                      className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      className="flex-1 bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
                     >
                       {creatingCategory ? "Creating..." : "Create Category"}
                     </button>
