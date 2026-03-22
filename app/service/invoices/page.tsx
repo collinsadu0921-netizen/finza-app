@@ -5,9 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
-import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate } from "@/lib/exportUtils"
+import { exportToCSV, exportToExcel, ExportColumn, formatDate } from "@/lib/exportUtils"
 import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 
 type Invoice = {
   id: string
@@ -17,10 +18,26 @@ type Invoice = {
   subtotal?: number
   vat?: number
   total: number
+  /** Issued invoice currency (FX invoices differ from business home currency). */
+  currency_code?: string | null
+  currency_symbol?: string | null
   status: "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled"
   issue_date: string | null
   due_date: string | null
   created_at: string
+}
+
+/** Format a list-row total using the currency stored on the invoice (same as invoice view). */
+function formatInvoiceListAmount(
+  amount: number,
+  inv: Pick<Invoice, "currency_code" | "currency_symbol">,
+  businessCurrencyCode: string | null
+): string {
+  const code = inv.currency_code?.trim() || null
+  if (code) return formatMoney(amount, code)
+  const sym = inv.currency_symbol?.trim()
+  if (sym) return formatMoneyWithSymbol(amount, sym)
+  return formatMoney(amount, businessCurrencyCode)
 }
 
 const STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string }> = {
@@ -51,7 +68,7 @@ function InvoicesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const toast = useToast()
-  const { format } = useBusinessCurrency()
+  const { format, currencyCode: businessCurrencyCode } = useBusinessCurrency()
 
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
@@ -175,12 +192,43 @@ function InvoicesPageContent() {
       { header: "Date", accessor: i => formatDate(i.issue_date), width: 15 },
       { header: "Due Date", accessor: i => formatDate(i.due_date), width: 15 },
       { header: "Customer", accessor: i => i.customers?.name || "", width: 30 },
+      { header: "Currency", accessor: i => i.currency_code?.trim() || businessCurrencyCode || "", width: 10 },
       { header: "Status", accessor: i => i.status.replace(/_/g, " "), width: 15 },
-      { header: "Subtotal", accessor: i => i.subtotal, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "VAT", accessor: i => i.vat, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "Total", accessor: i => i.total, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "Paid", accessor: i => i.amountPaid, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "Outstanding", accessor: i => i.outstanding, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
+      {
+        header: "Subtotal",
+        accessor: i => i.subtotal,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
+      {
+        header: "VAT",
+        accessor: i => i.vat,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 14,
+      },
+      {
+        header: "Total",
+        accessor: i => i.total,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
+      {
+        header: "Paid",
+        accessor: i => i.amountPaid,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
+      {
+        header: "Outstanding",
+        accessor: i => i.outstanding,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
     ]
     exportToCSV(rows, cols, "invoices")
     toast.showToast("Exported to CSV", "success")
@@ -198,12 +246,43 @@ function InvoicesPageContent() {
       { header: "Date", accessor: i => i.issue_date || "", formatter: v => v ? formatDate(v) : "", excelType: "date", width: 15 },
       { header: "Due Date", accessor: i => i.due_date || "", formatter: v => v ? formatDate(v) : "", excelType: "date", width: 15 },
       { header: "Customer", accessor: i => i.customers?.name || "", width: 30 },
+      { header: "Currency", accessor: i => i.currency_code?.trim() || businessCurrencyCode || "", width: 10 },
       { header: "Status", accessor: i => i.status.replace(/_/g, " "), width: 15 },
-      { header: "Subtotal", accessor: i => i.subtotal, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "VAT", accessor: i => i.vat, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "Total", accessor: i => i.total, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "Paid", accessor: i => i.amountPaid, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
-      { header: "Outstanding", accessor: i => i.outstanding, formatter: formatCurrencyRaw, excelType: "number", width: 15 },
+      {
+        header: "Subtotal",
+        accessor: i => i.subtotal,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
+      {
+        header: "VAT",
+        accessor: i => i.vat,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 14,
+      },
+      {
+        header: "Total",
+        accessor: i => i.total,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
+      {
+        header: "Paid",
+        accessor: i => i.amountPaid,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
+      {
+        header: "Outstanding",
+        accessor: i => i.outstanding,
+        formatter: (v, i) => formatInvoiceListAmount(Number(v), i, businessCurrencyCode),
+        excelType: "string",
+        width: 16,
+      },
     ]
     await exportToExcel(rows, cols, "invoices")
     toast.showToast("Exported to Excel", "success")
@@ -398,7 +477,9 @@ function InvoicesPageContent() {
                           <span className="text-sm text-slate-700">{invoice.customers?.name || <span className="text-slate-400 italic">No customer</span>}</span>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          <span className="text-sm font-semibold text-slate-900 tabular-nums">{format(Number(invoice.total || 0))}</span>
+                          <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                            {formatInvoiceListAmount(Number(invoice.total || 0), invoice, businessCurrencyCode)}
+                          </span>
                         </td>
                         <td className="px-5 py-4">
                           <StatusBadge status={invoice.status} />
