@@ -108,7 +108,7 @@ export async function POST(
     // Business currency
     const { data: bizProfile } = await supabase
       .from("businesses")
-      .select("legal_name, trading_name, default_currency")
+      .select("legal_name, trading_name, default_currency, email")
       .eq("id", business.id)
       .single()
 
@@ -233,6 +233,8 @@ export async function POST(
         to: toEmail,
         subject: `Your Payslip for ${payrollMonth} — ${businessName}`,
         html,
+        fromName: businessName,
+        replyTo: bizProfile?.email ?? undefined,
       })
 
       if (!result.success) {

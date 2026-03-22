@@ -390,10 +390,13 @@ export async function POST(
         customerName: customerName ?? undefined,
       })
       const docLabel = invoice.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice"
+      const businessEmail = (invoice.businesses as { email?: string } | null)?.email ?? undefined
       const result = await sendTransactionalEmail({
         to: toEmail,
         subject: `${docLabel} from ${businessName}`,
         html,
+        fromName: businessName,
+        replyTo: businessEmail,
       })
       if (!result.success) {
         return NextResponse.json(

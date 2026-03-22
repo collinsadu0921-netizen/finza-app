@@ -12,6 +12,8 @@ export interface SendTransactionalEmailParams {
   html: string
   text?: string
   replyTo?: string
+  /** Business display name — shown as "Business Name via Finza" in the From field */
+  fromName?: string
 }
 
 export type SendTransactionalEmailResult =
@@ -29,7 +31,14 @@ export async function sendTransactionalEmail(
     return { success: false, reason: "no_api_key" }
   }
 
-  const from = process.env.RESEND_FROM ?? "Finza <onboarding@resend.dev>"
+  // Extract just the email address from RESEND_FROM (e.g. "Finza <no-reply@finza.app>" → "no-reply@finza.app")
+  const resendFrom = process.env.RESEND_FROM ?? "Finza <onboarding@resend.dev>"
+  const emailMatch = resendFrom.match(/<([^>]+)>/)
+  const fromEmail = emailMatch ? emailMatch[1] : resendFrom
+  // Show "Business Name via Finza" so the client knows who sent it
+  const displayName = params.fromName ? `${params.fromName} via Finza` : "Finza"
+  const from = `${displayName} <${fromEmail}>`
+
   const body: Record<string, unknown> = {
     from,
     to: [params.to],
@@ -37,6 +46,7 @@ export async function sendTransactionalEmail(
     html: params.html,
   }
   if (params.text) body.text = params.text
+  // Allow replies to go to the business directly
   if (params.replyTo) body.reply_to = params.replyTo
 
   try {

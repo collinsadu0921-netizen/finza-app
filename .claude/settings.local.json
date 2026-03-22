@@ -118,7 +118,9 @@
       "Bash(grep -E \"\\\\.ts$|\\\\.js$|preview|draft\")",
       "Bash(grep -r \"wht_receivable\\\\|withholding\" /c/projects/finza-web/finza-web/app/api/invoices --include=*.ts)",
       "Bash(grep -E \"\\\\.\\(ts|tsx|js\\)$\")",
-      "Bash(npx jest:*)"
+      "Bash(npx jest:*)",
+      "Bash(find /c/projects/finza-web/finza-web -type f -name *template* -o -type f -name *welcome*)",
+      "Bash(find /c/projects/finza-web/finza-web -path */node_modules -prune -o -path */.next -prune -o -type f -path */lib/* -name *.ts -print)"
     ]
   }
 }

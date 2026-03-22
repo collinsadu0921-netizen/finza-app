@@ -1,6 +1,6 @@
 /**
  * Payslip email HTML template.
- * Clean, professional layout: header, earnings breakdown, deductions, net pay, view link.
+ * Professional layout: branded header, earnings breakdown, deductions, net pay, view link.
  */
 
 function escHtml(text: string): string {
@@ -9,7 +9,7 @@ function escHtml(text: string): string {
 }
 
 function fmt(amount: number, symbol: string): string {
-  return `${escHtml(symbol)}${Number(amount).toFixed(2)}`
+  return `${escHtml(symbol)}${Number(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export interface PayslipEmailParams {
@@ -36,118 +36,138 @@ export function buildPayslipEmailHtml(p: PayslipEmailParams): string {
   const bankRow =
     p.bankName || p.bankAccount
       ? `<tr>
-          <td style="padding:6px 0;color:#6b7280;font-size:13px;">Payment to</td>
-          <td style="padding:6px 0;color:#111827;font-size:13px;text-align:right;">
-            ${escHtml(p.bankName ?? "")}${p.bankAccount ? ` — ${escHtml(p.bankAccount)}` : ""}
+          <td style="padding:8px 0 0;font-size:13px;color:#6b7280;border-top:1px solid #e5e7eb;margin-top:8px;">Payment to</td>
+          <td style="padding:8px 0 0;font-size:13px;color:#374151;text-align:right;border-top:1px solid #e5e7eb;">
+            ${escHtml(p.bankName ?? "")}${p.bankAccount ? ` &mdash; ${escHtml(p.bankAccount)}` : ""}
           </td>
         </tr>`
       : ""
+
+  const totalDeductions = p.paye + p.ssnitEmployee + p.deductionsTotal
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>Payslip — ${escHtml(p.payrollMonth)}</title>
+  <title>Payslip &mdash; ${escHtml(p.payrollMonth)}</title>
 </head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:system-ui,-apple-system,sans-serif;">
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 16px;">
     <tr>
       <td align="center">
-        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:580px;">
 
-          <!-- Header -->
+          <!-- Branded header -->
           <tr>
-            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;">
-              <p style="margin:0;color:#bfdbfe;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;">Payslip</p>
-              <h1 style="margin:4px 0 0;color:#ffffff;font-size:22px;font-weight:700;">${escHtml(p.payrollMonth)}</h1>
-              <p style="margin:6px 0 0;color:#93c5fd;font-size:13px;">${escHtml(p.businessName)}</p>
+            <td style="background:linear-gradient(135deg,#0f2d5c 0%,#1d4ed8 100%);border-radius:12px 12px 0 0;padding:32px 36px 28px;">
+              <p style="margin:0 0 2px;font-size:11px;font-weight:700;color:#93c5fd;letter-spacing:.1em;text-transform:uppercase;">Payslip</p>
+              <h1 style="margin:0 0 4px;font-size:24px;font-weight:700;color:#ffffff;letter-spacing:-.3px;">${escHtml(p.payrollMonth)}</h1>
+              <p style="margin:0;font-size:13px;color:#bfdbfe;">${escHtml(p.businessName)}</p>
             </td>
           </tr>
 
-          <!-- Employee info -->
+          <!-- Main card -->
           <tr>
-            <td style="padding:24px 32px 0;">
-              <p style="margin:0;font-size:16px;font-weight:700;color:#111827;">${escHtml(p.staffName)}</p>
-              ${p.position ? `<p style="margin:2px 0 0;font-size:13px;color:#6b7280;">${escHtml(p.position)}</p>` : ""}
-            </td>
-          </tr>
+            <td style="background:#ffffff;padding:28px 36px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;">
 
-          <!-- Earnings -->
-          <tr>
-            <td style="padding:20px 32px 0;">
-              <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.08em;text-transform:uppercase;">Earnings</p>
-              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+              <!-- Employee info -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #f3f4f6;">
                 <tr>
-                  <td style="padding:7px 0;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">Basic Salary</td>
-                  <td style="padding:7px 0;font-size:13px;color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;">${fmt(p.basicSalary, sym)}</td>
+                  <td>
+                    <p style="margin:0;font-size:17px;font-weight:700;color:#111827;">${escHtml(p.staffName)}</p>
+                    ${p.position ? `<p style="margin:3px 0 0;font-size:13px;color:#6b7280;">${escHtml(p.position)}</p>` : ""}
+                  </td>
+                  <td style="text-align:right;">
+                    <p style="margin:0;font-size:11px;font-weight:600;color:#9ca3af;letter-spacing:.06em;text-transform:uppercase;">Pay period</p>
+                    <p style="margin:2px 0 0;font-size:13px;color:#374151;font-weight:500;">${escHtml(p.payrollMonth)}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Earnings -->
+              <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.08em;text-transform:uppercase;">Earnings</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:20px;">
+                <tr>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Basic Salary</td>
+                  <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(p.basicSalary, sym)}</td>
                 </tr>
                 ${p.allowancesTotal > 0 ? `
                 <tr>
-                  <td style="padding:7px 0;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">Allowances</td>
-                  <td style="padding:7px 0;font-size:13px;color:#111827;text-align:right;border-bottom:1px solid #f3f4f6;">${fmt(p.allowancesTotal, sym)}</td>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Allowances</td>
+                  <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(p.allowancesTotal, sym)}</td>
                 </tr>` : ""}
                 <tr>
-                  <td style="padding:9px 0;font-size:14px;font-weight:700;color:#111827;">Gross Pay</td>
-                  <td style="padding:9px 0;font-size:14px;font-weight:700;color:#111827;text-align:right;">${fmt(p.grossSalary, sym)}</td>
+                  <td style="padding:10px 0;font-size:14px;font-weight:700;color:#111827;">Gross Pay</td>
+                  <td style="padding:10px 0;font-size:14px;font-weight:700;color:#111827;text-align:right;">${fmt(p.grossSalary, sym)}</td>
                 </tr>
               </table>
-            </td>
-          </tr>
 
-          <!-- Deductions -->
-          <tr>
-            <td style="padding:20px 32px 0;">
-              <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.08em;text-transform:uppercase;">Deductions</p>
-              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+              <!-- Deductions -->
+              ${totalDeductions > 0 ? `
+              <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:.08em;text-transform:uppercase;">Deductions</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:20px;">
                 ${p.paye > 0 ? `
                 <tr>
-                  <td style="padding:7px 0;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">PAYE Income Tax</td>
-                  <td style="padding:7px 0;font-size:13px;color:#dc2626;text-align:right;border-bottom:1px solid #f3f4f6;">−${fmt(p.paye, sym)}</td>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">PAYE Income Tax</td>
+                  <td style="padding:9px 0;font-size:14px;color:#dc2626;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">&minus;${fmt(p.paye, sym)}</td>
                 </tr>` : ""}
                 ${p.ssnitEmployee > 0 ? `
                 <tr>
-                  <td style="padding:7px 0;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">SSNIT (Employee 5.5%)</td>
-                  <td style="padding:7px 0;font-size:13px;color:#dc2626;text-align:right;border-bottom:1px solid #f3f4f6;">−${fmt(p.ssnitEmployee, sym)}</td>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">SSNIT (Employee 5.5%)</td>
+                  <td style="padding:9px 0;font-size:14px;color:#dc2626;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">&minus;${fmt(p.ssnitEmployee, sym)}</td>
                 </tr>` : ""}
                 ${p.deductionsTotal > 0 ? `
                 <tr>
-                  <td style="padding:7px 0;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;">Other Deductions</td>
-                  <td style="padding:7px 0;font-size:13px;color:#dc2626;text-align:right;border-bottom:1px solid #f3f4f6;">−${fmt(p.deductionsTotal, sym)}</td>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Other Deductions</td>
+                  <td style="padding:9px 0;font-size:14px;color:#dc2626;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">&minus;${fmt(p.deductionsTotal, sym)}</td>
                 </tr>` : ""}
-              </table>
-            </td>
-          </tr>
-
-          <!-- Net Pay -->
-          <tr>
-            <td style="padding:20px 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;padding:16px;">
                 <tr>
-                  <td style="padding:0;font-size:15px;font-weight:700;color:#166534;">Net Pay</td>
-                  <td style="padding:0;font-size:22px;font-weight:800;color:#15803d;text-align:right;">${fmt(p.netSalary, sym)}</td>
+                  <td style="padding:10px 0;font-size:14px;font-weight:700;color:#111827;">Total Deductions</td>
+                  <td style="padding:10px 0;font-size:14px;font-weight:700;color:#dc2626;text-align:right;">&minus;${fmt(totalDeductions, sym)}</td>
                 </tr>
-                ${bankRow}
-              </table>
-            </td>
-          </tr>
+              </table>` : ""}
 
-          <!-- CTA -->
-          <tr>
-            <td style="padding:0 32px 28px;text-align:center;">
-              <a href="${escHtml(p.publicUrl)}"
-                 style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 28px;border-radius:8px;">
-                View Full Payslip
-              </a>
+              <!-- Net Pay -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;border-collapse:collapse;">
+                <tr>
+                  <td style="padding:18px 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="font-size:15px;font-weight:700;color:#166534;">Net Pay</td>
+                        <td style="font-size:26px;font-weight:800;color:#15803d;text-align:right;letter-spacing:-.5px;">${fmt(p.netSalary, sym)}</td>
+                      </tr>
+                      ${bankRow}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+                <tr>
+                  <td align="center">
+                    <a href="${escHtml(p.publicUrl)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 32px;border-radius:8px;letter-spacing:.01em;">View full payslip</a>
+                  </td>
+                </tr>
+              </table>
+
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-              <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
-                This payslip was generated by ${escHtml(p.businessName)} via Finza. Do not reply to this email.
-              </p>
+            <td style="background:#f9fafb;padding:16px 36px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="font-size:12px;color:#9ca3af;">
+                    This payslip was issued by <strong style="color:#6b7280;">${escHtml(p.businessName)}</strong>. Please do not reply to this email.
+                  </td>
+                  <td style="font-size:12px;color:#d1d5db;text-align:right;white-space:nowrap;">
+                    Powered by <strong style="color:#6b7280;">Finza</strong>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 

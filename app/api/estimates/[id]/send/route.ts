@@ -236,11 +236,17 @@ export async function POST(
 
       const businessName = estimate.businesses?.trading_name || estimate.businesses?.legal_name || "Our Business"
       const estimateNumber = estimate.estimate_number || estimate.id.substring(0, 8)
-      const html = buildEstimateEmailHtml(estimate, businessName)
+      const html = buildEstimateEmailHtml(estimate, businessName, {
+        customerName: customers?.name ?? undefined,
+        publicViewUrl: publicEstimateUrl || undefined,
+      })
+      const businessEmail = estimate.businesses?.email ?? undefined
       const result = await sendTransactionalEmail({
         to: email,
         subject: `Estimate ${estimateNumber} from ${businessName}`,
         html,
+        fromName: businessName,
+        replyTo: businessEmail,
       })
       if (!result.success) {
         return NextResponse.json(

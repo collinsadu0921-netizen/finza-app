@@ -14,7 +14,7 @@ function maxEdgePx(): number {
  * Parse data URL → buffer; returns null if not a data URL.
  */
 function dataUrlToBuffer(dataUrl: string): { buffer: Buffer; mime: string } | null {
-  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/s)
+  const m = dataUrl.match(/^data:([^;]+);base64,([\s\S]+)$/)
   if (!m) return null
   try {
     return { buffer: Buffer.from(m[2], "base64"), mime: m[1].toLowerCase().split(";")[0].trim() }
