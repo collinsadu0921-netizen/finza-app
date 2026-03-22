@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { Money } from "@/components/ui/Money"
 import { FinancialPositionBar } from "@/components/ui/FinancialPositionBar"
+import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { getCurrentBusiness } from "@/lib/business"
 import { isDateInOpenPeriod, validatePaymentPostingAllowed } from "@/lib/accountingPeriods/lifecycle"
 import { normalizeCountry, getAllowedMethods, getMobileMoneyLabel } from "@/lib/payments/eligibility"
@@ -98,6 +98,11 @@ export default function AddPaymentModal({
     const whtNum = whtEnabled ? (Number(whtAmountStr) || 0) : 0
     const netCashReceived = amountNum - whtNum
 
+    const formatInvoiceAmount = (n: number) =>
+        invoiceCurrencyCode
+            ? formatMoney(n, invoiceCurrencyCode)
+            : formatMoneyWithSymbol(n, currencySymbol)
+
     // Eligibility
     const countryCode = normalizeCountry(businessCountry)
     const allowedMethods = getAllowedMethods(countryCode)
@@ -156,7 +161,7 @@ export default function AddPaymentModal({
         }
 
         if (isOverpayment) {
-            setError(`Amount cannot exceed remaining balance of ${currencySymbol}${remainingBalance.toFixed(2)}`)
+            setError(`Amount cannot exceed remaining balance of ${formatInvoiceAmount(remainingBalance)}`)
             return
         }
 
@@ -229,7 +234,7 @@ export default function AddPaymentModal({
                             <p className="text-xs text-slate-500 mt-0.5">
                                 {successData
                                     ? `Invoice #${invoiceNumber} · ${customerName}`
-                                    : `Invoice #${invoiceNumber} · ${customerName} · Balance: ${currencySymbol}${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                    : `Invoice #${invoiceNumber} · ${customerName} · Balance: ${formatInvoiceAmount(remainingBalance)}`
                                 }
                             </p>
                         </div>
@@ -252,12 +257,12 @@ export default function AddPaymentModal({
                         <div className="bg-slate-50 rounded-xl p-5 w-full max-w-sm border border-slate-200 text-left space-y-3">
                             <div className="flex justify-between items-center">
                                 <span className="text-sm text-slate-500">Amount Paid</span>
-                                <span className="text-sm font-bold text-slate-900"><Money amount={successData.amount} currency={currencySymbol} /></span>
+                                <span className="text-sm font-bold text-slate-900 tabular-nums">{formatInvoiceAmount(successData.amount)}</span>
                             </div>
                             <div className="flex justify-between items-center">
                                 <span className="text-sm text-slate-500">Remaining Due</span>
-                                <span className="text-sm font-semibold text-slate-700">
-                                    <Money amount={Math.max(0, invoiceTotal - totalPaid - creditsApplied - successData.amount)} currency={currencySymbol} />
+                                <span className="text-sm font-semibold text-slate-700 tabular-nums">
+                                    {formatInvoiceAmount(Math.max(0, invoiceTotal - totalPaid - creditsApplied - successData.amount))}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center pt-3 border-t border-slate-200">
@@ -295,7 +300,7 @@ export default function AddPaymentModal({
                             {/* Payment Context Panel - FinancialPositionBar */}
                             <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
                                 <FinancialPositionBar
-                                    currency={currencySymbol}
+                                    currencyCode={invoiceCurrencyCode ?? null}
                                     total={invoiceTotal}
                                     paid={totalPaid}
                                     credits={creditsApplied}
@@ -320,7 +325,7 @@ export default function AddPaymentModal({
                                                 required
                                                 value={amount}
                                                 onChange={(e) => setAmount(e.target.value)}
-                                                className={`block w-full pl-9 pr-4 py-2.5 text-base font-mono rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${isOverpayment
+                                                className={`block w-full pl-9 pr-4 py-2.5 text-base tabular-nums rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${isOverpayment
                                                     ? "border-red-300 focus:border-red-400 focus:ring-red-100 bg-red-50 text-red-900"
                                                     : "border-slate-200 focus:border-slate-400 focus:ring-slate-100 hover:border-slate-300 bg-white"
                                                     }`}
@@ -330,7 +335,7 @@ export default function AddPaymentModal({
                                         {isOverpayment && (
                                             <p className="text-xs text-red-600 font-medium flex items-center gap-1">
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                                Exceeds remaining balance of {currencySymbol}{remainingBalance.toFixed(2)}
+                                                Exceeds remaining balance of {formatInvoiceAmount(remainingBalance)}
                                             </p>
                                         )}
                                     </div>
@@ -443,13 +448,13 @@ export default function AddPaymentModal({
                                                     min="0"
                                                     value={whtAmountStr}
                                                     onChange={(e) => setWhtAmountStr(e.target.value)}
-                                                    className="block w-full pl-9 pr-4 py-2.5 rounded-lg border-2 border-amber-300 focus:border-amber-400 focus:outline-none bg-white font-mono"
+                                                    className="block w-full pl-9 pr-4 py-2.5 rounded-lg border-2 border-amber-300 focus:border-amber-400 focus:outline-none bg-white tabular-nums"
                                                     placeholder="0.00"
                                                 />
                                             </div>
                                             {whtNum > 0 && (
                                                 <p className="text-xs text-amber-700 font-medium">
-                                                    Cash received: {currencySymbol}{netCashReceived.toFixed(2)} · WHT credit: {currencySymbol}{whtNum.toFixed(2)}
+                                                    Cash received: {formatInvoiceAmount(netCashReceived)} · WHT credit: {formatInvoiceAmount(whtNum)}
                                                 </p>
                                             )}
                                         </div>
@@ -473,7 +478,7 @@ export default function AddPaymentModal({
                                                 required
                                                 value={settlementFxRate}
                                                 onChange={(e) => setSettlementFxRate(e.target.value)}
-                                                className="block w-full pl-20 pr-16 py-2.5 rounded-lg border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 focus:outline-none bg-white font-mono"
+                                                className="block w-full pl-20 pr-16 py-2.5 rounded-lg border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 focus:outline-none bg-white tabular-nums"
                                                 placeholder="e.g. 15.20"
                                             />
                                             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400 text-sm">
@@ -486,9 +491,9 @@ export default function AddPaymentModal({
                                         {parsedSettlementRate > 0 && fxDiff !== null && (
                                             <div className={`text-xs font-semibold px-3 py-2 rounded-lg ${fxDiff > 0 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : fxDiff < 0 ? "bg-red-50 text-red-700 border border-red-200" : "bg-slate-100 text-slate-600"}`}>
                                                 {fxDiff > 0
-                                                    ? `FX Gain: +${fxDiff.toFixed(2)} ${homeCurrencyCode}`
+                                                    ? `FX Gain: +${formatMoney(fxDiff, homeCurrencyCode)}`
                                                     : fxDiff < 0
-                                                    ? `FX Loss: ${fxDiff.toFixed(2)} ${homeCurrencyCode}`
+                                                    ? `FX Loss: ${formatMoney(fxDiff, homeCurrencyCode)}`
                                                     : `No FX difference`}
                                             </div>
                                         )}
@@ -503,11 +508,11 @@ export default function AddPaymentModal({
                                     <div>
                                         <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Ledger Impact</h4>
                                         <ul className="text-xs text-slate-600 mt-1.5 space-y-1 font-medium">
-                                            <li>↑ Dr. Cash/Bank {whtNum > 0 ? `(${currencySymbol}${netCashReceived.toFixed(2)} net of WHT)` : isFxInvoice && amountInHomeCurrency ? `(${homeCurrencyCode} ${amountInHomeCurrency.toFixed(2)})` : ""}</li>
-                                            {whtNum > 0 && <li>↑ Dr. WHT Receivable ({currencySymbol}{whtNum.toFixed(2)})</li>}
-                                            <li>↓ Cr. Accounts Receivable {isFxInvoice && arClearAmount ? `(${homeCurrencyCode} ${arClearAmount.toFixed(2)})` : ""}</li>
-                                            {isFxInvoice && fxDiff !== null && fxDiff > 0 && <li>↓ Cr. FX Gain ({homeCurrencyCode} {fxDiff.toFixed(2)})</li>}
-                                            {isFxInvoice && fxDiff !== null && fxDiff < 0 && <li>↑ Dr. FX Loss ({homeCurrencyCode} {Math.abs(fxDiff).toFixed(2)})</li>}
+                                            <li>↑ Dr. Cash/Bank {whtNum > 0 ? `(${formatInvoiceAmount(netCashReceived)} net of WHT)` : isFxInvoice && amountInHomeCurrency ? `(${formatMoney(amountInHomeCurrency, homeCurrencyCode)})` : ""}</li>
+                                            {whtNum > 0 && <li>↑ Dr. WHT Receivable ({formatInvoiceAmount(whtNum)})</li>}
+                                            <li>↓ Cr. Accounts Receivable {isFxInvoice && arClearAmount ? `(${formatMoney(arClearAmount, homeCurrencyCode)})` : ""}</li>
+                                            {isFxInvoice && fxDiff !== null && fxDiff > 0 && <li>↓ Cr. FX Gain ({formatMoney(fxDiff, homeCurrencyCode)})</li>}
+                                            {isFxInvoice && fxDiff !== null && fxDiff < 0 && <li>↑ Dr. FX Loss ({formatMoney(Math.abs(fxDiff), homeCurrencyCode)})</li>}
                                         </ul>
                                     </div>
                                 </div>

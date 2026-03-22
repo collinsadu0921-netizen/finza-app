@@ -16,7 +16,7 @@ import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 
 // FINZA Design System Components (Phase 2 Refactor)
 import { StatusBadge } from "@/components/ui/StatusBadge"
-import { Money } from "@/components/ui/Money"
+import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 
 type Customer = {
   id: string
@@ -53,6 +53,8 @@ type LineItemRowProps = {
   item: InvoiceItem
   products: any[]
   currencySymbol: string
+  /** ISO code for line totals (matches invoice view formatMoney). */
+  amountCurrencyCode: string | null
   businessIndustry: string | null
   onUpdate: (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => void
   onCommit: (id: string, field: "quantity" | "price") => void
@@ -61,7 +63,7 @@ type LineItemRowProps = {
 }
 
 const LineItemRow = memo(function LineItemRow({
-  item, products, currencySymbol, businessIndustry,
+  item, products, currencySymbol, amountCurrencyCode, businessIndustry,
   onUpdate, onCommit, onRemove, onSelectProduct,
 }: LineItemRowProps) {
   // Local description state — typed into immediately, flushed to parent only on blur
@@ -84,7 +86,7 @@ const LineItemRow = memo(function LineItemRow({
             <option value="">{businessIndustry === "service" ? "Select Service" : "Select product (optional)..."}</option>
             {products.map(p => (
               <option key={p.id} value={p.id}>
-                {p.name}{p.price != null ? ` — ${currencySymbol} ${Number(p.price).toFixed(2)}` : ""}
+                {p.name}{p.price != null ? ` — ${formatMoneyWithSymbol(Number(p.price), currencySymbol)}` : ""}
               </option>
             ))}
           </select>
@@ -122,8 +124,8 @@ const LineItemRow = memo(function LineItemRow({
           className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
         />
       </td>
-      <td className="px-6 py-3 align-top text-right font-medium text-slate-900 pt-5">
-        <Money amount={item.total} currency={currencySymbol} />
+      <td className="px-6 py-3 align-top text-right font-medium text-slate-900 tabular-nums pt-5">
+        {formatMoney(item.total, amountCurrencyCode)}
       </td>
       <td className="px-2 py-3 align-top pt-4">
         <button
@@ -195,6 +197,9 @@ export default function NewInvoicePage() {
   const displaySymbol = fxEnabled && fxCurrencyCode
     ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
     : currencySymbol
+
+  // ISO code for formatMoney (invoice view / lists style — sans tabular-nums)
+  const amountCurrencyCode = fxEnabled && fxCurrencyCode ? fxCurrencyCode : currencyCode
 
   // Modals & Navigation
   const [showSendChoiceModal, setShowSendChoiceModal] = useState(false)
@@ -839,7 +844,8 @@ export default function NewInvoicePage() {
                     </div>
                     {selectedJobId && jobMaterialCost != null && (
                       <p className="text-sm text-slate-500">
-                        Total material cost (read-only): <span className="font-medium">{currencySymbol} {Number(jobMaterialCost).toFixed(2)}</span>
+                        Total material cost (read-only):{" "}
+                        <span className="font-medium tabular-nums">{formatMoney(Number(jobMaterialCost), currencyCode)}</span>
                       </p>
                     )}
                   </div>
@@ -874,6 +880,7 @@ export default function NewInvoicePage() {
                           item={item}
                           products={products}
                           currencySymbol={displaySymbol}
+                          amountCurrencyCode={amountCurrencyCode}
                           businessIndustry={businessIndustry}
                           onUpdate={updateItem}
                           onCommit={commitItem}
@@ -914,8 +921,8 @@ export default function NewInvoicePage() {
                 {/* Subtotal */}
                 <div className="flex justify-between items-center text-sm text-slate-600">
                   <span>Subtotal</span>
-                  <span className="font-medium">
-                    <Money amount={applyGhanaTax ? total : baseSubtotal} currency={displaySymbol} />
+                  <span className="font-medium tabular-nums">
+                    {formatMoney(applyGhanaTax ? total : baseSubtotal, amountCurrencyCode)}
                   </span>
                 </div>
 
@@ -927,31 +934,31 @@ export default function NewInvoicePage() {
                         {legacyTaxAmounts.nhil > 0 && (
                           <div className="flex justify-between items-center text-xs text-slate-500">
                             <span>NHIL (2.5%)</span>
-                            <Money amount={legacyTaxAmounts.nhil} currency={displaySymbol} />
+                            <span className="tabular-nums">{formatMoney(legacyTaxAmounts.nhil, amountCurrencyCode)}</span>
                           </div>
                         )}
                         {legacyTaxAmounts.getfund > 0 && (
                           <div className="flex justify-between items-center text-xs text-slate-500">
                             <span>GETFund (2.5%)</span>
-                            <Money amount={legacyTaxAmounts.getfund} currency={displaySymbol} />
+                            <span className="tabular-nums">{formatMoney(legacyTaxAmounts.getfund, amountCurrencyCode)}</span>
                           </div>
                         )}
                       </>
                     )}
                     <div className="flex justify-between items-center text-xs text-slate-500">
                       <span>VAT</span>
-                      <Money amount={legacyTaxAmounts.vat} currency={displaySymbol} />
+                      <span className="tabular-nums">{formatMoney(legacyTaxAmounts.vat, amountCurrencyCode)}</span>
                     </div>
 
                     {/* Realtime Breakdown Block */}
                     <div className="mt-2 bg-blue-50 rounded p-2 text-[10px] text-blue-700">
                       <div className="flex justify-between mb-1">
                         <span>Base Amount:</span>
-                        <Money amount={baseSubtotal} currency={displaySymbol} />
+                        <span className="tabular-nums">{formatMoney(baseSubtotal, amountCurrencyCode)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Tax Component:</span>
-                        <Money amount={tax} currency={displaySymbol} />
+                        <span className="tabular-nums">{formatMoney(tax, amountCurrencyCode)}</span>
                       </div>
                     </div>
                   </div>
@@ -960,8 +967,8 @@ export default function NewInvoicePage() {
                 {/* Grand Total */}
                 <div className="flex justify-between items-center pt-2">
                   <span className="text-base font-bold text-slate-900">Total</span>
-                  <span className="text-xl font-bold text-slate-900">
-                    <Money amount={total} currency={displaySymbol} />
+                  <span className="text-xl font-bold text-slate-900 tabular-nums">
+                    {formatMoney(total, amountCurrencyCode)}
                   </span>
                 </div>
 
@@ -995,14 +1002,14 @@ export default function NewInvoicePage() {
                       </select>
                       <div className="flex justify-between text-sm">
                         <span className="text-amber-700">WHT deducted:</span>
-                        <span className="font-semibold text-amber-800">
-                          <Money amount={whtRecvCalc.whtAmount} currency={displaySymbol} />
+                        <span className="font-semibold text-amber-800 tabular-nums">
+                          {formatMoney(whtRecvCalc.whtAmount, amountCurrencyCode)}
                         </span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-600">Net you receive:</span>
-                        <span className="font-bold text-slate-900">
-                          <Money amount={whtRecvCalc.netPayable} currency={displaySymbol} />
+                        <span className="font-bold text-slate-900 tabular-nums">
+                          {formatMoney(whtRecvCalc.netPayable, amountCurrencyCode)}
                         </span>
                       </div>
                     </div>

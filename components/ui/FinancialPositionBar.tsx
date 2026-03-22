@@ -1,9 +1,10 @@
 import React from "react"
-import { Money } from "./Money"
+import { formatMoney } from "@/lib/money"
 import { cn } from "@/lib/utils"
 
 interface FinancialPositionBarProps {
-    currency: string
+    /** ISO currency code for formatMoney (e.g. GHS, USD) — matches invoice view. */
+    currencyCode: string | null
     total: number
     paid: number
     credits: number
@@ -14,7 +15,7 @@ interface FinancialPositionBarProps {
 }
 
 export function FinancialPositionBar({
-    currency,
+    currencyCode,
     total,
     paid,
     credits,
@@ -30,12 +31,9 @@ export function FinancialPositionBar({
             {/* Total Section */}
             <div className="flex flex-col">
                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Total</span>
-                <Money
-                    amount={total}
-                    currency={currency}
-                    type="neutral"
-                    className="text-2xl font-bold"
-                />
+                <span className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-gray-100">
+                    {formatMoney(total, currencyCode)}
+                </span>
             </div>
 
             {/* Operator - Mobile Hidden */}
@@ -44,13 +42,9 @@ export function FinancialPositionBar({
             {/* Paid Section */}
             <div className="flex flex-col">
                 <span className="text-[10px] uppercase font-bold text-emerald-600 tracking-wider mb-1">Paid</span>
-                <Money
-                    amount={paid}
-                    currency={currency}
-                    type="in"
-                    className="text-2xl font-bold"
-                    showSign
-                />
+                <span className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    +{formatMoney(paid, currencyCode)}
+                </span>
             </div>
 
             {credits > 0 && (
@@ -59,13 +53,9 @@ export function FinancialPositionBar({
                     {/* Credits Section */}
                     <div className="flex flex-col">
                         <span className="text-[10px] uppercase font-bold text-amber-600 tracking-wider mb-1">Credits</span>
-                        <Money
-                            amount={credits}
-                            currency={currency}
-                            type="out"
-                            className="text-2xl font-bold text-amber-600"
-                            showSign
-                        />
+                        <span className="text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-500">
+                            +{formatMoney(credits, currencyCode)}
+                        </span>
                     </div>
                 </>
             )}
@@ -81,12 +71,16 @@ export function FinancialPositionBar({
                 )}>
                     {balance > 0.01 ? "Amount Due" : "Settled"}
                 </span>
-                <Money
-                    amount={balance}
-                    currency={currency}
-                    type={balance > 0.01 ? "error" : "in"}
-                    className={balanceClassName ?? "text-3xl font-black tabular-nums tracking-tight"}
-                />
+                <span
+                    className={cn(
+                        balanceClassName ?? "text-2xl font-semibold tabular-nums",
+                        balance > 0.01
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-emerald-600 dark:text-emerald-400"
+                    )}
+                >
+                    {formatMoney(balance, currencyCode)}
+                </span>
             </div>
         </div>
     )

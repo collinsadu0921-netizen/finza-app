@@ -38,7 +38,7 @@ export function Money({
 
     return (
         <span className={cn(
-            "font-mono tabular-nums tracking-tight inline-flex items-baseline",
+            "tabular-nums font-medium tracking-tight inline-flex items-baseline",
             colorClass,
             className
         )}>
