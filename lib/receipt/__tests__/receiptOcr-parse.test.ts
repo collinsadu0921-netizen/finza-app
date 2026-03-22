@@ -163,4 +163,26 @@ describe("receiptOcr parse", () => {
     expect(suggestions.total).toBe(450)
     expect(suggestions.currency_code).toBe("KES")
   })
+
+  it("Ghana market receipt: GRAND TOTAL wins over SUB-TOTAL; taxes with (%) and GET FUND", () => {
+    const text = [
+      "MALATA MARKET STALL 42",
+      "ACCRA, GHANA",
+      "22 MAR 2026",
+      "LONG GRAIN RICE GHS 75.00",
+      "SUB-TOTAL: GHS 341.00",
+      "NHIL (2.5%): GHS 8.53",
+      "GET FUND (2.5%): GHS 8.53",
+      "VAT (15%): GHS 53.71",
+      "GRAND TOTAL: GHS 411.77",
+    ].join("\n")
+    const { suggestions } = parseReceiptText(text, "expense", "GHS")
+    expect(suggestions.supplier_name).toBe("MALATA MARKET STALL 42")
+    expect(suggestions.document_date).toBe("2026-03-22")
+    expect(suggestions.total).toBe(411.77)
+    expect(suggestions.nhil_amount).toBe(8.53)
+    expect(suggestions.getfund_amount).toBe(8.53)
+    expect(suggestions.vat_amount).toBe(53.71)
+    expect(suggestions.subtotal).toBeCloseTo(341, 5)
+  })
 })

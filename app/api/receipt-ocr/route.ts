@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
+import { downscaleReceiptDataUrlForOcr } from "@/lib/receipt/downscaleReceiptImageForOcr"
 import { getReceiptOcrProvider, parseReceiptText } from "@/lib/receipt/receiptOcr"
 import type { DocumentType } from "@/lib/receipt/receiptOcr"
 
@@ -153,9 +154,11 @@ export async function POST(request: NextRequest) {
     const { data: biz } = await supabase.from("businesses").select("default_currency").eq("id", business_id).single()
     if (biz?.default_currency) businessCurrency = biz.default_currency
 
+    const ocrInput = await downscaleReceiptDataUrlForOcr(imageUrl)
+
     const provider = getReceiptOcrProvider()
     if (DEV) console.debug("[receipt-ocr] provider=%s", provider ? "stub/real" : "none")
-    const rawText = await provider.extractText(imageUrl)
+    const rawText = await provider.extractText(ocrInput)
     const sanitized = (rawText || "").replace(/\s+/g, " ").trim().slice(0, 200)
     if (DEV) console.debug("[receipt-ocr] extractedText_length=%d first200=%s", (rawText || "").length, sanitized)
 

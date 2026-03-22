@@ -517,7 +517,10 @@ export default function CITPage() {
                     Auto-fill from {isPresumptive ? "Revenue" : "P&L"}
                   </p>
                   <p className="text-xs text-blue-700 dark:text-blue-400">
-                    Pulls YTD {isPresumptive ? "gross revenue" : "profit before tax"} for {currentYear}
+                    Pulls {provType === "quarterly"
+                      ? (periodLabel.trim() || `Q${currentQ} ${currentYear}`)
+                      : `full year ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
+                    } {isPresumptive ? "gross revenue" : "profit before tax"}
                     {netProfit != null && ` → ${currency}${netProfit.toFixed(2)}`}
                   </p>
                 </div>
@@ -584,12 +587,15 @@ export default function CITPage() {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">CIT Rate</label>
                 <select
-                  value={citRate}
-                  onChange={e => setCitRate(Number(e.target.value))}
+                  value={citRateCode}
+                  onChange={e => {
+                    setCitRateCode(e.target.value)
+                    setCitRate(CIT_RATES[e.target.value]?.rate ?? 0.25)
+                  }}
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                 >
                   {Object.entries(CIT_RATES).map(([code, info]) => (
-                    <option key={code} value={info.rate}>{info.label}</option>
+                    <option key={code} value={code}>{info.label}</option>
                   ))}
                 </select>
               </div>

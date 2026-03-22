@@ -56,7 +56,11 @@ const CURRENCY_PATTERNS: Array<{ re: RegExp; code: string }> = [
 ]
 
 const ALL_CCY = `(?:GH[S¢₵]|GHS|₵|Cedi|₦|NGN|KES|KSh|UGX|TZS|TSh|ZAR|CFA|XOF|XAF)`
-const TOTAL_LABELS = new RegExp(`\\b(TOTAL|Grand Total|Amount Due|Balance Due|Net Total|Amount Payable|AMOUNT)\\s*[:]?\\s*${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)`, "gi")
+// (?<!SUB-) avoids matching "TOTAL" inside "SUB-TOTAL" (prefer GRAND TOTAL / real final total).
+const TOTAL_LABELS = new RegExp(
+  `\\b(Grand Total|(?<!SUB-)TOTAL|Amount Due|Balance Due|Net Total|Amount Payable|AMOUNT)\\s*[:]?\\s*${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)`,
+  "gi"
+)
 const AMOUNT_LINE = new RegExp(`\\bAMOUNT\\s*:\\s*${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)`, "gi")
 const CURRENCY_AMOUNT = new RegExp(`${ALL_CCY}\\s*([\\d,]+\\.?\\d*)|([\\d,]+\\.?\\d*)\\s*${ALL_CCY}`, "gi")
 const TENDERED_LABELS = /\b(Tendered|Cash|Change)\s*[:]?\s*([\d,]+\.?\d*)/gi
@@ -84,9 +88,13 @@ const DOC_NUMBER_PATTERNS = [
   /No\.?\s*[:]?\s*([A-Z0-9\-]+)/i,
 ]
 
-const VAT_PATTERN = /\b(?:VAT|V\.A\.T|Tax)\s*[:]?\s*([A-Z]{3})?\s*([\d,]+\.?\d*)/gi
-const NHIL_PATTERN = /\bNHIL\s*[:]?\s*([\d,]+\.?\d*)/gi
-const GETFUND_PATTERN = /\b(?:GETFund|GET Fund)\s*[:]?\s*([\d,]+\.?\d*)/gi
+// Optional "(15%)" / "(2.5%)" and optional GHS/₵ before amount (thermal receipts).
+const VAT_PATTERN =
+  /\b(?:VAT|V\.A\.T|Tax)(?:\s*\([^)]*\))?\s*[:]?\s*(?:GHS|GH¢|₵|[A-Z]{3})?\s*([\d,]+\.?\d*)/gi
+const NHIL_PATTERN =
+  /\bNHIL(?:\s*\([^)]*\))?\s*[:]?\s*(?:GHS|GH¢|₵)?\s*([\d,]+\.?\d*)/gi
+const GETFUND_PATTERN =
+  /\b(?:GETFund|GET\s+Fund)\s*(?:\([^)]*\))?\s*[:]?\s*(?:GHS|GH¢|₵)?\s*([\d,]+\.?\d*)/gi
 const COVID_PATTERN = /\bCOVID\s*(?:Levy)?\s*[:]?\s*([\d,]+\.?\d*)/gi
 
 function parseNumber(s: string): number | undefined {
@@ -141,7 +149,8 @@ function extractTotal(text: string): { value: number; confidence: ConfidenceLeve
   }
   // Multi-line totals: label on one line, amount (optionally prefixed with currency) on the next
   if (candidates.length === 0) {
-    const labelOnlyRe = /^\s*(TOTAL|Grand\s+Total|Amount\s+Due|Balance\s+Due|Net\s+Total|Amount\s+Payable|AMOUNT)\s*[:]?\s*$/i
+    const labelOnlyRe =
+      /^\s*(Grand\s+Total|(?<!SUB-)TOTAL|Amount\s+Due|Balance\s+Due|Net\s+Total|Amount\s+Payable|AMOUNT)\s*[:]?\s*$/i
     const amountOnlyRe = new RegExp(`^${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)\\s*${ALL_CCY}?$`)
     const splitLines = text.split(/\r?\n/)
     for (let i = 0; i < splitLines.length - 1; i++) {
@@ -177,6 +186,9 @@ function extractTotal(text: string): { value: number; confidence: ConfidenceLeve
   return { value: pick.value, confidence }
 }
 
+/** City/country line (e.g. ACCRA, GHANA) — not the trading name */
+const ADDRESS_LINE_GHANA = /^\s*[A-Z][A-Z\s]{2,},\s*GHANA\s*$/i
+
 function extractSupplierName(lines: string[]): { value: string; confidence: ConfidenceLevel } | undefined {
   const top = lines.slice(0, 10)
   const strong = /(?:LIMITED|LTD|COMPANY|GHANA|ENTERPRISE|CORPORATION|CO\.)/i
@@ -189,6 +201,7 @@ function extractSupplierName(lines: string[]): { value: string; confidence: Conf
     if (/^\d+$/.test(t)) continue
     if (t.length > 120) continue
     if (/^#\s*:|RECEIPT\s*#|DATE\s*:|AMOUNT\s*:/i.test(t)) continue
+    if (ADDRESS_LINE_GHANA.test(t)) continue
     const isAllCaps = t === t.toUpperCase() && /[A-Z]/.test(t)
     const hasStrong = strong.test(t)
     const conf: ConfidenceLevel = isAllCaps && hasStrong ? "HIGH" : hasStrong ? "MEDIUM" : "LOW"
@@ -210,7 +223,7 @@ function extractDocumentNumber(text: string): string | undefined {
 function extractVat(text: string): number | undefined {
   const m = VAT_PATTERN.exec(text)
   VAT_PATTERN.lastIndex = 0
-  if (m && m[2]) return parseNumber(m[2])
+  if (m && m[1]) return parseNumber(m[1])
   return undefined
 }
 
