@@ -59,7 +59,19 @@ export default function SendInvoiceModal({
     ? `${window.location.origin}/invoice-public/${invoice.public_token}`
     : ""
 
-  const handleSendWhatsApp = async () => {
+  /**
+   * @param waPrepWindow - Tab opened synchronously on user click (before any await) so the
+   *   browser does not block navigation to https://wa.me/... after the send API returns.
+   */
+  const handleSendWhatsApp = async (waPrepWindow: Window | null = null) => {
+    const closePrep = () => {
+      try {
+        if (waPrepWindow && !waPrepWindow.closed) waPrepWindow.close()
+      } catch {
+        /* ignore */
+      }
+    }
+
     try {
       setLoading(true)
       setError("")
@@ -70,6 +82,7 @@ export default function SendInvoiceModal({
       if (!phone) {
         setError("Customer phone number is not available. Please add a phone number to the customer profile.")
         setLoading(false)
+        closePrep()
         return
       }
 
@@ -77,6 +90,7 @@ export default function SendInvoiceModal({
       if (!phoneCheck.ok) {
         setError(phoneCheck.error)
         setLoading(false)
+        closePrep()
         return
       }
 
@@ -92,22 +106,36 @@ export default function SendInvoiceModal({
         })
       } catch (fetchError: any) {
         console.error("Fetch error:", fetchError)
+        closePrep()
         throw new Error("Network error. Please check your connection and try again.")
       }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        const friendlyError = errorData.error || "We couldn't send the invoice. Please check the customer's phone number and try again."
+        closePrep()
+        const friendlyError =
+          errorData.error || "We couldn't send the invoice. Please check the customer's phone number and try again."
         throw new Error(friendlyError)
       }
 
       const data = await response.json()
 
-      if (data.whatsappUrl) {
-        window.open(data.whatsappUrl, "_blank", "noopener,noreferrer")
+      if (data.whatsappUrl && /^https:\/\/wa\.me\//i.test(String(data.whatsappUrl))) {
+        if (waPrepWindow && !waPrepWindow.closed) {
+          waPrepWindow.location.href = data.whatsappUrl
+        } else {
+          const opened = window.open(data.whatsappUrl, "_blank", "noopener,noreferrer")
+          if (!opened) {
+            throw new Error(
+              "Pop-up was blocked. Allow pop-ups for this site to open WhatsApp, or copy the public link below."
+            )
+          }
+        }
+      } else {
+        closePrep()
+        throw new Error("No WhatsApp link returned from server. Try again or use Copy link.")
       }
 
-      // INVARIANT 6: onSuccess triggers parent rehydration - no optimistic updates
       onSuccess()
     } catch (err: any) {
       const friendlyError = err.message || "We couldn't send the invoice. Please check the customer's phone number and try again."
@@ -199,42 +227,95 @@ export default function SendInvoiceModal({
 
   const handleSendInvoice = async () => {
     setError("")
-    
+
     try {
       setLoading(true)
 
+      if (sendMethod === "link") {
+        await handleCopyLink()
+        return
+      }
+
+      const openWaPrepTab = (): Window | null =>
+        window.open("about:blank", "_blank", "noopener,noreferrer")
+
       switch (sendMethod) {
-        case "whatsapp":
-          await handleSendWhatsApp()
+        case "whatsapp": {
+          const customer = invoice.customers
+          const phone = customer?.whatsapp_phone || customer?.phone
+          if (!phone) {
+            setError("Customer phone number is not available. Please add a phone number to the customer profile.")
+            return
+          }
+          const waCheck = normalizePhoneForWaMe(phone)
+          if (!waCheck.ok) {
+            setError(waCheck.error)
+            return
+          }
+          const waPrep = openWaPrepTab()
+          if (!waPrep) {
+            setError(
+              "Pop-up blocked. Allow pop-ups for this site to open WhatsApp, or use Link only and share the invoice manually."
+            )
+            return
+          }
+          await handleSendWhatsApp(waPrep)
           break
+        }
         case "email":
           if (!email) {
             setError("Please enter an email address")
-            setLoading(false)
             return
           }
           await handleSendEmail()
           break
         case "both":
-          // Send email first, then WhatsApp
           if (!email) {
             setError("Please enter an email address for email sending")
-            setLoading(false)
             return
           }
-          await handleSendEmail()
-          // Small delay to ensure email is sent
-          await new Promise(resolve => setTimeout(resolve, 500))
-          await handleSendWhatsApp()
+          {
+            const customer = invoice.customers
+            const phone = customer?.whatsapp_phone || customer?.phone
+            const phoneOk = phone ? normalizePhoneForWaMe(phone).ok : false
+            const waPrep = phoneOk ? openWaPrepTab() : null
+            if (phoneOk && !waPrep) {
+              setError(
+                "Pop-up blocked. Allow pop-ups to open WhatsApp after email, or choose Email only and share the link manually."
+              )
+              return
+            }
+            await handleSendEmail()
+            await new Promise((resolve) => setTimeout(resolve, 500))
+            if (phoneOk) await handleSendWhatsApp(waPrep)
+          }
           break
-        case "link":
-          await handleCopyLink()
-          return // handleCopyLink already calls onSuccess/onClose
-        default:
-          await handleSendWhatsApp()
+        default: {
+          const customer = invoice.customers
+          const phone = customer?.whatsapp_phone || customer?.phone
+          if (!phone) {
+            setError("Customer phone number is not available. Please add a phone number to the customer profile.")
+            return
+          }
+          const waCheck = normalizePhoneForWaMe(phone)
+          if (!waCheck.ok) {
+            setError(waCheck.error)
+            return
+          }
+          const waPrep = openWaPrepTab()
+          if (!waPrep) {
+            setError(
+              "Pop-up blocked. Allow pop-ups for this site to open WhatsApp, or use Link only and share the invoice manually."
+            )
+            return
+          }
+          await handleSendWhatsApp(waPrep)
+          break
+        }
       }
     } catch (err: any) {
       setError(err.message || "Failed to send invoice")
+    } finally {
       setLoading(false)
     }
   }
@@ -273,10 +354,7 @@ export default function SendInvoiceModal({
               onClick={handleSendInvoice}
               disabled={
                 loading ||
-                checkingWhatsApp ||
-                (sendMethod !== "link" &&
-                  sendMethod !== "whatsapp" &&
-                  !email)
+                (sendMethod !== "link" && sendMethod !== "whatsapp" && !email)
               }
               className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 font-medium shadow-lg transition-all"
             >
@@ -309,7 +387,7 @@ export default function SendInvoiceModal({
             <div className="bg-blue-50 border-l-4 border-blue-400 text-blue-700 px-4 py-3 rounded text-sm">
               <p className="font-medium mb-1">WhatsApp integration is not connected</p>
               <p className="text-xs">
-                A WhatsApp link will open so you can send the invoice manually. To connect for automated sending, go to{" "}
+                We&apos;ll open <strong>wa.me</strong> with the message ready — you tap Send in WhatsApp. Cloud API is optional. To connect for automated sending, go to{" "}
                 <a
                   href="/settings/integrations/whatsapp"
                   className="underline font-medium"
@@ -324,15 +402,15 @@ export default function SendInvoiceModal({
             </div>
           )}
 
-          {/* Info for WhatsApp - No Phone */}
-          {whatsappConnected && sendMethod === "whatsapp" && !invoice.customers?.phone && !invoice.customers?.whatsapp_phone && (
+          {/* Info for WhatsApp - No Phone (wa.me needs a number — Cloud API optional) */}
+          {sendMethod === "whatsapp" && !invoice.customers?.phone && !invoice.customers?.whatsapp_phone && (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 px-4 py-3 rounded text-sm">
               Customer phone number is not available. Please add a phone number to the customer profile.
             </div>
           )}
 
           {/* Info for Both */}
-          {whatsappConnected && sendMethod === "both" && !invoice.customers?.phone && !invoice.customers?.whatsapp_phone && (
+          {sendMethod === "both" && !invoice.customers?.phone && !invoice.customers?.whatsapp_phone && (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 px-4 py-3 rounded text-sm">
               Customer phone number is not available for WhatsApp. Email will still be sent.
             </div>

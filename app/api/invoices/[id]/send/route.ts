@@ -399,12 +399,14 @@ export async function POST(
         replyTo: businessEmail,
       })
       if (!result.success) {
+        const noKey = result.reason === "no_api_key"
+        const userMessage = noKey
+          ? "Email is not configured. Add RESEND_API_KEY to your environment (e.g. Vercel → Environment Variables) and redeploy."
+          : String(result.reason || "Email delivery failed")
         return NextResponse.json(
           {
             success: false,
-            message: result.reason === "no_api_key"
-              ? "Email is not configured. Add RESEND_API_KEY to your environment."
-              : "Email delivery failed",
+            message: userMessage,
             error: result.reason,
           },
           { status: 502 }

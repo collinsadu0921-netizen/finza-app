@@ -31,8 +31,15 @@ export function normalizePhoneForWaMe(
   if (trimmed.startsWith("+")) {
     normalized = trimmed.slice(1).replace(/\D/g, "")
   } else {
-    const withoutLeadingZero = trimmed.replace(/^0/, "")
-    normalized = (defaultCountryCode + withoutLeadingZero).replace(/\D/g, "")
+    const digitsOnly = trimmed.replace(/\D/g, "")
+    // Already international (e.g. 23324… without +) — do not prepend country code again
+    if (digitsOnly.startsWith(defaultCountryCode)) {
+      normalized = digitsOnly
+    } else if (digitsOnly.startsWith("0")) {
+      normalized = (defaultCountryCode + digitsOnly.replace(/^0+/, "")).replace(/\D/g, "")
+    } else {
+      normalized = (defaultCountryCode + digitsOnly).replace(/\D/g, "")
+    }
   }
   if (normalized.length < MIN_DIGITS) {
     return { ok: false, error: "Please enter a valid phone number." }
