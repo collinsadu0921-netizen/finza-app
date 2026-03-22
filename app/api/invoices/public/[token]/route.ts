@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabaseClient"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 
 export async function GET(
   request: NextRequest,
@@ -7,6 +7,9 @@ export async function GET(
 ) {
   try {
     const { token } = await params
+
+    // Use admin client so RLS does not block reads on customers/businesses for public tokens
+    const supabase = createSupabaseAdminClient()
 
     // Get invoice by public token
     const { data: invoice, error: invoiceError } = await supabase
