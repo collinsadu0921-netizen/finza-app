@@ -40,7 +40,7 @@ export async function GET(
         .single(),
       supabase
         .from("invoice_settings")
-        .select("brand_color")
+        .select("brand_color, bank_name, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, quote_terms_and_conditions")
         .eq("business_id", estimate.business_id)
         .maybeSingle(),
     ])

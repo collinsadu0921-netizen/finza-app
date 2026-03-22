@@ -75,6 +75,7 @@ export default function QuotePublicPage() {
   const [items, setItems] = useState<Item[]>([])
   const [business, setBusiness] = useState<Business | null>(null)
   const [brand, setBrand] = useState("#0f172a")
+  const [quoteTerms, setQuoteTerms] = useState<string | null>(null)
 
   // Accept modal
   const [showAccept, setShowAccept] = useState(false)
@@ -103,6 +104,7 @@ export default function QuotePublicPage() {
         setItems(d.items ?? [])
         setBusiness(d.business)
         if (d.settings?.brand_color) setBrand(d.settings.brand_color)
+        if (d.settings?.quote_terms_and_conditions) setQuoteTerms(d.settings.quote_terms_and_conditions)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -362,6 +364,23 @@ export default function QuotePublicPage() {
                 <div className="text-sm text-slate-600 border-t border-slate-100 pt-4">
                   <p className="font-medium text-slate-700 mb-1">Notes</p>
                   <p className="whitespace-pre-line">{estimate.notes}</p>
+                </div>
+              )}
+
+              {/* Terms & Conditions — from invoice settings, auto-applied to every quote */}
+              {quoteTerms && (
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Terms &amp; Conditions
+                  </p>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 whitespace-pre-line leading-relaxed max-h-48 overflow-y-auto">
+                    {quoteTerms}
+                  </div>
+                  {isOpen && (
+                    <p className="text-xs text-slate-400 mt-2 italic">
+                      By accepting this quote, you agree to the terms and conditions above.
+                    </p>
+                  )}
                 </div>
               )}
 

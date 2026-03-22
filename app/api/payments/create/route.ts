@@ -244,10 +244,16 @@ export async function POST(request: NextRequest) {
 
     if (paymentError) {
       console.error("Error creating payment:", paymentError)
+      // Surface the real DB error so it shows in the UI — avoids silent "check all fields" loops
+      const userMessage = paymentError.message?.includes("payments_method_check")
+        ? `Payment method "${method}" is not supported. Please select a different method.`
+        : paymentError.message?.includes("violates check constraint")
+        ? `A field value was rejected by the database: ${paymentError.message}`
+        : paymentError.message || "Payment could not be saved. Please check all fields and try again."
       return NextResponse.json(
-        { 
+        {
           success: false,
-          error: "Payment could not be saved. Please check all fields and try again.",
+          error: userMessage,
           message: paymentError.message
         },
         { status: 500 }

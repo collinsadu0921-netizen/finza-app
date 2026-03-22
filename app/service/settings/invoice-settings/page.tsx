@@ -27,6 +27,7 @@ export default function ServiceInvoiceSettingsPage() {
     momo_provider: "" as "MTN" | "Vodafone" | "AirtelTigo" | "",
     momo_name: "",
     momo_number: "",
+    quote_terms_and_conditions: "",
     due_date_reminders_enabled: false,
     due_date_reminder_days: 3,
   })
@@ -63,6 +64,7 @@ export default function ServiceInvoiceSettingsPage() {
           momo_provider: settings.momo_provider || "",
           momo_name: settings.momo_name || "",
           momo_number: settings.momo_number || "",
+          quote_terms_and_conditions: settings.quote_terms_and_conditions || "",
           due_date_reminders_enabled: settings.due_date_reminders_enabled || false,
           due_date_reminder_days: settings.due_date_reminder_days || 3,
         })
@@ -510,6 +512,21 @@ export default function ServiceInvoiceSettingsPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Quote Terms & Conditions */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Quote Terms &amp; Conditions</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              Automatically shown on every quote you send. Customers must read these before they sign and accept.
+            </p>
+            <textarea
+              value={formData.quote_terms_and_conditions}
+              onChange={(e) => setFormData({ ...formData, quote_terms_and_conditions: e.target.value })}
+              rows={7}
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white resize-y"
+              placeholder={`e.g.\n1. A 50% deposit is required before work begins.\n2. Full payment is due within 7 days of completion.\n3. Quoted prices are valid for 30 days.\n4. Any additional work outside this quote will be quoted separately.`}
+            />
           </div>
 
           <div className="flex gap-4 pt-4">

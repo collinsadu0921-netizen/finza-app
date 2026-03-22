@@ -244,121 +244,117 @@ export function InvoiceDocument({
         </table>
       </div>
 
-      {/* Totals (right) + Payment Details (left) — side by side on one row */}
-      <div className="px-6 py-4 flex flex-col md:flex-row gap-6 border-b border-slate-100">
-
-        {/* Payment Details */}
-        {hasPaymentDetails && (
-          <div className="flex-1">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-              </svg>
-              Payment Details
-            </h3>
-            <div className={`grid gap-3 ${hasBank && hasMomo ? "grid-cols-2" : "grid-cols-1"}`}>
-              {hasBank && (
-                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                      <svg className="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
-                      </svg>
-                    </div>
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Bank Transfer</span>
-                  </div>
-                  <div className="space-y-0.5 text-xs">
-                    {settings?.bank_name && <p className="font-semibold text-slate-800">{settings.bank_name}</p>}
-                    {settings?.bank_account_name && (
-                      <p className="text-slate-500">Acc name: <span className="text-slate-700">{settings.bank_account_name}</span></p>
-                    )}
-                    <p className="font-mono text-slate-800 bg-white border border-slate-200 rounded px-2 py-0.5 inline-block mt-1 tracking-wider">
-                      {settings?.bank_account_number}
-                    </p>
-                  </div>
-                </div>
-              )}
-              {hasMomo && (
-                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <div className="w-5 h-5 rounded-full bg-yellow-100 flex items-center justify-center shrink-0">
-                      <svg className="w-3 h-3 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Mobile Money</span>
-                  </div>
-                  <div className="space-y-0.5 text-xs">
-                    {settings?.momo_provider && <p className="font-semibold text-slate-800">{settings.momo_provider} MoMo</p>}
-                    {settings?.momo_name && (
-                      <p className="text-slate-500">Name: <span className="text-slate-700">{settings.momo_name}</span></p>
-                    )}
-                    <p className="font-mono text-slate-800 bg-white border border-slate-200 rounded px-2 py-0.5 inline-block mt-1 tracking-wider">
-                      {settings?.momo_number}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
+      {/* Totals — right-aligned */}
+      <div className="px-6 py-5 flex justify-end border-b border-slate-100">
+        <div className="w-64 space-y-2.5">
+          <div className="flex justify-between items-center text-sm text-slate-500">
+            <span>Subtotal</span>
+            <span className="font-medium text-slate-700">
+              {formatMoney(Number(invoice.subtotal ?? 0), invoice.currency_symbol)}
+            </span>
           </div>
-        )}
-
-        {/* Totals */}
-        <div className={`${hasPaymentDetails ? "md:w-64 shrink-0" : "w-full flex justify-end"}`}>
-          <div className={`${hasPaymentDetails ? "w-full" : "w-64"} space-y-2`}>
-            <div className="flex justify-between items-center text-xs text-slate-500">
-              <span>Subtotal</span>
-              <span className="font-medium text-slate-700">
-                {formatMoney(Number(invoice.subtotal ?? 0), invoice.currency_symbol)}
-              </span>
-            </div>
-            {showTaxBreakdown && (
-              <>
-                {legacyTaxAmounts.nhil > 0 && (
-                  <div className="flex justify-between items-center text-xs text-slate-400">
-                    <span>NHIL (2.5%)</span>
-                    <span>{formatMoney(legacyTaxAmounts.nhil, invoice.currency_symbol)}</span>
-                  </div>
-                )}
-                {legacyTaxAmounts.getfund > 0 && (
-                  <div className="flex justify-between items-center text-xs text-slate-400">
-                    <span>GETFund (2.5%)</span>
-                    <span>{formatMoney(legacyTaxAmounts.getfund, invoice.currency_symbol)}</span>
-                  </div>
-                )}
-                {legacyTaxAmounts.vat > 0 && (
-                  <div className="flex justify-between items-center text-xs text-slate-400">
-                    <span>VAT (15%)</span>
-                    <span>{formatMoney(legacyTaxAmounts.vat, invoice.currency_symbol)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center text-xs pt-1.5 border-t border-slate-100">
-                  <span className="text-slate-500">Total Tax</span>
-                  <span className="font-medium text-slate-700">{formatMoney(totalTax, invoice.currency_symbol)}</span>
+          {showTaxBreakdown && (
+            <>
+              {legacyTaxAmounts.nhil > 0 && (
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>NHIL (2.5%)</span>
+                  <span>{formatMoney(legacyTaxAmounts.nhil, invoice.currency_symbol)}</span>
                 </div>
-              </>
-            )}
-            <div className="flex justify-between items-center pt-2 border-t-2 border-slate-200">
-              <span className="text-sm font-bold text-slate-900">Total</span>
-              <span className="text-lg font-bold text-slate-900">
-                {formatMoney(Number(invoice.total ?? 0), invoice.currency_symbol)}
-              </span>
-            </div>
+              )}
+              {legacyTaxAmounts.getfund > 0 && (
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>GETFund (2.5%)</span>
+                  <span>{formatMoney(legacyTaxAmounts.getfund, invoice.currency_symbol)}</span>
+                </div>
+              )}
+              {legacyTaxAmounts.vat > 0 && (
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>VAT (15%)</span>
+                  <span>{formatMoney(legacyTaxAmounts.vat, invoice.currency_symbol)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center text-sm pt-2 border-t border-slate-100">
+                <span className="text-slate-500">Total Tax</span>
+                <span className="font-medium text-slate-700">{formatMoney(totalTax, invoice.currency_symbol)}</span>
+              </div>
+            </>
+          )}
+          <div className="flex justify-between items-center pt-2.5 border-t-2 border-slate-800">
+            <span className="text-base font-bold text-slate-900">Total</span>
+            <span className="text-xl font-bold text-slate-900">
+              {formatMoney(Number(invoice.total ?? 0), invoice.currency_symbol)}
+            </span>
           </div>
         </div>
       </div>
 
+      {/* Payment Details — full width below totals */}
+      {hasPaymentDetails && (
+        <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">
+            How to Pay
+          </h3>
+          <div className={`grid gap-4 ${hasBank && hasMomo ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 max-w-xs"}`}>
+            {hasBank && (
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                    <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Bank Transfer</span>
+                </div>
+                <div className="space-y-1 text-sm">
+                  {settings?.bank_name && (
+                    <p className="font-semibold text-slate-800">{settings.bank_name}</p>
+                  )}
+                  {settings?.bank_account_name && (
+                    <p className="text-slate-500 text-xs">Account name: <span className="text-slate-700 font-medium">{settings.bank_account_name}</span></p>
+                  )}
+                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block mt-1.5 text-sm tracking-widest font-bold">
+                    {settings?.bank_account_number}
+                  </p>
+                </div>
+              </div>
+            )}
+            {hasMomo && (
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                    <svg className="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">
+                    {settings?.momo_provider ? `${settings.momo_provider} MoMo` : "Mobile Money"}
+                  </span>
+                </div>
+                <div className="space-y-1 text-sm">
+                  {settings?.momo_name && (
+                    <p className="text-slate-500 text-xs">Name: <span className="text-slate-700 font-medium">{settings.momo_name}</span></p>
+                  )}
+                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block mt-1.5 text-sm tracking-widest font-bold">
+                    {settings?.momo_number}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Notes / footer */}
       {(invoice.notes || invoice.footer_message) && (
-        <div className="px-6 py-3 bg-slate-50/40 border-t border-slate-100">
+        <div className="px-6 py-4 border-t border-slate-100">
           {invoice.notes && (
             <div className="mb-2">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Notes</h3>
-              <p className="text-xs text-slate-600 whitespace-pre-wrap">{invoice.notes}</p>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Notes</h3>
+              <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">{invoice.notes}</p>
             </div>
           )}
           {invoice.footer_message && (
-            <p className="text-xs text-slate-400 text-center italic">{invoice.footer_message}</p>
+            <p className="text-xs text-slate-400 text-center italic mt-2">{invoice.footer_message}</p>
           )}
         </div>
       )}

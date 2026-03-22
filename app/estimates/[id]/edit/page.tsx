@@ -678,7 +678,7 @@ export default function EstimateEditPage() {
               onChange={(e) => setNotes(e.target.value)}
               rows={4}
               className="w-full border border-gray-300 rounded-lg px-4 py-2"
-              placeholder="Additional notes or terms..."
+              placeholder="Additional notes or terms (visible on quote)..."
             />
           </div>
 
