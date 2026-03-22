@@ -8,6 +8,30 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { useToast } from "@/components/ui/ToastProvider"
 
+function getQuarterDateRange(year: number, quarter: number): { start: string; end: string } {
+  const quarterBounds: Record<number, [number, number]> = {
+    1: [1, 3],   // Jan – Mar
+    2: [4, 6],   // Apr – Jun
+    3: [7, 9],   // Jul – Sep
+    4: [10, 12], // Oct – Dec
+  }
+  const [startMonth, endMonth] = quarterBounds[quarter] ?? [1, 12]
+  const start = `${year}-${String(startMonth).padStart(2, "0")}-01`
+  const endDay = new Date(year, endMonth, 0).getDate()
+  const end   = `${year}-${String(endMonth).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`
+  return { start, end }
+}
+
+function parsePeriodLabel(
+  label: string,
+  fallbackYear: number,
+  fallbackQ: number
+): { year: number; quarter: number } {
+  const m = label.trim().match(/^Q([1-4])\s+(\d{4})$/i)
+  if (m) return { quarter: Number(m[1]), year: Number(m[2]) }
+  return { year: fallbackYear, quarter: fallbackQ }
+}
+
 // Ghana CIT rate codes → numeric rate + calculation basis
 const CIT_RATES: Record<string, { rate: number; label: string; basis: "profit" | "turnover" }> = {
   standard_25:   { rate: 0.25, label: "25% – Standard Company",         basis: "profit" },
@@ -113,10 +137,21 @@ export default function CITPage() {
     setPlLoading(true)
     setPlError("")
     try {
-      const yearStart = `${currentYear}-01-01`
-      const yearEnd = `${currentYear}-12-31`
+      let startDate: string
+      let endDate: string
+      if (provType === "quarterly") {
+        const { year, quarter } = parsePeriodLabel(periodLabel, currentYear, currentQ)
+        const range = getQuarterDateRange(year, quarter)
+        startDate = range.start
+        endDate   = range.end
+      } else {
+        // annual / final → full calendar year
+        const { year } = parsePeriodLabel(periodLabel, currentYear, currentQ)
+        startDate = `${year}-01-01`
+        endDate   = `${year}-12-31`
+      }
       const res = await fetch(
-        `/api/accounting/reports/profit-and-loss?business_id=${businessId}&start_date=${yearStart}&end_date=${yearEnd}`
+        `/api/accounting/reports/profit-and-loss?business_id=${businessId}&start_date=${startDate}&end_date=${endDate}`
       )
       if (!res.ok) {
         setPlError("Could not load P&L data. Please try again.")
