@@ -450,7 +450,7 @@ export default function EditExpensePage() {
                     <button
                       type="button"
                       onClick={() => setShowCategoryModal(true)}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                      className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -552,7 +552,7 @@ export default function EditExpensePage() {
                         <button
                           type="button"
                           onClick={() => setRemoveReceipt(false)}
-                          className="ml-4 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 text-sm font-medium"
+                          className="ml-4 text-slate-500 hover:text-slate-800 text-sm font-medium"
                         >
                           Keep
                         </button>
@@ -579,7 +579,7 @@ export default function EditExpensePage() {
                         href={existingReceiptPath} 
                         target="_blank" 
                         rel="noopener noreferrer" 
-                        className="inline-flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                        className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -626,8 +626,8 @@ export default function EditExpensePage() {
                     onClick={() => setApplyTaxes(!applyTaxes)}
                     className={`
                       relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
-                      transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-                      ${applyTaxes ? 'bg-blue-600' : 'bg-gray-200'}
+                      transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2
+                      ${applyTaxes ? 'bg-slate-800' : 'bg-slate-200'}
                     `}
                   >
                     <span
@@ -644,40 +644,40 @@ export default function EditExpensePage() {
 
             {/* Tax Breakdown */}
             {applyTaxes && totalIncludingTaxes > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Tax Breakdown</h3>
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Tax Breakdown</h3>
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">Subtotal (before tax):</span>
-                    <span className="font-semibold text-gray-900 dark:text-white">₵{baseAmount.toFixed(2)}</span>
+                    <span className="text-slate-500">Subtotal (before tax):</span>
+                    <span className="font-semibold text-slate-800 tabular-nums">₵{baseAmount.toFixed(2)}</span>
                   </div>
-                  <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">NHIL (2.5%):</span>
-                      <span className="text-gray-700 dark:text-gray-300">₵{taxBreakdown.nhil.toFixed(2)}</span>
+                      <span className="text-slate-500">NHIL (2.5%):</span>
+                      <span className="text-slate-700 tabular-nums">₵{taxBreakdown.nhil.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">GETFund (2.5%):</span>
-                      <span className="text-gray-700 dark:text-gray-300">₵{taxBreakdown.getfund.toFixed(2)}</span>
+                      <span className="text-slate-500">GETFund (2.5%):</span>
+                      <span className="text-slate-700 tabular-nums">₵{taxBreakdown.getfund.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">VAT (15%):</span>
-                      <span className="text-gray-700 dark:text-gray-300">₵{taxBreakdown.vat.toFixed(2)}</span>
+                      <span className="text-slate-500">VAT (15%):</span>
+                      <span className="text-slate-700 tabular-nums">₵{taxBreakdown.vat.toFixed(2)}</span>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pt-3 border-t-2 border-gray-300 dark:border-gray-600">
-                    <span className="text-gray-900 dark:text-white font-bold text-lg">Total:</span>
-                    <span className="font-bold text-blue-600 dark:text-blue-400 text-xl">₵{total.toFixed(2)}</span>
+                  <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200">
+                    <span className="text-slate-900 font-bold text-lg">Total:</span>
+                    <span className="font-bold text-slate-900 text-xl tabular-nums">₵{total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
             )}
 
             {!applyTaxes && totalIncludingTaxes > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-900 dark:text-white font-bold text-lg">Total:</span>
-                  <span className="font-bold text-blue-600 dark:text-blue-400 text-xl">₵{totalIncludingTaxes.toFixed(2)}</span>
+                  <span className="text-slate-900 font-bold text-lg">Total:</span>
+                  <span className="font-bold text-slate-900 text-xl tabular-nums">₵{totalIncludingTaxes.toFixed(2)}</span>
                 </div>
               </div>
             )}

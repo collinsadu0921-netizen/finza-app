@@ -543,9 +543,9 @@ export default function CreateRecurringInvoicePage() {
                         </div>
                       </>
                     )}
-                    <div className="flex justify-between items-center pt-3 border-t-2 border-gray-300 dark:border-gray-500">
-                      <span className="text-gray-900 dark:text-white font-bold text-lg">Total:</span>
-                      <span className="font-bold text-blue-600 dark:text-blue-400 text-xl">₵{displayTotal.toFixed(2)}</span>
+                    <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200">
+                      <span className="text-slate-900 font-bold text-lg">Total:</span>
+                      <span className="font-bold text-slate-900 text-xl tabular-nums">₵{displayTotal.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>

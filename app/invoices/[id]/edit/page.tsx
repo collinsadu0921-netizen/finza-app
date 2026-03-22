@@ -687,7 +687,7 @@ export default function InvoiceEditPage() {
                   <button
                     type="button"
                     onClick={() => setShowCustomerModal(true)}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                    className="text-xs text-slate-500 hover:text-slate-800 font-medium flex items-center gap-1 transition-colors"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1086,9 +1086,9 @@ export default function InvoiceEditPage() {
                   )
                 }
               })()}
-              <div className="flex justify-between items-center pt-3 border-t-2 border-gray-300">
-                <span className="text-gray-900 font-bold text-lg">Total:</span>
-                <span className="font-bold text-blue-600 text-xl">{currency}{total.toFixed(2)}</span>
+              <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200">
+                <span className="text-slate-900 font-bold text-lg">Total:</span>
+                <span className="font-bold text-slate-900 text-xl tabular-nums">{currency}{total.toFixed(2)}</span>
               </div>
             </div>
           </div>
