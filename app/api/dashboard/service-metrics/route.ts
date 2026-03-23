@@ -124,10 +124,10 @@ export async function GET(request: NextRequest) {
     // ── Cash Collected: sum of debits to cash accounts in the period ──────────
     // This represents actual cash received (payments), distinct from accrual revenue.
     let cashCollected = 0
-    const periodStart = (pnl.period as Record<string, unknown>)?.period_start as string | undefined
-    const periodEnd   = (pnl.period as Record<string, unknown>)?.period_end   as string | undefined
+    const pnlPeriodStart = (pnl.period as Record<string, unknown>)?.period_start as string | undefined
+    const pnlPeriodEnd = (pnl.period as Record<string, unknown>)?.period_end as string | undefined
 
-    if (periodStart && periodEnd) {
+    if (pnlPeriodStart && pnlPeriodEnd) {
       // Step 1: find the IDs of cash accounts for this business
       const { data: cashAccounts } = await supabase
         .from("accounts")
@@ -143,8 +143,8 @@ export async function GET(request: NextRequest) {
           .from("journal_entry_lines")
           .select("debit, journal_entries!inner(date, business_id)")
           .in("account_id", cashAccountIds)
-          .gte("journal_entries.date", periodStart)
-          .lte("journal_entries.date", periodEnd)
+          .gte("journal_entries.date", pnlPeriodStart)
+          .lte("journal_entries.date", pnlPeriodEnd)
           .eq("journal_entries.business_id", businessId)
 
         cashCollected = Math.round(
