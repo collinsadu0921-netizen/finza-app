@@ -27,22 +27,6 @@ export async function GET(request: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // Also get P&L summary for the current year to help compute CIT
-    const currentYear = new Date().getFullYear()
-    const yearStart = `${currentYear}-01-01`
-    const yearEnd = `${currentYear}-12-31`
-
-    // Sum income accounts (4xxx)
-    const { data: incomeLines } = await supabase
-      .from("journal_entry_lines")
-      .select("credit, debit, journal_entries!inner(business_id, date)")
-      .eq("journal_entries.business_id", businessId)
-      .gte("journal_entries.date", yearStart)
-      .lte("journal_entries.date", yearEnd)
-
-    // We'll compute this on the frontend via the P&L report instead
-    // Just return provisions and let the CIT page call P&L API
-
     return NextResponse.json({ provisions: provisions ?? [] })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -162,7 +146,20 @@ export async function POST(request: NextRequest) {
 
     // Auto-post to ledger if requested
     if (auto_post && citAmount > 0) {
-      await supabase.rpc("post_cit_provision_to_ledger", { p_provision_id: provision.id })
+      const { error: autoPostErr } = await supabase.rpc(
+        "post_cit_provision_to_ledger",
+        { p_provision_id: provision.id }
+      )
+      if (autoPostErr) {
+        console.error("CIT auto_post failed:", autoPostErr)
+        // Provision was created as draft; return it with a warning so the
+        // client can surface the failure rather than silently leaving it in draft.
+        return NextResponse.json({
+          success: true,
+          provision,
+          warning: `Provision created but auto-post failed: ${autoPostErr.message}`,
+        })
+      }
     }
 
     await createAuditLog({

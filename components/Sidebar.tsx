@@ -235,13 +235,15 @@ export default function Sidebar() {
           { label: "Bank Reconciliation", route: bankReconciliationRoute, minTier: "business" },
           { label: "Accounting Periods", route: periodsRoute, minTier: "business" },
           ...(isAccountantFirmUser === true
-            ? [
+            ? ([
                 { label: "Health", route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
                 { label: "Control Tower", route: buildAccountingRoute("/accounting/control-tower") },
                 { label: "Forensic Runs", route: "/admin/accounting/forensic-runs" },
                 { label: "Tenants", route: "/admin/accounting/tenants" },
-              ]
-            : [{ label: "Loans & Equity", route: "/service/accounting/loan", minTier: "business" }]),
+              ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)
+            : ([
+                { label: "Loans & Equity", route: "/service/accounting/loan", minTier: "business" as const },
+              ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)),
         ]
         sections.push({
           title: "ACCOUNTING",
