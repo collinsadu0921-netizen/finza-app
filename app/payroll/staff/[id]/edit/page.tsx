@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 
 type Staff = {
   id: string
@@ -131,29 +130,24 @@ export default function EditStaffPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p>Loading...</p>
+      </div>
     )
   }
 
   if (!staff) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p className="text-red-500">Staff not found</p>
-          <button onClick={() => router.back()} className="mt-4 text-blue-600 hover:underline">
-            ← Back
-          </button>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p className="text-red-500">Staff not found</p>
+        <button onClick={() => router.back()} className="mt-4 text-blue-600 hover:underline">
+          ← Back
+        </button>
+      </div>
     )
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="mb-6">
@@ -366,7 +360,6 @@ export default function EditStaffPage() {
           </form>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
 

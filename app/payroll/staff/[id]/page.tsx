@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
@@ -237,29 +236,25 @@ export default function StaffViewPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p>Loading...</p>
+      </div>
     )
   }
 
   if (!staff) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p className="text-red-500">{error || "Staff not found"}</p>
-          <button onClick={() => router.push("/settings/staff")} className="mt-4 text-blue-600 hover:underline">
-            ← Back to Staff List
-          </button>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p className="text-red-500">{error || "Staff not found"}</p>
+        <button onClick={() => router.push("/settings/staff")} className="mt-4 text-blue-600 hover:underline">
+          ← Back to Staff List
+        </button>
+      </div>
     )
   }
 
   return (
-    <ProtectedLayout>
+    <>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-7xl mx-auto">
           <div className="mb-6">
@@ -617,7 +612,7 @@ export default function StaffViewPage() {
           </div>
         </div>
       )}
-    </ProtectedLayout>
+    </>
   )
 }
 

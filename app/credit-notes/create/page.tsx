@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems, deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { normalizeCountry } from "@/lib/payments/eligibility"
@@ -326,18 +325,15 @@ function CreateCreditNoteContent() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p>Loading...</p>
+      </div>
     )
   }
 
   if (showInvoicePicker) {
     return (
-      <ProtectedLayout>
-        <div className="p-6 max-w-2xl mx-auto">
+      <div className="p-6 max-w-2xl mx-auto">
           <h1 className="text-2xl font-bold mb-2">Create Credit Note</h1>
           <p className="text-gray-600 dark:text-gray-400 mb-6">
             Select an invoice to create a credit note against. Credit notes can only be created for sent, paid, or overdue invoices.
@@ -391,24 +387,20 @@ function CreateCreditNoteContent() {
             ← Back to Credit Notes
           </button>
         </div>
-      </ProtectedLayout>
     )
   }
 
   if (error && !invoice) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-            {error}
-          </div>
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
         </div>
-      </ProtectedLayout>
+      </div>
     )
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
@@ -674,7 +666,6 @@ function CreateCreditNoteContent() {
           </form>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
 

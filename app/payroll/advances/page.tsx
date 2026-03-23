@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
 
 type Advance = {
@@ -131,17 +130,14 @@ export default function SalaryAdvancesPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-8 text-center">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-500">Loading…</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-8 text-center">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-gray-500">Loading…</p>
+      </div>
     )
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-5xl mx-auto space-y-8">
 
@@ -385,6 +381,5 @@ export default function SalaryAdvancesPage() {
 
         </div>
       </div>
-    </ProtectedLayout>
   )
 }

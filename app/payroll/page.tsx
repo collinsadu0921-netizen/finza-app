@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
-
 type PayrollRun = {
   id: string
   payroll_month: string
@@ -42,11 +40,9 @@ export default function PayrollPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p>Loading...</p>
+      </div>
     )
   }
 
@@ -56,7 +52,6 @@ export default function PayrollPage() {
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-6">
@@ -152,7 +147,6 @@ export default function PayrollPage() {
           </div>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
 

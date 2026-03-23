@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getTaxLinesForDisplay, sumTaxLines } from "@/lib/taxes/readTaxLines"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
@@ -240,46 +239,40 @@ export default function CreditNoteViewPage() {
 
   if (loading && !creditNote) {
     return (
-      <ProtectedLayout>
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-          <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-        </div>
-      </ProtectedLayout>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
     )
   }
 
   if (error && !creditNote) {
     return (
-      <ProtectedLayout>
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-          <div className="space-y-4 max-w-md w-full">
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
-              {error || "Credit note not found"}
-            </div>
-            <button onClick={() => router.back()} className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-sm font-medium">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
-            </button>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="space-y-4 max-w-md w-full">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+            {error || "Credit note not found"}
           </div>
+          <button onClick={() => router.back()} className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-sm font-medium">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
         </div>
-      </ProtectedLayout>
+      </div>
     )
   }
 
   if (!creditNote) {
     return (
-      <ProtectedLayout>
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm max-w-md w-full">
-            Credit note not found
-          </div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm max-w-md w-full">
+          Credit note not found
         </div>
-      </ProtectedLayout>
+      </div>
     )
   }
 
@@ -297,7 +290,6 @@ export default function CreditNoteViewPage() {
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-slate-50">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
@@ -527,6 +519,5 @@ export default function CreditNoteViewPage() {
 
         </div>
       </div>
-    </ProtectedLayout>
   )
 }

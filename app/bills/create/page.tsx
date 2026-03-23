@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxes, calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
@@ -523,7 +522,6 @@ export default function CreateBillPage() {
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-slate-50">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
@@ -1511,6 +1509,5 @@ export default function CreateBillPage() {
           </form>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }

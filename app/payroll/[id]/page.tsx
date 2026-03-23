@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
 
 type PayrollEntry = {
@@ -238,25 +237,21 @@ export default function PayrollRunViewPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-8 text-center">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-500">Loading payroll run…</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-8 text-center">
+        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-gray-500">Loading payroll run…</p>
+      </div>
     )
   }
 
   if (!payrollRun) {
     return (
-      <ProtectedLayout>
-        <div className="p-6 text-center text-gray-500">Payroll run not found.</div>
-      </ProtectedLayout>
+      <div className="p-6 text-center text-gray-500">Payroll run not found.</div>
     )
   }
 
   return (
-    <ProtectedLayout>
+    <>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-7xl mx-auto space-y-6">
 
@@ -531,6 +526,6 @@ export default function PayrollRunViewPage() {
           </div>
         </div>
       )}
-    </ProtectedLayout>
+    </>
   )
 }

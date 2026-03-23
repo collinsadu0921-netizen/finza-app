@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
 
 export default function PayrollRunPage() {
@@ -42,7 +41,6 @@ export default function PayrollRunPage() {
   }
 
   return (
-    <ProtectedLayout>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="mb-6">
@@ -92,8 +90,8 @@ export default function PayrollRunPage() {
           </form>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
+
 
 
