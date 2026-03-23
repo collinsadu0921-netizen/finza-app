@@ -74,19 +74,20 @@ export function formatMoney(
     return missingPlaceholder
   }
 
-  // Format number with fixed locale for deterministic output across environments
-  // Using 'en-US' ensures consistent formatting (1,234.56) regardless of system locale
+  // Separate sign from magnitude so the symbol always sits between the
+  // minus and the digits: -₵112,368.00 rather than ₵-112,368.00
+  const isNegative = amount < 0
   const formattedNumber = new Intl.NumberFormat('en-US', {
     minimumFractionDigits,
     maximumFractionDigits,
     useGrouping,
-  }).format(amount)
+  }).format(Math.abs(amount))
 
   // Get currency symbol
   const symbol = getCurrencySymbol(currencyCode)
 
   // Return formatted string with symbol
-  return `${symbol}${formattedNumber}`
+  return isNegative ? `-${symbol}${formattedNumber}` : `${symbol}${formattedNumber}`
 }
 
 /**

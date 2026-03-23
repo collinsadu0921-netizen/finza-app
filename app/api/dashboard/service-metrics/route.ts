@@ -12,7 +12,7 @@ import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
 
-const CASH_CODES = ["1000", "1010", "1020", "1030"]
+const CASH_CODES = ["1000", "1010", "1020", "1030"] as const
 /** Accounts Receivable control account. Use 1100 (service/standard); 1200 is Inventory in retail. */
 const AR_CODE = "1100"
 
@@ -121,12 +121,48 @@ export async function GET(request: NextRequest) {
     const ar = extractAR(bs)
     const ap = extractAP(bs)
 
+    // ── Cash Collected: sum of debits to cash accounts in the period ──────────
+    // This represents actual cash received (payments), distinct from accrual revenue.
+    let cashCollected = 0
+    const periodStart = (pnl.period as Record<string, unknown>)?.period_start as string | undefined
+    const periodEnd   = (pnl.period as Record<string, unknown>)?.period_end   as string | undefined
+
+    if (periodStart && periodEnd) {
+      // Step 1: find the IDs of cash accounts for this business
+      const { data: cashAccounts } = await supabase
+        .from("accounts")
+        .select("id")
+        .eq("business_id", businessId)
+        .in("code", [...CASH_CODES])
+
+      const cashAccountIds = (cashAccounts ?? []).map((a: { id: string }) => a.id)
+
+      if (cashAccountIds.length > 0) {
+        // Step 2: sum debits to those accounts within the period
+        const { data: cashLines } = await supabase
+          .from("journal_entry_lines")
+          .select("debit, journal_entries!inner(date, business_id)")
+          .in("account_id", cashAccountIds)
+          .gte("journal_entries.date", periodStart)
+          .lte("journal_entries.date", periodEnd)
+          .eq("journal_entries.business_id", businessId)
+
+        cashCollected = Math.round(
+          (cashLines ?? []).reduce(
+            (s: number, l: Record<string, unknown>) => s + (Number(l.debit) || 0),
+            0
+          ) * 100
+        ) / 100
+      }
+    }
+
     const payload = {
       period: pnl.period,
       currency: pnl.currency,
       revenue,
       expenses,
       netProfit,
+      cashCollected,
       accountsReceivable: ar,
       accountsPayable: ap,
       cashBalance,
@@ -134,6 +170,7 @@ export async function GET(request: NextRequest) {
         revenue: number
         expenses: number
         netProfit: number
+        cashCollected: number
         accountsReceivable: number
         accountsPayable: number
         cashBalance: number
@@ -171,6 +208,7 @@ export async function GET(request: NextRequest) {
           revenue: revPrev,
           expenses: expPrev,
           netProfit: pnlPrev.totals?.net_profit ?? revPrev - expPrev,
+          cashCollected: 0, // previous-period cash collected not needed for trend arrows
           accountsReceivable: extractAR(bsPrev),
           accountsPayable: extractAP(bsPrev),
           cashBalance: extractCash(bsPrev),

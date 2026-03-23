@@ -11,12 +11,12 @@ export type MetricCardProps = {
   currencyCode?: string
   variant?: "default" | "positive" | "negative"
   sparklineData?: number[]
-  /** Override sparkline bar color. Defaults to gray. */
+  /** Override sparkline bar color. */
   sparklineColor?: string
   static?: boolean
   /** "currency" (default), "percent" (shows e.g. 15.5%), or "count" (plain integer). */
   valueFormat?: "currency" | "percent" | "count"
-  /** Small label shown below the value, e.g. "overdue" */
+  /** Small label shown below the value */
   subtitle?: string
 }
 
@@ -25,10 +25,10 @@ export default function MetricCard({
   value,
   previousValue,
   reportHref,
-  currencyCode = "USD",
+  currencyCode = "GHS",
   variant = "default",
   sparklineData,
-  sparklineColor = "#9ca3af",
+  sparklineColor = "#94a3b8",
   static: isStatic = false,
   valueFormat = "currency",
   subtitle,
@@ -49,31 +49,39 @@ export default function MetricCard({
           : String(Math.round(value))
         : formatMoney(value ?? 0, currencyCode)
 
+  // Derive variant from value when not explicitly set
+  const resolvedVariant =
+    variant !== "default"
+      ? variant
+      : valueFormat === "currency" && value != null && value < 0
+        ? "negative"
+        : "default"
+
   const content = (
     <>
-      <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
         {title}
       </p>
       <p
         className={`mt-1.5 text-xl font-semibold tabular-nums tracking-tight ${
-          variant === "positive"
-            ? "text-emerald-600 dark:text-emerald-400"
-            : variant === "negative"
-              ? "text-red-600 dark:text-red-400"
-              : "text-gray-900 dark:text-white"
+          resolvedVariant === "positive"
+            ? "text-emerald-600"
+            : resolvedVariant === "negative"
+              ? "text-red-500"
+              : "text-slate-900"
         }`}
       >
         {valueDisplay}
       </p>
       {subtitle && (
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>
+        <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p>
       )}
       {(pct !== null || (sparklineData && sparklineData.length > 0)) && (
         <div className="mt-2 flex items-center justify-between gap-2">
           {pct !== null && (
             <span
               className={`text-xs font-medium ${
-                pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
+                pct >= 0 ? "text-emerald-600" : "text-red-500"
               }`}
             >
               {pct >= 0 ? "+" : ""}
@@ -106,14 +114,14 @@ export default function MetricCard({
   )
 
   const baseClass =
-    "rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-colors dark:border-gray-700 dark:bg-gray-800/80"
+    "rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors"
 
   if (isStatic || !reportHref) {
     return <div className={baseClass}>{content}</div>
   }
 
   return (
-    <Link href={reportHref} className={`block ${baseClass} hover:border-gray-300 dark:hover:border-gray-600`}>
+    <Link href={reportHref} className={`block ${baseClass} hover:border-slate-300 hover:shadow`}>
       {content}
     </Link>
   )

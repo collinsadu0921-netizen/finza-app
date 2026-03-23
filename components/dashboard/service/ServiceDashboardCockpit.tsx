@@ -19,6 +19,7 @@ type Metrics = {
   revenue: number
   expenses: number
   netProfit: number
+  cashCollected: number
   accountsReceivable: number
   accountsPayable: number
   cashBalance: number
@@ -26,6 +27,7 @@ type Metrics = {
     revenue: number
     expenses: number
     netProfit: number
+    cashCollected: number
     accountsReceivable: number
     accountsPayable: number
     cashBalance: number
@@ -241,6 +243,11 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
       ? Math.round((metrics.netProfit / metrics.revenue) * 1000) / 10
       : null
 
+  const collectionRatePct =
+    metrics && metrics.revenue > 0
+      ? Math.round((metrics.cashCollected / metrics.revenue) * 1000) / 10
+      : null
+
   if (loading && !metrics) {
     return <ServiceDashboardSkeleton />
   }
@@ -282,6 +289,7 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
           sparklineColor="#10b981"
           reportHref={routes.revenue}
           currencyCode={currencyCode}
+          subtitle="billed this period"
           variant="default"
         />
         <MetricCard
@@ -302,6 +310,7 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
           sparklineColor={(metrics?.netProfit ?? 0) >= 0 ? "#3b82f6" : "#f97316"}
           reportHref={routes.netProfit}
           currencyCode={currencyCode}
+          subtitle={profitMarginPct != null ? `${profitMarginPct}% margin` : undefined}
           variant={(metrics?.netProfit ?? 0) >= 0 ? "positive" : "negative"}
         />
         <MetricCard
@@ -311,6 +320,8 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
           sparklineColor="#6366f1"
           reportHref={routes.cashBalance}
           currencyCode={currencyCode}
+          subtitle="bank account balance"
+          variant={(metrics?.cashBalance ?? 0) < 0 ? "negative" : "default"}
         />
       </div>
 
@@ -322,6 +333,7 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
           previousValue={prev?.accountsReceivable}
           reportHref={routes.accountsReceivable}
           currencyCode={currencyCode}
+          subtitle="outstanding from clients"
         />
         <MetricCard
           title="Accounts Payable"
@@ -329,13 +341,16 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
           previousValue={prev?.accountsPayable}
           reportHref={routes.accountsPayable}
           currencyCode={currencyCode}
+          subtitle="owed to suppliers"
         />
         <MetricCard
-          title="Profit Margin"
-          value={profitMarginPct}
+          title="Cash Collected"
+          value={metrics?.cashCollected ?? 0}
+          previousValue={prev?.cashCollected}
           currencyCode={currencyCode}
-          valueFormat="percent"
-          static
+          subtitle={collectionRatePct != null ? `${collectionRatePct}% of billed` : "payments received"}
+          reportHref={routes.cashBalance}
+          variant="default"
         />
         <MetricCard
           title="Overdue Invoices"

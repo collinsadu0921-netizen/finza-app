@@ -50,6 +50,10 @@ export default function RecentActivityFeed({
             {list.map((item) => {
               const dot = TYPE_DOT[item.type] ?? "bg-slate-400"
               const displayCurrency = item.currencyCode ?? currencyCode
+              // Show a currency badge when the item's currency differs from the
+              // business home currency — e.g. a USD invoice in a GHS business
+              const isFx = item.currencyCode && item.currencyCode !== currencyCode
+
               const row = (
                 <div className="flex items-center gap-3 px-4 py-3 text-sm">
                   {/* type dot */}
@@ -58,10 +62,17 @@ export default function RecentActivityFeed({
                   <span className="min-w-0 flex-1 truncate text-slate-700">
                     {item.description}
                   </span>
-                  {/* amount */}
+                  {/* amount + optional FX badge */}
                   {item.amount != null && (
-                    <span className="shrink-0 tabular-nums font-medium text-slate-900">
-                      {formatMoney(item.amount, displayCurrency)}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {isFx && (
+                        <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                          {item.currencyCode}
+                        </span>
+                      )}
+                      <span className="tabular-nums font-medium text-slate-900">
+                        {formatMoney(item.amount, displayCurrency)}
+                      </span>
                     </span>
                   )}
                   {/* relative time */}
