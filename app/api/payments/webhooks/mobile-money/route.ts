@@ -8,6 +8,9 @@
  *
  * Ledger: Payment record is created on initiate; trigger posts DR Cash CR AR.
  * Webhook only updates payment notes and invoice status (recalculation).
+ *
+ * Paystack + metadata.finza_purpose=service_subscription: updates workspace
+ * subscription tier and subscription_grace_until (no payments row).
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -17,7 +20,10 @@ import {
   settlePaymentFromWebhook,
   type MobileMoneyProvider,
 } from "@/lib/payments/mobileMoneyService"
-import { applyPaystackSubscriptionWebhook } from "@/lib/serviceWorkspace/applyPaystackSubscriptionWebhook"
+import {
+  applyPaystackSubscriptionWebhook,
+  isPaystackServiceSubscriptionMetadata,
+} from "@/lib/serviceWorkspace/applyPaystackSubscriptionWebhook"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -70,7 +76,12 @@ export async function POST(request: NextRequest) {
     JSON.parse(rawBody || "{}").externalId ??
     JSON.parse(rawBody || "{}").external_id
 
-  if (provider === "paystack" && validation.metadata && reference) {
+  if (
+    provider === "paystack" &&
+    reference &&
+    validation.metadata &&
+    isPaystackServiceSubscriptionMetadata(validation.metadata as Record<string, unknown>)
+  ) {
     const subStatus =
       validation.status === "success"
         ? "success"

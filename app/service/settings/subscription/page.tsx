@@ -104,12 +104,233 @@ function formatGHS(amount: number): string {
   return `GHS ${amount.toLocaleString()}`
 }
 
-export default function SubscriptionPage() {
-  const { tier, loading } = useServiceSubscription()
+function SubscriptionCallbackHandler() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const toast = useToast()
+
+  useEffect(() => {
+    if (searchParams.get("sub_callback") !== "1") return
+    const ref = searchParams.get("reference") || searchParams.get("trxref")
+    if (!ref) {
+      toast.showToast("Missing payment reference from Paystack.", "error")
+      router.replace("/service/settings/subscription")
+      return
+    }
+    let alive = true
+    ;(async () => {
+      for (let i = 0; i < 15; i++) {
+        const r = await fetch(
+          `/api/payments/paystack/verify?reference=${encodeURIComponent(ref)}`,
+          { cache: "no-store" }
+        )
+        const j = await r.json()
+        if (!alive) return
+        if (j.status === "success") {
+          toast.showToast("Payment confirmed. Your plan will update in a moment.", "success")
+          router.replace("/service/settings/subscription")
+          router.refresh()
+          return
+        }
+        if (j.status === "failed" || j.status === "abandoned") {
+          toast.showToast("Payment was not completed.", "error")
+          router.replace("/service/settings/subscription")
+          return
+        }
+        await new Promise((r) => setTimeout(r, 1500))
+      }
+      toast.showToast("Still processing — refresh this page shortly.", "info")
+      router.replace("/service/settings/subscription")
+    })()
+    return () => {
+      alive = false
+    }
+  }, [searchParams, router, toast])
+
+  return null
+}
+
+function SubscriptionPaystackActions({
+  businessId,
+  targetTier,
+  cycle,
+  disabled,
+}: {
+  businessId: string | null
+  targetTier: ServiceSubscriptionTier
+  cycle: BillingCycle
+  disabled: boolean
+}) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [showMomo, setShowMomo] = useState(false)
+  const [phone, setPhone] = useState("")
+  const [momoProvider, setMomoProvider] = useState<"mtn" | "vodafone" | "airteltigo">("mtn")
+
+  const startCard = async () => {
+    if (!businessId || disabled) return
+    setBusy(true)
+    try {
+      const res = await fetch("/api/payments/paystack/subscription/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: businessId,
+          target_tier: targetTier,
+          billing_cycle: cycle,
+          channel: "card",
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Could not start checkout")
+      if (data.authorization_url) {
+        window.location.href = data.authorization_url as string
+        return
+      }
+      throw new Error("No checkout URL returned")
+    } catch (e: unknown) {
+      toast.showToast(e instanceof Error ? e.message : "Checkout failed", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startMomo = async () => {
+    if (!businessId || disabled) return
+    if (!phone.trim()) {
+      toast.showToast("Enter your Mobile Money number", "error")
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch("/api/payments/paystack/subscription/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: businessId,
+          target_tier: targetTier,
+          billing_cycle: cycle,
+          channel: "momo",
+          phone: phone.trim(),
+          momo_provider: momoProvider,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Could not start MoMo charge")
+
+      let reference = data.reference as string
+
+      if (data.otp_required) {
+        const otp =
+          typeof window !== "undefined"
+            ? window.prompt("Enter the OTP sent to your phone (Vodafone Cash)")
+            : null
+        if (!otp?.trim()) {
+          toast.showToast("OTP is required to complete payment", "error")
+          return
+        }
+        const otpRes = await fetch("/api/payments/paystack/submit-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ otp: otp.trim(), reference }),
+        })
+        const otpJson = await otpRes.json()
+        if (!otpRes.ok || !otpJson.success) {
+          throw new Error(otpJson.error || "OTP verification failed")
+        }
+        reference = otpJson.reference || reference
+      }
+
+      toast.showToast(
+        "Approve the payment on your phone. Your plan updates when Paystack confirms.",
+        "success"
+      )
+      setShowMomo(false)
+    } catch (e: unknown) {
+      toast.showToast(e instanceof Error ? e.message : "MoMo payment failed", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <button
+        type="button"
+        disabled={disabled || busy || !businessId}
+        onClick={() => void startCard()}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Pay with card (Paystack)
+      </button>
+      {!showMomo ? (
+        <button
+          type="button"
+          disabled={disabled || busy || !businessId}
+          onClick={() => setShowMomo(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white py-2 text-center text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Pay with Mobile Money
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+          <label className="block text-xs font-medium text-slate-600">MoMo number</label>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="e.g. 0241234567"
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+          />
+          <label className="block text-xs font-medium text-slate-600">Network</label>
+          <select
+            value={momoProvider}
+            onChange={(e) =>
+              setMomoProvider(e.target.value as "mtn" | "vodafone" | "airteltigo")
+            }
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+          >
+            <option value="mtn">MTN</option>
+            <option value="vodafone">Vodafone</option>
+            <option value="airteltigo">AirtelTigo</option>
+          </select>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void startMomo()}
+              className="flex-1 rounded-lg bg-slate-800 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            >
+              {busy ? "…" : "Charge MoMo"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setShowMomo(false)}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      <a
+        href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[targetTier])}%20—%20help`}
+        className="block text-center text-[11px] text-slate-400 underline hover:text-slate-600"
+      >
+        Need help or invoice billing? Email us
+      </a>
+    </div>
+  )
+}
+
+function SubscriptionPageInner() {
+  const { tier, loading, businessId } = useServiceSubscription()
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <SubscriptionCallbackHandler />
       <div className="mx-auto max-w-5xl px-4 py-10">
 
         {/* Header */}
@@ -293,13 +514,26 @@ export default function SubscriptionPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          To change your plan, contact us at{" "}
+          Questions about billing?{" "}
           <a href="mailto:hello@finza.app" className="underline hover:text-slate-600">
             hello@finza.app
           </a>
-          .
         </p>
       </div>
     </div>
+  )
+}
+
+export default function SubscriptionPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+          Loading…
+        </div>
+      }
+    >
+      <SubscriptionPageInner />
+    </Suspense>
   )
 }
