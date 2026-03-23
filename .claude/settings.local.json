@@ -130,7 +130,18 @@
       "Bash(grep -n \"text-blue-600\" /c/projects/finza-web/finza-web/app/expenses/[id]/edit/page.tsx -B 3 -A 1)",
       "Bash(grep -r \"RecentActivityFeed\\\\|recent.activity\\\\|recentActivity\" /c/projects/finza-web/finza-web/app --include=*.tsx --include=*.ts)",
       "Bash(grep -r \"canAccessTier\\\\|tierIncludes\\\\|minTier\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.next)",
-      "Bash(grep -r \"Essentials\\\\|essentials\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.next)"
+      "Bash(grep -r \"Essentials\\\\|essentials\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.next)",
+      "Bash(find /c/projects/finza-web/finza-web -type f \\\\\\(-name *report* -o -name *statement* \\\\\\) -not -path */node_modules/*)",
+      "Bash(find /c/projects/finza-web/finza-web -type f -path *afs* -name *.ts -o -path *afs* -name *.tsx)",
+      "Bash(find /c/projects/finza-web/finza-web -type f -path *lib/accounting* -name *.ts)",
+      "Bash(grep -r \"entity_type\\\\|sole proprietor\\\\|limited.company\" /c/projects/finza-web/finza-web/app --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"company_type\\\\|sole.proprietor\\\\|business_type\" /c/projects/finza-web/finza-web/app --include=*.ts --include=*.tsx)",
+      "Bash(find /c/projects/finza-web/finza-web -name *.sql -o -name *schema*)",
+      "Bash(find /c/projects/finza-web/finza-web/app/api/accounting/reports -type f -name *.ts)",
+      "Bash(grep -n \"business_type\\\\|entity_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -l \"CREATE TABLE.*afs_runs\\\\|CREATE TABLE.*afs_documents\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -n \"CREATE TABLE.*afs\\\\|document_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -r \"business_type\\\\|entity_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
     ]
   }
 }

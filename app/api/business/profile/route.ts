@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
         start_date: (business as any).start_date || null,
         cit_rate_code: (business as any).cit_rate_code || "standard_25",
         vat_scheme: (business as any).vat_scheme || "standard",
+        business_type: (business as any).business_type || "limited_company",
         created_at: business.created_at || null,
       }
     })
@@ -115,6 +116,7 @@ export async function PUT(request: NextRequest) {
       start_date,
       cit_rate_code,
       vat_scheme,
+      business_type,
     } = body
 
     // Validate required fields
@@ -226,6 +228,7 @@ export async function PUT(request: NextRequest) {
     if (start_date !== undefined) updateData.start_date = start_date || null
     if (cit_rate_code !== undefined) updateData.cit_rate_code = cit_rate_code
     if (vat_scheme !== undefined) updateData.vat_scheme = vat_scheme
+    if (business_type !== undefined) updateData.business_type = business_type
 
     // ONBOARDING FIX: Advance onboarding_step when profile is saved during onboarding
     // This ensures onboarding always progresses after successful actions

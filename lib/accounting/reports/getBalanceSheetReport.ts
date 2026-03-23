@@ -8,6 +8,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { getCurrencySymbol, getCurrencyName } from "@/lib/currency"
 
+export type BusinessType = "limited_company" | "sole_proprietorship"
+
 export type BalanceSheetReportInput = {
   businessId: string
   period_id?: string | null
@@ -15,6 +17,8 @@ export type BalanceSheetReportInput = {
   as_of_date?: string | null
   start_date?: string | null
   end_date?: string | null
+  /** Optional override — if omitted the value is read from the businesses table. */
+  business_type?: BusinessType | null
 }
 
 export type BSSectionKey = "assets" | "liabilities" | "equity"
@@ -55,6 +59,7 @@ export type BalanceSheetReportResponse = {
   }
   currency: { code: string; symbol: string; name: string }
   as_of_date: string
+  business_type: BusinessType
   sections: BSSection[]
   totals: {
     assets: number
@@ -153,15 +158,20 @@ export async function getBalanceSheetReport(
 
   const { data: biz } = await supabase
     .from("businesses")
-    .select("default_currency")
+    .select("default_currency, business_type")
     .eq("id", businessId)
     .single()
-  const currencyCode = biz?.default_currency ?? "USD"
+  const currencyCode = (biz as any)?.default_currency ?? "USD"
   const currency = {
     code: currencyCode,
     symbol: getCurrencySymbol(currencyCode) || currencyCode,
     name: getCurrencyName(currencyCode) || currencyCode,
   }
+  // Resolve entity type: caller override → DB value → default
+  const resolvedBusinessType: BusinessType =
+    input.business_type ??
+    ((biz as any)?.business_type as BusinessType | undefined) ??
+    "limited_company"
 
   const assetsByGroup = new Map<BSGroupKey, BSLine[]>()
   const liabilitiesByGroup = new Map<BSGroupKey, BSLine[]>()
@@ -211,6 +221,35 @@ export async function getBalanceSheetReport(
   const imbalance = Math.round((totalAssets - liabilitiesPlusEquity) * 100) / 100
   const isBalanced = Math.abs(imbalance) < 0.01
 
+  // Entity-type-specific equity section:
+  // • limited_company  → "Equity"         net income line labelled "Current Period Net Income"
+  // • sole_proprietorship → "Owner's Equity"  net income line labelled "Net Profit for Period"
+  const isSoleProp = resolvedBusinessType === "sole_proprietorship"
+  const equitySectionLabel = isSoleProp ? "Owner's Equity" : "Equity"
+  const netIncomeLineLabel = isSoleProp ? "Net Profit for Period" : "Current Period Net Income"
+
+  // Add current period net income as a visible synthetic line in the equity group
+  // so it appears explicitly in the statement rather than silently inflating the subtotal.
+  const equityGroupWithNetIncome: BSGroup[] = equityGroups.map((g) => {
+    if (g.key !== "equity") return g
+    const syntheticLine: BSLine = {
+      account_id: "__net_income__",
+      account_code: "",
+      account_name: netIncomeLineLabel,
+      amount: currentPeriodNetIncome,
+    }
+    // Only add the line when there is a non-zero net income value
+    const lines = currentPeriodNetIncome !== 0
+      ? [...g.lines, syntheticLine]
+      : g.lines
+    return {
+      ...g,
+      label: equitySectionLabel,
+      lines,
+      subtotal: Math.round((g.subtotal + currentPeriodNetIncome) * 100) / 100,
+    }
+  })
+
   const sections: BSSection[] = [
     {
       key: "assets",
@@ -226,8 +265,8 @@ export async function getBalanceSheetReport(
     },
     {
       key: "equity",
-      label: "Equity",
-      groups: equityGroups,
+      label: equitySectionLabel,
+      groups: equityGroupWithNetIncome,
       subtotal: adjustedEquity,
     },
   ]
@@ -242,6 +281,7 @@ export async function getBalanceSheetReport(
       },
       currency,
       as_of_date: resolvedPeriod.period_end,
+      business_type: resolvedBusinessType,
       sections,
       totals: {
         assets: totalAssets,

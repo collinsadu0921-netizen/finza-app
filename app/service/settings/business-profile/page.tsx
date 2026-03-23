@@ -38,6 +38,7 @@ export default function ServiceBusinessProfilePage() {
     start_date: "",
     cit_rate_code: "standard_25",
     vat_scheme: "standard",
+    business_type: "limited_company",
   })
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
@@ -94,6 +95,7 @@ export default function ServiceBusinessProfilePage() {
         start_date: businessData.start_date ? new Date(businessData.start_date).toISOString().split("T")[0] : "",
         cit_rate_code: businessData.cit_rate_code || "standard_25",
         vat_scheme: businessData.vat_scheme || "standard",
+        business_type: businessData.business_type || "limited_company",
       })
 
       if (businessData.logo_url) setLogoPreview(businessData.logo_url)
@@ -226,6 +228,22 @@ export default function ServiceBusinessProfilePage() {
             <input value={formData.tin} onChange={(e) => handleChange("tin", e.target.value)} placeholder="TIN / Tax ID" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
             <input value={businessIndustry} readOnly disabled placeholder="Industry" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-gray-100 dark:bg-gray-700 dark:text-gray-300" />
             <DateInput value={formData.start_date} onChange={(e) => handleChange("start_date", e.target.value)} placeholder="Business start date" />
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Legal Entity Type
+              </label>
+              <select
+                value={formData.business_type}
+                onChange={(e) => handleChange("business_type", e.target.value)}
+                className="w-full md:w-1/2 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="limited_company">Limited Company</option>
+                <option value="sole_proprietorship">Sole Proprietorship</option>
+              </select>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                Used to format your Annual Financial Statements correctly (equity section structure).
+              </p>
+            </div>
           </div>
         </div>
 
