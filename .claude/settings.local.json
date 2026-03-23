@@ -128,7 +128,9 @@
       "Bash(find /c/projects/finza-web/finza-web -type f -name *[Pp]ayment*.tsx -o -name *[Mm]odal*.tsx)",
       "Bash(grep -rn \"text-blue-600\" /c/projects/finza-web/finza-web/app/invoices/[id]/edit/page.tsx --include=\"*.tsx\" -B 3 -A 1)",
       "Bash(grep -n \"text-blue-600\" /c/projects/finza-web/finza-web/app/expenses/[id]/edit/page.tsx -B 3 -A 1)",
-      "Bash(grep -r \"RecentActivityFeed\\\\|recent.activity\\\\|recentActivity\" /c/projects/finza-web/finza-web/app --include=*.tsx --include=*.ts)"
+      "Bash(grep -r \"RecentActivityFeed\\\\|recent.activity\\\\|recentActivity\" /c/projects/finza-web/finza-web/app --include=*.tsx --include=*.ts)",
+      "Bash(grep -r \"canAccessTier\\\\|tierIncludes\\\\|minTier\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.next)",
+      "Bash(grep -r \"Essentials\\\\|essentials\" /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=.next)"
     ]
   }
 }

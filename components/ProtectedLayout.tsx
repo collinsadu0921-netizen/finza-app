@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, usePathname } from "next/navigation"
+import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscriptionContext"
 import StoreSwitcher from "./StoreSwitcher"
 import ClientSelector from "./ClientSelector"
 import FirmSelector from "./FirmSelector"
@@ -93,19 +94,21 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const cashierAuth = isCashierAuthenticated()
 
   return (
-    <div
-      className="min-h-screen bg-gray-50 dark:bg-gray-900"
-      data-export-mode={isExportMode ? "true" : undefined}
-    >
-      {/* Sidebar - hidden in print/export/preview (export-hide) */}
-      {!cashierAuth && (
-        <div className="export-hide print-hide">
-          <Sidebar />
-        </div>
-      )}
+    <Suspense fallback={null}>
+      <ServiceSubscriptionProvider>
+        <div
+          className="min-h-screen bg-gray-50 dark:bg-gray-900"
+          data-export-mode={isExportMode ? "true" : undefined}
+        >
+          {/* Sidebar - hidden in print/export/preview (export-hide) */}
+          {!cashierAuth && (
+            <div className="export-hide print-hide">
+              <Sidebar />
+            </div>
+          )}
 
-      {/* Main Layout */}
-      <div className={cashierAuth ? "" : "lg:pl-64"}>
+          {/* Main Layout */}
+          <div className={cashierAuth ? "" : "lg:pl-64"}>
         {/* Top Navigation Bar — shown on accounting routes and non-service paths only.
             On /service/* the bar is empty (no accounting selectors, logout moved to sidebar)
             so we hide it to reclaim vertical space. */}
@@ -142,8 +145,10 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           )}
           {children}
         </main>
-      </div>
-    </div>
+          </div>
+        </div>
+      </ServiceSubscriptionProvider>
+    </Suspense>
   )
 }
 

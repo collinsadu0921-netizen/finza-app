@@ -8,10 +8,13 @@ import { getCurrentBusiness } from "@/lib/business"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { clearSelectedBusinessId } from "@/lib/business"
+import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
+import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
 
 type MenuSection = {
   title: string
-  items: Array<{ label: string; route: string }>
+  items: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>
 }
 
 export default function Sidebar() {
@@ -32,6 +35,7 @@ export default function Sidebar() {
   const [serviceBusinessId, setServiceBusinessId] = useState<string | null>(null)
   const [businessDisplay, setBusinessDisplay] = useState<{ name: string | null; logo_url: string | null }>({ name: null, logo_url: null })
   const isAccountingPath = pathname?.startsWith("/accounting") ?? false
+  const { canAccessTier } = useServiceSubscription()
 
   // Business ID for canonical accounting links: URL first, then (service owner only, when NOT on accounting) current business.
   // Sidebar may call getCurrentBusiness() ONLY when not on /accounting/* (Wave 11).
@@ -158,34 +162,35 @@ export default function Sidebar() {
         {
           title: "OPERATIONS",
           items: [
-            { label: "Dashboard", route: "/service/dashboard" },
-            { label: "Customers", route: "/service/customers" },
-            { label: "Quotes",    route: "/service/estimates" },
-            { label: "Projects",  route: "/service/jobs" },
+            { label: "Dashboard", route: "/service/dashboard", minTier: "starter" },
+            { label: "Customers", route: "/service/customers", minTier: "starter" },
+            { label: "Quotes", route: "/service/estimates", minTier: "starter" },
+            { label: "Projects", route: "/service/jobs", minTier: "professional" },
           ],
         },
         {
           title: "CATALOG",
           items: [
-            { label: "Services",  route: "/service/services" },
-            { label: "Materials", route: "/service/materials" },
+            { label: "Services", route: "/service/services", minTier: "starter" },
+            { label: "Materials", route: "/service/materials", minTier: "professional" },
           ],
         },
         {
           title: "BILLING",
           items: [
-            { label: "Proforma Invoices", route: "/service/proforma" },
-            { label: "Invoices",          route: "/service/invoices" },
-            { label: "Payments",          route: "/service/payments" },
-            { label: "Supplier Bills",    route: "/bills" },
-            { label: "Expenses",          route: "/service/expenses" },
+            { label: "Proforma Invoices", route: "/service/proforma", minTier: "starter" },
+            { label: "Invoices", route: "/service/invoices", minTier: "starter" },
+            { label: "Payments", route: "/service/payments", minTier: "starter" },
+            { label: "Credit Notes", route: "/service/credit-notes", minTier: "starter" },
+            { label: "Expenses", route: "/service/expenses", minTier: "starter" },
+            { label: "Supplier Bills", route: "/service/bills", minTier: "professional" },
           ],
         },
         {
           title: "PAYROLL",
           items: [
-            { label: "Payroll",          route: "/payroll" },
-            { label: "Salary Advances",  route: "/payroll/advances" },
+            { label: "Payroll", route: "/service/payroll", minTier: "professional" },
+            { label: "Salary Advances", route: "/service/payroll/advances", minTier: "professional" },
           ],
         },
       ]
@@ -193,20 +198,20 @@ export default function Sidebar() {
         sections.push({
           title: "REPORTS",
           items: [
-            { label: "Profit & Loss",     route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined) },
-            { label: "Balance Sheet",     route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined) },
-            { label: "Cash Flow",         route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined) },
-            { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined) },
-            { label: "Assets",            route: "/assets" },
+            { label: "Profit & Loss", route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
+            { label: "Balance Sheet", route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
+            { label: "Cash Flow", route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "Assets", route: "/service/assets", minTier: "professional" },
           ],
         })
         sections.push({
           title: "TAX & COMPLIANCE",
           items: [
-            { label: "VAT Report",     route: buildServiceRoute("/reports/vat",    effectiveServiceBusinessId ?? undefined) },
-            { label: "VAT Returns",    route: buildServiceRoute("/vat-returns",    effectiveServiceBusinessId ?? undefined) },
-            { label: "WHT Returns",    route: "/service/accounting/wht" },
-            { label: "CIT Provisions", route: "/service/accounting/cit" },
+            { label: "VAT Report", route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
+            { label: "VAT Returns", route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "WHT Returns", route: "/service/accounting/wht", minTier: "professional" },
+            { label: "CIT Provisions", route: "/service/accounting/cit", minTier: "business" },
           ],
         })
       }
@@ -222,23 +227,21 @@ export default function Sidebar() {
         const bankReconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/bank-reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/bank-reconciliation", accountingBusinessId ?? undefined)
         const periodsRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/periods", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/periods", accountingBusinessId ?? undefined)
 
-        const accountingItems: Array<{ label: string; route: string }> = [
-          { label: "General Ledger",        route: ledgerRoute },
-          { label: "Chart of Accounts",     route: coaRoute },
-          { label: "Trial Balance",         route: trialBalanceRoute },
-          { label: "Reconciliation",        route: reconciliationRoute },
-          { label: "Bank Reconciliation",   route: bankReconciliationRoute },
-          { label: "Accounting Periods",    route: periodsRoute },
+        const accountingItems: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }> = [
+          { label: "General Ledger", route: ledgerRoute, minTier: "business" },
+          { label: "Chart of Accounts", route: coaRoute, minTier: "business" },
+          { label: "Trial Balance", route: trialBalanceRoute, minTier: "business" },
+          { label: "Reconciliation", route: reconciliationRoute, minTier: "business" },
+          { label: "Bank Reconciliation", route: bankReconciliationRoute, minTier: "business" },
+          { label: "Accounting Periods", route: periodsRoute, minTier: "business" },
           ...(isAccountantFirmUser === true
             ? [
-                { label: "Health",        route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
+                { label: "Health", route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
                 { label: "Control Tower", route: buildAccountingRoute("/accounting/control-tower") },
                 { label: "Forensic Runs", route: "/admin/accounting/forensic-runs" },
-                { label: "Tenants",       route: "/admin/accounting/tenants" },
+                { label: "Tenants", route: "/admin/accounting/tenants" },
               ]
-            : [
-                { label: "Loans & Equity", route: "/service/accounting/loan" },
-              ]),
+            : [{ label: "Loans & Equity", route: "/service/accounting/loan", minTier: "business" }]),
         ]
         sections.push({
           title: "ACCOUNTING",
@@ -251,16 +254,17 @@ export default function Sidebar() {
       sections.push({
           title: "SETTINGS",
           items: [
-            { label: "Business Profile", route: "/service/settings/business-profile" },
-            { label: "Invoice Settings", route: "/service/settings/invoice-settings" },
-            { label: "Payment Settings", route: "/service/settings/payments" },
-            { label: "WhatsApp Integration", route: "/service/settings/integrations/whatsapp" },
-            { label: "Automations", route: "/service/settings/automations" },
-            { label: "Team Members", route: "/service/settings/team" },
-            { label: "Staff Management", route: "/service/settings/staff" },
-            { label: "Accountant Requests", route: "/service/invitations" },
-            { label: "Accounting Activity", route: settingsAuditRoute },
-            { label: "System Activity", route: "/audit-log" },
+            { label: "Business Profile", route: "/service/settings/business-profile", minTier: "starter" },
+            { label: "Subscription & Plan", route: "/service/settings/subscription", minTier: "starter" },
+            { label: "Invoice Settings", route: "/service/settings/invoice-settings", minTier: "starter" },
+            { label: "Payment Settings", route: "/service/settings/payments", minTier: "starter" },
+            { label: "WhatsApp Integration", route: "/service/settings/integrations/whatsapp", minTier: "starter" },
+            { label: "Automations", route: "/service/settings/automations", minTier: "professional" },
+            { label: "Team Members", route: "/service/settings/team", minTier: "professional" },
+            { label: "Staff Management", route: "/service/settings/staff", minTier: "professional" },
+            { label: "Accountant Requests", route: "/service/invitations", minTier: "professional" },
+            { label: "Journal Entry Activity", route: settingsAuditRoute, minTier: "professional" },
+            { label: "Full Audit Log", route: "/audit-log", minTier: "business" },
           ],
         })
       return sections
@@ -440,11 +444,18 @@ export default function Sidebar() {
                               item.route.startsWith("/accounting") && !item.route.includes("control-tower")
                             const isServiceClientRoute =
                               item.route.startsWith("/service/ledger") || item.route.startsWith("/service/accounting") || item.route.startsWith("/service/reports")
-                            const disabled = (isAccountingClientRoute || isServiceClientRoute) && !sidebarBusinessId
+                            const tierBlocked =
+                              effectiveIndustry === "service" &&
+                              !isAccountantFirmUser &&
+                              item.minTier != null &&
+                              !canAccessTier(item.minTier)
+                            const disabled =
+                              ((isAccountingClientRoute || isServiceClientRoute) && !sidebarBusinessId) || tierBlocked
                             const target = item.route
                             return (
                               <button
                                 key={itemIdx}
+                                title={tierBlocked ? upgradeLabel(item.minTier!) : undefined}
                                 onClick={() => {
                                   if (!disabled) {
                                     router.push(target)
@@ -460,7 +471,18 @@ export default function Sidebar() {
                                     : "text-gray-600 dark:text-gray-400 hover:bg-white/5 dark:hover:bg-gray-700/50"
                                 }`}
                               >
-                                {item.label}
+                                <span className="flex items-center justify-between gap-2">
+                                  <span>{item.label}</span>
+                                  {tierBlocked && (
+                                    <span
+                                      role="link"
+                                      onClick={(e) => { e.stopPropagation(); router.push("/service/settings/subscription") }}
+                                      className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 shrink-0 cursor-pointer hover:text-amber-700"
+                                    >
+                                      Upgrade
+                                    </span>
+                                  )}
+                                </span>
                               </button>
                             )
                           })}
