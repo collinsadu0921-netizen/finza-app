@@ -154,11 +154,17 @@ export async function POST(
           })
 
           if (result.success) {
-            await supabase
+            const { error: updErr } = await supabase
               .from("payslips")
               .update({ sent_via_email: true, email_sent_at: now, sent_at: now })
               .eq("id", payslip.id)
-            sent++
+            if (updErr) {
+              console.error("send-all payslip update failed:", updErr)
+              errors.push(`${staff?.name ?? payslip.id}: could not save sent status`)
+              skipped++
+            } else {
+              sent++
+            }
           } else {
             errors.push(`${staff?.name ?? payslip.id}: email failed`)
             skipped++
@@ -194,11 +200,17 @@ export async function POST(
             entityId: payslip.id,
           })
 
-          await supabase
+          const { error: waUpdErr } = await supabase
             .from("payslips")
             .update({ sent_via_whatsapp: true, whatsapp_sent_at: now, sent_at: now })
             .eq("id", payslip.id)
-          sent++
+          if (waUpdErr) {
+            console.error("send-all payslip WhatsApp update failed:", waUpdErr)
+            errors.push(`${staff?.name ?? payslip.id}: could not save sent status`)
+            skipped++
+          } else {
+            sent++
+          }
         } catch (e: any) {
           errors.push(`${staff?.name ?? payslip.id}: WhatsApp failed`)
           skipped++

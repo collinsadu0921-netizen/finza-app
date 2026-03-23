@@ -1,52 +1,74 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 
+/**
+ * Legacy path: same behaviour as GET /api/payroll/payslips/public/[token].
+ * Uses service role; RLS no longer exposes payslips by public_token alone.
+ */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
-  try {
-    const { token } = await params
-    const supabase = await createSupabaseServerClient()
+  const { token } = await params
+  if (!token) {
+    return NextResponse.json({ error: "Token is required" }, { status: 400 })
+  }
 
-    // Get payslip by public token
-    const { data: payslip, error: payslipError } = await supabase
+  try {
+    const supabase = createSupabaseAdminClient()
+
+    const { data: payslip, error } = await supabase
       .from("payslips")
-      .select(
-        `
-        *,
+      .select(`
+        id,
+        public_token,
+        sent_at,
+        created_at,
         payroll_entries (
-          *,
-          staff (
-            *
-          )
+          id,
+          basic_salary,
+          allowances_total,
+          deductions_total,
+          gross_salary,
+          ssnit_employee,
+          ssnit_employer,
+          taxable_income,
+          paye,
+          net_salary
+        ),
+        staff (
+          id,
+          name,
+          position,
+          bank_name,
+          bank_account,
+          ssnit_number,
+          tin_number
         ),
         payroll_runs (
-          *,
-          businesses (
-            *
-          )
+          id,
+          payroll_month,
+          status,
+          business_id
         )
-      `
-      )
+      `)
       .eq("public_token", token)
       .single()
 
-    if (payslipError || !payslip) {
-      return NextResponse.json(
-        { error: "Payslip not found" },
-        { status: 404 }
-      )
+    if (error || !payslip) {
+      return NextResponse.json({ error: "Payslip not found" }, { status: 404 })
     }
 
-    return NextResponse.json({ payslip })
-  } catch (error: any) {
-    console.error("Error fetching public payslip:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    )
+    const run = payslip.payroll_runs as { business_id?: string } | null
+    const { data: business } = await supabase
+      .from("businesses")
+      .select("id, legal_name, trading_name, phone, email, address_line1, address_city, address_country, default_currency")
+      .eq("id", run?.business_id ?? "")
+      .single()
+
+    return NextResponse.json({ payslip, business })
+  } catch (err: any) {
+    console.error("Error fetching public payslip:", err)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
-
-

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export async function GET(
   _request: NextRequest,
@@ -18,6 +20,16 @@ export async function GET(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.PAYROLL_VIEW
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     // Verify run belongs to business

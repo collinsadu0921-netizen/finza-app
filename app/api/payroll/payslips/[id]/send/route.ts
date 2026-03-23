@@ -6,6 +6,8 @@ import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { buildPayslipEmailHtml } from "@/lib/email/templates/payslip"
 import { getCurrencySymbol } from "@/lib/currency"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export async function POST(
   request: NextRequest,
@@ -24,6 +26,16 @@ export async function POST(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.PAYROLL_PAYSLIPS
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     const body = await request.json()
@@ -154,8 +166,7 @@ export async function POST(
         return NextResponse.json({ error: linkResult.error }, { status: 400 })
       }
 
-      // Mark as sent
-      await supabase
+      const { error: markWaError } = await supabase
         .from("payslips")
         .update({
           sent_via_whatsapp: true,
@@ -163,6 +174,14 @@ export async function POST(
           sent_at: payslip.sent_at ?? now,
         })
         .eq("id", id)
+
+      if (markWaError) {
+        console.error("Payslip WhatsApp sent flags update failed:", markWaError)
+        return NextResponse.json(
+          { error: markWaError.message || "Failed to update payslip delivery status" },
+          { status: 500 }
+        )
+      }
 
       // Audit log
       try {
@@ -249,8 +268,7 @@ export async function POST(
         )
       }
 
-      // Mark as sent
-      await supabase
+      const { error: markEmailError } = await supabase
         .from("payslips")
         .update({
           sent_via_email: true,
@@ -258,6 +276,14 @@ export async function POST(
           sent_at: payslip.sent_at ?? now,
         })
         .eq("id", id)
+
+      if (markEmailError) {
+        console.error("Payslip email sent flags update failed:", markEmailError)
+        return NextResponse.json(
+          { error: markEmailError.message || "Failed to update payslip delivery status" },
+          { status: 500 }
+        )
+      }
 
       // Audit log
       try {

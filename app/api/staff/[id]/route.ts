@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { hasPermission, requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 
 export async function GET(
   request: NextRequest,
@@ -15,47 +17,42 @@ export async function GET(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    // Get staff
+    const canViewPayroll = await hasPermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.PAYROLL_VIEW
+    )
+    const canManageStaff = await hasPermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.STAFF_MANAGE
+    )
+    if (!canViewPayroll && !canManageStaff) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    }
+
     const { data: staff, error: staffError } = await supabase
       .from("staff")
       .select("*")
       .eq("id", staffId)
+      .eq("business_id", business.id)
       .single()
 
     if (staffError || !staff) {
-      return NextResponse.json(
-        { error: "Staff not found" },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Staff not found" }, { status: 404 })
     }
 
-    // Get allowances
     const { data: allowances, error: allowancesError } = await supabase
       .from("allowances")
       .select("*")
@@ -67,7 +64,6 @@ export async function GET(
       console.error("Error fetching allowances:", allowancesError)
     }
 
-    // Get deductions
     const { data: deductions, error: deductionsError } = await supabase
       .from("deductions")
       .select("*")
@@ -106,30 +102,23 @@ export async function PUT(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.STAFF_MANAGE
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
     const body = await request.json()
@@ -149,7 +138,7 @@ export async function PUT(
       status,
     } = body
 
-    const updateData: any = {}
+    const updateData: Record<string, unknown> = {}
     if (name) updateData.name = name.trim()
     if (position !== undefined) updateData.position = position?.trim() || null
     if (phone !== undefined) updateData.phone = phone?.trim() || null
@@ -168,15 +157,17 @@ export async function PUT(
       .from("staff")
       .update(updateData)
       .eq("id", staffId)
+      .eq("business_id", business.id)
       .select()
       .single()
 
     if (error) {
       console.error("Error updating staff:", error)
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    if (!staff) {
+      return NextResponse.json({ error: "Staff not found" }, { status: 404 })
     }
 
     return NextResponse.json({ staff })
@@ -202,43 +193,42 @@ export async function DELETE(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const { error } = await supabase
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.STAFF_MANAGE
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    }
+
+    const { data: deletedRows, error } = await supabase
       .from("staff")
-      .update({ deleted_at: new Date().toISOString() })
+      .update({
+        deleted_at: new Date().toISOString(),
+        status: "terminated",
+      })
       .eq("id", staffId)
+      .eq("business_id", business.id)
+      .select("id")
 
     if (error) {
       console.error("Error deleting staff:", error)
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    if (!deletedRows?.length) {
+      return NextResponse.json({ error: "Staff not found" }, { status: 404 })
     }
 
     return NextResponse.json({ message: "Staff deleted successfully" })
@@ -250,5 +240,3 @@ export async function DELETE(
     )
   }
 }
-
-

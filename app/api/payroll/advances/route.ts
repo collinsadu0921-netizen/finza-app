@@ -289,13 +289,13 @@ export async function POST(request: NextRequest) {
 
     if (advError) {
       console.error("Advance insert error:", advError)
+      await supabase.from("journal_entries").delete().eq("id", je.id)
       return NextResponse.json(
         {
-          success: true,
-          journal_entry_id: je.id,
-          advance: null,
-          warning: "Journal entry posted but advance record could not be saved: " + advError.message,
-        }
+          success: false,
+          error: advError.message || "Failed to save salary advance after posting journal entry. Journal entry was rolled back.",
+        },
+        { status: 500 }
       )
     }
 
