@@ -329,6 +329,123 @@ describe("F. 501 stub is replaced", () => {
   })
 })
 
+// ── H. Business name fallback & draft run status ─────────────────────────
+
+describe("H. Business name fallback and run status", () => {
+  it("falls back to business.name when legal_name is null", async () => {
+    const mockSup = {
+      ...buildMockSupabase(),
+      from: jest.fn((table: string) => {
+        if (table === "afs_runs") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq:     jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({ data: AFS_RUN, error: null }),
+          }
+        }
+        if (table === "businesses") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq:     jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({
+              data: {
+                name:             "Acme Services",
+                legal_name:       null,   // <── legal_name is null
+                default_currency: "GHS",
+                business_type:    "limited_company",
+              },
+              error: null,
+            }),
+          }
+        }
+        return {}
+      }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSup as any)
+
+    const res = await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
+    expect(res.status).toBe(200)
+    // Filename should use the fallback name slugified
+    const disposition = res.headers.get("Content-Disposition") ?? ""
+    expect(disposition.toLowerCase()).toContain("acme-services")
+  })
+
+  it("returns 200 for a draft (non-finalized) run", async () => {
+    const draftRun = { ...AFS_RUN, status: "draft", finalized_at: null, finalized_by: null }
+    const mockSup = {
+      ...buildMockSupabase(),
+      from: jest.fn((table: string) => {
+        if (table === "afs_runs") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq:     jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({ data: draftRun, error: null }),
+          }
+        }
+        if (table === "businesses") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq:     jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({
+              data: { name: "Acme Ltd", legal_name: "Acme Ltd", default_currency: "GHS", business_type: "limited_company" },
+              error: null,
+            }),
+          }
+        }
+        return {}
+      }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSup as any)
+
+    const res = await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
+    // Draft run should still render a PDF — the cover page just shows "Draft — not yet finalized"
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("application/pdf")
+  })
+})
+
+// ── I. Empty trial balance & net loss path ────────────────────────────────
+
+describe("I. Empty trial balance and net loss path", () => {
+  it("returns 200 when trial balance has zero rows (empty state)", async () => {
+    const mockSup = {
+      ...buildMockSupabase(),
+      rpc: jest.fn((name: string) => {
+        if (name === "get_profit_and_loss_from_trial_balance") return Promise.resolve({ data: PNL_ROWS, error: null })
+        if (name === "get_balance_sheet_from_trial_balance")   return Promise.resolve({ data: BS_ROWS,  error: null })
+        if (name === "get_trial_balance_snapshot")             return Promise.resolve({ data: [],       error: null }) // empty TB
+        return Promise.resolve({ data: [], error: null })
+      }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSup as any)
+
+    const res = await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
+    expect(res.status).toBe(200)
+  })
+
+  it("returns 200 when P&L shows a net loss (expenses > income)", async () => {
+    const lossRows = [
+      { account_code: "4000", account_name: "Revenue",         account_type: "income",  period_total:  50000 },
+      { account_code: "5000", account_name: "Operating Costs", account_type: "expense", period_total: 120000 },
+    ]
+    const mockSup = {
+      ...buildMockSupabase(),
+      rpc: jest.fn((name: string) => {
+        if (name === "get_profit_and_loss_from_trial_balance") return Promise.resolve({ data: lossRows, error: null })
+        if (name === "get_balance_sheet_from_trial_balance")   return Promise.resolve({ data: BS_ROWS,  error: null })
+        if (name === "get_trial_balance_snapshot")             return Promise.resolve({ data: TB_ROWS,  error: null })
+        return Promise.resolve({ data: [], error: null })
+      }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSup as any)
+
+    const res = await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
+    // Net loss should not crash the route — it still renders "Net Loss for Period"
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("application/pdf")
+  })
+})
+
 // ── G. pdfkit import failure ──────────────────────────────────────────────
 
 describe("G. pdfkit import failure surfaces as 500", () => {

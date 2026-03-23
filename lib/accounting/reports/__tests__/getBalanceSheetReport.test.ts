@@ -247,3 +247,73 @@ describe("H. Input validation", () => {
     expect(error).toMatch(/business_id/i)
   })
 })
+
+// ── Additional coverage ────────────────────────────────────────────────────
+
+const PNL_ROWS_LOSS = [
+  { account_type: "income",  period_total: 10000 },
+  { account_type: "expense", period_total: 25000 },
+  // net = -15,000 (loss)
+]
+
+describe("I. Net loss (negative net income)", () => {
+  it("adds net income synthetic line with a negative amount when period is a loss", async () => {
+    const { data } = await getBalanceSheetReport(
+      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, PNL_ROWS_LOSS),
+      { businessId: "biz-001" }
+    )
+    const equityGroup = data!.sections
+      .find((s) => s.key === "equity")!
+      .groups.find((g) => g.key === "equity")!
+    const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
+    expect(netIncomeLine).toBeDefined()
+    expect(netIncomeLine!.amount).toBe(-15000)
+  })
+
+  it("equity subtotal decreases when there is a net loss", async () => {
+    // Ledger equity: 40,000 + 15,000 = 55,000. Net loss: -15,000. Total: 40,000.
+    const { data } = await getBalanceSheetReport(
+      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, PNL_ROWS_LOSS),
+      { businessId: "biz-001" }
+    )
+    const equitySection = data!.sections.find((s) => s.key === "equity")!
+    expect(equitySection.subtotal).toBe(40000)
+  })
+
+  it("net loss line label uses entity-appropriate wording", async () => {
+    const { data } = await getBalanceSheetReport(
+      buildMockSupabase("sole_proprietorship", BALANCE_SHEET_ROWS, PNL_ROWS_LOSS),
+      { businessId: "biz-001" }
+    )
+    const equityGroup = data!.sections
+      .find((s) => s.key === "equity")!
+      .groups.find((g) => g.key === "equity")!
+    const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
+    expect(netIncomeLine!.account_name).toBe("Net Profit for Period")
+  })
+})
+
+describe("J. RPC error propagation", () => {
+  it("returns an error string when the balance_sheet RPC fails", async () => {
+    const brokenSupabase = {
+      rpc: jest.fn((name: string) => {
+        if (name === "get_balance_sheet_from_trial_balance") {
+          return Promise.resolve({ data: null, error: { message: "rpc not found" } })
+        }
+        return Promise.resolve({ data: PNL_ROWS, error: null })
+      }),
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: { default_currency: "GHS", business_type: "limited_company" },
+          error: null,
+        }),
+      })),
+    } as unknown as import("@supabase/supabase-js").SupabaseClient
+
+    const { data, error } = await getBalanceSheetReport(brokenSupabase, { businessId: "biz-001" })
+    expect(data).toBeNull()
+    expect(error).toMatch(/rpc not found/i)
+  })
+})

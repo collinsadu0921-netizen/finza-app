@@ -537,6 +537,174 @@ describe("F. POST /api/cit?action=post — post to ledger", () => {
   })
 })
 
+// ── H. Edge cases ─────────────────────────────────────────────────────────
+
+describe("H. Edge cases", () => {
+  it("auto_post failure returns 200 with warning (provision still created)", async () => {
+    const mockRpc = jest.fn((name: string) => {
+      if (name === "post_cit_provision_to_ledger") {
+        return Promise.resolve({ data: null, error: { message: "ledger RPC unavailable" } })
+      }
+      return Promise.resolve({ data: null, error: null })
+    })
+    const mockSupabase = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: jest.fn(() => ({
+        insert: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: { id: "prov-warn", cit_amount: 25000, status: "draft" },
+          error: null,
+        }),
+      })),
+      rpc: mockRpc,
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const req = makePostRequest({
+      business_id: "biz-001",
+      period_label: "Q1 2026",
+      chargeable_income: 100000,
+      cit_rate: 0.25,
+      auto_post: true,
+    })
+    const res = await POST(req)
+    // Must still be 200 — provision was created, auto-post just failed
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.success).toBe(true)
+    expect(json.provision).toBeDefined()
+    expect(json.warning).toMatch(/auto-post failed/i)
+  })
+
+  it("GET returns 500 when DB query returns an error", async () => {
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        order: jest.fn().mockResolvedValue({ data: null, error: { message: "connection timeout" } }),
+      },
+    })
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const req = makeGetRequest({ business_id: "biz-001" })
+    const res = await GET(req)
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json.error).toMatch(/connection timeout/)
+  })
+
+  it("provision_type defaults to 'quarterly' when not provided", async () => {
+    let capturedData: any = null
+    const mockSupabase = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: jest.fn(() => ({
+        insert: jest.fn((data: any) => {
+          capturedData = data
+          return {
+            select: jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({ data: { ...data, id: "prov-q" }, error: null }),
+          }
+        }),
+      })),
+      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const req = makePostRequest({
+      business_id: "biz-001",
+      period_label: "Q1 2026",
+      chargeable_income: 100000,
+      // no provision_type supplied
+    })
+    await POST(req)
+    expect(capturedData.provision_type).toBe("quarterly")
+  })
+
+  it("cit_rate defaults to 0.25 (standard Ghana CIT) when not provided", async () => {
+    let capturedData: any = null
+    const mockSupabase = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: jest.fn(() => ({
+        insert: jest.fn((data: any) => {
+          capturedData = data
+          return {
+            select: jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({ data: { ...data, id: "prov-r" }, error: null }),
+          }
+        }),
+      })),
+      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const req = makePostRequest({
+      business_id: "biz-001",
+      period_label: "Q1 2026",
+      chargeable_income: 100000,
+      // no cit_rate supplied
+    })
+    await POST(req)
+    expect(capturedData.cit_rate).toBe(0.25)
+    expect(capturedData.cit_amount).toBe(25000)
+  })
+
+  it("existing notes are preserved when AMT note is appended", async () => {
+    let capturedData: any = null
+    const mockSupabase = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: jest.fn(() => ({
+        insert: jest.fn((data: any) => {
+          capturedData = data
+          return {
+            select: jest.fn().mockReturnThis(),
+            single: jest.fn().mockResolvedValue({ data: { ...data, id: "prov-n" }, error: null }),
+          }
+        }),
+      })),
+      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    // Trigger AMT (standard = 2,500 < AMT 5,000) with an existing note
+    const req = makePostRequest({
+      business_id: "biz-001",
+      period_label: "Q1 2026",
+      chargeable_income: 10000,
+      cit_rate: 0.25,
+      gross_revenue: 1000000,
+      notes: "Manually reviewed by CFO",
+    })
+    await POST(req)
+    // Both the original note and the AMT note should be present
+    expect(capturedData.notes).toContain("Manually reviewed by CFO")
+    expect(capturedData.notes).toContain("AMT applied")
+  })
+
+  it("DB insert failure on create returns 500", async () => {
+    const mockSupabase = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+      from: jest.fn(() => ({
+        insert: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({ data: null, error: { message: "duplicate key value" } }),
+      })),
+      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const req = makePostRequest({
+      business_id: "biz-001",
+      period_label: "Q1 2026",
+      chargeable_income: 100000,
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json.error).toMatch(/duplicate key/)
+  })
+})
+
 // ── G. POST /api/cit?action=pay ───────────────────────────────────────────
 
 describe("G. POST /api/cit?action=pay — record payment", () => {

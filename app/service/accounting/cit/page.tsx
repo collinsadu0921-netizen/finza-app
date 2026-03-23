@@ -151,10 +151,19 @@ export default function CITPage() {
         endDate   = `${year}-12-31`
       }
       const res = await fetch(
-        `/api/accounting/reports/profit-and-loss?business_id=${businessId}&start_date=${startDate}&end_date=${endDate}`
+        `/api/accounting/reports/profit-and-loss?business_id=${encodeURIComponent(businessId)}&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`
       )
       if (!res.ok) {
-        setPlError("Could not load P&L data. Please try again.")
+        let msg = "Could not load P&L data. Please try again."
+        try {
+          const errBody = await res.json()
+          if (typeof errBody?.error === "string" && errBody.error.trim()) {
+            msg = errBody.error
+          }
+        } catch {
+          /* ignore */
+        }
+        setPlError(msg)
         return
       }
       const data = await res.json()
