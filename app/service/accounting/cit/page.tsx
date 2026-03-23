@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -30,6 +30,11 @@ function parsePeriodLabel(
   const m = label.trim().match(/^Q([1-4])\s+(\d{4})$/i)
   if (m) return { quarter: Number(m[1]), year: Number(m[2]) }
   return { year: fallbackYear, quarter: fallbackQ }
+}
+
+/** Used for auto-fetch: only run P&L when label is unambiguous (avoids half-typed "Q2"). */
+function periodLabelIsCompleteForFetch(label: string): boolean {
+  return /^Q[1-4]\s+\d{4}$/i.test(label.trim())
 }
 
 // Ghana CIT rate codes → numeric rate + calculation basis
@@ -132,7 +137,7 @@ export default function CITPage() {
     }
   }
 
-  const fetchPL = async () => {
+  const fetchPL = useCallback(async () => {
     if (!businessId) return
     setPlLoading(true)
     setPlError("")
@@ -196,7 +201,23 @@ export default function CITPage() {
     } finally {
       setPlLoading(false)
     }
-  }
+  }, [businessId, periodLabel, provType, currentYear, currentQ, isPresumptive])
+
+  // When Period is a full "Q2 2026" (or you change Type), P&L reloads shortly — no need to rely on Fetch alone.
+  const plAutoFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!showForm || !businessId || !periodLabelIsCompleteForFetch(periodLabel)) {
+      return
+    }
+    if (plAutoFetchTimer.current) clearTimeout(plAutoFetchTimer.current)
+    plAutoFetchTimer.current = setTimeout(() => {
+      plAutoFetchTimer.current = null
+      void fetchPL()
+    }, 650)
+    return () => {
+      if (plAutoFetchTimer.current) clearTimeout(plAutoFetchTimer.current)
+    }
+  }, [showForm, businessId, periodLabel, provType, fetchPL])
 
   const isExempt = citRateCode === "exempt"
   // AMT = 0.5% of gross revenue; doesn't apply to presumptive (already turnover-based) or exempt
@@ -526,6 +547,9 @@ export default function CITPage() {
                     Auto-fill from {isPresumptive ? "Revenue" : "P&L"}
                   </p>
                   <p className="text-xs text-blue-700 dark:text-blue-400">
+                    Use <span className="font-mono">Q1 2026</span> style for Period. When that&apos;s complete, figures refresh automatically after a short pause; you can also click Fetch anytime.
+                  </p>
+                  <p className="text-xs text-blue-700/90 dark:text-blue-400/90 mt-1">
                     Pulls {provType === "quarterly"
                       ? (periodLabel.trim() || `Q${currentQ} ${currentYear}`)
                       : `full year ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
