@@ -13,6 +13,7 @@ import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLos
 import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
 
 const CASH_CODES = ["1000", "1010", "1020", "1030"] as const
+const CASH_CODE_SET = new Set<string>(CASH_CODES)
 /** Accounts Receivable control account. Use 1100 (service/standard); 1200 is Inventory in retail. */
 const AR_CODE = "1100"
 
@@ -22,7 +23,7 @@ function extractCash(bs: any): number {
   if (!assets) return 0
   for (const g of assets.groups || []) {
     for (const line of g.lines || []) {
-      if (CASH_CODES.includes(String(line.account_code).trim())) sum += Number(line.amount ?? 0)
+      if (CASH_CODE_SET.has(String(line.account_code).trim())) sum += Number(line.amount ?? 0)
     }
   }
   return Math.round(sum * 100) / 100
