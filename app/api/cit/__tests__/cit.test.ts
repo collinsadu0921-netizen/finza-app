@@ -20,6 +20,9 @@ jest.mock("@/lib/supabaseServer")
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
+jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
+  enforceServiceWorkspaceAccess: jest.fn().mockResolvedValue(null),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<typeof createSupabaseServerClient>
@@ -67,6 +70,10 @@ function buildMockSupabase(overrides: Record<string, any> = {}) {
     select: jest.fn().mockReturnThis(),
     eq: jest.fn().mockReturnThis(),
     order: jest.fn().mockResolvedValue({ data: [], error: null }),
+    maybeSingle: jest.fn().mockResolvedValue({
+      data: { business_id: "biz-001" },
+      error: null,
+    }),
   }
 
   const mock: any = {
@@ -241,6 +248,7 @@ describe("C. AMT exemption for presumptive and exempt categories", () => {
 
 describe("D. GET /api/cit", () => {
   it("returns 400 when business_id is missing", async () => {
+    mockCreateSupabase.mockResolvedValue(buildMockSupabase() as any)
     const req = makeGetRequest({})
     const res = await GET(req)
     expect(res.status).toBe(400)

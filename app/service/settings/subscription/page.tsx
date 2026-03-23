@@ -1,13 +1,22 @@
 "use client"
 
+import { Suspense, useEffect, useState } from "react"
+import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
+import { useToast } from "@/components/ui/ToastProvider"
 import {
   SERVICE_TIER_LABEL,
   SERVICE_TIER_RANK,
-  nextTier,
   type ServiceSubscriptionTier,
 } from "@/lib/serviceWorkspace/subscriptionTiers"
-import Link from "next/link"
+import {
+  TIER_PRICING,
+  BILLING_CYCLE_LABEL,
+  billingCycleSavings,
+  monthlyEquivalent,
+  type BillingCycle,
+} from "@/lib/serviceWorkspace/subscriptionPricing"
 
 type TierFeatures = {
   section: string
@@ -88,10 +97,16 @@ const TIER_BADGE: Record<ServiceSubscriptionTier, string> = {
   business:     "bg-purple-100 text-purple-700",
 }
 
+const BILLING_CYCLES: BillingCycle[] = ["monthly", "quarterly", "annual"]
 const TIER_ORDER: ServiceSubscriptionTier[] = ["starter", "professional", "business"]
+
+function formatGHS(amount: number): string {
+  return `GHS ${amount.toLocaleString()}`
+}
 
 export default function SubscriptionPage() {
   const { tier, loading } = useServiceSubscription()
+  const [cycle, setCycle] = useState<BillingCycle>("monthly")
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -127,18 +142,7 @@ export default function SubscriptionPage() {
                 </p>
               )}
             </div>
-            {!loading && nextTier(tier) && (
-              <a
-                href="mailto:hello@finza.app?subject=Upgrade%20request"
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-700"
-              >
-                Upgrade to {SERVICE_TIER_LABEL[nextTier(tier)!]}
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                </svg>
-              </a>
-            )}
-            {!loading && !nextTier(tier) && (
+            {!loading && tier === "business" && (
               <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -149,12 +153,49 @@ export default function SubscriptionPage() {
           </div>
         </div>
 
+        {/* Billing cycle toggle */}
+        <div className="mb-6 flex justify-center">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            {BILLING_CYCLES.map((c) => {
+              const savings = billingCycleSavings(c, "starter") // same % across tiers
+              return (
+                <button
+                  key={c}
+                  onClick={() => setCycle(c)}
+                  className={`relative rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                    cycle === c
+                      ? "bg-slate-800 text-white shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {BILLING_CYCLE_LABEL[c]}
+                  {savings > 0 && (
+                    <span
+                      className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        cycle === c
+                          ? "bg-emerald-400/30 text-emerald-100"
+                          : "bg-emerald-100 text-emerald-700"
+                      }`}
+                    >
+                      Save {savings}%
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         {/* Plan comparison cards */}
         <div className="grid gap-4 sm:grid-cols-3">
           {TIER_ORDER.map((t) => {
-            const isCurrent = t === tier
-            const isLocked  = !loading && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
-            const features  = TIER_FEATURES[t]
+            const isCurrent  = t === tier
+            const isUpgrade  = !loading && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
+            const isDowngrade = !loading && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[tier]
+            const features   = TIER_FEATURES[t]
+            const price      = TIER_PRICING[cycle][t]
+            const perMonth   = monthlyEquivalent(cycle, t)
+            const savings    = billingCycleSavings(cycle, t)
 
             return (
               <div
@@ -169,17 +210,29 @@ export default function SubscriptionPage() {
                   </span>
                 )}
 
-                <div className="mb-4">
+                <div className="mb-3">
                   <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${TIER_BADGE[t]}`}>
                     {SERVICE_TIER_LABEL[t]}
                   </span>
-                  {isLocked && (
-                    <span className="ml-2 inline-flex items-center gap-0.5 text-xs text-slate-400">
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                      Upgrade required
+                </div>
+
+                {/* Pricing */}
+                <div className="mb-4">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl font-bold text-slate-900">{formatGHS(price)}</span>
+                    <span className="text-xs text-slate-500">
+                      /{cycle === "monthly" ? "mo" : cycle === "quarterly" ? "qtr" : "yr"}
                     </span>
+                  </div>
+                  {cycle !== "monthly" && (
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {formatGHS(perMonth)}/mo equivalent
+                      {savings > 0 && (
+                        <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Save {savings}%
+                        </span>
+                      )}
+                    </p>
                   )}
                 </div>
 
@@ -207,13 +260,32 @@ export default function SubscriptionPage() {
                   </div>
                 ))}
 
-                {isLocked && (
+                {/* Upgrade button */}
+                {isUpgrade && (
                   <a
-                    href="mailto:hello@finza.app?subject=Upgrade%20request"
-                    className="mt-4 block w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                    href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700"
                   >
-                    Contact us to upgrade
+                    Upgrade to {SERVICE_TIER_LABEL[t]}
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
                   </a>
+                )}
+
+                {/* Downgrade button */}
+                {isDowngrade && (
+                  <div className="mt-4">
+                    <a
+                      href={`mailto:hello@finza.app?subject=Downgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      Downgrade to {SERVICE_TIER_LABEL[t]}
+                    </a>
+                    <p className="mt-1.5 text-center text-[11px] text-slate-400">
+                      Downgrading removes access to features in your current plan.
+                    </p>
+                  </div>
                 )}
               </div>
             )

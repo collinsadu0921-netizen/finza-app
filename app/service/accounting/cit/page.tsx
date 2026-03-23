@@ -7,6 +7,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { useToast } from "@/components/ui/ToastProvider"
+import TierGate from "@/components/service/TierGate"
 
 function getQuarterDateRange(year: number, quarter: number): { start: string; end: string } {
   const quarterBounds: Record<number, [number, number]> = {
@@ -393,7 +394,7 @@ export default function CITPage() {
   const activeRate  = CIT_RATES[citRateCode] ?? CIT_RATES.standard_25
 
   return (
-    <>
+    <TierGate minTier="business">
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -874,6 +875,6 @@ export default function CITPage() {
           </div>
         </div>
       )}
-    </>
+    </TierGate>
   )
 }

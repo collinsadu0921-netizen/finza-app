@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -16,44 +16,40 @@ export async function GET(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    const { data: vatReturn, error } = await supabase
+      .from("vat_returns")
+      .select("*")
+      .eq("id", returnId)
+      .is("deleted_at", null)
+      .maybeSingle()
 
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
+    if (error || !vatReturn) {
+      return NextResponse.json(
+        { error: "VAT return not found" },
+        { status: 404 }
+      )
     }
 
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
+    const accessDenied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId: vatReturn.business_id,
+      minTier: "professional",
+    })
+    if (accessDenied) return accessDenied
 
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
-    // CRITICAL: Load business country and validate
     const { data: businessData } = await supabase
       .from("businesses")
       .select("address_country")
-      .eq("id", business.id)
+      .eq("id", vatReturn.business_id)
       .single()
 
     if (!businessData?.address_country) {
       return NextResponse.json(
-        { 
-          error: "Business country is required. Please set your business country in Business Profile settings.",
-          unsupported: true
+        {
+          error:
+            "Business country is required. Please set your business country in Business Profile settings.",
+          unsupported: true,
         },
         { status: 400 }
       )
@@ -62,28 +58,14 @@ export async function GET(
     const countryCode = normalizeCountry(businessData.address_country)
     const isGhana = countryCode === "GH"
 
-    // CRITICAL: Block non-GH businesses from viewing Ghana VAT returns
     if (!isGhana) {
       return NextResponse.json(
-        { 
+        {
           error: `VAT returns are not available for country ${countryCode}. Ghana VAT return structure (NHIL, GETFund, COVID, VAT) is only supported for Ghana businesses.`,
           unsupported: true,
-          country: countryCode
+          country: countryCode,
         },
         { status: 400 }
-      )
-    }
-
-    const { data: vatReturn, error } = await supabase
-      .from("vat_returns")
-      .select("*")
-      .eq("id", returnId)
-      .single()
-
-    if (error || !vatReturn) {
-      return NextResponse.json(
-        { error: "VAT return not found" },
-        { status: 404 }
       )
     }
 
@@ -100,7 +82,7 @@ export async function GET(
       const { data: invoices } = await supabase
         .from("invoices")
         .select("id, invoice_number, issue_date, subtotal, nhil, getfund, covid, vat, total_tax, apply_taxes")
-        .eq("business_id", business.id)
+        .eq("business_id", vatReturn.business_id)
         .in("status", ["paid", "partially_paid"])
         .gte("issue_date", vatReturn.period_start_date)
         .lte("issue_date", vatReturn.period_end_date)
@@ -111,7 +93,7 @@ export async function GET(
       const { data: creditNotes } = await supabase
         .from("credit_notes")
         .select("id, credit_number, date, subtotal, nhil, getfund, covid, vat, total_tax")
-        .eq("business_id", business.id)
+        .eq("business_id", vatReturn.business_id)
         .eq("status", "applied")
         .gte("date", vatReturn.period_start_date)
         .lte("date", vatReturn.period_end_date)
@@ -121,7 +103,7 @@ export async function GET(
       const { data: expenses } = await supabase
         .from("expenses")
         .select("id, date, supplier, total, nhil, getfund, covid, vat")
-        .eq("business_id", business.id)
+        .eq("business_id", vatReturn.business_id)
         .gte("date", vatReturn.period_start_date)
         .lte("date", vatReturn.period_end_date)
         .is("deleted_at", null)
@@ -131,7 +113,7 @@ export async function GET(
       const { data: bills } = await supabase
         .from("bills")
         .select("id, bill_number, issue_date, subtotal, nhil, getfund, covid, vat, total_tax")
-        .eq("business_id", business.id)
+        .eq("business_id", vatReturn.business_id)
         .gte("issue_date", vatReturn.period_start_date)
         .lte("issue_date", vatReturn.period_end_date)
         .is("deleted_at", null)
@@ -173,31 +155,29 @@ export async function PUT(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    const { data: existingReturn, error: loadErr } = await supabase
+      .from("vat_returns")
+      .select(
+        "business_id, status, total_output_tax, total_input_tax, output_adjustment, input_adjustment, submission_date, payment_date"
+      )
+      .eq("id", returnId)
+      .is("deleted_at", null)
+      .maybeSingle()
 
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
+    if (loadErr || !existingReturn) {
+      return NextResponse.json(
+        { error: "VAT return not found" },
+        { status: 404 }
+      )
     }
 
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
+    const putAccessDenied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId: existingReturn.business_id,
+      minTier: "professional",
+    })
+    if (putAccessDenied) return putAccessDenied
 
     const body = await request.json()
     const {
@@ -225,20 +205,6 @@ export async function PUT(
       net_vat_payable,
       net_vat_refund,
     } = body
-
-    // Get existing return
-    const { data: existingReturn } = await supabase
-      .from("vat_returns")
-      .select("status, total_output_tax, total_input_tax, output_adjustment, input_adjustment, submission_date, payment_date")
-      .eq("id", returnId)
-      .single()
-
-    if (!existingReturn) {
-      return NextResponse.json(
-        { error: "VAT return not found" },
-        { status: 404 }
-      )
-    }
 
     // If submitted, lock the return (only notes editable)
     if (status === "submitted" && existingReturn.status !== "submitted") {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getEffectivePermissions } from "@/lib/userPermissions"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,6 +28,14 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Forbidden: requires accounting.view permission" }, { status: 403 })
       }
     }
+
+    const tierDenied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId: business.id,
+      minTier: "business",
+    })
+    if (tierDenied) return tierDenied
 
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get("start_date")

@@ -141,7 +141,9 @@
       "Bash(grep -n \"business_type\\\\|entity_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -l \"CREATE TABLE.*afs_runs\\\\|CREATE TABLE.*afs_documents\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -n \"CREATE TABLE.*afs\\\\|document_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
-      "Bash(grep -r \"business_type\\\\|entity_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
+      "Bash(grep -r \"business_type\\\\|entity_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(wc -l C:/projects/finza-web/finza-web/app/vat-returns/create/page.tsx C:/projects/finza-web/finza-web/app/vat-returns/[id]/page.tsx)",
+      "Bash(grep -n \"export default\\\\|return \\(\" C:/projects/finza-web/finza-web/app/vat-returns/[id]/page.tsx)"
     ]
   }
 }

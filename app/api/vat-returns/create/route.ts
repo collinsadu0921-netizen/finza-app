@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,35 +10,22 @@ export async function POST(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    const body = await request.json()
+    const explicitBiz =
+      typeof body.business_id === "string" ? body.business_id : null
 
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
+    const resolved = await resolveProfessionalVatBusinessId(
+      supabase,
+      user?.id,
+      explicitBiz
+    )
+    if (resolved instanceof NextResponse) return resolved
+    const { businessId } = resolved
 
     const { data: businessData } = await supabase
       .from("businesses")
       .select("address_country, vat_scheme")
-      .eq("id", business.id)
+      .eq("id", businessId)
       .single()
 
     if (!businessData?.address_country) {
@@ -90,7 +77,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
     const {
       period_start_date,
       period_end_date,
@@ -108,7 +94,7 @@ export async function POST(request: NextRequest) {
     const { data: existingReturn } = await supabase
       .from("vat_returns")
       .select("id")
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
       .eq("period_start_date", period_start_date)
       .eq("period_end_date", period_end_date)
       .is("deleted_at", null)
@@ -125,7 +111,7 @@ export async function POST(request: NextRequest) {
     const { data: ledgerData, error: rpcError } = await supabase.rpc(
       "extract_tax_return_from_ledger",
       {
-        p_business_id: business.id,
+        p_business_id: businessId,
         p_start_date: period_start_date,
         p_end_date: period_end_date,
       }
@@ -172,7 +158,7 @@ export async function POST(request: NextRequest) {
     const { data: vatReturn, error } = await supabase
       .from("vat_returns")
       .insert({
-        business_id: business.id,
+        business_id: businessId,
         period_start_date,
         period_end_date,
         status: "draft",

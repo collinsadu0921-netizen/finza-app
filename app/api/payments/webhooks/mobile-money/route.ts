@@ -17,6 +17,7 @@ import {
   settlePaymentFromWebhook,
   type MobileMoneyProvider,
 } from "@/lib/payments/mobileMoneyService"
+import { applyPaystackSubscriptionWebhook } from "@/lib/serviceWorkspace/applyPaystackSubscriptionWebhook"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -64,8 +65,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature or payload" }, { status: 401 })
   }
 
+  const reference =
+    validation.providerReference ??
+    JSON.parse(rawBody || "{}").externalId ??
+    JSON.parse(rawBody || "{}").external_id
+
+  if (provider === "paystack" && validation.metadata && reference) {
+    const subStatus =
+      validation.status === "success"
+        ? "success"
+        : validation.status === "failed"
+          ? "failed"
+          : "pending"
+    const sub = await applyPaystackSubscriptionWebhook({
+      reference,
+      status: subStatus,
+      amountGhs: validation.amount,
+      transactionId: validation.transactionId,
+      metadata: validation.metadata,
+    })
+    if (sub.handled) {
+      return NextResponse.json({
+        received: true,
+        subscription: true,
+        applied: sub.applied ?? false,
+        message: sub.message,
+      })
+    }
+  }
+
   const supabase = await createSupabaseServerClient()
-  const reference = validation.providerReference ?? JSON.parse(rawBody || "{}").externalId ?? JSON.parse(rawBody || "{}").external_id
   if (!reference) {
     return NextResponse.json({ error: "Missing reference in payload" }, { status: 400 })
   }

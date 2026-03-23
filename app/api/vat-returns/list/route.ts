@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,44 +9,19 @@ export async function GET(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
     const { searchParams } = new URL(request.url)
-    let businessId = searchParams.get("business_id")
+    const urlBusinessId = searchParams.get("business_id")?.trim() || null
 
-    // If no business_id provided, try to get from user's business
-    if (!businessId && user) {
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (business) {
-        businessId = business.id
-      }
-    }
+    const resolved = await resolveProfessionalVatBusinessId(supabase, user?.id, urlBusinessId)
+    if (resolved instanceof NextResponse) return resolved
+    const { businessId } = resolved
 
-    // If still no business_id, get first business
-    if (!businessId) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        businessId = firstBusiness.id
-      }
-    }
-
-    let returnsQuery = supabase
+    const returnsQuery = supabase
       .from("vat_returns")
       .select("*")
+      .eq("business_id", businessId)
       .is("deleted_at", null)
       .order("period_start_date", { ascending: false })
-
-    if (businessId) {
-      returnsQuery = returnsQuery.eq("business_id", businessId)
-    }
 
     const { data: returns, error } = await returnsQuery
 
@@ -65,8 +40,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ returns: returns || [] })
   } catch (error: any) {
     console.error("Error in VAT returns list:", error)
-    // Return empty array on error to prevent UI crash
-    return NextResponse.json({ returns: [] })
+    return NextResponse.json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    )
   }
 }
 

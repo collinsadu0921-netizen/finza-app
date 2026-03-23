@@ -54,6 +54,8 @@ export interface WebhookValidationResult {
   status?: "success" | "failed" | "pending"
   payerPhone?: string
   transactionId?: string
+  /** Paystack: custom metadata from charge / initialize (subscription, etc.). */
+  metadata?: Record<string, unknown>
   error?: string
 }
 
@@ -262,12 +264,19 @@ function validatePaystackWebhook(payload: WebhookPayload): WebhookValidationResu
 
   try {
     const body = JSON.parse(payload.rawBody) as any
-    const eventStatus =
-      body.event === "charge.success" || body.data?.status === "success"
+    const event = String(body.event ?? "")
+    const dataStatus = String(body.data?.status ?? "")
+    const eventStatus: "success" | "failed" | "pending" =
+      event === "charge.success" || dataStatus === "success"
         ? "success"
-        : body.data?.status === "failed"
-        ? "failed"
-        : "pending"
+        : event === "charge.failed" || dataStatus === "failed"
+          ? "failed"
+          : "pending"
+    const meta = body.data?.metadata
+    const metadata =
+      meta && typeof meta === "object" && !Array.isArray(meta)
+        ? (meta as Record<string, unknown>)
+        : undefined
     return {
       valid: true,
       providerReference: body.data?.reference,
@@ -277,6 +286,7 @@ function validatePaystackWebhook(payload: WebhookPayload): WebhookValidationResu
       status: eventStatus,
       transactionId: body.data?.id?.toString(),
       payerPhone: body.data?.authorization?.mobile_money_number,
+      metadata,
     }
   } catch {
     return { valid: false, error: "Invalid Paystack payload" }

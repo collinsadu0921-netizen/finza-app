@@ -6,18 +6,30 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 const GH_CIT_RATE = 0.25  // 25% standard Ghana CIT rate
 
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
 
     if (!businessId) {
       return NextResponse.json({ error: "business_id required" }, { status: 400 })
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId,
+      minTier: "business",
+    })
+    if (denied) return denied
 
     const { data: provisions, error } = await supabase
       .from("cit_provisions")
@@ -48,6 +60,24 @@ export async function POST(request: NextRequest) {
       const { provision_id } = body
       if (!provision_id) return NextResponse.json({ error: "provision_id required" }, { status: 400 })
 
+      const { data: provRow } = await supabase
+        .from("cit_provisions")
+        .select("business_id")
+        .eq("id", provision_id)
+        .maybeSingle()
+
+      if (!provRow?.business_id) {
+        return NextResponse.json({ error: "Provision not found" }, { status: 404 })
+      }
+
+      const deniedPost = await enforceServiceWorkspaceAccess({
+        supabase,
+        userId: user?.id,
+        businessId: provRow.business_id,
+        minTier: "business",
+      })
+      if (deniedPost) return deniedPost
+
       const { data: jeId, error: ledgerErr } = await supabase
         .rpc("post_cit_provision_to_ledger", { p_provision_id: provision_id })
 
@@ -61,8 +91,32 @@ export async function POST(request: NextRequest) {
 
     // POST with action=pay → mark provision as paid, post payment journal
     if (action === "pay") {
-      const { provision_id, payment_account_code = "1010", payment_date, payment_ref } = body
+      const { provision_id, business_id: payBusinessId, payment_account_code = "1010", payment_date, payment_ref } = body
       if (!provision_id) return NextResponse.json({ error: "provision_id required" }, { status: 400 })
+      if (!payBusinessId) {
+        return NextResponse.json({ error: "business_id required" }, { status: 400 })
+      }
+
+      const { data: provPay } = await supabase
+        .from("cit_provisions")
+        .select("business_id")
+        .eq("id", provision_id)
+        .maybeSingle()
+
+      if (!provPay?.business_id || provPay.business_id !== payBusinessId) {
+        return NextResponse.json(
+          { error: "Provision not found or does not belong to this business" },
+          { status: 400 }
+        )
+      }
+
+      const deniedPay = await enforceServiceWorkspaceAccess({
+        supabase,
+        userId: user?.id,
+        businessId: payBusinessId,
+        minTier: "business",
+      })
+      if (deniedPay) return deniedPay
 
       const { data: jeId, error: payErr } = await supabase.rpc(
         "post_cit_payment_to_ledger",
@@ -80,7 +134,7 @@ export async function POST(request: NextRequest) {
       }
 
       await createAuditLog({
-        businessId: body.business_id,
+        businessId: payBusinessId,
         userId: user?.id || null,
         actionType: "cit.payment_posted",
         entityType: "cit_provision",
@@ -108,6 +162,14 @@ export async function POST(request: NextRequest) {
     if (!business_id || !period_label || chargeable_income == null) {
       return NextResponse.json({ error: "business_id, period_label, and chargeable_income required" }, { status: 400 })
     }
+
+    const deniedCreate = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId: business_id,
+      minTier: "business",
+    })
+    if (deniedCreate) return deniedCreate
 
     // Ghana AMT: 0.5% of gross revenue — applies when standard CIT would be lower.
     // Exempt (rate=0) and presumptive (rate=0.03 turnover-based) are not subject to AMT.
@@ -137,7 +199,7 @@ export async function POST(request: NextRequest) {
         cit_amount: citAmount,
         status: "draft",
         notes: finalNotes,
-        created_by: user?.id || null,
+        created_by: user!.id,
       })
       .select()
       .single()
@@ -164,7 +226,7 @@ export async function POST(request: NextRequest) {
 
     await createAuditLog({
       businessId: business_id,
-      userId: user?.id || null,
+      userId: user!.id,
       actionType: "cit.provision_created",
       entityType: "cit_provision",
       entityId: provision.id,

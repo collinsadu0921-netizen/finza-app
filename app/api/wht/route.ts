@@ -5,16 +5,28 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
 
     if (!businessId) {
       return NextResponse.json({ error: "business_id required" }, { status: 400 })
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId,
+      minTier: "professional",
+    })
+    if (denied) return denied
 
     const { data: bills, error } = await supabase
       .from("bills")
@@ -49,6 +61,14 @@ export async function POST(request: NextRequest) {
     if (!business_id || !bill_ids?.length || !remittance_date) {
       return NextResponse.json({ error: "business_id, bill_ids, and remittance_date are required" }, { status: 400 })
     }
+
+    const deniedPost = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId: business_id,
+      minTier: "professional",
+    })
+    if (deniedPost) return deniedPost
 
     // Fetch bills to get their WHT amounts
     const { data: bills, error: fetchErr } = await supabase

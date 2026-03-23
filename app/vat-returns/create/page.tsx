@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
+import TierGate from "@/components/service/TierGate"
 
 function CreateVatReturnContent() {
   const router = useRouter()
@@ -398,8 +399,10 @@ function CreateVatReturnContent() {
 
 export default function CreateVatReturnPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <CreateVatReturnContent />
-    </Suspense>
+    <TierGate minTier="professional">
+      <Suspense fallback={<div>Loading...</div>}>
+        <CreateVatReturnContent />
+      </Suspense>
+    </TierGate>
   )
 }

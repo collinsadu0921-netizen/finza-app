@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export type LedgerLine = {
   id: string
@@ -46,40 +46,17 @@ export async function GET(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
     const { searchParams } = new URL(request.url)
     const urlBusinessId = (searchParams.get("business_id") ?? searchParams.get("businessId"))?.trim() ?? null
 
-    let business: { id: string } | null = null
-    if (urlBusinessId) {
-      business = { id: urlBusinessId }
-    }
-    if (!business && user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
+    const resolved = await resolveProfessionalVatBusinessId(supabase, user?.id, urlBusinessId)
+    if (resolved instanceof NextResponse) return resolved
+    const { businessId } = resolved
 
     const { data: businessData } = await supabase
       .from("businesses")
       .select("address_country")
-      .eq("id", business.id)
+      .eq("id", businessId)
       .single()
 
     if (!businessData?.address_country) {
@@ -110,7 +87,7 @@ export async function GET(request: NextRequest) {
     const { data: taxAccounts, error: accountsError } = await supabase
       .from("accounts")
       .select("id, code")
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
       .in("code", ["2100", "2110", "2120", "2130"])
       .is("deleted_at", null)
 
