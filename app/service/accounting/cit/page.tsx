@@ -27,14 +27,42 @@ function parsePeriodLabel(
   fallbackYear: number,
   fallbackQ: number
 ): { year: number; quarter: number } {
-  const m = label.trim().match(/^Q([1-4])\s+(\d{4})$/i)
+  const t = label.trim()
+  const m = t.match(/^Q([1-4])\s+(\d{4})$/i)
   if (m) return { quarter: Number(m[1]), year: Number(m[2]) }
+  const fy = t.match(/^FY\s+(\d{4})$/i)
+  if (fy) return { quarter: 1, year: Number(fy[1]) }
+  const yOnly = t.match(/^(\d{4})$/)
+  if (yOnly) return { quarter: 1, year: Number(yOnly[1]) }
   return { year: fallbackYear, quarter: fallbackQ }
 }
 
-/** Used for auto-fetch: only run P&L when label is unambiguous (avoids half-typed "Q2"). */
-function periodLabelIsCompleteForFetch(label: string): boolean {
-  return /^Q[1-4]\s+\d{4}$/i.test(label.trim())
+/** Used for auto-fetch: quarterly needs Q# YYYY; annual/final needs FY YYYY (or plain YYYY if legacy). */
+function periodLabelIsCompleteForFetch(
+  label: string,
+  provType: "quarterly" | "annual" | "final"
+): boolean {
+  const t = label.trim()
+  if (provType === "quarterly") return /^Q[1-4]\s+\d{4}$/i.test(t)
+  return /^FY\s+\d{4}$/i.test(t) || /^\d{4}$/.test(t)
+}
+
+function buildQuarterSelectOptions(fromYear: number, toYear: number): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = []
+  for (let y = toYear; y >= fromYear; y--) {
+    for (let q = 4; q >= 1; q--) {
+      out.push({ value: `Q${q} ${y}`, label: `Q${q} ${y}` })
+    }
+  }
+  return out
+}
+
+function buildFinancialYearOptions(fromYear: number, toYear: number): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = []
+  for (let y = toYear; y >= fromYear; y--) {
+    out.push({ value: `FY ${y}`, label: `FY ${y} (full year)` })
+  }
+  return out
 }
 
 // Ghana CIT rate codes → numeric rate + calculation basis
@@ -206,7 +234,7 @@ export default function CITPage() {
   // When Period is a full "Q2 2026" (or you change Type), P&L reloads shortly — no need to rely on Fetch alone.
   const plAutoFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (!showForm || !businessId || !periodLabelIsCompleteForFetch(periodLabel)) {
+    if (!showForm || !businessId || !periodLabelIsCompleteForFetch(periodLabel, provType)) {
       return
     }
     if (plAutoFetchTimer.current) clearTimeout(plAutoFetchTimer.current)
@@ -218,6 +246,25 @@ export default function CITPage() {
       if (plAutoFetchTimer.current) clearTimeout(plAutoFetchTimer.current)
     }
   }, [showForm, businessId, periodLabel, provType, fetchPL])
+
+  const periodYearFrom = currentYear - 3
+  const periodYearTo = currentYear + 1
+  const quarterOptions = buildQuarterSelectOptions(periodYearFrom, periodYearTo)
+  const fyOptions = buildFinancialYearOptions(periodYearFrom, periodYearTo)
+  const quarterSelectOptions =
+    /^Q[1-4]\s+\d{4}$/i.test(periodLabel) && !quarterOptions.some((o) => o.value === periodLabel)
+      ? [{ value: periodLabel, label: periodLabel }, ...quarterOptions]
+      : quarterOptions
+  const fySelectOptions =
+    /^FY\s+\d{4}$/i.test(periodLabel) && !fyOptions.some((o) => o.value === periodLabel.trim().replace(/^fy\s+/i, "FY "))
+      ? [
+          {
+            value: periodLabel.trim().replace(/^fy\s+/i, "FY "),
+            label: periodLabel.trim().replace(/^fy\s+/i, "FY "),
+          },
+          ...fyOptions,
+        ]
+      : fyOptions
 
   const isExempt = citRateCode === "exempt"
   // AMT = 0.5% of gross revenue; doesn't apply to presumptive (already turnover-based) or exempt
@@ -232,7 +279,7 @@ export default function CITPage() {
 
   const handleCreate = async () => {
     if (!periodLabel.trim()) {
-      toast.showToast("Please enter a period label (e.g. Q1 2026)", "warning")
+      toast.showToast("Please choose a period", "warning")
       return
     }
     if (!chargeableIncome || Number(chargeableIncome) < 0) {
@@ -518,19 +565,51 @@ export default function CITPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Period *</label>
-                  <input
-                    type="text"
-                    value={periodLabel}
-                    onChange={e => setPeriodLabel(e.target.value)}
-                    placeholder={`Q${currentQ} ${currentYear}`}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  />
+                  {provType === "quarterly" ? (
+                    <select
+                      value={quarterSelectOptions.some((o) => o.value === periodLabel) ? periodLabel : `Q${currentQ} ${currentYear}`}
+                      onChange={(e) => setPeriodLabel(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                    >
+                      {quarterSelectOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={
+                        /^FY\s+\d{4}$/i.test(periodLabel.trim())
+                          ? periodLabel.trim().replace(/^fy\s+/i, "FY ")
+                          : `FY ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
+                      }
+                      onChange={(e) => setPeriodLabel(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                    >
+                      {fySelectOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Type</label>
                   <select
                     value={provType}
-                    onChange={e => setProvType(e.target.value as any)}
+                    onChange={(e) => {
+                      const next = e.target.value as "quarterly" | "annual" | "final"
+                      const { year } = parsePeriodLabel(periodLabel, currentYear, currentQ)
+                      setProvType(next)
+                      if (next === "quarterly") {
+                        const q = year === currentYear ? currentQ : 1
+                        setPeriodLabel(`Q${q} ${year}`)
+                      } else {
+                        setPeriodLabel(`FY ${year}`)
+                      }
+                    }}
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                   >
                     <option value="quarterly">Quarterly Provisional</option>
@@ -547,7 +626,7 @@ export default function CITPage() {
                     Auto-fill from {isPresumptive ? "Revenue" : "P&L"}
                   </p>
                   <p className="text-xs text-blue-700 dark:text-blue-400">
-                    Use <span className="font-mono">Q1 2026</span> style for Period. When that&apos;s complete, figures refresh automatically after a short pause; you can also click Fetch anytime.
+                    Changing Period or Type reloads P&amp;L after a short pause. Use <strong>Fetch</strong> for an immediate refresh.
                   </p>
                   <p className="text-xs text-blue-700/90 dark:text-blue-400/90 mt-1">
                     Pulls {provType === "quarterly"
