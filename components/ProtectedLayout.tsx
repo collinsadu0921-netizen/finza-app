@@ -15,6 +15,7 @@ import { isCashierAuthenticated } from "@/lib/cashierSession"
 import { resolveAccess, getHomeRouteForRole, getWorkspaceFromPath } from "@/lib/accessControl"
 import { autoBindSingleStore } from "@/lib/autoBindStore"
 import { useExportMode } from "@/lib/hooks/useExportMode"
+import RetailPosIdleSessionWatcher from "@/components/RetailPosIdleSessionWatcher"
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -96,6 +97,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   return (
     <Suspense fallback={null}>
       <ServiceSubscriptionProvider>
+        <RetailPosIdleSessionWatcher pathname={pathname} />
         <div
           className="min-h-screen bg-gray-50 dark:bg-gray-900"
           data-export-mode={isExportMode ? "true" : undefined}

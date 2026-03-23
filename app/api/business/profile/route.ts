@@ -265,12 +265,36 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("businesses")
       .update(updateData)
       .eq("id", business.id)
       .select("*")
       .maybeSingle()
+
+    // DB without migration 381: column business_type missing → PostgREST schema cache error.
+    // Retry without business_type so onboarding / profile save still works; apply 381 for full support.
+    const errText = String(error?.message ?? (error as { details?: string })?.details ?? "")
+    if (
+      error &&
+      updateData.business_type !== undefined &&
+      (errText.includes("business_type") || errText.includes("schema cache"))
+    ) {
+      const { business_type: _omit, ...updateWithoutType } = updateData
+      const second = await supabase
+        .from("businesses")
+        .update(updateWithoutType)
+        .eq("id", business.id)
+        .select("*")
+        .maybeSingle()
+      data = second.data
+      error = second.error
+      if (!error) {
+        console.warn(
+          "[business/profile] Saved without business_type — run supabase migration 381_add_business_type.sql on this project."
+        )
+      }
+    }
 
     if (error) {
       console.error("Error updating business profile:", error)
