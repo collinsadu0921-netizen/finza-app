@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabaseClient"
+import { createClient } from "@supabase/supabase-js"
+
+export const dynamic = "force-dynamic"
+
+/** Public quote access must bypass RLS; anon key cannot read estimates (business-only policies). */
+function serviceClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  )
+}
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
-    const { token } = await params
+    const { token: rawToken } = await params
+    const token = decodeURIComponent(rawToken).trim()
+    if (!token) {
+      return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+    }
+
+    const supabase = serviceClient()
 
     const { data: estimate, error } = await supabase
       .from("estimates")
