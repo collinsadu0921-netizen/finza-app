@@ -52,9 +52,14 @@ function SignupPageInner() {
 
       // Build durable metadata. Trial intent lives here so it survives the
       // email-verification redirect (URL params are gone by then).
+      //
+      // trial_intent is ALWAYS written — true for website trial links, false for
+      // contextless signups. This makes the intent unambiguous at rest and prevents
+      // business-setup from needing to distinguish "key absent" from "key = false".
       const userMetadata: Record<string, string | boolean> = {
-        full_name: fullName,
+        full_name:     fullName,
         signup_intent: hasTrial ? "business_owner" : signupIntent,
+        trial_intent:  false,   // default; overwritten below if valid trial link
       }
 
       if (hasTrial && trialWorkspace && trialPlan) {

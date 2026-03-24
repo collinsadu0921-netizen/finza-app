@@ -159,32 +159,49 @@ export default function BusinessSetupPage() {
     const trialEnd = new Date(now.getTime() + TRIAL_DURATION_MS)
 
     // Build subscription fields for the INSERT.
-    // We always set these explicitly for service businesses so we never rely on
-    // the DB column default (which could be stale or wrong for edge cases).
-    let subscriptionFields: Record<string, string | null> = {}
+    //
+    // We ALWAYS set every subscription column explicitly — never rely on DB column
+    // defaults or leave them NULL on a new row. This guarantees that every business
+    // has a defined, known commercial state from the moment it is created.
+    //
+    // Decision tree:
+    //
+    //   industry = "service" AND valid trial metadata present
+    //     → status=trialing, tier=selected plan, 14-day window open
+    //
+    //   industry = "service" AND no/invalid trial metadata
+    //     → status=active, tier=starter, no trial window
+    //     → User lands on Essentials indefinitely (free tier) until they subscribe.
+    //
+    //   any other industry (retail, logistics, …)
+    //     → status=active, tier=starter, no trial window
+    //     → service_subscription_* columns are irrelevant for these workspaces but
+    //       we still write safe, explicit values so there is never a NULL state.
 
-    if (industry === "service") {
-      if (isServiceTrial) {
-        // Parse tier — invalid/unknown alias falls back to 'starter' (safe)
-        const trialTier = parseServiceSubscriptionTier(trialPlanRaw)
-        subscriptionFields = {
-          service_subscription_tier:   trialTier,
-          service_subscription_status: "trialing",
-          trial_started_at:            now.toISOString(),
-          trial_ends_at:               trialEnd.toISOString(),
-        }
-      } else {
-        // Direct service signup (no trial link): start at Essentials, no trial window.
-        subscriptionFields = {
-          service_subscription_tier:   "starter",
-          service_subscription_status: "active",
-          trial_started_at:            null,
-          trial_ends_at:               null,
-        }
-      }
+    // Safe base — overridden below for service trial path only
+    const safeDefault: Record<string, string | null> = {
+      service_subscription_tier:   "starter",
+      service_subscription_status: "active",
+      trial_started_at:            null,
+      trial_ends_at:               null,
     }
-    // For retail / logistics / other industries: leave subscriptionFields empty.
-    // The DB column default ('starter') and NULL status are correct for those rows.
+
+    let subscriptionFields: Record<string, string | null>
+
+    if (industry === "service" && isServiceTrial) {
+      // Parse tier — invalid/unknown alias falls back to 'starter' (safe)
+      const trialTier = parseServiceSubscriptionTier(trialPlanRaw)
+      subscriptionFields = {
+        service_subscription_tier:   trialTier,
+        service_subscription_status: "trialing",
+        trial_started_at:            now.toISOString(),
+        trial_ends_at:               trialEnd.toISOString(),
+      }
+    } else {
+      // All other paths (direct service signup, retail, any other industry):
+      // start at Essentials / active with no trial window.
+      subscriptionFields = safeDefault
+    }
 
     const { data: business, error: businessError } = await supabase
       .from("businesses")
