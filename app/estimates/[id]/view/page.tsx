@@ -157,7 +157,18 @@ export default function EstimateViewPage() {
       const response = await fetch("/api/proforma/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source_estimate_id: estimateId }),
+        body: JSON.stringify({
+          source_estimate_id: estimateId,
+          customer_id: estimate.customers?.id || null,
+          issue_date: new Date().toISOString().split("T")[0],
+          notes: estimate.notes || null,
+          items: items.map((item) => ({
+            description: item.description,
+            qty: item.quantity,
+            unit_price: item.price,
+            discount_amount: 0,
+          })),
+        }),
       })
 
       const data = await response.json()

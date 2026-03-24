@@ -106,7 +106,7 @@ export async function POST(
     // Generate public estimate URL (if public_token exists)
     let publicEstimateUrl = ""
     if (estimate.public_token) {
-      publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/estimate-public/${estimate.public_token}`
+      publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/quote-public/${estimate.public_token}`
     }
 
     // Handle different send actions
@@ -269,7 +269,7 @@ export async function POST(
           .update({ public_token: publicToken })
           .eq("id", estimateId)
 
-        publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/estimate-public/${publicToken}`
+        publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/quote-public/${publicToken}`
       }
 
       // Update status only if sending (draft → sent), not if resending
