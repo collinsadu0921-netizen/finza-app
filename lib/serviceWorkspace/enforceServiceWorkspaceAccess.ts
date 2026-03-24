@@ -1,16 +1,23 @@
 /**
- * Server-side guards for service workspace: business membership, subscription
- * payment lock (post grace), and minimum tier.
+ * Server-side guards for the service workspace.
+ *
+ * Uses resolveServiceEntitlement (the same logic as the client context) so
+ * that server and client always make identical access decisions.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 import { getCurrentBusiness } from "@/lib/business"
+import { type ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import {
-  type ServiceSubscriptionTier,
-  parseServiceSubscriptionTier,
-  tierIncludes,
-} from "@/lib/serviceWorkspace/subscriptionTiers"
+  resolveServiceEntitlement,
+  entitlementIncludesTier,
+  type RawBusinessSubscriptionRow,
+} from "@/lib/serviceWorkspace/resolveServiceEntitlement"
+
+// ---------------------------------------------------------------------------
+// Membership check
+// ---------------------------------------------------------------------------
 
 export async function userHasBusinessAccess(
   supabase: SupabaseClient,
@@ -37,41 +44,44 @@ export async function userHasBusinessAccess(
   return !!bu
 }
 
-export function isSubscriptionPaymentLocked(graceUntil: string | Date | null | undefined): boolean {
+// ---------------------------------------------------------------------------
+// Subscription state loader
+// ---------------------------------------------------------------------------
+
+async function loadBusinessSubscriptionRow(
+  supabase: SupabaseClient,
+  businessId: string
+): Promise<RawBusinessSubscriptionRow> {
+  const { data } = await supabase
+    .from("businesses")
+    .select(
+      "service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at"
+    )
+    .eq("id", businessId)
+    .is("archived_at", null)
+    .maybeSingle()
+
+  if (!data) return {}
+
+  return data as RawBusinessSubscriptionRow
+}
+
+// ---------------------------------------------------------------------------
+// Legacy helper kept for callers that need raw grace-only state
+// ---------------------------------------------------------------------------
+
+export function isSubscriptionPaymentLocked(
+  graceUntil: string | Date | null | undefined
+): boolean {
   if (graceUntil == null || graceUntil === "") return false
   const end = typeof graceUntil === "string" ? new Date(graceUntil) : graceUntil
   if (Number.isNaN(end.getTime())) return false
   return Date.now() >= end.getTime()
 }
 
-export async function getBusinessSubscriptionState(
-  supabase: SupabaseClient,
-  businessId: string
-): Promise<{ tier: ServiceSubscriptionTier; graceUntil: string | null }> {
-  const { data, error } = await supabase
-    .from("businesses")
-    .select("service_subscription_tier, subscription_grace_until")
-    .eq("id", businessId)
-    .is("archived_at", null)
-    .maybeSingle()
-
-  if (error || !data) {
-    return {
-      tier: parseServiceSubscriptionTier(undefined),
-      graceUntil: null,
-    }
-  }
-
-  const row = data as {
-    service_subscription_tier?: string | null
-    subscription_grace_until?: string | null
-  }
-
-  return {
-    tier: parseServiceSubscriptionTier(row.service_subscription_tier),
-    graceUntil: row.subscription_grace_until ?? null,
-  }
-}
+// ---------------------------------------------------------------------------
+// Main enforcement function
+// ---------------------------------------------------------------------------
 
 export type EnforceServiceAccessOptions = {
   supabase: SupabaseClient
@@ -81,7 +91,15 @@ export type EnforceServiceAccessOptions = {
 }
 
 /**
- * @returns null if access allowed, otherwise a NextResponse with 401/403.
+ * Returns null when access is allowed; a NextResponse (401 or 403) otherwise.
+ *
+ * Check order:
+ * 1. Auth            — userId must be present
+ * 2. Membership      — user must own or be a member of the business
+ * 3. Payment lock    — subscription_grace_until expired → 403 SUBSCRIPTION_LOCKED
+ * 4. Effective tier  — resolveServiceEntitlement() determines effectiveTier
+ *                      (handles active trial, trial expiry downgrade, paid sub)
+ *                      → 403 TIER_REQUIRED if effectiveTier < minTier
  */
 export async function enforceServiceWorkspaceAccess(
   opts: EnforceServiceAccessOptions
@@ -100,9 +118,11 @@ export async function enforceServiceWorkspaceAccess(
     )
   }
 
-  const { tier, graceUntil } = await getBusinessSubscriptionState(supabase, businessId)
+  const row = await loadBusinessSubscriptionRow(supabase, businessId)
+  const entitlement = resolveServiceEntitlement(row)
 
-  if (isSubscriptionPaymentLocked(graceUntil)) {
+  // MoMo renewal grace expired — hard block regardless of tier
+  if (entitlement.isSubscriptionLocked) {
     return NextResponse.json(
       {
         error: "Subscription payment overdue. Renew to restore access.",
@@ -112,22 +132,28 @@ export async function enforceServiceWorkspaceAccess(
     )
   }
 
-  if (!tierIncludes(tier, minTier)) {
+  // Effective tier check (handles active trial and trial-expiry downgrade)
+  if (!entitlementIncludesTier(entitlement, minTier)) {
     return NextResponse.json(
       {
         error: `Forbidden: requires ${minTier} plan or higher`,
         code: "TIER_REQUIRED",
+        effectiveTier: entitlement.effectiveTier,
       },
       { status: 403 }
     )
   }
 
-  return null
+  return null // access granted
 }
+
+// ---------------------------------------------------------------------------
+// VAT-specific helper (Professional tier + subscription check)
+// ---------------------------------------------------------------------------
 
 /**
  * Resolve which business a VAT returns API call applies to, then enforce
- * Professional tier + subscription (same rules as TierGate on VAT pages).
+ * Professional tier + subscription (mirrors TierGate on VAT pages).
  */
 export async function resolveProfessionalVatBusinessId(
   supabase: SupabaseClient,
@@ -154,10 +180,7 @@ export async function resolveProfessionalVatBusinessId(
     const b = await getCurrentBusiness(supabase, userId)
     if (!b?.id) {
       return NextResponse.json(
-        {
-          error:
-            "business_id is required, or complete onboarding to set a workspace.",
-        },
+        { error: "business_id is required, or complete onboarding to set a workspace." },
         { status: 400 }
       )
     }
@@ -172,4 +195,21 @@ export async function resolveProfessionalVatBusinessId(
   })
   if (denied) return denied
   return { businessId }
+}
+
+// ---------------------------------------------------------------------------
+// Kept for callers that only need subscription state without tier enforcement
+// ---------------------------------------------------------------------------
+
+/** @deprecated Prefer resolveServiceEntitlement() + loadBusinessSubscriptionRow() */
+export async function getBusinessSubscriptionState(
+  supabase: SupabaseClient,
+  businessId: string
+) {
+  const row = await loadBusinessSubscriptionRow(supabase, businessId)
+  const { rawTier, isSubscriptionLocked: locked } = resolveServiceEntitlement(row)
+  return {
+    tier: rawTier,
+    graceUntil: row.subscription_grace_until ?? null,
+  }
 }

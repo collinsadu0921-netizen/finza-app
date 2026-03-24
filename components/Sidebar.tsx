@@ -264,8 +264,9 @@ export default function Sidebar() {
       sections.push({
           title: "SETTINGS",
           items: [
-            { label: "All settings", route: "/service/settings", minTier: "starter" },
+            { label: "All settings",        route: "/service/settings",              minTier: "starter" },
             { label: "Subscription & plan", route: "/service/settings/subscription", minTier: "starter" },
+            { label: "Automations",         route: "/service/settings/automations",  minTier: "starter" },
           ],
         })
       if (!isAccountantFirmUser) {

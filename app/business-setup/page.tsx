@@ -5,6 +5,9 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import DateInput from "@/components/ui/DateInput"
+import { parseServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+
+const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
 
 const COUNTRY_CURRENCY_MAP: Record<string, string> = {
   Ghana: "GHS",
@@ -119,6 +122,70 @@ export default function BusinessSetupPage() {
       return
     }
 
+    // --- Resolve trial intent from durable user metadata ---
+    // The marketing site sets ?workspace=service&plan=X&trial=1 on the signup URL.
+    // The signup page writes those into Supabase user_metadata so they survive
+    // email-verification redirects (URL params are gone by then).
+    //
+    // Rules:
+    //   Service business + valid trial metadata (workspace=service, trial=true, plan set)
+    //     → status=trialing, tier=selected plan, trial window set for 14 days
+    //
+    //   Service business + NO trial metadata (direct signup, no marketing link)
+    //     → status=active, tier=starter
+    //     → No trial window. They are on Essentials indefinitely (free-tier).
+    //
+    //   Non-service business (retail, logistics, etc.)
+    //     → Do NOT set service subscription fields. The DB default handles the column.
+    //
+    // Assumption: only the service industry uses service_subscription_* columns.
+    // Retail etc. are unaffected by this logic.
+
+    const { data: freshAuth } = await supabase.auth.getUser()
+    const meta = freshAuth?.user?.user_metadata ?? {}
+
+    const trialWorkspace = typeof meta.trial_workspace === "string" ? meta.trial_workspace : null
+    const trialPlanRaw   = typeof meta.trial_plan      === "string" ? meta.trial_plan      : null
+    const trialIntent    = meta.trial_intent === true
+
+    // Trial is only valid for the service industry + all three signals present
+    const isServiceTrial =
+      industry === "service" &&
+      trialIntent &&
+      trialWorkspace === "service" &&
+      !!trialPlanRaw
+
+    const now      = new Date()
+    const trialEnd = new Date(now.getTime() + TRIAL_DURATION_MS)
+
+    // Build subscription fields for the INSERT.
+    // We always set these explicitly for service businesses so we never rely on
+    // the DB column default (which could be stale or wrong for edge cases).
+    let subscriptionFields: Record<string, string | null> = {}
+
+    if (industry === "service") {
+      if (isServiceTrial) {
+        // Parse tier — invalid/unknown alias falls back to 'starter' (safe)
+        const trialTier = parseServiceSubscriptionTier(trialPlanRaw)
+        subscriptionFields = {
+          service_subscription_tier:   trialTier,
+          service_subscription_status: "trialing",
+          trial_started_at:            now.toISOString(),
+          trial_ends_at:               trialEnd.toISOString(),
+        }
+      } else {
+        // Direct service signup (no trial link): start at Essentials, no trial window.
+        subscriptionFields = {
+          service_subscription_tier:   "starter",
+          service_subscription_status: "active",
+          trial_started_at:            null,
+          trial_ends_at:               null,
+        }
+      }
+    }
+    // For retail / logistics / other industries: leave subscriptionFields empty.
+    // The DB column default ('starter') and NULL status are correct for those rows.
+
     const { data: business, error: businessError } = await supabase
       .from("businesses")
       .insert({
@@ -129,6 +196,7 @@ export default function BusinessSetupPage() {
         default_currency: currency || null,
         start_date: startDate || null,
         onboarding_step: "business_profile",
+        ...subscriptionFields,
       })
       .select("id, name, industry, created_at, start_date, onboarding_step")
       .single()

@@ -133,12 +133,29 @@ export async function applyPaystackSubscriptionWebhook(
   }
 
   if (status === "success") {
+    const now = new Date()
+    // Calculate current_period_ends_at based on billing cycle
+    const periodMs =
+      cycle === "monthly"   ? 30  * 24 * 60 * 60 * 1000 :
+      cycle === "quarterly" ? 90  * 24 * 60 * 60 * 1000 :
+                              365 * 24 * 60 * 60 * 1000 // annual
+
     const { error: upErr } = await supabase
       .from("businesses")
       .update({
-        service_subscription_tier: tier,
-        subscription_grace_until: null,
-        updated_at: new Date().toISOString(),
+        // Subscription state
+        service_subscription_tier:   tier,
+        service_subscription_status: "active",
+        subscription_grace_until:    null,
+        billing_cycle:               cycle,
+        subscription_started_at:     now.toISOString(),
+        current_period_ends_at:      new Date(now.getTime() + periodMs).toISOString(),
+        // Clear trial flags — the paid subscription supersedes the trial.
+        // resolveServiceEntitlement() uses status='active' so these columns
+        // are no longer evaluated, but nulling them avoids stale data confusion.
+        trial_started_at: null,
+        trial_ends_at:    null,
+        updated_at:       now.toISOString(),
       })
       .eq("id", businessId)
       .is("archived_at", null)
@@ -168,8 +185,9 @@ export async function applyPaystackSubscriptionWebhook(
   const { error: failErr } = await supabase
     .from("businesses")
     .update({
-      subscription_grace_until: graceEnd,
-      updated_at: new Date().toISOString(),
+      service_subscription_status: "past_due",  // payment failed; grace window open
+      subscription_grace_until:    graceEnd,
+      updated_at:                  new Date().toISOString(),
     })
     .eq("id", businessId)
     .is("archived_at", null)

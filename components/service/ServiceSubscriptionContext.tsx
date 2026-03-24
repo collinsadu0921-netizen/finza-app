@@ -13,61 +13,95 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import {
   type ServiceSubscriptionTier,
-  parseServiceSubscriptionTier,
-  tierIncludes,
+  type ServiceSubscriptionStatus,
   DEFAULT_SERVICE_SUBSCRIPTION_TIER,
 } from "@/lib/serviceWorkspace/subscriptionTiers"
+import {
+  resolveServiceEntitlement,
+  type RawBusinessSubscriptionRow,
+  type ServiceEntitlement,
+} from "@/lib/serviceWorkspace/resolveServiceEntitlement"
+import { tierIncludes } from "@/lib/serviceWorkspace/subscriptionTiers"
 
 export type ServiceSubscriptionContextValue = {
+  /** Effective tier — what the user actually has access to. */
+  effectiveTier: ServiceSubscriptionTier
+  /** Raw tier stored in DB (the plan they signed up for / are trialling). */
   tier: ServiceSubscriptionTier
+  /** Full subscription status from the DB column. */
+  status: ServiceSubscriptionStatus
   businessId: string | null
   loading: boolean
-  /** Whether current workspace tier satisfies a minimum tier requirement. */
+
+  /** True when effectiveTier satisfies the required tier. */
   canAccessTier: (required: ServiceSubscriptionTier) => boolean
-  /**
-   * True when a MoMo payment has failed but the 3-day grace period has not
-   * yet expired (subscription_grace_until is set and in the future).
-   * Features remain accessible but a warning banner is shown.
-   */
+
+  // --- Trial ---
+  isTrialing: boolean
+  trialExpired: boolean
+  trialEndsAt: Date | null
+  trialDaysLeft: number | null
+
+  // --- MoMo payment grace ---
   inGracePeriod: boolean
-  /**
-   * True when a MoMo payment failed AND the 3-day grace period has expired
-   * (subscription_grace_until is set and in the past).
-   * Tier-gated features are blocked until payment is resolved.
-   */
   subscriptionLocked: boolean
 }
 
 const defaultValue: ServiceSubscriptionContextValue = {
+  effectiveTier: DEFAULT_SERVICE_SUBSCRIPTION_TIER,
   tier: DEFAULT_SERVICE_SUBSCRIPTION_TIER,
+  status: "active",
   businessId: null,
   loading: false,
   canAccessTier: () => true,
+  isTrialing: false,
+  trialExpired: false,
+  trialEndsAt: null,
+  trialDaysLeft: null,
   inGracePeriod: false,
   subscriptionLocked: false,
 }
 
-const ServiceSubscriptionContext = createContext<ServiceSubscriptionContextValue>(defaultValue)
+const ServiceSubscriptionContext =
+  createContext<ServiceSubscriptionContextValue>(defaultValue)
 
-export function ServiceSubscriptionProvider({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+const SERVICE_COLUMNS =
+  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at"
+
+function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitlement {
+  const r: RawBusinessSubscriptionRow = {
+    service_subscription_tier:   (row?.service_subscription_tier   as string) ?? null,
+    service_subscription_status: (row?.service_subscription_status as string) ?? null,
+    trial_started_at:            (row?.trial_started_at            as string) ?? null,
+    trial_ends_at:               (row?.trial_ends_at               as string) ?? null,
+    subscription_grace_until:    (row?.subscription_grace_until    as string) ?? null,
+  }
+  return resolveServiceEntitlement(r)
+}
+
+export function ServiceSubscriptionProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const pathname     = usePathname()
   const searchParams = useSearchParams()
-  // Activate for /service/* paths AND the legacy root-level routes that are
-  // service-workspace features but haven't been moved under /service/ yet.
-  // This ensures TierGate works even if a user navigates to those paths directly.
+
+  // Activate for /service/* paths AND legacy root-level service routes.
   const isService =
     (pathname?.startsWith("/service") ?? false) ||
-    (pathname?.startsWith("/bills") ?? false) ||
-    (pathname?.startsWith("/payroll") ?? false) ||
-    (pathname?.startsWith("/assets") ?? false) ||
+    (pathname?.startsWith("/bills")        ?? false) ||
+    (pathname?.startsWith("/payroll")      ?? false) ||
+    (pathname?.startsWith("/assets")       ?? false) ||
     (pathname?.startsWith("/credit-notes") ?? false) ||
-    (pathname?.startsWith("/audit-log") ?? false) ||
-    (pathname?.startsWith("/vat-returns") ?? false)
+    (pathname?.startsWith("/audit-log")    ?? false) ||
+    (pathname?.startsWith("/vat-returns")  ?? false)
 
-  const [tier, setTier] = useState<ServiceSubscriptionTier>(DEFAULT_SERVICE_SUBSCRIPTION_TIER)
+  const [entitlement, setEntitlement] = useState<ServiceEntitlement>(() =>
+    resolveServiceEntitlement({})
+  )
   const [businessId, setBusinessId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [graceUntil, setGraceUntil] = useState<Date | null>(null)
+  const [loading, setLoading]       = useState(false)
 
   const urlBusinessId = searchParams.get("business_id")?.trim() || null
 
@@ -81,73 +115,67 @@ export function ServiceSubscriptionProvider({ children }: { children: React.Reac
         if (urlBusinessId) {
           const { data } = await supabase
             .from("businesses")
-            .select("id, service_subscription_tier, subscription_grace_until")
+            .select(SERVICE_COLUMNS)
             .eq("id", urlBusinessId)
             .is("archived_at", null)
             .maybeSingle()
           if (cancelled) return
-          const row = data as { id?: string; service_subscription_tier?: string; subscription_grace_until?: string | null } | null
-          setBusinessId(row?.id ?? urlBusinessId)
-          setTier(parseServiceSubscriptionTier(row?.service_subscription_tier))
-          setGraceUntil(row?.subscription_grace_until ? new Date(row.subscription_grace_until) : null)
+          setBusinessId((data as any)?.id ?? urlBusinessId)
+          setEntitlement(rowToEntitlement(data as Record<string, unknown> | null))
           return
         }
 
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
+        const { data: { user } } = await supabase.auth.getUser()
         if (!user || cancelled) {
           if (!cancelled) {
             setBusinessId(null)
-            setTier(DEFAULT_SERVICE_SUBSCRIPTION_TIER)
-            setGraceUntil(null)
+            setEntitlement(resolveServiceEntitlement({}))
           }
           return
         }
 
         const b = await getCurrentBusiness(supabase, user.id)
         if (cancelled) return
-        const biz = b as { id?: string; service_subscription_tier?: string; subscription_grace_until?: string | null } | null
-        setBusinessId(biz?.id ?? null)
-        setTier(parseServiceSubscriptionTier(biz?.service_subscription_tier))
-        setGraceUntil(biz?.subscription_grace_until ? new Date(biz.subscription_grace_until) : null)
+        setBusinessId((b as any)?.id ?? null)
+        setEntitlement(rowToEntitlement(b as Record<string, unknown> | null))
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
 
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [isService, urlBusinessId, pathname])
 
   const canAccessTier = useCallback(
-    (required: ServiceSubscriptionTier) => tierIncludes(tier, required),
-    [tier]
+    (required: ServiceSubscriptionTier) =>
+      tierIncludes(entitlement.effectiveTier, required),
+    [entitlement.effectiveTier]
   )
-
-  const now = new Date()
-  const inGracePeriod  = graceUntil !== null && now < graceUntil
-  const subscriptionLocked = graceUntil !== null && now >= graceUntil
 
   const value = useMemo<ServiceSubscriptionContextValue>(
     () => ({
-      tier,
+      effectiveTier:    entitlement.effectiveTier,
+      tier:             entitlement.rawTier,
+      status:           entitlement.status,
       businessId,
       loading,
       canAccessTier,
-      inGracePeriod,
-      subscriptionLocked,
+      isTrialing:       entitlement.isTrialing,
+      trialExpired:     entitlement.trialExpired,
+      trialEndsAt:      entitlement.trialEndsAt,
+      trialDaysLeft:    entitlement.trialDaysLeft,
+      inGracePeriod:    entitlement.inGracePeriod,
+      subscriptionLocked: entitlement.isSubscriptionLocked,
     }),
-    [tier, businessId, loading, canAccessTier, inGracePeriod, subscriptionLocked]
+    [entitlement, businessId, loading, canAccessTier]
   )
 
-  if (!isService) {
-    return <>{children}</>
-  }
+  if (!isService) return <>{children}</>
 
   return (
-    <ServiceSubscriptionContext.Provider value={value}>{children}</ServiceSubscriptionContext.Provider>
+    <ServiceSubscriptionContext.Provider value={value}>
+      {children}
+    </ServiceSubscriptionContext.Provider>
   )
 }
 

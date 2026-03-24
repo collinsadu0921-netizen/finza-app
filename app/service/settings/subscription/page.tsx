@@ -18,6 +18,11 @@ import {
   type BillingCycle,
 } from "@/lib/serviceWorkspace/subscriptionPricing"
 
+function formatDate(d: Date | null): string {
+  if (!d) return "—"
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+}
+
 type TierFeatures = {
   section: string
   items: string[]
@@ -324,7 +329,7 @@ function SubscriptionPaystackActions({
 }
 
 function SubscriptionPageInner() {
-  const { tier, loading, businessId } = useServiceSubscription()
+  const { tier, status, loading, businessId, isTrialing, trialExpired, trialEndsAt, trialDaysLeft, subscriptionLocked } = useServiceSubscription()
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
 
   return (
@@ -349,28 +354,96 @@ function SubscriptionPageInner() {
           </p>
         </div>
 
-        {/* Current plan banner */}
+        {/* Current plan + subscription status banner */}
         <div className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Current plan</p>
-              {loading ? (
-                <div className="mt-1 h-7 w-36 animate-pulse rounded-md bg-slate-100" />
-              ) : (
-                <p className="mt-1 text-2xl font-bold text-slate-900">
-                  {SERVICE_TIER_LABEL[tier]}
-                </p>
-              )}
+          {loading ? (
+            <div className="space-y-2">
+              <div className="h-4 w-24 animate-pulse rounded bg-slate-100" />
+              <div className="h-7 w-36 animate-pulse rounded-md bg-slate-100" />
             </div>
-            {!loading && tier === "business" && (
-              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                Highest plan
-              </span>
-            )}
-          </div>
+          ) : (
+            <>
+              {/* Trial active */}
+              {isTrialing && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-blue-800">
+                      {SERVICE_TIER_LABEL[tier]} free trial
+                      {trialDaysLeft !== null && (
+                        <> — {trialDaysLeft === 0 ? "last day" : trialDaysLeft === 1 ? "1 day left" : `${trialDaysLeft} days left`}</>
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-xs text-blue-700">
+                      Trial ends on {formatDate(trialEndsAt)}. Subscribe before then to keep uninterrupted access.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Trial expired */}
+              {trialExpired && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-orange-800">Your free trial has ended</p>
+                    <p className="mt-0.5 text-xs text-orange-700">
+                      Trial ended on {formatDate(trialEndsAt)}. Your data is safe — subscribe below to restore access.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment locked */}
+              {subscriptionLocked && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-red-800">Subscription payment overdue</p>
+                    <p className="mt-0.5 text-xs text-red-700">
+                      Your Mobile Money payment failed and the grace period has expired. Renew below to restore access.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Current plan</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-900">{SERVICE_TIER_LABEL[tier]}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 capitalize">
+                    Status:{" "}
+                    <span className={
+                      status === "active"   ? "text-emerald-600 font-medium" :
+                      status === "trialing" ? "text-blue-600 font-medium" :
+                      "text-red-600 font-medium"
+                    }>
+                      {status === "trialing" && isTrialing  ? "Free trial" :
+                       status === "trialing" && trialExpired ? "Trial expired" :
+                       status === "active"                   ? "Active" :
+                       status === "past_due"                 ? "Payment failed (grace period)" :
+                       status === "locked"                   ? "Locked" :
+                       status}
+                    </span>
+                  </p>
+                </div>
+                {!loading && status === "active" && tier === "business" && (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Highest plan
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Billing cycle toggle */}
@@ -409,9 +482,12 @@ function SubscriptionPageInner() {
         {/* Plan comparison cards */}
         <div className="grid gap-4 sm:grid-cols-3">
           {TIER_ORDER.map((t) => {
-            const isCurrent  = t === tier
-            const isUpgrade  = !loading && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
-            const isDowngrade = !loading && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[tier]
+            const isCurrent   = t === tier
+            // On a trial or expired trial, every plan shows a "Subscribe" action
+            const needsSubscription = isTrialing || trialExpired || subscriptionLocked
+            const isUpgrade   = !loading && !needsSubscription && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
+            const isDowngrade  = !loading && !needsSubscription && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[tier]
+            const isSubscribeTarget = !loading && needsSubscription
             const features   = TIER_FEATURES[t]
             const price      = TIER_PRICING[cycle][t]
             const perMonth   = monthlyEquivalent(cycle, t)
@@ -480,7 +556,17 @@ function SubscriptionPageInner() {
                   </div>
                 ))}
 
-                {/* Upgrade button */}
+                {/* Subscribe CTA — shown during trial, trial-expired, or payment-locked */}
+                {isSubscribeTarget && (
+                  <SubscriptionPaystackActions
+                    businessId={businessId}
+                    targetTier={t}
+                    cycle={cycle}
+                    disabled={false}
+                  />
+                )}
+
+                {/* Upgrade button (active paid subscriber going higher) */}
                 {isUpgrade && (
                   <a
                     href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
@@ -493,7 +579,7 @@ function SubscriptionPageInner() {
                   </a>
                 )}
 
-                {/* Downgrade button */}
+                {/* Downgrade button (active paid subscriber going lower) */}
                 {isDowngrade && (
                   <div className="mt-4">
                     <a

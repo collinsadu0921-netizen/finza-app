@@ -150,7 +150,13 @@
       "Bash(xargs -I {} find {} -type f -name \"*.tsx\")",
       "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
       "Bash(grep -l 'AUTH DISABLED FOR DEVELOPMENT' /c/projects/finza-web/finza-web/app/api/**/*.ts)",
-      "Bash(grep -L \"user\\\\|userId\\\\|currentUser\" /c/projects/finza-web/finza-web/app/api/**/route.ts)"
+      "Bash(grep -L \"user\\\\|userId\\\\|currentUser\" /c/projects/finza-web/finza-web/app/api/**/route.ts)",
+      "Bash(find /c/projects/finza-web/finza-web -type f -name *.sql -o -name *migration* -o -name *schema*)",
+      "Bash(grep -r \"service_subscription_tier\\\\|service_subscription_status\\\\|trial_starts_at\\\\|trial_ends_at\\\\|subscription_grace_until\\\\|billing_cycle\\\\|subscription_started_at\\\\|current_period_ends_at\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(find /c/projects/finza-web/finza-web -type f \\\\\\(-name *signup* -o -name *onboard* -o -name *auth* \\\\\\) \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(find /c/projects/finza-web/finza-web/app -type d -name \"signup\\\\|onboard\\\\|auth\\\\|register\")",
+      "Bash(find /c/projects/finza-web/finza-web -type f -name *business*setup* \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
+      "Bash(find /c/projects/finza-web/finza-web/app -type d -name business*)"
     ]
   }
 }

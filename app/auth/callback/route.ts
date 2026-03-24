@@ -44,10 +44,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${requestUrl.origin}/login?error=no_user`)
     }
 
-    // Step 9.3 Batch C: Check signup intent for routing
-    const signupIntent = user.user_metadata?.signup_intent || "business_owner"
+    const signupIntent   = user.user_metadata?.signup_intent  || "business_owner"
+    // Trial intent — stored in metadata during signup so it survives this redirect.
+    // trial_workspace is only set for finished workspaces (currently "service" only).
+    const trialWorkspace = user.user_metadata?.trial_workspace ?? null
+    const trialPlan      = user.user_metadata?.trial_plan      ?? null
+    const trialIntent    = user.user_metadata?.trial_intent    === true
 
-    // Check if user has a business (existing user; exclude archived)
+    // Check if user already has a business (returning / existing user)
     const { data: business } = await supabase
       .from("businesses")
       .select("id")
@@ -55,14 +59,19 @@ export async function GET(request: NextRequest) {
       .is("archived_at", null)
       .maybeSingle()
 
-    // If user has a business, redirect to dashboard
+    // Existing user with a business → go straight to dashboard
     if (business) {
       return NextResponse.redirect(`${requestUrl.origin}/dashboard`)
     }
 
-    // Step 9.3 Batch C: Route new users based on signup intent
+    // Trial signup from marketing site (workspace=service&plan=…&trial=1)
+    // Route to business-setup; the trial fields in metadata are picked up there.
+    if (trialIntent && trialWorkspace === "service" && trialPlan) {
+      return NextResponse.redirect(`${requestUrl.origin}/business-setup`)
+    }
+
+    // Accounting firm signup
     if (signupIntent === "accounting_firm") {
-      // Check if user already belongs to a firm
       const { data: firmUser } = await supabase
         .from("accounting_firm_users")
         .select("firm_id")
@@ -71,16 +80,14 @@ export async function GET(request: NextRequest) {
         .maybeSingle()
 
       if (firmUser) {
-        // Already in a firm, go to firm dashboard
         return NextResponse.redirect(`${requestUrl.origin}/accounting/firm`)
       } else {
-        // Not in a firm yet, go to firm setup
         return NextResponse.redirect(`${requestUrl.origin}/accounting/firm/setup`)
       }
-    } else {
-      // Default: business owner flow (unchanged)
-      return NextResponse.redirect(`${requestUrl.origin}/business-setup`)
     }
+
+    // Default: business owner flow
+    return NextResponse.redirect(`${requestUrl.origin}/business-setup`)
   } catch (error: any) {
     console.error("Unexpected error in auth callback:", error)
     return NextResponse.redirect(
