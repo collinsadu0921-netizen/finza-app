@@ -78,11 +78,9 @@ export default function ProformaViewPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
 
-  // Send modal
+  // Send / share modal
   const [showSendModal, setShowSendModal] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sendDone, setSendDone] = useState(false)
-  const [sentProformaToken, setSentProformaToken] = useState<string | null>(null)
   const [copiedSendLink, setCopiedSendLink] = useState(false)
 
   useEffect(() => {
@@ -127,76 +125,92 @@ export default function ProformaViewPage() {
     </span>
   )
 
-  /** Step 1 of Send: call API to mark as sent and assign PRF number */
-  const executeSend = async () => {
-    if (!proforma) return
-    setSending(true)
+  /** Draft → mark sent + PRF number; already sent → return existing public_token */
+  const ensureSentAndGetPublicToken = async (): Promise<string> => {
+    if (!proforma) throw new Error("Proforma not loaded")
+    if (proforma.status !== "draft") {
+      if (!proforma.public_token) throw new Error("This proforma has no public link")
+      return proforma.public_token
+    }
+    const response = await fetch(`/api/proforma/${proformaId}/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || "Failed to send proforma")
+    const tok = data.proforma?.public_token as string | undefined
+    if (!tok) throw new Error("Server did not return a client link")
+    await loadProforma()
+    return tok
+  }
+
+  const buildClientUrl = (publicToken: string) =>
+    `${typeof window !== "undefined" ? window.location.origin : ""}/proforma-public/${publicToken}`
+
+  const openSendModal = () => {
+    setCopiedSendLink(false)
+    setShowSendModal(true)
+  }
+
+  const closeSendModal = () => {
+    setShowSendModal(false)
+    setCopiedSendLink(false)
+  }
+
+  const handleCopySendLink = async () => {
     try {
-      const response = await fetch(`/api/proforma/${proformaId}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || "Failed to send proforma")
-      await loadProforma()
-      // After reload, public_token is set — grab it from the fresh state via data
-      setSentProformaToken(data.proforma?.public_token ?? proforma.public_token)
-      setSendDone(true)
+      setSending(true)
+      const tok = await ensureSentAndGetPublicToken()
+      const link = buildClientUrl(tok)
+      await navigator.clipboard.writeText(link)
+      setCopiedSendLink(true)
+      setTimeout(() => setCopiedSendLink(false), 2000)
     } catch (err: any) {
-      setToast({ message: err.message || "Failed to send proforma", type: "error" })
-      setShowSendModal(false)
+      setToast({ message: err.message || "Could not copy link", type: "error" })
     } finally {
       setSending(false)
     }
   }
 
-  const clientLink = () => {
-    const token = sentProformaToken ?? proforma?.public_token
-    if (!token) return ""
-    return `${typeof window !== "undefined" ? window.location.origin : ""}/proforma-public/${token}`
-  }
-
-  const openSendModal = () => {
-    // If already sent, jump straight to share panel
-    if (proforma?.status === "sent") {
-      setSendDone(true)
-      setSentProformaToken(proforma.public_token)
-      setShowSendModal(true)
-    } else {
-      setSendDone(false)
-      setShowSendModal(true)
+  const handleWhatsApp = async () => {
+    try {
+      setSending(true)
+      const tok = await ensureSentAndGetPublicToken()
+      const link = buildClientUrl(tok)
+      const custPhone = proforma?.customers?.phone?.replace(/\D/g, "")
+      const text = encodeURIComponent(
+        `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review and accept your proforma invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}.\n\n${link}`
+      )
+      const url = custPhone
+        ? `https://wa.me/${custPhone}?text=${text}`
+        : `https://wa.me/?text=${text}`
+      window.open(url, "_blank")
+    } catch (err: any) {
+      setToast({ message: err.message || "Failed to open WhatsApp", type: "error" })
+    } finally {
+      setSending(false)
     }
   }
 
-  const handleCopySendLink = () => {
-    navigator.clipboard.writeText(clientLink()).then(() => {
-      setCopiedSendLink(true)
-      setTimeout(() => setCopiedSendLink(false), 2000)
-    })
-  }
-
-  const handleWhatsApp = () => {
-    const link = clientLink()
-    if (!link) return
-    const custPhone = proforma?.customers?.phone?.replace(/\D/g, "")
-    const text = encodeURIComponent(
-      `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review and accept your proforma invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}.\n\n${link}`
-    )
-    const url = custPhone
-      ? `https://wa.me/${custPhone}?text=${text}`
-      : `https://wa.me/?text=${text}`
-    window.open(url, "_blank")
-  }
-
-  const handleEmail = () => {
-    const link = clientLink()
-    if (!link) return
-    const subject = encodeURIComponent(`Proforma Invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}`)
-    const body = encodeURIComponent(
-      `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review your proforma invoice using the link below:\n\n${link}\n\nKindly accept or decline at your earliest convenience.\n\nThank you.`
-    )
-    const email = proforma?.customers?.email ?? ""
-    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`
+  const handleEmail = async () => {
+    try {
+      setSending(true)
+      const tok = await ensureSentAndGetPublicToken()
+      const link = buildClientUrl(tok)
+      const subject = encodeURIComponent(
+        `Proforma Invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}`
+      )
+      const body = encodeURIComponent(
+        `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review your proforma invoice using the link below:\n\n${link}\n\nKindly accept or decline at your earliest convenience.\n\nThank you.`
+      )
+      const email = proforma?.customers?.email ?? ""
+      window.location.href = `mailto:${email}?subject=${subject}&body=${body}`
+    } catch (err: any) {
+      setToast({ message: err.message || "Failed to open email", type: "error" })
+    } finally {
+      setSending(false)
+    }
   }
 
   const handleMarkAccepted = async () => {
@@ -691,82 +705,52 @@ export default function ProformaViewPage() {
       {/* Toast */}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* ── SEND MODAL ─────────────────────────────────────── */}
+      {/* ── SEND / SHARE MODAL ─────────────────────────────────────── */}
       {showSendModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-
-            {/* Step 1: Confirm send */}
-            {!sendDone && (
-              <>
-                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                  <h2 className="text-lg font-bold text-slate-800">Send Proforma Invoice</h2>
-                  <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {proforma?.status !== "draft" && (
+                  <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                     </svg>
-                  </button>
-                </div>
-                <div className="p-6 space-y-4">
-                  <p className="text-sm text-slate-600">
-                    This will assign a proforma number <span className="font-semibold">PRF-XXXXXX</span> and mark the invoice as sent. You can then share the client link via WhatsApp, email, or copy it directly.
-                  </p>
-                  {proforma?.customers?.name && (
-                    <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm">
-                      <p className="text-slate-400 text-xs uppercase tracking-wide font-medium mb-1">Sending to</p>
-                      <p className="font-semibold text-slate-800">{proforma.customers.name}</p>
-                      {proforma.customers.email && <p className="text-slate-500">{proforma.customers.email}</p>}
-                      {proforma.customers.phone && <p className="text-slate-500">{proforma.customers.phone}</p>}
-                    </div>
-                  )}
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      onClick={() => setShowSendModal(false)}
-                      className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={executeSend}
-                      disabled={sending}
-                      className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
-                    >
-                      {sending ? "Sending…" : "Confirm & Send"}
-                    </button>
                   </div>
+                )}
+                <h2 className="text-lg font-bold text-slate-800">
+                  {proforma?.status === "draft"
+                    ? "Share with client"
+                    : `${proforma?.proforma_number ?? "Proforma"} — share link`}
+                </h2>
+              </div>
+              <button type="button" onClick={closeSendModal} className="text-slate-400 hover:text-slate-600">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-slate-600 mb-1">
+                {proforma?.status === "draft"
+                  ? "Choose WhatsApp, email, or copy link. We’ll assign a PRF number and mark this proforma as Sent when you continue."
+                  : "Share the client link so they can review, accept, or sign."}
+              </p>
+              {proforma?.status === "draft" && proforma?.customers?.name && (
+                <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm mb-2">
+                  <p className="text-slate-400 text-xs uppercase tracking-wide font-medium mb-1">Customer</p>
+                  <p className="font-semibold text-slate-800">{proforma.customers.name}</p>
+                  {proforma.customers.email && <p className="text-slate-500">{proforma.customers.email}</p>}
+                  {proforma.customers.phone && <p className="text-slate-500">{proforma.customers.phone}</p>}
                 </div>
-              </>
-            )}
-
-            {/* Step 2: Share options */}
-            {sendDone && (
-              <>
-                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <h2 className="text-lg font-bold text-slate-800">
-                      {proforma?.proforma_number ?? "Proforma"} sent!
-                    </h2>
-                  </div>
-                  <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="p-6 space-y-3">
-                  <p className="text-sm text-slate-500 mb-4">
-                    Share the client link so they can review, accept, and sign.
-                  </p>
+              )}
 
                   {/* WhatsApp */}
                   <button
-                    onClick={handleWhatsApp}
-                    className="w-full flex items-center gap-3 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm"
+                    type="button"
+                    onClick={() => void handleWhatsApp()}
+                    disabled={sending}
+                    className="w-full flex items-center gap-3 bg-[#25D366] hover:bg-[#1ebe5d] disabled:opacity-60 text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm"
                   >
                     <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
@@ -779,8 +763,10 @@ export default function ProformaViewPage() {
 
                   {/* Email */}
                   <button
-                    onClick={handleEmail}
-                    className="w-full flex items-center gap-3 bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm"
+                    type="button"
+                    onClick={() => void handleEmail()}
+                    disabled={sending}
+                    className="w-full flex items-center gap-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm"
                   >
                     <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -793,8 +779,10 @@ export default function ProformaViewPage() {
 
                   {/* Copy link */}
                   <button
-                    onClick={handleCopySendLink}
-                    className="w-full flex items-center gap-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-3 px-4 rounded-xl transition-colors text-sm border border-slate-200"
+                    type="button"
+                    onClick={() => void handleCopySendLink()}
+                    disabled={sending}
+                    className="w-full flex items-center gap-3 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 font-medium py-3 px-4 rounded-xl transition-colors text-sm border border-slate-200"
                   >
                     {copiedSendLink ? (
                       <>
@@ -814,14 +802,13 @@ export default function ProformaViewPage() {
                   </button>
 
                   <button
-                    onClick={() => setShowSendModal(false)}
+                    type="button"
+                    onClick={closeSendModal}
                     className="w-full text-center text-sm text-slate-400 hover:text-slate-600 pt-1"
                   >
                     Done
                   </button>
-                </div>
-              </>
-            )}
+            </div>
           </div>
         </div>
       )}

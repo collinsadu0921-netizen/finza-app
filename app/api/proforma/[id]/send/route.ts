@@ -96,6 +96,31 @@ export async function POST(
       )
     }
 
+    let finalProforma = updatedProforma
+    if (!finalProforma.public_token) {
+      const { data: tokenData, error: tokErr } = await supabase.rpc("generate_public_token")
+      if (tokErr || tokenData == null) {
+        return NextResponse.json(
+          { success: false, error: "Failed to generate client link for this proforma." },
+          { status: 500 }
+        )
+      }
+      const publicToken = String(tokenData)
+      const { data: withTok, error: tokUpdateErr } = await supabase
+        .from("proforma_invoices")
+        .update({ public_token: publicToken })
+        .eq("id", proformaId)
+        .select()
+        .single()
+      if (tokUpdateErr || !withTok) {
+        return NextResponse.json(
+          { success: false, error: "Failed to save client link for this proforma." },
+          { status: 500 }
+        )
+      }
+      finalProforma = withTok
+    }
+
     // Log audit entry
     await createAuditLog({
       businessId: business.id,
@@ -104,13 +129,13 @@ export async function POST(
       entityType: "proforma_invoice",
       entityId: proformaId,
       oldValues: proforma,
-      newValues: updatedProforma,
+      newValues: finalProforma,
       request,
     })
 
     return NextResponse.json({
       success: true,
-      proforma: updatedProforma,
+      proforma: finalProforma,
     })
   } catch (error: any) {
     console.error("Error sending proforma invoice:", error)

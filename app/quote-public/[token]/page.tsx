@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
 
@@ -67,7 +67,8 @@ const formatDate = (d: string | null) =>
 
 export default function QuotePublicPage() {
   const params = useParams()
-  const token = params.token as string
+  const router = useRouter()
+  const token = typeof params.token === "string" ? decodeURIComponent(params.token) : ""
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -94,23 +95,46 @@ export default function QuotePublicPage() {
   const [rejectError, setRejectError] = useState("")
 
   useEffect(() => {
-    fetch(`/api/public/quote/${token}`)
-      .then(r => {
-        if (!r.ok) throw new Error("Quote not found")
-        return r.json()
-      })
-      .then(d => {
-        setEstimate(d.estimate)
-        setItems(d.items ?? [])
-        setBusiness(d.business)
-        if (d.settings?.brand_color) setBrand(d.settings.brand_color)
-        if (d.settings?.quote_terms_and_conditions) setQuoteTerms(d.settings.quote_terms_and_conditions)
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [token])
+    if (!token) {
+      setError("Invalid link")
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    const enc = encodeURIComponent(token)
+    ;(async () => {
+      try {
+        const quoteRes = await fetch(`/api/public/quote/${enc}`, { cache: "no-store" })
+        if (quoteRes.ok) {
+          const d = await quoteRes.json()
+          if (cancelled) return
+          setEstimate(d.estimate)
+          setItems(d.items ?? [])
+          setBusiness(d.business)
+          if (d.settings?.brand_color) setBrand(d.settings.brand_color)
+          if (d.settings?.quote_terms_and_conditions) setQuoteTerms(d.settings.quote_terms_and_conditions)
+          return
+        }
+        // Same opaque token may be a proforma (client links use /proforma-public/…)
+        const proformaRes = await fetch(`/api/public/proforma/${enc}`, { cache: "no-store" })
+        if (proformaRes.ok && !cancelled) {
+          router.replace(`/proforma-public/${enc}`)
+          return
+        }
+        if (!cancelled) setError("Quote not found")
+      } catch {
+        if (!cancelled) setError("Quote not found")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [token, router])
 
   const sym = estimate?.currency_symbol ?? "₵"
+  const quoteTokenEnc = token ? encodeURIComponent(token) : ""
 
   const handleAccept = async () => {
     setAcceptError("")
@@ -121,7 +145,7 @@ export default function QuotePublicPage() {
 
     setAccepting(true)
     try {
-      const res = await fetch(`/api/public/quote/${token}/accept`, {
+      const res = await fetch(`/api/public/quote/${quoteTokenEnc}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -149,7 +173,7 @@ export default function QuotePublicPage() {
     setRejectError("")
     setRejecting(true)
     try {
-      const res = await fetch(`/api/public/quote/${token}/reject`, {
+      const res = await fetch(`/api/public/quote/${quoteTokenEnc}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: rejectReason }),
@@ -157,7 +181,7 @@ export default function QuotePublicPage() {
       const data = await res.json()
       if (!res.ok) { setRejectError(data.error ?? "Failed to decline"); return }
       setShowReject(false)
-      const r2 = await fetch(`/api/public/quote/${token}`)
+      const r2 = await fetch(`/api/public/quote/${quoteTokenEnc}`)
       const d2 = await r2.json()
       setEstimate(d2.estimate)
     } catch {
