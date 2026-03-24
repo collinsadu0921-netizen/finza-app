@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -16,16 +17,19 @@ export async function GET(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT - Keep login check only
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT - Bypass business ownership check
-    // const business = await getCurrentBusiness(supabase, user.id)
-    // if (!business) {
-    //   return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    // }
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "starter",
+    })
+    if (denied) return denied
 
     // Fetch credit note with all details
     const { data: creditNote, error: creditNoteError } = await supabase
@@ -47,8 +51,7 @@ export async function GET(
       `
       )
       .eq("id", creditNoteId)
-      // AUTH DISABLED FOR DEVELOPMENT - Removed business_id filter
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .is("deleted_at", null)
       .single()
 

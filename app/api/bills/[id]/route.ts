@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -15,27 +16,27 @@ export async function GET(
     const billId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // const business = await getCurrentBusiness(supabase, user.id)
-    // if (!business) {
-    //   return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    // }
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+    })
+    if (denied) return denied
 
     const { data: bill, error } = await supabase
       .from("bills")
       .select("*, business_id")
       .eq("id", billId)
-      // AUTH DISABLED FOR DEVELOPMENT
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .is("deleted_at", null)
       .single()
 
@@ -103,20 +104,21 @@ export async function PUT(
     const billId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // const business = await getCurrentBusiness(supabase, user.id)
-    // if (!business) {
-    //   return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    // }
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+    })
+    if (denied) return denied
 
     const body = await request.json()
     const {
@@ -146,13 +148,12 @@ export async function PUT(
       landed_cost_account_code,
     } = body
 
-    // Verify bill exists
+    // Verify bill exists and belongs to this business
     const { data: existingBill } = await supabase
       .from("bills")
       .select("id, status")
       .eq("id", billId)
-      // AUTH DISABLED FOR DEVELOPMENT
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .single()
 
     if (!existingBill) {
@@ -345,28 +346,28 @@ export async function DELETE(
     const billId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // const business = await getCurrentBusiness(supabase, user.id)
-    // if (!business) {
-    //   return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    // }
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+    })
+    if (denied) return denied
 
     // Only allow deletion of draft bills
     const { data: bill } = await supabase
       .from("bills")
       .select("status")
       .eq("id", billId)
-      // AUTH DISABLED FOR DEVELOPMENT
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .single()
 
     if (!bill) {

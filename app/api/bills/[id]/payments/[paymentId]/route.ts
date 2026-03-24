@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function PUT(
   request: NextRequest,
@@ -18,20 +19,21 @@ export async function PUT(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const body = await request.json()
     const { amount, date, method, reference, notes, business_id } = body
 
     if (!business_id) {
-      return NextResponse.json(
-        { error: "business_id is required" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "business_id is required" }, { status: 400 })
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business_id, minTier: "professional",
+    })
+    if (denied) return denied
 
     // Verify payment exists
     const { data: existingPayment } = await supabase
@@ -95,14 +97,11 @@ export async function DELETE(
     const paymentId = resolvedParams.paymentId
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const { searchParams } = new URL(request.url)
     const business_id = searchParams.get("business_id")
@@ -114,11 +113,17 @@ export async function DELETE(
       )
     }
 
-    // Get payment before deletion for audit log
+    const desDenied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business_id, minTier: "professional",
+    })
+    if (desDenied) return desDenied
+
+    // Get payment before deletion for audit log — scoped to this business
     const { data: existingPayment } = await supabase
       .from("bill_payments")
       .select("*")
       .eq("id", paymentId)
+      .eq("business_id", business_id)
       .single()
 
     // Soft delete

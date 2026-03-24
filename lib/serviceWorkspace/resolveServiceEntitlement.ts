@@ -112,8 +112,15 @@ export function resolveServiceEntitlement(
       : null
 
   // --- MoMo payment grace (completely separate from trial) ---
-  const inGracePeriod      = graceUntil !== null && now < graceUntil
-  const isSubscriptionLocked = graceUntil !== null && now >= graceUntil
+  // isSubscriptionLocked is true when EITHER:
+  //   a) subscription_grace_until is set and has expired (normal payment failure path), OR
+  //   b) status is explicitly 'locked' (admin/background-job set it directly).
+  // Both paths must block access — checking only the date would miss an explicit
+  // admin lock; checking only the status column would miss an expired grace window
+  // that hasn't been flushed to the status column yet.
+  const inGracePeriod        = graceUntil !== null && now < graceUntil
+  const isSubscriptionLocked =
+    status === "locked" || (graceUntil !== null && now >= graceUntil)
 
   return {
     effectiveTier,

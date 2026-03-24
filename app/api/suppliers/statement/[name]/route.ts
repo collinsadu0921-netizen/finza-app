@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -13,51 +14,23 @@ export async function GET(
     const supplierName = decodeURIComponent(resolvedParams.name)
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business_id from query or use first business
-    let business
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
-    // If no business found, try to get business_id from query params
-    const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
-    
-    if (!business && businessId) {
-      const { data: businessData } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("id", businessId)
-        .single()
-      if (businessData) {
-        business = businessData
-      }
-    }
-    
-    // If still no business, get first business (for development)
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+    })
+    if (denied) return denied
+
+    const { searchParams } = new URL(request.url)
     
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")

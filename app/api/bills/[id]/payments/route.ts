@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -14,27 +15,27 @@ export async function GET(
     const billId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // const business = await getCurrentBusiness(supabase, user.id)
-    // if (!business) {
-    //   return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    // }
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+    })
+    if (denied) return denied
 
     const { data: payments, error } = await supabase
       .from("bill_payments")
       .select("*")
       .eq("bill_id", billId)
-      // AUTH DISABLED FOR DEVELOPMENT
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .is("deleted_at", null)
       .order("date", { ascending: false })
 
@@ -66,16 +67,12 @@ export async function POST(
     const billId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT - Get business_id from request body or query
     const body = await request.json()
     const { amount, date, method, reference, notes, business_id } = body
 
@@ -96,11 +93,13 @@ export async function POST(
     }
 
     if (!business_id) {
-      return NextResponse.json(
-        { error: "business_id is required" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "business_id is required" }, { status: 400 })
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business_id, minTier: "professional",
+    })
+    if (denied) return denied
 
     // Verify bill exists and is open (payments only for open bills)
     const { data: bill } = await supabase

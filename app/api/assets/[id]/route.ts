@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -13,44 +14,28 @@ export async function GET(
     const assetId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business or use first business
-    let business
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // If no business found, get first business (for development)
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    // Get asset
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "business",
+    })
+    if (denied) return denied
+
+    // Get asset — scoped to the authenticated business
     const { data: asset, error: assetError } = await supabase
       .from("assets")
       .select("*")
       .eq("id", assetId)
-      // AUTH DISABLED FOR DEVELOPMENT
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .is("deleted_at", null)
       .single()
 
@@ -96,43 +81,28 @@ export async function PUT(
     const assetId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business or use first business
-    let business
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    // Verify asset exists
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "business",
+    })
+    if (denied) return denied
+
+    // Verify asset exists and belongs to this business
     const { data: existingAsset } = await supabase
       .from("assets")
       .select("id, status, purchase_amount, salvage_value")
       .eq("id", assetId)
-      // AUTH DISABLED FOR DEVELOPMENT
-      // .eq("business_id", business.id)
+      .eq("business_id", business.id)
       .is("deleted_at", null)
       .single()
 
@@ -245,43 +215,28 @@ export async function DELETE(
     const assetId = resolvedParams.id
 
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business or use first business
-    let business
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
-    }
-
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    // Soft delete
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "business",
+    })
+    if (denied) return denied
+
+    // Soft delete — scoped to authenticated business
     const { error: deleteError } = await supabase
       .from("assets")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", assetId)
-    // AUTH DISABLED FOR DEVELOPMENT
-    // .eq("business_id", business.id)
+      .eq("business_id", business.id)
 
     if (deleteError) {
       console.error("Error deleting asset:", deleteError)

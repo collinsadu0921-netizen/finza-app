@@ -21,28 +21,11 @@ export async function PUT(
       data: { user: currentUser },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!currentUser) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
-
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (currentUser) {
-      business = await getCurrentBusiness(supabase, currentUser.id)
-    }
-    
-    if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
+    if (!currentUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const business = await getCurrentBusiness(supabase, currentUser.id)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }

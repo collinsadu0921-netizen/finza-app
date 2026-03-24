@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeAllowanceType, ALLOWANCE_TYPES } from "@/lib/payrollTypes"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function POST(
   request: NextRequest,
@@ -16,37 +17,30 @@ export async function POST(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // AUTH DISABLED FOR DEVELOPMENT
-    // if (!user) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // AUTH DISABLED FOR DEVELOPMENT - Get business from query or use first business
-    let business: { id: string } | null = null
-    if (user) {
-      business = await getCurrentBusiness(supabase, user.id)
-    }
-    
+    const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
-      const { data: firstBusiness } = await supabase
-        .from("businesses")
-        .select("id")
-        .limit(1)
-        .single()
-      if (firstBusiness) {
-        business = firstBusiness
-      }
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+    })
+    if (denied) return denied
 
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    // Verify staff exists
+    // Verify staff belongs to the authenticated business
     const { data: staff } = await supabase
       .from("staff")
       .select("id")
       .eq("id", staffId)
+      .eq("business_id", business.id)
       .single()
 
     if (!staff) {
