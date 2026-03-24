@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, phone, email } = body
+    const { name, phone, email, address, tin, whatsapp_phone } = body
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return NextResponse.json(
@@ -52,6 +52,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (address !== undefined && address !== null && typeof address !== "string") {
+      return NextResponse.json({ error: "Address must be a string" }, { status: 400 })
+    }
+    if (tin !== undefined && tin !== null && typeof tin !== "string") {
+      return NextResponse.json({ error: "TIN must be a string" }, { status: 400 })
+    }
+    if (whatsapp_phone !== undefined && whatsapp_phone !== null && typeof whatsapp_phone !== "string") {
+      return NextResponse.json({ error: "WhatsApp number must be a string" }, { status: 400 })
+    }
+
+    const addressVal =
+      address === undefined || address === null ? null : address.trim() || null
+    const tinVal = tin === undefined || tin === null ? null : tin.trim() || null
+    const whatsappVal =
+      whatsapp_phone === undefined || whatsapp_phone === null
+        ? null
+        : whatsapp_phone.trim() || null
+
     // Create customer
     const { data: customer, error: customerError } = await supabase
       .from("customers")
@@ -60,6 +78,9 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         phone: phone?.trim() || null,
         email: email?.trim() || null,
+        address: addressVal,
+        tin: tinVal,
+        whatsapp_phone: whatsappVal,
         status: "active",
       })
       .select()
@@ -119,11 +140,11 @@ export async function GET(request: NextRequest) {
       query = query.eq("status", status)
     }
 
-    // Search by name, phone, or email
+    // Search by name, phone, email, address, or TIN
     if (search.trim().length > 0) {
       const searchTerm = `%${search.trim()}%`
       query = query.or(
-        `name.ilike.${searchTerm},phone.ilike.${searchTerm},email.ilike.${searchTerm}`
+        `name.ilike.${searchTerm},phone.ilike.${searchTerm},email.ilike.${searchTerm},address.ilike.${searchTerm},tin.ilike.${searchTerm}`
       )
     }
 

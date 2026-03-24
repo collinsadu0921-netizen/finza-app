@@ -10,6 +10,9 @@ export default function RetailNewCustomerPage() {
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
   const [email, setEmail] = useState("")
+  const [address, setAddress] = useState("")
+  const [tin, setTin] = useState("")
+  const [whatsappPhone, setWhatsappPhone] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,6 +32,9 @@ export default function RetailNewCustomerPage() {
           name: name.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,
+          address: address.trim() || null,
+          tin: tin.trim() || null,
+          whatsapp_phone: whatsappPhone.trim() || null,
         }),
       })
 
@@ -95,6 +101,48 @@ export default function RetailNewCustomerPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               placeholder="Email address"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-1">
+              Address
+            </label>
+            <textarea
+              id="address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              rows={3}
+              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Billing address"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label htmlFor="tin" className="block text-sm font-medium text-gray-700 mb-1">
+              TIN
+            </label>
+            <input
+              type="text"
+              id="tin"
+              value={tin}
+              onChange={(e) => setTin(e.target.value)}
+              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Tax identification number"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label htmlFor="whatsapp" className="block text-sm font-medium text-gray-700 mb-1">
+              WhatsApp
+            </label>
+            <input
+              type="tel"
+              id="whatsapp"
+              value={whatsappPhone}
+              onChange={(e) => setWhatsappPhone(e.target.value)}
+              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Optional if same as phone"
               disabled={loading}
             />
           </div>

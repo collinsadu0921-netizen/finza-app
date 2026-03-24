@@ -83,6 +83,8 @@ export default function InvoiceEditPage() {
   const [newCustomerEmail, setNewCustomerEmail] = useState("")
   const [newCustomerPhone, setNewCustomerPhone] = useState("")
   const [newCustomerAddress, setNewCustomerAddress] = useState("")
+  const [newCustomerTin, setNewCustomerTin] = useState("")
+  const [newCustomerWhatsapp, setNewCustomerWhatsapp] = useState("")
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
@@ -408,6 +410,8 @@ export default function InvoiceEditPage() {
         email: newCustomerEmail.trim() || null,
         phone: newCustomerPhone.trim() || null,
         address: newCustomerAddress.trim() || null,
+        tin: newCustomerTin.trim() || null,
+        whatsapp_phone: newCustomerWhatsapp.trim() || null,
       }).select().single()
 
       if (insertError) {
@@ -436,6 +440,8 @@ export default function InvoiceEditPage() {
       setNewCustomerEmail("")
       setNewCustomerPhone("")
       setNewCustomerAddress("")
+      setNewCustomerTin("")
+      setNewCustomerWhatsapp("")
       setShowCustomerModal(false)
       setCreatingCustomer(false)
     } catch (err: any) {
@@ -1200,6 +1206,29 @@ export default function InvoiceEditPage() {
                     className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    TIN
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustomerTin}
+                    onChange={(e) => setNewCustomerTin(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    WhatsApp
+                  </label>
+                  <input
+                    type="tel"
+                    value={newCustomerWhatsapp}
+                    onChange={(e) => setNewCustomerWhatsapp(e.target.value)}
+                    placeholder="Optional if same as phone"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
                 {customerError && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">
                     {customerError}
@@ -1215,6 +1244,8 @@ export default function InvoiceEditPage() {
                       setNewCustomerEmail("")
                       setNewCustomerPhone("")
                       setNewCustomerAddress("")
+                      setNewCustomerTin("")
+                      setNewCustomerWhatsapp("")
                     }}
                     className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
                   >

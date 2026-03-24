@@ -176,6 +176,8 @@ export default function NewInvoicePage() {
   const [newCustomerEmail, setNewCustomerEmail] = useState("")
   const [newCustomerPhone, setNewCustomerPhone] = useState("")
   const [newCustomerAddress, setNewCustomerAddress] = useState("")
+  const [newCustomerTin, setNewCustomerTin] = useState("")
+  const [newCustomerWhatsapp, setNewCustomerWhatsapp] = useState("")
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [customerError, setCustomerError] = useState("")
 
@@ -270,7 +272,7 @@ export default function NewInvoicePage() {
       // Load Customers
       const { data: customersData } = await supabase
         .from("customers")
-        .select("id, name, email, phone, address")
+        .select("id, name, email, phone, address, tin, whatsapp_phone")
         .eq("business_id", business.id)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -473,6 +475,8 @@ export default function NewInvoicePage() {
         email: newCustomerEmail.trim() || null,
         phone: newCustomerPhone.trim() || null,
         address: newCustomerAddress.trim() || null,
+        tin: newCustomerTin.trim() || null,
+        whatsapp_phone: newCustomerWhatsapp.trim() || null,
       }).select().single()
 
       if (insertError) throw insertError
@@ -480,7 +484,7 @@ export default function NewInvoicePage() {
       // Refresh customers and select new one
       const { data: allCustomers } = await supabase
         .from("customers")
-        .select("id, name, email, phone, address")
+        .select("id, name, email, phone, address, tin, whatsapp_phone")
         .eq("business_id", businessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -493,6 +497,8 @@ export default function NewInvoicePage() {
       setNewCustomerEmail("")
       setNewCustomerPhone("")
       setNewCustomerAddress("")
+      setNewCustomerTin("")
+      setNewCustomerWhatsapp("")
       setCreatingCustomer(false)
     } catch (err: any) {
       setCustomerError(err.message || "Failed to create customer")
@@ -1120,7 +1126,15 @@ export default function NewInvoicePage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Address</label>
-                    <input type="text" value={newCustomerAddress} onChange={e => setNewCustomerAddress(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <textarea value={newCustomerAddress} onChange={e => setNewCustomerAddress(e.target.value)} rows={2} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TIN</label>
+                    <input type="text" value={newCustomerTin} onChange={e => setNewCustomerTin(e.target.value)} className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">WhatsApp</label>
+                    <input type="text" inputMode="tel" value={newCustomerWhatsapp} onChange={e => setNewCustomerWhatsapp(e.target.value)} placeholder="Optional if same as phone" className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button type="button" onClick={() => setShowCustomerModal(false)} className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>

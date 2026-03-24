@@ -13,6 +13,9 @@ type Customer = {
   name: string
   phone?: string | null
   email?: string | null
+  address?: string | null
+  tin?: string | null
+  whatsapp_phone?: string | null
   status: "active" | "blocked"
   created_at: string
   updated_at: string
@@ -53,6 +56,9 @@ export default function CustomerProfilePage() {
   const [editName, setEditName] = useState("")
   const [editPhone, setEditPhone] = useState("")
   const [editEmail, setEditEmail] = useState("")
+  const [editAddress, setEditAddress] = useState("")
+  const [editTin, setEditTin] = useState("")
+  const [editWhatsappPhone, setEditWhatsappPhone] = useState("")
   const [editStatus, setEditStatus] = useState<"active" | "blocked">("active")
   const [saving, setSaving] = useState(false)
   const { currencyCode } = useBusinessCurrency()
@@ -109,6 +115,9 @@ export default function CustomerProfilePage() {
       setEditName(data.customer.name)
       setEditPhone(data.customer.phone || "")
       setEditEmail(data.customer.email || "")
+      setEditAddress(data.customer.address || "")
+      setEditTin(data.customer.tin || "")
+      setEditWhatsappPhone(data.customer.whatsapp_phone || "")
       setEditStatus(data.customer.status)
       setLoading(false)
     } catch (err: any) {
@@ -134,6 +143,9 @@ export default function CustomerProfilePage() {
           name: editName.trim(),
           phone: editPhone.trim() || null,
           email: editEmail.trim() || null,
+          address: editAddress.trim() || null,
+          tin: editTin.trim() || null,
+          whatsapp_phone: editWhatsappPhone.trim() || null,
           status: editStatus,
         }),
       })
@@ -289,6 +301,42 @@ export default function CustomerProfilePage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Address
+                </label>
+                <textarea
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                  placeholder="Optional"
+                  rows={3}
+                  className="w-full border p-2 rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  TIN
+                </label>
+                <input
+                  type="text"
+                  value={editTin}
+                  onChange={(e) => setEditTin(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full border p-2 rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  WhatsApp
+                </label>
+                <input
+                  type="text"
+                  value={editWhatsappPhone}
+                  onChange={(e) => setEditWhatsappPhone(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full border p-2 rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Status
                 </label>
                 <select
@@ -314,6 +362,9 @@ export default function CustomerProfilePage() {
                     setEditName(customer.name)
                     setEditPhone(customer.phone || "")
                     setEditEmail(customer.email || "")
+                    setEditAddress(customer.address || "")
+                    setEditTin(customer.tin || "")
+                    setEditWhatsappPhone(customer.whatsapp_phone || "")
                     setEditStatus(customer.status)
                     setError("")
                   }}
@@ -344,6 +395,24 @@ export default function CustomerProfilePage() {
                 <div>
                   <label className="text-sm font-medium text-gray-600">Email</label>
                   <p className="text-lg">{customer.email}</p>
+                </div>
+              )}
+              {customer.address && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">Address</label>
+                  <p className="text-lg whitespace-pre-wrap">{customer.address}</p>
+                </div>
+              )}
+              {customer.tin && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">TIN</label>
+                  <p className="text-lg">{customer.tin}</p>
+                </div>
+              )}
+              {customer.whatsapp_phone && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600">WhatsApp</label>
+                  <p className="text-lg">{customer.whatsapp_phone}</p>
                 </div>
               )}
               <div>

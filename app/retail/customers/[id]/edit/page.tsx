@@ -10,6 +10,9 @@ type Customer = {
   name: string
   phone?: string | null
   email?: string | null
+  address?: string | null
+  tin?: string | null
+  whatsapp_phone?: string | null
   status: "active" | "blocked"
 }
 
@@ -24,6 +27,9 @@ export default function RetailCustomerEditPage() {
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
   const [email, setEmail] = useState("")
+  const [address, setAddress] = useState("")
+  const [tin, setTin] = useState("")
+  const [whatsappPhone, setWhatsappPhone] = useState("")
   const [status, setStatus] = useState<"active" | "blocked">("active")
 
   useEffect(() => {
@@ -62,6 +68,9 @@ export default function RetailCustomerEditPage() {
       setName(c.name)
       setPhone(c.phone || "")
       setEmail(c.email || "")
+      setAddress(c.address || "")
+      setTin(c.tin || "")
+      setWhatsappPhone(c.whatsapp_phone || "")
       setStatus(c.status)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load customer")
@@ -87,6 +96,9 @@ export default function RetailCustomerEditPage() {
           name: name.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,
+          address: address.trim() || null,
+          tin: tin.trim() || null,
+          whatsapp_phone: whatsappPhone.trim() || null,
           status,
         }),
       })
@@ -174,6 +186,48 @@ export default function RetailCustomerEditPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               placeholder="Email address"
+              disabled={saving}
+            />
+          </div>
+          <div>
+            <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-1">
+              Address
+            </label>
+            <textarea
+              id="address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              rows={3}
+              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Billing address"
+              disabled={saving}
+            />
+          </div>
+          <div>
+            <label htmlFor="tin" className="block text-sm font-medium text-gray-700 mb-1">
+              TIN
+            </label>
+            <input
+              type="text"
+              id="tin"
+              value={tin}
+              onChange={(e) => setTin(e.target.value)}
+              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Tax identification number"
+              disabled={saving}
+            />
+          </div>
+          <div>
+            <label htmlFor="whatsapp" className="block text-sm font-medium text-gray-700 mb-1">
+              WhatsApp
+            </label>
+            <input
+              type="tel"
+              id="whatsapp"
+              value={whatsappPhone}
+              onChange={(e) => setWhatsappPhone(e.target.value)}
+              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Optional if same as phone"
               disabled={saving}
             />
           </div>

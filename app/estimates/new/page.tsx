@@ -41,6 +41,8 @@ export default function NewEstimatePage() {
   const [newCustomerEmail, setNewCustomerEmail] = useState("")
   const [newCustomerPhone, setNewCustomerPhone] = useState("")
   const [newCustomerAddress, setNewCustomerAddress] = useState("")
+  const [newCustomerTin, setNewCustomerTin] = useState("")
+  const [newCustomerWhatsapp, setNewCustomerWhatsapp] = useState("")
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
@@ -277,6 +279,8 @@ export default function NewEstimatePage() {
         email: newCustomerEmail.trim() || null,
         phone: newCustomerPhone.trim() || null,
         address: newCustomerAddress.trim() || null,
+        tin: newCustomerTin.trim() || null,
+        whatsapp_phone: newCustomerWhatsapp.trim() || null,
       }).select().single()
 
       if (insertError) {
@@ -300,6 +304,8 @@ export default function NewEstimatePage() {
       setNewCustomerEmail("")
       setNewCustomerPhone("")
       setNewCustomerAddress("")
+      setNewCustomerTin("")
+      setNewCustomerWhatsapp("")
       setCreatingCustomer(false)
     } catch (err: any) {
       setCustomerError(err.message || "Failed to create customer")
@@ -824,6 +830,14 @@ export default function NewEstimatePage() {
                   <div>
                     <label className="block text-sm font-medium">Address</label>
                     <textarea value={newCustomerAddress} onChange={(e) => setNewCustomerAddress(e.target.value)} rows={3} className="w-full border rounded p-2" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium">TIN</label>
+                    <input type="text" value={newCustomerTin} onChange={(e) => setNewCustomerTin(e.target.value)} className="w-full border rounded p-2" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium">WhatsApp</label>
+                    <input type="tel" value={newCustomerWhatsapp} onChange={(e) => setNewCustomerWhatsapp(e.target.value)} placeholder="Optional if same as phone" className="w-full border rounded p-2" />
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button type="button" onClick={() => { setShowCustomerModal(false); setCustomerError("") }} className="flex-1 border rounded p-2 hover:bg-gray-50">Cancel</button>

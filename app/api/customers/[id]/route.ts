@@ -118,7 +118,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { name, phone, email, status } = body
+    const { name, phone, email, status, address, tin, whatsapp_phone } = body
 
     // Build update object
     const updates: Record<string, any> = {}
@@ -161,6 +161,45 @@ export async function PATCH(
         )
       } else {
         updates.email = email.trim()
+      }
+    }
+
+    if (address !== undefined) {
+      if (address === null || address === "") {
+        updates.address = null
+      } else if (typeof address !== "string") {
+        return NextResponse.json(
+          { error: "Address must be a string" },
+          { status: 400 }
+        )
+      } else {
+        updates.address = address.trim() || null
+      }
+    }
+
+    if (tin !== undefined) {
+      if (tin === null || tin === "") {
+        updates.tin = null
+      } else if (typeof tin !== "string") {
+        return NextResponse.json(
+          { error: "TIN must be a string" },
+          { status: 400 }
+        )
+      } else {
+        updates.tin = tin.trim() || null
+      }
+    }
+
+    if (whatsapp_phone !== undefined) {
+      if (whatsapp_phone === null || whatsapp_phone === "") {
+        updates.whatsapp_phone = null
+      } else if (typeof whatsapp_phone !== "string") {
+        return NextResponse.json(
+          { error: "WhatsApp number must be a string" },
+          { status: 400 }
+        )
+      } else {
+        updates.whatsapp_phone = whatsapp_phone.trim() || null
       }
     }
 

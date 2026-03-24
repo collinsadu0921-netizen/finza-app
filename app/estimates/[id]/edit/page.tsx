@@ -60,6 +60,8 @@ export default function EstimateEditPage() {
   const [newCustomerEmail, setNewCustomerEmail] = useState("")
   const [newCustomerPhone, setNewCustomerPhone] = useState("")
   const [newCustomerAddress, setNewCustomerAddress] = useState("")
+  const [newCustomerTin, setNewCustomerTin] = useState("")
+  const [newCustomerWhatsapp, setNewCustomerWhatsapp] = useState("")
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
@@ -257,6 +259,8 @@ export default function EstimateEditPage() {
         email: newCustomerEmail.trim() || null,
         phone: newCustomerPhone.trim() || null,
         address: newCustomerAddress.trim() || null,
+        tin: newCustomerTin.trim() || null,
+        whatsapp_phone: newCustomerWhatsapp.trim() || null,
       }).select().single()
 
       if (insertError) {
@@ -280,6 +284,8 @@ export default function EstimateEditPage() {
       setNewCustomerEmail("")
       setNewCustomerPhone("")
       setNewCustomerAddress("")
+      setNewCustomerTin("")
+      setNewCustomerWhatsapp("")
       setShowCustomerModal(false)
       setCreatingCustomer(false)
     } catch (err: any) {
@@ -749,6 +755,25 @@ export default function EstimateEditPage() {
                       value={newCustomerAddress}
                       onChange={(e) => setNewCustomerAddress(e.target.value)}
                       rows={3}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">TIN</label>
+                    <input
+                      type="text"
+                      value={newCustomerTin}
+                      onChange={(e) => setNewCustomerTin(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">WhatsApp</label>
+                    <input
+                      type="tel"
+                      value={newCustomerWhatsapp}
+                      onChange={(e) => setNewCustomerWhatsapp(e.target.value)}
+                      placeholder="Optional if same as phone"
                       className="w-full border border-gray-300 rounded-lg px-4 py-2"
                     />
                   </div>
