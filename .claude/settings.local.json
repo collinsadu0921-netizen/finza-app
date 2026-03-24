@@ -156,7 +156,10 @@
       "Bash(find /c/projects/finza-web/finza-web -type f \\\\\\(-name *signup* -o -name *onboard* -o -name *auth* \\\\\\) \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
       "Bash(find /c/projects/finza-web/finza-web/app -type d -name \"signup\\\\|onboard\\\\|auth\\\\|register\")",
       "Bash(find /c/projects/finza-web/finza-web -type f -name *business*setup* \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
-      "Bash(find /c/projects/finza-web/finza-web/app -type d -name business*)"
+      "Bash(find /c/projects/finza-web/finza-web/app -type d -name business*)",
+      "Bash(grep -r \"NEXT_PUBLIC_RETAIL_POS_IDLE\\\\|SESSION\\\\|TIMEOUT\\\\|EXPIRY\" /c/projects/finza-web/finza-web/.env*)",
+      "Bash(grep -ri \"automat\\\\|Automat\" /c/projects/finza-web/finza-web/app --include=*.tsx)",
+      "Bash(grep -ri Automationsb /c/projects/finza-web/finza-web --include=*.tsx --include=*.ts)"
     ]
   }
 }

@@ -16,6 +16,7 @@ import { resolveAccess, getHomeRouteForRole, getWorkspaceFromPath } from "@/lib/
 import { autoBindSingleStore } from "@/lib/autoBindStore"
 import { useExportMode } from "@/lib/hooks/useExportMode"
 import RetailPosIdleSessionWatcher from "@/components/RetailPosIdleSessionWatcher"
+import AppIdleTimeoutWatcher from "@/components/AppIdleTimeoutWatcher"
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -98,6 +99,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     <Suspense fallback={null}>
       <ServiceSubscriptionProvider>
         <RetailPosIdleSessionWatcher pathname={pathname} />
+        <AppIdleTimeoutWatcher pathname={pathname} />
         <div
           className="min-h-screen bg-gray-50 dark:bg-gray-900"
           data-export-mode={isExportMode ? "true" : undefined}

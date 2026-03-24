@@ -511,18 +511,6 @@ export default function Sidebar() {
           {/* Sidebar Footer */}
           <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-1">
             <button
-              onClick={() => {
-                clearSelectedBusinessId()
-                router.push("/select-workspace")
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-            >
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-              </svg>
-              Switch Workspace
-            </button>
-            <button
               onClick={async () => {
                 clearTabIndustryMode()
                 clearSelectedBusinessId()

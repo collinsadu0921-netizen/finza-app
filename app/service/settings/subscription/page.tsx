@@ -23,70 +23,150 @@ function formatDate(d: Date | null): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
 }
 
-type TierFeatures = {
+type TierSection = {
   section: string
   items: string[]
 }
 
-const TIER_FEATURES: Record<ServiceSubscriptionTier, TierFeatures[]> = {
-  starter: [
-    {
-      section: "Operations",
-      items: ["Dashboard", "Customers", "Quotes", "Services"],
-    },
-    {
-      section: "Billing",
-      items: ["Proforma Invoices", "Invoices", "Payments", "Credit Notes", "Expenses"],
-    },
-    {
-      section: "Reports",
-      items: ["Profit & Loss", "Balance Sheet"],
-    },
-    {
-      section: "Tax",
-      items: ["VAT Report"],
-    },
-    {
-      section: "Settings",
-      items: ["Business Profile", "Invoice Settings", "Payment Settings", "WhatsApp Integration"],
-    },
-  ],
-  professional: [
-    {
-      section: "Everything in Essentials, plus:",
-      items: [
-        "Projects",
-        "Materials",
-        "Supplier Bills",
-        "Payroll & Salary Advances",
-        "Fixed Assets",
-        "Cash Flow Statement",
-        "Changes in Equity Report",
-        "VAT Returns",
-        "WHT Returns",
-        "Team Members",
-        "Staff Management",
-        "Accountant Requests",
-        "Accounting Activity Log",
-      ],
-    },
-  ],
-  business: [
-    {
-      section: "Everything in Professional, plus:",
-      items: [
-        "General Ledger",
-        "Chart of Accounts",
-        "Trial Balance",
-        "Reconciliation",
-        "Bank Reconciliation",
-        "Accounting Periods",
-        "Loans & Equity",
-        "CIT Provisions",
-        "Full System Audit Log",
-      ],
-    },
-  ],
+type TierConfig = {
+  description: string
+  inheritText?: string
+  sections: TierSection[]
+}
+
+const TIER_FEATURES: Record<ServiceSubscriptionTier, TierConfig> = {
+  starter: {
+    description: "Core financial operations for running your business",
+    sections: [
+      {
+        section: "Financial Operations",
+        items: [
+          "Real-time business overview and performance tracking",
+          "Customer management and activity history",
+          "Quote creation and conversion to invoices",
+          "Service-based workflow management",
+        ],
+      },
+      {
+        section: "Billing & Cash Management",
+        items: [
+          "Proforma invoice generation",
+          "Invoice creation and tracking",
+          "Payment recording and status tracking",
+          "Credit notes and adjustments",
+          "Expense tracking and categorisation",
+        ],
+      },
+      {
+        section: "Financial Reporting",
+        items: [
+          "Profit & Loss (real-time view)",
+          "Balance Sheet (automatically generated)",
+        ],
+      },
+      {
+        section: "Tax & Compliance",
+        items: ["VAT tracking and reporting"],
+      },
+      {
+        section: "Business Configuration",
+        items: [
+          "Business profile management",
+          "Invoice configuration (numbering, structure)",
+          "Payment setup and preferences",
+          "WhatsApp communication integration",
+        ],
+      },
+    ],
+  },
+  professional: {
+    description: "Operational control and structured financial management",
+    inheritText: "Everything in Essentials, plus:",
+    sections: [
+      {
+        section: "Operations & Resource Management",
+        items: [
+          "Project tracking and management",
+          "Material usage tracking",
+          "Supplier bill management",
+        ],
+      },
+      {
+        section: "Workforce & Internal Management",
+        items: [
+          "Payroll processing",
+          "Salary advances management",
+          "Team member access control",
+          "Staff management",
+        ],
+      },
+      {
+        section: "Financial Management & Reporting",
+        items: [
+          "Fixed asset tracking",
+          "Cash flow statement",
+          "Statement of changes in equity",
+        ],
+      },
+      {
+        section: "Tax & Regulatory Reporting",
+        items: [
+          "VAT return preparation",
+          "Withholding tax (WHT) tracking and returns",
+        ],
+      },
+      {
+        section: "Collaboration & Oversight",
+        items: [
+          "Accountant collaboration requests",
+          "Accounting activity log",
+        ],
+      },
+    ],
+  },
+  business: {
+    description: "Full financial control with accounting-grade infrastructure",
+    inheritText: "Everything in Professional, plus:",
+    sections: [
+      {
+        section: "Core Accounting Infrastructure",
+        items: [
+          "General Ledger (system-generated and continuously updated)",
+          "Chart of Accounts management",
+          "Trial Balance (automatically maintained)",
+        ],
+      },
+      {
+        section: "Reconciliation & Accuracy Control",
+        items: [
+          "Transaction reconciliation",
+          "Bank reconciliation",
+        ],
+      },
+      {
+        section: "Financial Governance",
+        items: [
+          "Accounting period management",
+          "Period closing controls",
+        ],
+      },
+      {
+        section: "Capital & Financial Structuring",
+        items: [
+          "Loan tracking and management",
+          "Equity tracking and structuring",
+          "Corporate Income Tax (CIT) provisions",
+        ],
+      },
+      {
+        section: "Audit & System Integrity",
+        items: [
+          "Full system audit log",
+          "End-to-end financial traceability",
+        ],
+      },
+    ],
+  },
 }
 
 const TIER_COLOR: Record<ServiceSubscriptionTier, string> = {
@@ -488,7 +568,7 @@ function SubscriptionPageInner() {
             const isUpgrade   = !loading && !needsSubscription && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
             const isDowngrade  = !loading && !needsSubscription && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[tier]
             const isSubscribeTarget = !loading && needsSubscription
-            const features   = TIER_FEATURES[t]
+            const config     = TIER_FEATURES[t]
             const price      = TIER_PRICING[cycle][t]
             const perMonth   = monthlyEquivalent(cycle, t)
             const savings    = billingCycleSavings(cycle, t)
@@ -512,6 +592,8 @@ function SubscriptionPageInner() {
                   </span>
                 </div>
 
+                <p className="mb-3 text-xs text-slate-500">{config.description}</p>
+
                 {/* Pricing */}
                 <div className="mb-4">
                   <div className="flex items-baseline gap-1">
@@ -532,7 +614,10 @@ function SubscriptionPageInner() {
                   )}
                 </div>
 
-                {features.map((group) => (
+                {config.inheritText && (
+                  <p className="mb-3 text-xs font-medium text-slate-500">{config.inheritText}</p>
+                )}
+                {config.sections.map((group) => (
                   <div key={group.section} className="mb-3">
                     <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                       {group.section}
