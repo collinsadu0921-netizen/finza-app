@@ -143,7 +143,14 @@
       "Bash(grep -n \"CREATE TABLE.*afs\\\\|document_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(grep -r \"business_type\\\\|entity_type\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
       "Bash(wc -l C:/projects/finza-web/finza-web/app/vat-returns/create/page.tsx C:/projects/finza-web/finza-web/app/vat-returns/[id]/page.tsx)",
-      "Bash(grep -n \"export default\\\\|return \\(\" C:/projects/finza-web/finza-web/app/vat-returns/[id]/page.tsx)"
+      "Bash(grep -n \"export default\\\\|return \\(\" C:/projects/finza-web/finza-web/app/vat-returns/[id]/page.tsx)",
+      "Bash(find . -type f \\\\\\(-name *idebar* -o -name *avigation* \\\\\\))",
+      "Bash(find ./app -type f -path *invitations* -o -path *audit*)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(xargs -I {} find {} -type f -name \"*.tsx\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
+      "Bash(grep -l 'AUTH DISABLED FOR DEVELOPMENT' /c/projects/finza-web/finza-web/app/api/**/*.ts)",
+      "Bash(grep -L \"user\\\\|userId\\\\|currentUser\" /c/projects/finza-web/finza-web/app/api/**/route.ts)"
     ]
   }
 }

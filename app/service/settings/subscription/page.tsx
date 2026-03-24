@@ -59,7 +59,6 @@ const TIER_FEATURES: Record<ServiceSubscriptionTier, TierFeatures[]> = {
         "Changes in Equity Report",
         "VAT Returns",
         "WHT Returns",
-        "Automations",
         "Team Members",
         "Staff Management",
         "Accountant Requests",

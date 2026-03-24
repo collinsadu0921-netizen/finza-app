@@ -7,7 +7,7 @@
  *
  * Product mapping (summary):
  * - Essentials (starter): core CRM + quoting, service catalog, billing documents, basic P&L/BS, VAT report, core settings.
- * - Professional: projects, materials, AP (bills), extended reports, tax returns (VAT/WHT), payroll, team/automations.
+ * - Professional: projects, materials, AP (bills), extended reports, tax returns (VAT/WHT), payroll, team.
  * - Business: full general ledger, reconciliation, periods, loans, CIT, system audit.
  */
 

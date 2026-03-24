@@ -243,6 +243,7 @@ export default function Sidebar() {
               ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)
             : ([
                 { label: "Loans & Equity", route: "/service/accounting/loan", minTier: "business" as const },
+                { label: "Journal Entry Activity", route: buildServiceRoute("/service/accounting/audit", accountingBusinessId ?? undefined), minTier: "professional" as const },
               ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)),
         ]
         sections.push({
@@ -250,25 +251,31 @@ export default function Sidebar() {
           items: accountingItems,
         })
       }
-      const settingsAuditRoute = effectiveServiceBusinessId
-        ? buildServiceRoute("/service/accounting/audit", effectiveServiceBusinessId)
-        : "/service/accounting/audit"
+      if (!isAccountantFirmUser) {
+        sections.push({
+          title: "ORGANIZATION",
+          items: [
+            { label: "Team members", route: buildServiceRoute("/service/settings/team", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "Staff management", route: buildServiceRoute("/service/settings/staff", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "Accountant requests", route: buildServiceRoute("/service/invitations", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+          ],
+        })
+      }
       sections.push({
           title: "SETTINGS",
           items: [
-            { label: "Business Profile", route: "/service/settings/business-profile", minTier: "starter" },
-            { label: "Subscription & Plan", route: "/service/settings/subscription", minTier: "starter" },
-            { label: "Invoice Settings", route: "/service/settings/invoice-settings", minTier: "starter" },
-            { label: "Payment Settings", route: "/service/settings/payments", minTier: "starter" },
-            { label: "WhatsApp Integration", route: "/service/settings/integrations/whatsapp", minTier: "starter" },
-            { label: "Automations", route: "/service/settings/automations", minTier: "professional" },
-            { label: "Team Members", route: "/service/settings/team", minTier: "professional" },
-            { label: "Staff Management", route: "/service/settings/staff", minTier: "professional" },
-            { label: "Accountant Requests", route: "/service/invitations", minTier: "professional" },
-            { label: "Journal Entry Activity", route: settingsAuditRoute, minTier: "professional" },
-            { label: "Full Audit Log", route: "/audit-log", minTier: "business" },
+            { label: "All settings", route: "/service/settings", minTier: "starter" },
+            { label: "Subscription & plan", route: "/service/settings/subscription", minTier: "starter" },
           ],
         })
+      if (!isAccountantFirmUser) {
+        sections.push({
+          title: "ADMIN",
+          items: [
+            { label: "Full Audit Log", route: buildServiceRoute("/audit-log", effectiveServiceBusinessId ?? undefined), minTier: "business" },
+          ],
+        })
+      }
       return sections
     }
 

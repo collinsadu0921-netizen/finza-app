@@ -390,7 +390,6 @@ export async function resolveAccess(
       // Settings — specific first, general last
       { prefix: "/service/settings/team",         permission: "team.manage" },
       { prefix: "/service/settings/staff",        permission: "staff.manage" },
-      { prefix: "/service/settings/automations",  permission: "settings.edit" },
       { prefix: "/settings/staff",                permission: "staff.manage" },
       { prefix: "/service/settings",              permission: "settings.view" }, // catch-all for other settings pages
       { prefix: "/admin",                         permission: "settings.edit" },
