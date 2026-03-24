@@ -1,15 +1,52 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, useSearchParams } from "next/navigation"
-import { parseServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+import {
+  parseServiceSubscriptionTier,
+  tryParseServiceSubscriptionTier,
+} from "@/lib/serviceWorkspace/subscriptionTiers"
 
 /**
  * Valid workspaces that support the trial flow.
  * Only "service" is finished — do NOT extend to retail or other workspaces.
  */
 const TRIAL_SUPPORTED_WORKSPACES = ["service"] as const
+
+/**
+ * Strict signup gate.
+ *
+ * When NEXT_PUBLIC_SIGNUP_REQUIRE_SERVICE_PLAN_CONTEXT === "true", the signup
+ * page is only accessible if the visitor arrives with:
+ *   (a) valid service plan context:  workspace=service & plan=<valid tier>
+ *   (b) accounting-firm bypass:      flow=accounting_firm
+ *
+ * Any other visitor is redirected to NEXT_PUBLIC_MARKETING_PRICING_URL.
+ * When the flag is absent / not "true" the gate is OFF and behavior is
+ * identical to before — nothing changes for dev or existing flows.
+ */
+const STRICT_GATE =
+  process.env.NEXT_PUBLIC_SIGNUP_REQUIRE_SERVICE_PLAN_CONTEXT === "true"
+
+/**
+ * Strict plan validator used ONLY by the signup gate.
+ *
+ * Intentionally does NOT fall back to "starter" — an unknown or missing plan
+ * param should fail the gate, not silently grant entry as Essentials.
+ * This is separate from parseServiceSubscriptionTier (which has a safe
+ * fallback for subscription logic elsewhere).
+ */
+function isValidServicePlanParam(raw: string): boolean {
+  const n = raw.trim().toLowerCase()
+  // Mirror all aliases accepted by parseServiceSubscriptionTier so the gate
+  // stays in sync with the rest of the tier system.
+  return (
+    n === "starter"      || n === "essentials" ||
+    n === "professional" || n === "growth"     || n === "pro" ||
+    n === "business"     || n === "scale"       || n === "enterprise"
+  )
+}
 
 function SignupPageInner() {
   const router = useRouter()
@@ -22,6 +59,33 @@ function SignupPageInner() {
   const rawWorkspace = searchParams.get("workspace") ?? ""
   const rawPlan      = searchParams.get("plan") ?? ""
   const rawTrial     = searchParams.get("trial") ?? ""
+
+  // Accounting-firm bypass param (flow=accounting_firm).
+  // Used by: accounting firm invite links, internal onboarding.
+  const rawFlow = searchParams.get("flow") ?? ""
+  const isAccountingFirmFlow = rawFlow === "accounting_firm"
+
+  const hasValidServicePlanContext =
+    rawWorkspace.trim().toLowerCase() === "service" &&
+    tryParseServiceSubscriptionTier(rawPlan) !== null
+
+  const shouldBlockAndRedirect =
+    STRICT_GATE && !hasValidServicePlanContext && !isAccountingFirmFlow
+
+  useEffect(() => {
+    if (!shouldBlockAndRedirect) return
+    const pricingUrl = process.env.NEXT_PUBLIC_MARKETING_PRICING_URL?.trim()
+    if (pricingUrl) {
+      window.location.replace(pricingUrl)
+      return
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        "[signup] NEXT_PUBLIC_SIGNUP_REQUIRE_SERVICE_PLAN_CONTEXT is true but NEXT_PUBLIC_MARKETING_PRICING_URL is empty; falling back to /"
+      )
+    }
+    window.location.replace("/")
+  }, [shouldBlockAndRedirect])
 
   // Only honour trial intent for finished workspaces
   const trialWorkspace = (TRIAL_SUPPORTED_WORKSPACES as readonly string[]).includes(rawWorkspace)
@@ -36,7 +100,11 @@ function SignupPageInner() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [fullName, setFullName] = useState("")
-  const [signupIntent, setSignupIntent] = useState<"business_owner" | "accounting_firm">("business_owner")
+  // Preselect accounting_firm when the flow param is present; this is a
+  // harmless UX hint — the actual signup_intent is written from the selector.
+  const [signupIntent, setSignupIntent] = useState<"business_owner" | "accounting_firm">(
+    isAccountingFirmFlow ? "accounting_firm" : "business_owner"
+  )
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -44,6 +112,19 @@ function SignupPageInner() {
     e.preventDefault()
     setError("")
     setLoading(true)
+
+    if (
+      STRICT_GATE &&
+      !hasTrial &&
+      signupIntent === "business_owner" &&
+      !hasValidServicePlanContext
+    ) {
+      setError(
+        "Start from our pricing page to choose a plan, or select “I manage accounting for clients” if you are signing up as an accounting firm."
+      )
+      setLoading(false)
+      return
+    }
 
     try {
       const appUrl =
@@ -94,6 +175,14 @@ function SignupPageInner() {
       setError(err.message || "An error occurred")
       setLoading(false)
     }
+  }
+
+  if (shouldBlockAndRedirect) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-100 text-sm text-gray-500">
+        Redirecting…
+      </div>
+    )
   }
 
   return (

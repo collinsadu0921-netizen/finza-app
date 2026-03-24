@@ -62,13 +62,21 @@ export const SERVICE_TIER_LABEL: Record<ServiceSubscriptionTier, string> = {
  */
 export const DEFAULT_SERVICE_SUBSCRIPTION_TIER: ServiceSubscriptionTier = "starter"
 
-export function parseServiceSubscriptionTier(raw: string | null | undefined): ServiceSubscriptionTier {
-  if (!raw || typeof raw !== "string") return DEFAULT_SERVICE_SUBSCRIPTION_TIER
+/**
+ * Parses tier only when `raw` is a recognized alias. Returns null if missing or unknown.
+ * Use for URL gates (e.g. strict signup) where invalid input must not be coerced to starter.
+ */
+export function tryParseServiceSubscriptionTier(raw: string | null | undefined): ServiceSubscriptionTier | null {
+  if (!raw || typeof raw !== "string") return null
   const n = raw.trim().toLowerCase()
   if (n === "starter" || n === "essentials") return "starter"
   if (n === "professional" || n === "growth" || n === "pro") return "professional"
   if (n === "business" || n === "scale" || n === "enterprise") return "business"
-  return DEFAULT_SERVICE_SUBSCRIPTION_TIER
+  return null
+}
+
+export function parseServiceSubscriptionTier(raw: string | null | undefined): ServiceSubscriptionTier {
+  return tryParseServiceSubscriptionTier(raw) ?? DEFAULT_SERVICE_SUBSCRIPTION_TIER
 }
 
 /** True if `userTier` is at or above `requiredTier`. */
