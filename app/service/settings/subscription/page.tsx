@@ -18,6 +18,8 @@ import {
   type BillingCycle,
 } from "@/lib/serviceWorkspace/subscriptionPricing"
 
+const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
+
 function formatDate(d: Date | null): string {
   if (!d) return "—"
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
@@ -211,7 +213,10 @@ function SubscriptionCallbackHandler() {
         const j = await r.json()
         if (!alive) return
         if (j.status === "success") {
-          toast.showToast("Payment confirmed. Your plan will update in a moment.", "success")
+          toast.showToast(
+            "Payment confirmed. Your plan will update shortly. Your billing period runs from this payment.",
+            "success"
+          )
           router.replace("/service/settings/subscription")
           router.refresh()
           return
@@ -326,7 +331,7 @@ function SubscriptionPaystackActions({
       }
 
       toast.showToast(
-        "Approve the payment on your phone. Your plan updates when Paystack confirms.",
+        "Approve the payment on your phone. When it succeeds, your plan updates and a new billing period starts from that time.",
         "success"
       )
       setShowMomo(false)
@@ -339,13 +344,19 @@ function SubscriptionPaystackActions({
 
   return (
     <div className="mt-4 space-y-2">
+      <p className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600">
+        You will be charged the <span className="font-medium text-slate-700">full amount</span> shown for this plan
+        and billing cycle. When payment succeeds, your subscription period{" "}
+        <span className="font-medium text-slate-700">starts from that date</span> for the full length of the cycle.
+        We do not prorate or credit unused time.
+      </p>
       <button
         type="button"
         disabled={disabled || busy || !businessId}
         onClick={() => void startCard()}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Pay with card (Paystack)
+        Pay full amount with card
       </button>
       {!showMomo ? (
         <button
@@ -409,8 +420,31 @@ function SubscriptionPaystackActions({
 }
 
 function SubscriptionPageInner() {
-  const { tier, status, loading, businessId, isTrialing, trialExpired, trialEndsAt, trialDaysLeft, subscriptionLocked } = useServiceSubscription()
+  const {
+    tier,
+    status,
+    loading,
+    businessId,
+    isTrialing,
+    trialExpired,
+    trialEndsAt,
+    trialDaysLeft,
+    billingCycle,
+    currentPeriodEndsAt,
+    periodExpired,
+    daysUntilRenewal,
+    graceEndsAt,
+    inGracePeriod,
+    subscriptionLocked,
+  } = useServiceSubscription()
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
+
+  // Pre-select the user's current billing cycle once context loads
+  useEffect(() => {
+    if (billingCycle && BILLING_CYCLES_SET.has(billingCycle)) {
+      setCycle(billingCycle as BillingCycle)
+    }
+  }, [billingCycle])
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -430,7 +464,8 @@ function SubscriptionPageInner() {
           </Link>
           <h1 className="text-xl font-bold text-slate-900">Subscription & Plan</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Your plan determines which features are available in your workspace.
+            Your plan determines which features are available in your workspace. Paid changes bill at the full listed
+            price; each successful payment starts a new subscription period from that date.
           </p>
         </div>
 
@@ -485,9 +520,61 @@ function SubscriptionPageInner() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                   </svg>
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-red-800">Subscription payment overdue</p>
+                    <p className="text-sm font-semibold text-red-800">Subscription expired</p>
                     <p className="mt-0.5 text-xs text-red-700">
-                      Your Mobile Money payment failed and the grace period has expired. Renew below to restore access.
+                      Your subscription has expired. Renew to continue using paid features.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Period expired — grace state (access still allowed but renewal needed) */}
+              {!subscriptionLocked && periodExpired && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-800">
+                      {inGracePeriod ? "Grace period" : "Subscription period ended"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-amber-700">
+                      Your subscription period ended on{" "}
+                      <span className="font-medium">{formatDate(currentPeriodEndsAt)}</span>.
+                      You have limited time to renew.
+                      {graceEndsAt && (
+                        <> Access continues until{" "}
+                          <span className="font-medium">{formatDate(graceEndsAt)}</span>.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Active paid — next billing date */}
+              {status === "active" && !periodExpired && !subscriptionLocked && currentPeriodEndsAt && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-emerald-800">
+                      Next billing date:{" "}
+                      <span className="font-bold">{formatDate(currentPeriodEndsAt)}</span>
+                      {daysUntilRenewal !== null && (
+                        <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                          {daysUntilRenewal === 0
+                            ? "Due today"
+                            : daysUntilRenewal === 1
+                            ? "1 day left"
+                            : `${daysUntilRenewal} days left`}
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-xs text-emerald-700">
+                      {billingCycle ? `Billing cycle: ${BILLING_CYCLE_LABEL[billingCycle as BillingCycle] ?? billingCycle}. ` : ""}
+                      Your plan renews manually — pay before this date to maintain uninterrupted access.
                     </p>
                   </div>
                 </div>
@@ -500,15 +587,21 @@ function SubscriptionPageInner() {
                   <p className="mt-0.5 text-xs text-slate-500 capitalize">
                     Status:{" "}
                     <span className={
-                      status === "active"   ? "text-emerald-600 font-medium" :
-                      status === "trialing" ? "text-blue-600 font-medium" :
+                      subscriptionLocked                     ? "text-red-600 font-medium" :
+                      periodExpired                          ? "text-amber-600 font-medium" :
+                      inGracePeriod                          ? "text-amber-600 font-medium" :
+                      status === "active"                    ? "text-emerald-600 font-medium" :
+                      status === "trialing"                  ? "text-blue-600 font-medium" :
                       "text-red-600 font-medium"
                     }>
-                      {status === "trialing" && isTrialing  ? "Free trial" :
-                       status === "trialing" && trialExpired ? "Trial expired" :
-                       status === "active"                   ? "Active" :
-                       status === "past_due"                 ? "Payment failed (grace period)" :
-                       status === "locked"                   ? "Locked" :
+                      {subscriptionLocked                              ? "Expired" :
+                       periodExpired && inGracePeriod                  ? "Grace period" :
+                       periodExpired                                   ? "Period ended" :
+                       status === "trialing" && isTrialing             ? "Free trial" :
+                       status === "trialing" && trialExpired           ? "Trial expired" :
+                       status === "active"                             ? "Active" :
+                       status === "past_due"                           ? "Grace period" :
+                       status === "locked"                             ? "Expired" :
                        status}
                     </span>
                   </p>
@@ -558,13 +651,20 @@ function SubscriptionPageInner() {
             })}
           </div>
         </div>
+        <p className="mx-auto mb-6 max-w-2xl px-2 text-center text-xs leading-relaxed text-slate-500">
+          <span className="font-medium text-slate-600">Billing cycle:</span> Prices update when you switch Monthly,
+          Quarterly, or Annual. If you pay after switching, you are charged the full amount for that cycle and a{" "}
+          <span className="font-medium text-slate-600">new period begins immediately</span> from the payment date.
+          There is no credit for unused time and no prorated adjustment. “Save %” compares paying a longer cycle
+          upfront to paying month by month — it is not a refund from a previous subscription.
+        </p>
 
         {/* Plan comparison cards */}
         <div className="grid gap-4 sm:grid-cols-3">
           {TIER_ORDER.map((t) => {
             const isCurrent   = t === tier
-            // On a trial or expired trial, every plan shows a "Subscribe" action
-            const needsSubscription = isTrialing || trialExpired || subscriptionLocked
+            // Show payment actions when: trial (any state), period expired (grace), or locked
+            const needsSubscription = isTrialing || trialExpired || subscriptionLocked || periodExpired
             const isUpgrade   = !loading && !needsSubscription && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
             const isDowngrade  = !loading && !needsSubscription && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[tier]
             const isSubscribeTarget = !loading && needsSubscription
@@ -653,28 +753,37 @@ function SubscriptionPageInner() {
 
                 {/* Upgrade button (active paid subscriber going higher) */}
                 {isUpgrade && (
-                  <a
-                    href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
-                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700"
-                  >
-                    Upgrade to {SERVICE_TIER_LABEL[t]}
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                  </a>
+                  <div className="mt-4 space-y-1.5">
+                    <a
+                      href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700"
+                    >
+                      Email to upgrade to {SERVICE_TIER_LABEL[t]}
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </a>
+                    <p className="text-center text-[11px] leading-relaxed text-slate-500">
+                      Upgrades are billed at the <span className="font-medium text-slate-600">full price</span> for the
+                      plan and billing cycle shown. Your new subscription period begins when payment succeeds. We do not
+                      prorate or apply unused-time credit.
+                    </p>
+                  </div>
                 )}
 
                 {/* Downgrade button (active paid subscriber going lower) */}
                 {isDowngrade && (
-                  <div className="mt-4">
+                  <div className="mt-4 space-y-1.5">
                     <a
                       href={`mailto:hello@finza.app?subject=Downgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
                       className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
                     >
-                      Downgrade to {SERVICE_TIER_LABEL[t]}
+                      Email to request {SERVICE_TIER_LABEL[t]}
                     </a>
-                    <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                      Downgrading removes access to features in your current plan.
+                    <p className="text-center text-[11px] leading-relaxed text-slate-500">
+                      Lower plans are handled <span className="font-medium text-slate-600">manually by our team</span>.
+                      There is no self-serve downgrade and no automatic switch at your next renewal. We will confirm
+                      access and billing with you. Moving down may remove features available on your current plan.
                     </p>
                   </div>
                 )}
@@ -684,7 +793,7 @@ function SubscriptionPageInner() {
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          Questions about billing?{" "}
+          Questions about billing or plan changes?{" "}
           <a href="mailto:hello@finza.app" className="underline hover:text-slate-600">
             hello@finza.app
           </a>

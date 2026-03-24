@@ -42,8 +42,20 @@ export type ServiceSubscriptionContextValue = {
   trialEndsAt: Date | null
   trialDaysLeft: number | null
 
-  // --- MoMo payment grace ---
+  // --- Billing period ---
+  /** Billing cycle: 'monthly' | 'quarterly' | 'annual'. Null until loaded. */
+  billingCycle: string | null
+  /** When the current paid period ends. Null for trial users or when not set. */
+  currentPeriodEndsAt: Date | null
+  /** True when the paid period has passed and renewal is needed. */
+  periodExpired: boolean
+  /** Days remaining until current_period_ends_at. Null when expired or not active. */
+  daysUntilRenewal: number | null
+
+  // --- Grace / lock ---
   inGracePeriod: boolean
+  /** When the grace deadline expires (subscription_grace_until). Null if not set. */
+  graceEndsAt: Date | null
   subscriptionLocked: boolean
 }
 
@@ -58,7 +70,12 @@ const defaultValue: ServiceSubscriptionContextValue = {
   trialExpired: false,
   trialEndsAt: null,
   trialDaysLeft: null,
+  billingCycle: null,
+  currentPeriodEndsAt: null,
+  periodExpired: false,
+  daysUntilRenewal: null,
   inGracePeriod: false,
+  graceEndsAt: null,
   subscriptionLocked: false,
 }
 
@@ -66,7 +83,7 @@ const ServiceSubscriptionContext =
   createContext<ServiceSubscriptionContextValue>(defaultValue)
 
 const SERVICE_COLUMNS =
-  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at"
+  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle"
 
 function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitlement {
   const r: RawBusinessSubscriptionRow = {
@@ -75,6 +92,8 @@ function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitleme
     trial_started_at:            (row?.trial_started_at            as string) ?? null,
     trial_ends_at:               (row?.trial_ends_at               as string) ?? null,
     subscription_grace_until:    (row?.subscription_grace_until    as string) ?? null,
+    current_period_ends_at:      (row?.current_period_ends_at      as string) ?? null,
+    billing_cycle:               (row?.billing_cycle               as string) ?? null,
   }
   return resolveServiceEntitlement(r)
 }
@@ -154,17 +173,22 @@ export function ServiceSubscriptionProvider({
 
   const value = useMemo<ServiceSubscriptionContextValue>(
     () => ({
-      effectiveTier:    entitlement.effectiveTier,
-      tier:             entitlement.rawTier,
-      status:           entitlement.status,
+      effectiveTier:      entitlement.effectiveTier,
+      tier:               entitlement.rawTier,
+      status:             entitlement.status,
       businessId,
       loading,
       canAccessTier,
-      isTrialing:       entitlement.isTrialing,
-      trialExpired:     entitlement.trialExpired,
-      trialEndsAt:      entitlement.trialEndsAt,
-      trialDaysLeft:    entitlement.trialDaysLeft,
-      inGracePeriod:    entitlement.inGracePeriod,
+      isTrialing:         entitlement.isTrialing,
+      trialExpired:       entitlement.trialExpired,
+      trialEndsAt:        entitlement.trialEndsAt,
+      trialDaysLeft:      entitlement.trialDaysLeft,
+      billingCycle:       entitlement.billingCycle,
+      currentPeriodEndsAt: entitlement.currentPeriodEndsAt,
+      periodExpired:      entitlement.periodExpired,
+      daysUntilRenewal:   entitlement.daysUntilRenewal,
+      inGracePeriod:      entitlement.inGracePeriod,
+      graceEndsAt:        entitlement.graceEndsAt,
       subscriptionLocked: entitlement.isSubscriptionLocked,
     }),
     [entitlement, businessId, loading, canAccessTier]

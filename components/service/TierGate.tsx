@@ -45,6 +45,8 @@ export default function TierGate({ minTier, children }: TierGateProps) {
     loading,
     isTrialing,
     inGracePeriod,
+    periodExpired,
+    graceEndsAt,
     subscriptionLocked,
   } = useServiceSubscription()
 
@@ -147,8 +149,12 @@ export default function TierGate({ minTier, children }: TierGateProps) {
     )
   }
 
-  // --- 3. MoMo grace period (payment failed, still within 3-day window) ---
+  // --- 3. Grace period: period expired OR MoMo payment failed ---
   if (inGracePeriod) {
+    const graceEndFormatted = graceEndsAt
+      ? graceEndsAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+      : null
+
     return (
       <>
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
@@ -156,13 +162,29 @@ export default function TierGate({ minTier, children }: TierGateProps) {
             <svg className="h-4 w-4 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
-            <p className="text-sm text-amber-800">
-              <span className="font-semibold">Payment failed.</span> Your Mobile Money renewal
-              did not go through. Renew within the 3-day grace period to avoid losing access.{" "}
-              <Link href="/service/settings/subscription" className="underline hover:text-amber-900">
-                Renew now
-              </Link>.
-            </p>
+            {periodExpired ? (
+              <p className="text-sm text-amber-800">
+                <span className="font-semibold">Your subscription period has ended.</span>{" "}
+                You have limited time to renew.
+                {graceEndFormatted && (
+                  <> Access is available until <span className="font-medium">{graceEndFormatted}</span>.</>
+                )}{" "}
+                <Link href="/service/settings/subscription" className="underline hover:text-amber-900">
+                  Renew now
+                </Link>.
+              </p>
+            ) : (
+              <p className="text-sm text-amber-800">
+                <span className="font-semibold">Payment failed.</span> Your Mobile Money renewal
+                did not go through. Renew within the 3-day grace period to avoid losing access.
+                {graceEndFormatted && (
+                  <> Grace period ends <span className="font-medium">{graceEndFormatted}</span>.</>
+                )}{" "}
+                <Link href="/service/settings/subscription" className="underline hover:text-amber-900">
+                  Renew now
+                </Link>.
+              </p>
+            )}
           </div>
         </div>
         {children}
