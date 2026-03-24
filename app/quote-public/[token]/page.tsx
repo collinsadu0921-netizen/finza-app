@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
+import { PublicBillToBlock, PublicDocumentMetaRow } from "@/components/documents/PublicBillToBlock"
 
 // Lazy-load signature pad (canvas — SSR-incompatible)
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
@@ -41,7 +42,14 @@ type Estimate = {
   signed_at: string | null
   rejected_reason: string | null
   rejected_at: string | null
-  customers: { name: string; email: string | null; phone: string | null; address: string | null } | null
+  customers: {
+    name: string
+    email: string | null
+    phone: string | null
+    address: string | null
+    tin?: string | null
+    whatsapp_phone?: string | null
+  } | null
 }
 
 type Business = {
@@ -292,116 +300,114 @@ export default function QuotePublicPage() {
               </div>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Meta row */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <p className="text-slate-400 text-xs uppercase tracking-wide font-medium">Bill To</p>
-                  <p className="font-semibold text-slate-800 mt-0.5">{estimate.customers?.name ?? "—"}</p>
-                  {estimate.customers?.email && <p className="text-slate-500">{estimate.customers.email}</p>}
-                  {estimate.customers?.phone && <p className="text-slate-500">{estimate.customers.phone}</p>}
-                </div>
-                <div>
-                  <p className="text-slate-400 text-xs uppercase tracking-wide font-medium">Issue Date</p>
-                  <p className="font-medium text-slate-700 mt-0.5">{formatDate(estimate.issue_date)}</p>
-                </div>
-                <div>
-                  <p className="text-slate-400 text-xs uppercase tracking-wide font-medium">Valid Until</p>
-                  <p className="font-medium text-slate-700 mt-0.5">{formatDate(estimate.expiry_date)}</p>
-                </div>
-                {business?.tin && (
-                  <div>
-                    <p className="text-slate-400 text-xs uppercase tracking-wide font-medium">TIN</p>
-                    <p className="font-medium text-slate-700 mt-0.5">{business.tin}</p>
-                  </div>
-                )}
-              </div>
+            <PublicDocumentMetaRow
+              cells={[
+                { label: "Issue Date", value: formatDate(estimate.issue_date) },
+                { label: "Valid Until", value: formatDate(estimate.expiry_date) },
+                { label: "Payment Terms", value: "—" },
+                {
+                  label: "Currency",
+                  value: estimate.currency_code && estimate.currency_symbol
+                    ? `${estimate.currency_code} (${estimate.currency_symbol})`
+                    : (estimate.currency_code ?? estimate.currency_symbol ?? "—"),
+                },
+              ]}
+            />
+            <PublicBillToBlock customer={estimate.customers} />
 
-              {/* Line items */}
-              <div className="overflow-x-auto rounded-lg border border-slate-100">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100">
-                      <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs uppercase tracking-wide">Description</th>
-                      <th className="text-right py-2.5 px-4 font-semibold text-slate-600 text-xs uppercase tracking-wide">Qty</th>
-                      <th className="text-right py-2.5 px-4 font-semibold text-slate-600 text-xs uppercase tracking-wide">Unit Price</th>
-                      <th className="text-right py-2.5 px-4 font-semibold text-slate-600 text-xs uppercase tracking-wide">Total</th>
+            {/* Line items — table styling aligned with public invoice view */}
+            <div className="px-8 py-5 border-b border-gray-100">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3">
+                      Description
+                    </th>
+                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-16">
+                      Qty
+                    </th>
+                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
+                      Unit Price
+                    </th>
+                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
+                      Total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {items.map((item) => (
+                    <tr key={item.id}>
+                      <td className="py-3 text-gray-800 font-medium">{item.description}</td>
+                      <td className="py-3 text-right text-gray-600 tabular-nums">{item.quantity}</td>
+                      <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.price)}</td>
+                      <td className="py-3 text-right text-gray-800 font-medium tabular-nums">{fmt(sym, item.total)}</td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {items.map(item => (
-                      <tr key={item.id}>
-                        <td className="py-3 px-4 text-slate-700">{item.description}</td>
-                        <td className="py-3 px-4 text-right text-slate-600">{item.quantity}</td>
-                        <td className="py-3 px-4 text-right text-slate-600">{fmt(sym, item.price)}</td>
-                        <td className="py-3 px-4 text-right font-medium text-slate-800">{fmt(sym, item.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-              {/* Totals */}
-              <div className="flex justify-end">
-                <div className="w-full max-w-xs space-y-1.5 text-sm">
-                  <div className="flex justify-between text-slate-600">
+            {/* Totals */}
+            <div className="px-8 py-5 border-b border-gray-100">
+              <div className="max-w-xs ml-auto space-y-1.5 text-sm">
+                  <div className="flex justify-between text-gray-600">
                     <span>Subtotal</span>
-                    <span>{fmt(sym, estimate.subtotal)}</span>
+                    <span className="tabular-nums font-medium">{fmt(sym, estimate.subtotal)}</span>
                   </div>
                   {estimate.apply_taxes && estimate.total_tax_amount > 0 && (
                     <>
                       {estimate.nhil_amount > 0 && (
-                        <div className="flex justify-between text-slate-500">
+                        <div className="flex justify-between text-gray-500">
                           <span>NHIL (2.5%)</span>
-                          <span>{fmt(sym, estimate.nhil_amount)}</span>
+                          <span className="tabular-nums">{fmt(sym, estimate.nhil_amount)}</span>
                         </div>
                       )}
                       {estimate.getfund_amount > 0 && (
-                        <div className="flex justify-between text-slate-500">
+                        <div className="flex justify-between text-gray-500">
                           <span>GETFund (2.5%)</span>
-                          <span>{fmt(sym, estimate.getfund_amount)}</span>
+                          <span className="tabular-nums">{fmt(sym, estimate.getfund_amount)}</span>
                         </div>
                       )}
                       {estimate.covid_amount > 0 && (
-                        <div className="flex justify-between text-slate-500">
+                        <div className="flex justify-between text-gray-500">
                           <span>COVID Levy (1%)</span>
-                          <span>{fmt(sym, estimate.covid_amount)}</span>
+                          <span className="tabular-nums">{fmt(sym, estimate.covid_amount)}</span>
                         </div>
                       )}
                       {estimate.vat_amount > 0 && (
-                        <div className="flex justify-between text-slate-500">
+                        <div className="flex justify-between text-gray-500">
                           <span>VAT (15%)</span>
-                          <span>{fmt(sym, estimate.vat_amount)}</span>
+                          <span className="tabular-nums">{fmt(sym, estimate.vat_amount)}</span>
                         </div>
                       )}
                     </>
                   )}
-                  <div className="flex justify-between font-bold text-base text-slate-900 pt-2 border-t border-slate-200">
-                    <span>Total</span>
-                    <span>{fmt(sym, estimate.total_amount)}</span>
+                  <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
+                    <span className="font-bold text-gray-900 text-base">Total</span>
+                    <span className="font-bold text-gray-900 text-lg tabular-nums">{fmt(sym, estimate.total_amount)}</span>
                   </div>
                 </div>
               </div>
 
               {/* Notes */}
               {estimate.notes && (
-                <div className="text-sm text-slate-600 border-t border-slate-100 pt-4">
-                  <p className="font-medium text-slate-700 mb-1">Notes</p>
+                <div className="px-8 py-5 border-b border-gray-100 text-sm text-gray-600">
+                  <p className="font-medium text-gray-800 mb-1">Notes</p>
                   <p className="whitespace-pre-line">{estimate.notes}</p>
                 </div>
               )}
 
               {/* Terms & Conditions — from invoice settings, auto-applied to every quote */}
               {quoteTerms && (
-                <div className="border-t border-slate-100 pt-4">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                <div className="px-8 py-5 border-b border-gray-100">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
                     Terms &amp; Conditions
                   </p>
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 whitespace-pre-line leading-relaxed max-h-48 overflow-y-auto">
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-xs text-gray-600 whitespace-pre-line leading-relaxed max-h-48 overflow-y-auto">
                     {quoteTerms}
                   </div>
                   {isOpen && (
-                    <p className="text-xs text-slate-400 mt-2 italic">
+                    <p className="text-xs text-gray-400 mt-2 italic">
                       By accepting this quote, you agree to the terms and conditions above.
                     </p>
                   )}
@@ -410,19 +416,20 @@ export default function QuotePublicPage() {
 
               {/* Accepted signature block */}
               {isAccepted && estimate.client_signature && (
-                <div className="border-t border-slate-100 pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Accepted &amp; Signed By</p>
-                  <div className="border border-slate-200 rounded-lg p-3 inline-block bg-slate-50">
+                <div className="px-8 py-5 border-b border-gray-100">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                    Accepted &amp; Signed By
+                  </p>
+                  <div className="border border-gray-200 rounded-lg p-3 inline-block bg-gray-50">
                     <img src={estimate.client_signature} alt="Signature" className="h-16 w-auto" />
                   </div>
-                  <p className="text-sm text-slate-600 mt-1">
+                  <p className="text-sm text-gray-600 mt-1">
                     {estimate.client_name_signed} ·{" "}
-                    {ID_TYPES.find(t => t.value === estimate.client_id_type)?.label}: {estimate.client_id_number}
+                    {ID_TYPES.find((t) => t.value === estimate.client_id_type)?.label}: {estimate.client_id_number}
                   </p>
-                  <p className="text-xs text-slate-400 mt-0.5">{formatDate(estimate.signed_at)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{formatDate(estimate.signed_at)}</p>
                 </div>
               )}
-            </div>
           </div>
 
           {/* Action buttons — only when status is 'sent' */}

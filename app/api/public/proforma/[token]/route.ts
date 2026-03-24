@@ -24,40 +24,59 @@ export async function GET(
 
     const supabase = serviceClient()
 
-    const { data: proforma, error } = await supabase
+    const { data: row, error } = await supabase
       .from("proforma_invoices")
-      .select(`
-        id, business_id, proforma_number, issue_date, validity_date,
-        payment_terms, notes, footer_message,
-        subtotal, total_tax, total, nhil, getfund, covid, vat,
-        status, apply_taxes, tax_lines, currency_code, currency_symbol,
-        client_name_signed, client_id_type, client_id_number,
-        client_signature, signed_at, rejected_reason, rejected_at,
-        customers ( id, name, email, phone, address )
-      `)
+      .select("*")
       .eq("public_token", token)
       .is("deleted_at", null)
-      .single()
+      .maybeSingle()
 
-    if (error || !proforma) {
+    if (error) {
+      console.error("public/proforma GET error:", error.message)
       return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
     }
+    if (!row) {
+      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+    }
+
+    const customerId = row.customer_id as string | null | undefined
+    let customers: {
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      whatsapp_phone: string | null
+      address: string | null
+      tin: string | null
+    } | null = null
+
+    if (customerId) {
+      const { data: cust, error: custErr } = await supabase
+        .from("customers")
+        .select("id, name, email, phone, whatsapp_phone, address, tin")
+        .eq("id", customerId)
+        .maybeSingle()
+      if (custErr) console.error("public/proforma GET customer:", custErr.message)
+      customers = cust ?? null
+    }
+
+    const proforma = { ...row, customers }
 
     const [{ data: items }, { data: biz }, { data: settings }] = await Promise.all([
       supabase
         .from("proforma_invoice_items")
         .select("id, description, qty, unit_price, discount_amount, line_subtotal")
-        .eq("proforma_invoice_id", proforma.id)
+        .eq("proforma_invoice_id", row.id)
         .order("created_at", { ascending: true }),
       supabase
         .from("businesses")
         .select("legal_name, trading_name, address_street, address_city, address_region, phone, email, website, tin, logo_url")
-        .eq("id", proforma.business_id)
+        .eq("id", row.business_id as string)
         .single(),
       supabase
         .from("invoice_settings")
         .select("brand_color")
-        .eq("business_id", proforma.business_id)
+        .eq("business_id", row.business_id as string)
         .maybeSingle(),
     ])
 
