@@ -328,12 +328,21 @@ export default function PayrollRunViewPage() {
             </div>
           </div>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {[
               { label: "Gross Salary", value: payrollRun.total_gross_salary, color: "text-gray-900 dark:text-white" },
               { label: "PAYE", value: payrollRun.total_paye, color: "text-red-600 dark:text-red-400" },
-              { label: "SSNIT (Total)", value: (payrollRun.total_ssnit_employee || 0) + (payrollRun.total_ssnit_employer || 0), color: "text-orange-600 dark:text-orange-400" },
+              {
+                label: "SSNIT (employee)",
+                value: payrollRun.total_ssnit_employee || 0,
+                color: "text-orange-600 dark:text-orange-400",
+              },
+              {
+                label: "SSNIT (employer)",
+                value: payrollRun.total_ssnit_employer || 0,
+                color: "text-amber-700 dark:text-amber-500",
+              },
               { label: "Net Salary", value: payrollRun.total_net_salary, color: "text-green-600 dark:text-green-400" },
             ].map(({ label, value, color }) => (
               <div key={label} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-5 border border-gray-200 dark:border-gray-700">
@@ -342,6 +351,9 @@ export default function PayrollRunViewPage() {
               </div>
             ))}
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-2">
+            Net salary is gross minus PAYE, employee SSNIT, and other employee deductions — not employer SSNIT.
+          </p>
 
           {/* Payslips hint when not generated */}
           {!hasPayslips && (
@@ -368,6 +380,7 @@ export default function PayrollRunViewPage() {
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Basic</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Allowances</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Gross</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">SSNIT (emp.)</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">PAYE</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Net</th>
                     <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Payslip</th>
@@ -389,6 +402,7 @@ export default function PayrollRunViewPage() {
                         <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">₵{Number(entry.basic_salary).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">₵{Number(entry.allowances_total).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right font-medium text-gray-900 dark:text-white tabular-nums">₵{Number(entry.gross_salary).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-orange-600 dark:text-orange-400 tabular-nums">₵{Number(entry.ssnit_employee).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-red-600 dark:text-red-400 tabular-nums">₵{Number(entry.paye).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right font-bold text-green-600 dark:text-green-400 tabular-nums">₵{Number(entry.net_salary).toFixed(2)}</td>
                         <td className="px-5 py-4 text-center">
