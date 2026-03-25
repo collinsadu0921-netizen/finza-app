@@ -7,7 +7,8 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
-import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { getCurrencySymbol } from "@/lib/currency"
 import FileAttachment, { FileInput } from "@/components/ui/FileAttachment"
 import { generateStoragePath, uploadFileToStorage, extractFilename } from "@/lib/fileHandling"
 
@@ -46,6 +47,11 @@ export default function EditExpensePage() {
   const [newCategoryDescription, setNewCategoryDescription] = useState("")
   const [creatingCategory, setCreatingCategory] = useState(false)
 
+  const [currencyCode, setCurrencyCode] = useState<string>("")
+  const [fxEnabled, setFxEnabled] = useState(false)
+  const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
+  const [fxRate, setFxRate] = useState<string>("")
+
   useEffect(() => {
     if (!expenseId) {
       setError("Expense ID is missing")
@@ -78,6 +84,9 @@ export default function EditExpensePage() {
       }
 
       setBusinessId(business.id)
+      if (business.default_currency) {
+        setCurrencyCode(business.default_currency)
+      }
 
       // Ensure default categories are seeded
       await supabase.rpc("seed_default_expense_categories", {
@@ -144,7 +153,22 @@ export default function EditExpensePage() {
       // Check if taxes were applied
       const hasTaxes = Number(expense.nhil || 0) + Number(expense.getfund || 0) + Number(expense.covid || 0) + Number(expense.vat || 0) > 0
       setApplyTaxes(hasTaxes)
-      
+
+      const home = business.default_currency || "GHS"
+      if (
+        expense.currency_code &&
+        expense.fx_rate &&
+        expense.currency_code !== home
+      ) {
+        setFxEnabled(true)
+        setFxCurrencyCode(expense.currency_code)
+        setFxRate(String(expense.fx_rate))
+      } else {
+        setFxEnabled(false)
+        setFxCurrencyCode("USD")
+        setFxRate("")
+      }
+
       setLoadingData(false)
     } catch (err: any) {
       setError(err.message || "Failed to load data")
@@ -335,6 +359,11 @@ export default function EditExpensePage() {
         total, // Store total (including taxes, what user entered)
         date,
         notes: notes || null,
+        currency_code: fxEnabled && fxCurrencyCode ? fxCurrencyCode : null,
+        fx_rate:
+          fxEnabled && fxCurrencyCode && fxRate && parseFloat(fxRate) > 0
+            ? parseFloat(fxRate)
+            : null,
       }
 
       // Only include receipt_path if it changed (not undefined)
@@ -354,7 +383,11 @@ export default function EditExpensePage() {
         throw new Error(errorData.error || "Failed to update expense")
       }
 
-      router.push(`/service/expenses/${expenseId}/view`)
+      router.push(
+        isUnderService
+          ? `/service/expenses/${expenseId}/view`
+          : `/expenses/${expenseId}/view`
+      )
     } catch (err: any) {
       setError(err.message || "Failed to update expense")
       setLoading(false)
@@ -388,6 +421,19 @@ export default function EditExpensePage() {
   }
 
   const total = totalIncludingTaxes // Total is what user entered
+
+  const homeCurrencyCode = currencyCode || ""
+  const documentCurrencyCode = fxEnabled && fxCurrencyCode ? fxCurrencyCode : homeCurrencyCode
+  const docSymbol = getCurrencySymbol(documentCurrencyCode) || documentCurrencyCode || "₵"
+  const homeSymbol = getCurrencySymbol(homeCurrencyCode) || homeCurrencyCode || "₵"
+  const fxRateNum = fxRate && !Number.isNaN(parseFloat(fxRate)) ? parseFloat(fxRate) : 0
+  const approxHomeTotal =
+    fxEnabled &&
+    fxRateNum > 0 &&
+    documentCurrencyCode &&
+    documentCurrencyCode !== homeCurrencyCode
+      ? Math.round(totalIncludingTaxes * fxRateNum * 100) / 100
+      : null
 
   if (loadingData) {
     return (
@@ -474,7 +520,8 @@ export default function EditExpensePage() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Amount {applyTaxes ? "(including taxes)" : ""} *
+                    Amount {applyTaxes ? "(including taxes)" : ""}
+                    {fxEnabled && fxCurrencyCode ? ` (${fxCurrencyCode})` : ""} *
                   </label>
                   <input
                     type="number"
@@ -640,6 +687,74 @@ export default function EditExpensePage() {
                   </button>
                 </div>
               </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      Paid in foreign currency?
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Expense was paid in USD, EUR, GBP, etc. — booked in{" "}
+                      {currencyCode || "home currency"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={fxEnabled}
+                    onClick={() => setFxEnabled(!fxEnabled)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${fxEnabled ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-600"}`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fxEnabled ? "translate-x-5" : "translate-x-0"}`}
+                    />
+                  </button>
+                </div>
+                {fxEnabled && (
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                        Expense currency
+                      </label>
+                      <select
+                        value={fxCurrencyCode}
+                        onChange={(e) => setFxCurrencyCode(e.target.value)}
+                        className="w-full border border-gray-300 dark:border-gray-600 text-sm rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                      >
+                        <option value="USD">USD — US Dollar</option>
+                        <option value="EUR">EUR — Euro</option>
+                        <option value="GBP">GBP — British Pound</option>
+                        <option value="KES">KES — Kenyan Shilling</option>
+                        <option value="NGN">NGN — Nigerian Naira</option>
+                        <option value="ZAR">ZAR — South African Rand</option>
+                        <option value="CNY">CNY — Chinese Yuan</option>
+                        <option value="INR">INR — Indian Rupee</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                        Rate: 1 {fxCurrencyCode} = ? {currencyCode || "home"}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        value={fxRate}
+                        onChange={(e) => setFxRate(e.target.value)}
+                        placeholder="e.g. 14.50"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-sm rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                      />
+                    </div>
+                    {fxRate && !Number.isNaN(parseFloat(fxRate)) && parseFloat(fxRate) > 0 && (
+                      <p className="sm:col-span-2 text-xs text-gray-600 dark:text-gray-300">
+                        Amount entered in {fxCurrencyCode}. Booked in {currencyCode} at rate{" "}
+                        {parseFloat(fxRate).toFixed(4)}.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Tax Breakdown */}
@@ -649,26 +764,47 @@ export default function EditExpensePage() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-500">Subtotal (before tax):</span>
-                    <span className="font-semibold text-slate-800 tabular-nums">₵{baseAmount.toFixed(2)}</span>
+                    <span className="font-semibold text-slate-800 tabular-nums">
+                      {docSymbol}
+                      {baseAmount.toFixed(2)}
+                    </span>
                   </div>
                   <div className="space-y-2 pt-2 border-t border-slate-100">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">NHIL (2.5%):</span>
-                      <span className="text-slate-700 tabular-nums">₵{taxBreakdown.nhil.toFixed(2)}</span>
+                      <span className="text-slate-700 tabular-nums">
+                        {docSymbol}
+                        {taxBreakdown.nhil.toFixed(2)}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">GETFund (2.5%):</span>
-                      <span className="text-slate-700 tabular-nums">₵{taxBreakdown.getfund.toFixed(2)}</span>
+                      <span className="text-slate-700 tabular-nums">
+                        {docSymbol}
+                        {taxBreakdown.getfund.toFixed(2)}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">VAT (15%):</span>
-                      <span className="text-slate-700 tabular-nums">₵{taxBreakdown.vat.toFixed(2)}</span>
+                      <span className="text-slate-700 tabular-nums">
+                        {docSymbol}
+                        {taxBreakdown.vat.toFixed(2)}
+                      </span>
                     </div>
                   </div>
                   <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200">
                     <span className="text-slate-900 font-bold text-lg">Total:</span>
-                    <span className="font-bold text-slate-900 text-xl tabular-nums">₵{total.toFixed(2)}</span>
+                    <span className="font-bold text-slate-900 text-xl tabular-nums">
+                      {docSymbol}
+                      {total.toFixed(2)}
+                    </span>
                   </div>
+                  {approxHomeTotal != null && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      Booked in {homeCurrencyCode}: ≈ {homeSymbol}
+                      {approxHomeTotal.toFixed(2)} (at rate {fxRateNum.toFixed(4)})
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -677,8 +813,17 @@ export default function EditExpensePage() {
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-900 font-bold text-lg">Total:</span>
-                  <span className="font-bold text-slate-900 text-xl tabular-nums">₵{totalIncludingTaxes.toFixed(2)}</span>
+                  <span className="font-bold text-slate-900 text-xl tabular-nums">
+                    {docSymbol}
+                    {totalIncludingTaxes.toFixed(2)}
+                  </span>
                 </div>
+                {approxHomeTotal != null && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Booked in {homeCurrencyCode}: ≈ {homeSymbol}
+                    {approxHomeTotal.toFixed(2)} (at rate {fxRateNum.toFixed(4)})
+                  </p>
+                )}
               </div>
             )}
 

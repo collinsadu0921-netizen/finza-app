@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { handleFilePersistence } from "@/lib/fileHandlingServer"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export async function GET(
   request: NextRequest,
@@ -117,12 +118,14 @@ export async function PUT(
       date,
       notes,
       receipt_path,
+      currency_code: body_currency_code,
+      fx_rate: body_fx_rate,
     } = body
 
     // Fetch existing expense with receipt_path to preserve it if not updated
     const { data: existingExpense } = await supabase
       .from("expenses")
-      .select("id, receipt_path")
+      .select("id, receipt_path, total, currency_code, fx_rate")
       .eq("id", expenseId)
       .eq("business_id", business.id)
       .maybeSingle()
@@ -165,6 +168,67 @@ export async function PUT(
     if (notes !== undefined) updateData.notes = notes
     // Always set receipt_path to the determined value (preserved or updated)
     updateData.receipt_path = filePersistenceResult.finalFilePath
+
+    const touchFx =
+      Object.prototype.hasOwnProperty.call(body, "currency_code") ||
+      Object.prototype.hasOwnProperty.call(body, "fx_rate")
+
+    if (touchFx) {
+      const { data: bizCurrency } = await supabase
+        .from("businesses")
+        .select("default_currency")
+        .eq("id", business.id)
+        .maybeSingle()
+
+      const homeCurrencyCode = bizCurrency?.default_currency
+      if (!homeCurrencyCode) {
+        return NextResponse.json(
+          {
+            error:
+              "Business currency is required. Please set it in Business Profile settings.",
+          },
+          { status: 400 }
+        )
+      }
+
+      const nextCode =
+        "currency_code" in body
+          ? body_currency_code
+            ? String(body_currency_code).trim()
+            : null
+          : existingExpense.currency_code
+      const nextRateRaw =
+        "fx_rate" in body ? body_fx_rate : existingExpense.fx_rate
+      const nextRate =
+        nextRateRaw != null && nextRateRaw !== ""
+          ? Number(nextRateRaw)
+          : null
+      const isFx = !!(nextCode && nextCode !== homeCurrencyCode)
+      if (isFx && (!nextRate || nextRate <= 0)) {
+        return NextResponse.json(
+          {
+            error: `Exchange rate is required for ${nextCode} expenses. Please enter the current rate.`,
+          },
+          { status: 400 }
+        )
+      }
+
+      const effectiveTotal =
+        updateData.total !== undefined
+          ? Number(updateData.total)
+          : Number(existingExpense.total ?? 0)
+
+      updateData.currency_code = isFx ? nextCode : null
+      updateData.currency_symbol = isFx
+        ? getCurrencySymbol(nextCode!) || nextCode
+        : null
+      updateData.fx_rate = isFx ? nextRate : null
+      updateData.home_currency_code = isFx ? homeCurrencyCode : null
+      updateData.home_currency_total =
+        isFx && nextRate
+          ? Math.round(effectiveTotal * nextRate * 100) / 100
+          : null
+    }
 
     const { data: expense, error } = await supabase
       .from("expenses")

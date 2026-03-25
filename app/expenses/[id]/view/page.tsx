@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrencySymbol } from "@/lib/currency"
 
 type Expense = {
   id: string
@@ -20,6 +20,11 @@ type Expense = {
   total: number
   notes: string | null
   receipt_path: string | null
+  currency_code?: string | null
+  currency_symbol?: string | null
+  fx_rate?: number | null
+  home_currency_code?: string | null
+  home_currency_total?: number | null
   expense_categories: {
     id: string
     name: string
@@ -115,6 +120,17 @@ export default function ViewExpensePage() {
   const totalTaxes = Number(expense.nhil || 0) + Number(expense.getfund || 0) + Number(expense.covid || 0) + Number(expense.vat || 0)
   const hasTaxes = totalTaxes > 0
 
+  const homeCode = expense.home_currency_code || "GHS"
+  const isFx = !!(
+    expense.fx_rate &&
+    expense.currency_code &&
+    expense.currency_code !== homeCode
+  )
+  const docCode = isFx ? expense.currency_code! : homeCode
+  const docSymbol =
+    expense.currency_symbol || getCurrencySymbol(docCode) || docCode || "₵"
+  const homeSymbol = getCurrencySymbol(homeCode) || homeCode || "₵"
+
   return (
     <Wrapper>
       <div className="min-h-screen bg-slate-50">
@@ -174,7 +190,17 @@ export default function ViewExpensePage() {
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 mb-0.5">Total Amount</p>
-                    <p className="text-sm font-bold text-slate-900">₵{Number(expense.total).toFixed(2)}</p>
+                    <p className="text-sm font-bold text-slate-900">
+                      {docSymbol}
+                      {Number(expense.total).toFixed(2)}
+                      {isFx && expense.home_currency_total != null && (
+                        <span className="block text-xs font-normal text-slate-500 mt-1">
+                          Booked in {homeCode}: {homeSymbol}
+                          {Number(expense.home_currency_total).toFixed(2)} (rate{" "}
+                          {Number(expense.fx_rate).toFixed(4)})
+                        </span>
+                      )}
+                    </p>
                   </div>
                   {expense.notes && (
                     <div className="col-span-2">
@@ -192,31 +218,46 @@ export default function ViewExpensePage() {
                   <div className="space-y-2.5">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">Subtotal</span>
-                      <span className="font-medium text-slate-800">₵{Number(expense.amount).toFixed(2)}</span>
+                      <span className="font-medium text-slate-800">
+                        {docSymbol}
+                        {Number(expense.amount).toFixed(2)}
+                      </span>
                     </div>
                     <div className="border-t border-slate-100 pt-2.5 space-y-2">
                       {Number(expense.nhil || 0) > 0 && (
                         <div className="flex justify-between items-center text-sm">
                           <span className="text-slate-500">NHIL (2.5%)</span>
-                          <span className="text-slate-700">₵{Number(expense.nhil).toFixed(2)}</span>
+                          <span className="text-slate-700">
+                            {docSymbol}
+                            {Number(expense.nhil).toFixed(2)}
+                          </span>
                         </div>
                       )}
                       {Number(expense.getfund || 0) > 0 && (
                         <div className="flex justify-between items-center text-sm">
                           <span className="text-slate-500">GETFund (2.5%)</span>
-                          <span className="text-slate-700">₵{Number(expense.getfund).toFixed(2)}</span>
+                          <span className="text-slate-700">
+                            {docSymbol}
+                            {Number(expense.getfund).toFixed(2)}
+                          </span>
                         </div>
                       )}
                       {Number(expense.vat || 0) > 0 && (
                         <div className="flex justify-between items-center text-sm">
                           <span className="text-slate-500">VAT (15%)</span>
-                          <span className="text-slate-700">₵{Number(expense.vat).toFixed(2)}</span>
+                          <span className="text-slate-700">
+                            {docSymbol}
+                            {Number(expense.vat).toFixed(2)}
+                          </span>
                         </div>
                       )}
                     </div>
                     <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200">
                       <span className="text-sm font-bold text-slate-900">Total</span>
-                      <span className="font-bold text-slate-900">₵{Number(expense.total).toFixed(2)}</span>
+                      <span className="font-bold text-slate-900">
+                        {docSymbol}
+                        {Number(expense.total).toFixed(2)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -226,8 +267,17 @@ export default function ViewExpensePage() {
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-semibold text-slate-700">Total</span>
-                    <span className="text-lg font-bold text-slate-900">₵{Number(expense.total).toFixed(2)}</span>
+                    <span className="text-lg font-bold text-slate-900">
+                      {docSymbol}
+                      {Number(expense.total).toFixed(2)}
+                    </span>
                   </div>
+                  {isFx && expense.home_currency_total != null && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      Booked in {homeCode}: {homeSymbol}
+                      {Number(expense.home_currency_total).toFixed(2)} (rate {Number(expense.fx_rate).toFixed(4)})
+                    </p>
+                  )}
                 </div>
               )}
             </div>
