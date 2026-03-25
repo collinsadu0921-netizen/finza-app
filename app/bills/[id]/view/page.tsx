@@ -46,6 +46,38 @@ type Bill = {
   examination_fee: number | null
   clearing_agent_fee: number | null
   landed_cost_account_code: string | null
+  currency_code?: string | null
+  currency_symbol?: string | null
+  fx_rate?: number | null
+  home_currency_code?: string | null
+  home_currency_total?: number | null
+}
+
+/** Prefix for amounts stored in document currency vs business home. */
+function billAmountCurrencyDisplay(
+  b: Pick<
+    Bill,
+    "fx_rate" | "currency_code" | "currency_symbol" | "home_currency_code"
+  >,
+  businessHomeCode: string,
+  homeDisplay: string
+): string {
+  const hc = b.home_currency_code || businessHomeCode || ""
+  const isDocForeign = !!(
+    b.fx_rate &&
+    b.currency_code &&
+    hc &&
+    b.currency_code !== hc
+  )
+  if (isDocForeign && b.currency_code) {
+    return (
+      b.currency_symbol ||
+      getCurrencySymbol(b.currency_code) ||
+      b.currency_code ||
+      homeDisplay
+    )
+  }
+  return homeDisplay
 }
 
 type BillItem = {
@@ -135,8 +167,6 @@ export default function BillViewPage() {
     }
   }
 
-  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
-
   const handlePaymentAdded = () => {
     setShowPaymentModal(false)
     setEditingPayment(null)
@@ -153,7 +183,12 @@ export default function BillViewPage() {
       bill.wht_applicable && Number(bill.wht_amount) > 0
         ? "Outstanding (net to you after WHT)"
         : "Outstanding"
-    const message = `Hello, here is our record of your bill ${bill.bill_number}.\n\nTotal: ${currency}${bill.total.toFixed(2)}.\n${outstandingLabel}: ${currency}${balance.toFixed(2)}.\n\nFor confirmation or clarifications, please reply here.`
+    const homeDisp = resolveCurrencyDisplay({
+      currency_symbol: currencySymbol,
+      currency_code: currencyCode,
+    })
+    const docDisp = billAmountCurrencyDisplay(bill, currencyCode, homeDisp)
+    const message = `Hello, here is our record of your bill ${bill.bill_number}.\n\nTotal: ${docDisp}${bill.total.toFixed(2)}.\n${outstandingLabel}: ${docDisp}${balance.toFixed(2)}.\n\nFor confirmation or clarifications, please reply here.`
     const result = buildWhatsAppLink(bill.supplier_phone, message)
     if (!result.ok) {
       toast.showToast(result.error, "error")
@@ -219,6 +254,25 @@ export default function BillViewPage() {
     )
   }
 
+  const homeCurrencyDisplay = resolveCurrencyDisplay({
+    currency_symbol: currencySymbol,
+    currency_code: currencyCode,
+  })
+  const docCurrencyDisplay = billAmountCurrencyDisplay(
+    bill,
+    currencyCode,
+    homeCurrencyDisplay
+  )
+  const homeCodeForBill = bill.home_currency_code || currencyCode || ""
+  const billIsForeign = !!(
+    bill.fx_rate &&
+    bill.currency_code &&
+    homeCodeForBill &&
+    bill.currency_code !== homeCodeForBill
+  )
+  const homeSymbolForBooked =
+    getCurrencySymbol(homeCodeForBill) || homeCodeForBill || homeCurrencyDisplay
+
   return (
       <div className="min-h-screen bg-slate-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -261,12 +315,22 @@ export default function BillViewPage() {
           <div className={`grid grid-cols-1 gap-4 mb-6 export-hide print-hide ${bill.wht_applicable ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Gross Total</p>
-              <p className="text-2xl font-bold text-slate-900">{currency}{Number(bill.total).toFixed(2)}</p>
+              <p className="text-2xl font-bold text-slate-900">
+                {docCurrencyDisplay}
+                {Number(bill.total).toFixed(2)}
+              </p>
+              {billIsForeign && bill.home_currency_total != null && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Booked in {homeCodeForBill}: {homeSymbolForBooked}
+                  {Number(bill.home_currency_total).toFixed(2)} (rate{" "}
+                  {Number(bill.fx_rate).toFixed(4)})
+                </p>
+              )}
             </div>
             {bill.wht_applicable && (
               <div className={`rounded-xl border shadow-sm p-4 ${bill.wht_remitted_at ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                 <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">WHT ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%)</p>
-                <p className={`text-2xl font-bold ${bill.wht_remitted_at ? 'text-emerald-700' : 'text-amber-700'}`}>{currency}{Number(bill.wht_amount).toFixed(2)}</p>
+                <p className={`text-2xl font-bold ${bill.wht_remitted_at ? 'text-emerald-700' : 'text-amber-700'}`}>{docCurrencyDisplay}{Number(bill.wht_amount).toFixed(2)}</p>
                 <p className={`text-xs mt-1 ${bill.wht_remitted_at ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {bill.wht_remitted_at ? '✓ Remitted to GRA' : 'Pending remittance'}
                 </p>
@@ -274,13 +338,13 @@ export default function BillViewPage() {
             )}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Total Paid</p>
-              <p className="text-2xl font-bold text-emerald-600">{currency}{totalPaid.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-emerald-600">{docCurrencyDisplay}{totalPaid.toFixed(2)}</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
                 {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier)" : "Remaining"}
               </p>
-              <p className={`text-2xl font-bold ${balance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{currency}{balance.toFixed(2)}</p>
+              <p className={`text-2xl font-bold ${balance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{docCurrencyDisplay}{balance.toFixed(2)}</p>
               {bill.wht_applicable && Number(bill.wht_amount) > 0 && (
                 <p className="text-xs text-slate-500 mt-1">Net of WHT — supplier cash portion only.</p>
               )}
@@ -351,44 +415,44 @@ export default function BillViewPage() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between py-2 border-b border-slate-100">
                       <span className="text-slate-600">CIF Value <span className="text-xs">(Cost + Insurance + Freight)</span></span>
-                      <span className="font-semibold text-slate-800">{currency}{Number(bill.cif_value ?? 0).toFixed(2)}</span>
+                      <span className="font-semibold text-slate-800">{docCurrencyDisplay}{Number(bill.cif_value ?? 0).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-slate-100">
                       <span className="text-slate-600">
                         Import Duty <span className="text-xs">({((Number(bill.import_duty_rate ?? 0)) * 100).toFixed(0)}% ECOWAS CET)</span>
                       </span>
-                      <span className="font-medium text-slate-800">{currency}{Number(bill.import_duty_amount ?? 0).toFixed(2)}</span>
+                      <span className="font-medium text-slate-800">{docCurrencyDisplay}{Number(bill.import_duty_amount ?? 0).toFixed(2)}</span>
                     </div>
 
                     {/* Port levies */}
                     {Number(bill.ecowas_levy) > 0 && (
                       <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>ECOWAS Levy (0.5%)</span>
-                        <span>{currency}{Number(bill.ecowas_levy).toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{Number(bill.ecowas_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.au_levy) > 0 && (
                       <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>AU Levy (0.2%)</span>
-                        <span>{currency}{Number(bill.au_levy).toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{Number(bill.au_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.exim_levy) > 0 && (
                       <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>EXIM Levy (0.75%)</span>
-                        <span>{currency}{Number(bill.exim_levy).toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{Number(bill.exim_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.sil_levy) > 0 && (
                       <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>SIL (2%)</span>
-                        <span>{currency}{Number(bill.sil_levy).toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{Number(bill.sil_levy).toFixed(2)}</span>
                       </div>
                     )}
                     {Number(bill.examination_fee) > 0 && (
                       <div className="flex justify-between py-1.5 pl-4 text-xs text-slate-400">
                         <span>Examination Fee (1%)</span>
-                        <span>{currency}{Number(bill.examination_fee).toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{Number(bill.examination_fee).toFixed(2)}</span>
                       </div>
                     )}
 
@@ -404,7 +468,7 @@ export default function BillViewPage() {
                       return (
                         <div className="flex justify-between py-2 border-t border-indigo-200 mt-1">
                           <span className="font-semibold text-indigo-800">VAT Base (landed cost)</span>
-                          <span className="font-bold text-indigo-800">{currency}{vatBase.toFixed(2)}</span>
+                          <span className="font-bold text-indigo-800">{docCurrencyDisplay}{vatBase.toFixed(2)}</span>
                         </div>
                       )
                     })()}
@@ -412,7 +476,7 @@ export default function BillViewPage() {
                     {Number(bill.clearing_agent_fee) > 0 && (
                       <div className="flex justify-between py-2 border-t border-dashed border-slate-200 text-xs text-slate-400">
                         <span>Clearing Agent Fee (posted to 5220)</span>
-                        <span>{currency}{Number(bill.clearing_agent_fee).toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{Number(bill.clearing_agent_fee).toFixed(2)}</span>
                       </div>
                     )}
 
@@ -447,10 +511,10 @@ export default function BillViewPage() {
                             <td className="px-4 py-3 text-sm text-slate-800">{item.description}</td>
                             <td className="px-4 py-3 text-sm text-center text-slate-600">{Number(item.qty)}</td>
                             <td className="px-4 py-3 text-sm text-right text-slate-600">
-                              {currency}{Number(item.unit_price).toFixed(2)}
+                              {docCurrencyDisplay}{Number(item.unit_price).toFixed(2)}
                             </td>
                             <td className="px-4 py-3 text-sm text-right font-medium text-slate-800">
-                              {currency}{Number(item.line_subtotal).toFixed(2)}
+                              {docCurrencyDisplay}{Number(item.line_subtotal).toFixed(2)}
                             </td>
                           </tr>
                         ))}
@@ -467,7 +531,7 @@ export default function BillViewPage() {
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
                       <span className="text-slate-500">Subtotal:</span>
-                      <span className="font-semibold text-slate-800">{currency}{Number(bill.subtotal).toFixed(2)}</span>
+                      <span className="font-semibold text-slate-800">{docCurrencyDisplay}{Number(bill.subtotal).toFixed(2)}</span>
                     </div>
                     <div className="space-y-2 pt-2 border-t border-slate-100">
                       {(() => {
@@ -480,15 +544,15 @@ export default function BillViewPage() {
                             <>
                               <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-500">NHIL (2.5%):</span>
-                                <span className="text-slate-800">{currency}{Number(bill.nhil || 0).toFixed(2)}</span>
+                                <span className="text-slate-800">{docCurrencyDisplay}{Number(bill.nhil || 0).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-500">GETFund (2.5%):</span>
-                                <span className="text-slate-800">{currency}{Number(bill.getfund || 0).toFixed(2)}</span>
+                                <span className="text-slate-800">{docCurrencyDisplay}{Number(bill.getfund || 0).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-500">VAT (15%):</span>
-                                <span className="text-slate-800">{currency}{Number(bill.vat || 0).toFixed(2)}</span>
+                                <span className="text-slate-800">{docCurrencyDisplay}{Number(bill.vat || 0).toFixed(2)}</span>
                               </div>
                             </>
                           )
@@ -497,7 +561,7 @@ export default function BillViewPage() {
                           return (
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-slate-500">VAT:</span>
-                              <span className="text-slate-800">{currency}{Number(bill.vat || 0).toFixed(2)}</span>
+                              <span className="text-slate-800">{docCurrencyDisplay}{Number(bill.vat || 0).toFixed(2)}</span>
                             </div>
                           )
                         }
@@ -507,7 +571,7 @@ export default function BillViewPage() {
                       <span className="text-slate-800 font-bold text-lg">
                         {bill.wht_applicable ? 'Gross Total:' : 'Total:'}
                       </span>
-                      <span className="font-bold text-slate-900 text-xl">{currency}{Number(bill.total).toFixed(2)}</span>
+                      <span className="font-bold text-slate-900 text-xl">{docCurrencyDisplay}{Number(bill.total).toFixed(2)}</span>
                     </div>
                     {bill.wht_applicable && bill.wht_amount > 0 && (
                       <>
@@ -516,13 +580,13 @@ export default function BillViewPage() {
                             WHT Deduction ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%):
                           </span>
                           <span className="text-amber-700 font-semibold">
-                            − {currency}{Number(bill.wht_amount).toFixed(2)}
+                            − {docCurrencyDisplay}{Number(bill.wht_amount).toFixed(2)}
                           </span>
                         </div>
                         <div className="flex justify-between items-center pt-2 border-t-2 border-amber-300">
                           <span className="text-amber-800 font-bold text-lg">Net to Supplier:</span>
                           <span className="font-bold text-amber-700 text-xl">
-                            {currency}{(Number(bill.total) - Number(bill.wht_amount)).toFixed(2)}
+                            {docCurrencyDisplay}{(Number(bill.total) - Number(bill.wht_amount)).toFixed(2)}
                           </span>
                         </div>
                       </>
@@ -559,7 +623,7 @@ export default function BillViewPage() {
                       <div key={payment.id} className="border border-slate-100 rounded-lg p-3">
                         <div className="flex justify-between items-start mb-2">
                           <div>
-                            <p className="font-semibold text-slate-800">{currency}{Number(payment.amount).toFixed(2)}</p>
+                            <p className="font-semibold text-slate-800">{docCurrencyDisplay}{Number(payment.amount).toFixed(2)}</p>
                             <p className="text-xs text-slate-500">
                               {formatMethod(payment.method)} • {new Date(payment.date).toLocaleDateString("en-GH")}
                             </p>
@@ -582,14 +646,14 @@ export default function BillViewPage() {
                     <div className="pt-3 border-t border-slate-100">
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-slate-500">Total Paid:</span>
-                        <span className="font-semibold text-slate-800">{currency}{totalPaid.toFixed(2)}</span>
+                        <span className="font-semibold text-slate-800">{docCurrencyDisplay}{totalPaid.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm mt-1">
                         <span className="text-slate-500">
                           {bill.wht_applicable && Number(bill.wht_amount) > 0 ? "Remaining (to supplier):" : "Remaining:"}
                         </span>
                         <span className={`font-semibold ${balance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                          {currency}{balance.toFixed(2)}
+                          {docCurrencyDisplay}{balance.toFixed(2)}
                         </span>
                       </div>
                     </div>
@@ -604,7 +668,7 @@ export default function BillViewPage() {
                   <div className="space-y-2 mb-4">
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">WHT Amount:</span>
-                      <span className="font-semibold text-slate-800">{currency}{Number(bill.wht_amount).toFixed(2)}</span>
+                      <span className="font-semibold text-slate-800">{docCurrencyDisplay}{Number(bill.wht_amount).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">Status:</span>
@@ -676,7 +740,7 @@ export default function BillViewPage() {
             billId={id}
             businessId={bill.business_id}
             balance={balance}
-            currencySymbol={currency}
+            currencySymbol={docCurrencyDisplay}
             onClose={() => setShowPaymentModal(false)}
             onSuccess={handlePaymentAdded}
             editingPayment={editingPayment}
