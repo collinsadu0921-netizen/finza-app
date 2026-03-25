@@ -396,6 +396,16 @@ export default function CreateExpensePage() {
 
   const total = totalIncludingTaxes // Total is what user entered
 
+  const homeCurrencyCode = currencyCode || ""
+  const documentCurrencyCode = fxEnabled && fxCurrencyCode ? fxCurrencyCode : homeCurrencyCode
+  const docSymbol = getCurrencySymbol(documentCurrencyCode) || documentCurrencyCode || "₵"
+  const homeSymbol = getCurrencySymbol(homeCurrencyCode) || homeCurrencyCode || "₵"
+  const fxRateNum = fxRate && !Number.isNaN(parseFloat(fxRate)) ? parseFloat(fxRate) : 0
+  const approxHomeTotal =
+    fxEnabled && fxRateNum > 0 && documentCurrencyCode && documentCurrencyCode !== homeCurrencyCode
+      ? Math.round(totalIncludingTaxes * fxRateNum * 100) / 100
+      : null
+
   return (
     <Wrapper>
       <div className="min-h-screen bg-slate-50">
@@ -480,7 +490,8 @@ export default function CreateExpensePage() {
 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Amount {applyTaxes ? "(including taxes)" : ""} *
+                    Amount {applyTaxes ? "(including taxes)" : ""}
+                    {fxEnabled && fxCurrencyCode ? ` (${fxCurrencyCode})` : ""} *
                     {ocrSuggestedFields.amount && (
                       <span className="text-xs font-medium text-emerald-600 ml-2" title="Suggested by receipt OCR">
                         From receipt
@@ -697,26 +708,31 @@ export default function CreateExpensePage() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-500">Subtotal (before tax):</span>
-                    <span className="font-semibold text-slate-800">₵{baseAmount.toFixed(2)}</span>
+                    <span className="font-semibold text-slate-800">{docSymbol}{baseAmount.toFixed(2)}</span>
                   </div>
                   <div className="space-y-2 pt-2 border-t border-slate-100">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">NHIL (2.5%):</span>
-                      <span className="text-slate-600">₵{taxBreakdown.nhil.toFixed(2)}</span>
+                      <span className="text-slate-600">{docSymbol}{taxBreakdown.nhil.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">GETFund (2.5%):</span>
-                      <span className="text-slate-600">₵{taxBreakdown.getfund.toFixed(2)}</span>
+                      <span className="text-slate-600">{docSymbol}{taxBreakdown.getfund.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">VAT (15%):</span>
-                      <span className="text-slate-600">₵{taxBreakdown.vat.toFixed(2)}</span>
+                      <span className="text-slate-600">{docSymbol}{taxBreakdown.vat.toFixed(2)}</span>
                     </div>
                   </div>
                   <div className="flex justify-between items-center pt-3 border-t-2 border-slate-800">
                     <span className="text-slate-800 font-bold text-lg">Total:</span>
-                    <span className="font-bold text-slate-900 text-xl">₵{total.toFixed(2)}</span>
+                    <span className="font-bold text-slate-900 text-xl">{docSymbol}{total.toFixed(2)}</span>
                   </div>
+                  {approxHomeTotal != null && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      Booked in {homeCurrencyCode}: ≈ {homeSymbol}{approxHomeTotal.toFixed(2)} (at rate {fxRateNum.toFixed(4)})
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -725,8 +741,13 @@ export default function CreateExpensePage() {
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-800 font-bold text-lg">Total:</span>
-                  <span className="font-bold text-slate-900 text-xl">₵{totalIncludingTaxes.toFixed(2)}</span>
+                  <span className="font-bold text-slate-900 text-xl">{docSymbol}{totalIncludingTaxes.toFixed(2)}</span>
                 </div>
+                {approxHomeTotal != null && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Booked in {homeCurrencyCode}: ≈ {homeSymbol}{approxHomeTotal.toFixed(2)} (at rate {fxRateNum.toFixed(4)})
+                  </p>
+                )}
               </div>
             )}
             </div>
