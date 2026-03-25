@@ -149,6 +149,8 @@ export async function PUT(
       landed_cost_account_code,
       currency_code: body_currency_code,
       fx_rate: body_fx_rate,
+      material_id: body_material_id,
+      quantity: body_import_quantity,
     } = body
 
     // Verify bill exists and belongs to this business
@@ -220,6 +222,14 @@ export async function PUT(
       updateData.vat                      = vat
       updateData.total_tax                = totalTax
       updateData.total                    = grandTotal
+      updateData.material_id =
+        body_material_id != null && String(body_material_id).trim() !== ""
+          ? String(body_material_id).trim()
+          : null
+      updateData.quantity =
+        updateData.material_id != null
+          ? Math.max(Number(body_import_quantity) || 0, 0.000001)
+          : null
 
     } else if (items && items.length > 0) {
       // ── Standard bill: reverse-calculate taxes from tax-inclusive total ───
@@ -265,6 +275,8 @@ export async function PUT(
       updateData.vat        = taxResult.vat
       updateData.total_tax  = taxResult.totalTax
       updateData.total      = taxResult.grandTotal
+      updateData.material_id = null
+      updateData.quantity = null
     }
 
     if (supplier_name     !== undefined) updateData.supplier_name  = supplier_name.trim()

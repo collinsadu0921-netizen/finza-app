@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { formatMoney } from "@/lib/money"
 
 type Bill = {
   id: string
@@ -16,6 +17,47 @@ type Bill = {
   total_paid: number
   balance: number
   bill_type?: "standard" | "import"
+  currency_code?: string | null
+  currency_symbol?: string | null
+  fx_rate?: number | null
+  home_currency_code?: string | null
+}
+
+function billIsDocForeign(
+  bill: Pick<Bill, "fx_rate" | "currency_code" | "home_currency_code">,
+  businessHomeCode: string | null
+): boolean {
+  const hc = bill.home_currency_code || businessHomeCode || ""
+  return !!(
+    bill.fx_rate &&
+    bill.currency_code &&
+    hc &&
+    bill.currency_code !== hc
+  )
+}
+
+/** Format an amount in the bill's document currency when FX, else business home. */
+function formatBillListAmount(
+  bill: Bill,
+  businessHomeCode: string | null,
+  amount: number
+): string {
+  if (billIsDocForeign(bill, businessHomeCode)) {
+    return formatMoney(amount, bill.currency_code ?? null)
+  }
+  return formatMoney(amount, businessHomeCode)
+}
+
+/** Approximate value in home currency for dashboard totals (FX × bill rate). */
+function billAmountInHomeApprox(
+  bill: Bill,
+  businessHomeCode: string | null,
+  amount: number
+): number {
+  if (billIsDocForeign(bill, businessHomeCode) && bill.fx_rate) {
+    return Math.round(amount * Number(bill.fx_rate) * 100) / 100
+  }
+  return amount
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -46,7 +88,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function BillsPage() {
   const router = useRouter()
   const toast = useToast()
-  const { format } = useBusinessCurrency()
+  const { format, currencyCode: businessHomeCode } = useBusinessCurrency()
   const [loading, setLoading] = useState(true)
   const [bills, setBills] = useState<Bill[]>([])
   const [error, setError] = useState("")
@@ -92,11 +134,18 @@ export default function BillsPage() {
 
   const totalOutstanding = bills
     .filter((b) => b.status !== "paid" && b.status !== "draft")
-    .reduce((sum, b) => sum + b.balance, 0)
+    .reduce(
+      (sum, b) => sum + billAmountInHomeApprox(b, businessHomeCode, b.balance),
+      0
+    )
 
   const totalPaid = bills
     .filter((b) => b.status === "paid")
-    .reduce((sum, b) => sum + Number(b.total), 0)
+    .reduce(
+      (sum, b) =>
+        sum + billAmountInHomeApprox(b, businessHomeCode, Number(b.total)),
+      0
+    )
 
   const filtersActive = !!(filters.supplier_name || filters.status !== "all" || filters.start_date || filters.end_date || searchInput)
 
@@ -312,11 +361,13 @@ export default function BillsPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm font-semibold text-slate-900 tabular-nums">{format(Number(bill.total))}</span>
+                          <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                            {formatBillListAmount(bill, businessHomeCode, Number(bill.total))}
+                          </span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
                           <span className={`text-sm font-semibold tabular-nums ${bill.balance > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-                            {format(bill.balance)}
+                            {formatBillListAmount(bill, businessHomeCode, bill.balance)}
                           </span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
