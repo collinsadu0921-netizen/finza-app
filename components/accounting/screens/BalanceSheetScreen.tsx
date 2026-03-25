@@ -147,6 +147,9 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
   const [asOfDate, setAsOfDate]                       = useState(() => new Date().toISOString().split("T")[0])
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null)
   const [includePeriodNetIncome, setIncludePeriodNetIncome] = useState(false)
+  const [useDateRange, setUseDateRange]               = useState(false)
+  const [rangeStartDate, setRangeStartDate]           = useState("")
+  const [rangeEndDate, setRangeEndDate]               = useState("")
 
   const [assetSection, setAssetSection]       = useState<BSSection | null>(null)
   const [liabilitySection, setLiabilitySection] = useState<BSSection | null>(null)
@@ -173,7 +176,15 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
       setEquitySection(null)
       setTotals(null)
     }
-  }, [businessId, asOfDate, selectedPeriodStart, includePeriodNetIncome])
+  }, [
+    businessId,
+    asOfDate,
+    selectedPeriodStart,
+    includePeriodNetIncome,
+    useDateRange,
+    rangeStartDate,
+    rangeEndDate,
+  ])
 
   const loadPeriods = async () => {
     if (!businessId) return
@@ -205,12 +216,27 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
 
   const loadBalanceSheet = async () => {
     if (!businessId) return
+    if (useDateRange && (!rangeStartDate || !rangeEndDate)) {
+      setAssetSection(null)
+      setLiabilitySection(null)
+      setEquitySection(null)
+      setTotals(null)
+      setLoading(false)
+      return
+    }
     try {
       setLoading(true)
       setError("")
       let url = `/api/accounting/reports/balance-sheet?business_id=${businessId}`
-      if (asOfDate) url += `&as_of_date=${asOfDate}`
-      if (includePeriodNetIncome && selectedPeriodStart) url += `&period_start=${selectedPeriodStart}`
+      if (useDateRange && rangeStartDate && rangeEndDate) {
+        url += `&start_date=${encodeURIComponent(rangeStartDate)}&end_date=${encodeURIComponent(rangeEndDate)}`
+      } else {
+        if (selectedPeriodStart) {
+          url += `&period_start=${encodeURIComponent(selectedPeriodStart)}`
+        } else if (asOfDate) {
+          url += `&as_of_date=${encodeURIComponent(asOfDate)}`
+        }
+      }
 
       const response = await fetch(url)
       if (!response.ok) {
@@ -223,6 +249,10 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
       setAssetSection(parseSection(sections.find((s) => s.key === "assets")))
       setLiabilitySection(parseSection(sections.find((s) => s.key === "liabilities")))
       setEquitySection(parseSection(sections.find((s) => s.key === "equity")))
+
+      if (typeof data.as_of_date === "string" && data.as_of_date) {
+        setAsOfDate(data.as_of_date)
+      }
 
       if (data.totals) {
         setTotals({
@@ -248,12 +278,28 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
   const hasData = !!(assetSection || liabilitySection || equitySection)
 
   const handleExport = (format: "csv" | "pdf") => {
-    if (!businessId || !asOfDate) {
-      toast.showToast("Please select a date first", "warning")
+    if (!businessId) {
+      toast.showToast("Missing business context", "warning")
       return
     }
-    let url = `/api/accounting/reports/balance-sheet/export/${format}?business_id=${businessId}&as_of_date=${asOfDate}`
-    if (includePeriodNetIncome && selectedPeriodStart) url += `&period_start=${selectedPeriodStart}`
+    if (useDateRange) {
+      if (!rangeStartDate || !rangeEndDate) {
+        toast.showToast("Please select start and end dates for the custom range", "warning")
+        return
+      }
+    } else if (!asOfDate && !selectedPeriodStart) {
+      toast.showToast("Please select a period or as-of date", "warning")
+      return
+    }
+    const q = new URLSearchParams({ business_id: businessId })
+    if (useDateRange && rangeStartDate && rangeEndDate) {
+      q.set("start_date", rangeStartDate)
+      q.set("end_date", rangeEndDate)
+    } else {
+      if (selectedPeriodStart) q.set("period_start", selectedPeriodStart)
+      else if (asOfDate) q.set("as_of_date", asOfDate)
+    }
+    const url = `/api/accounting/reports/balance-sheet/export/${format}?${q.toString()}`
     window.open(url, "_blank")
   }
 
@@ -290,9 +336,16 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Balance Sheet</h1>
-              {asOfDate && (
+              {useDateRange && rangeStartDate && rangeEndDate ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                  Custom range {rangeStartDate} → {rangeEndDate}
+                  {asOfDate ? (
+                    <span className="text-gray-400"> · Statement as of {new Date(asOfDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span>
+                  ) : null}
+                </p>
+              ) : asOfDate ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">As of {new Date(asOfDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
-              )}
+              ) : null}
             </div>
             <div className="flex gap-2 shrink-0">
               {hasData && (
@@ -332,52 +385,109 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
 
         {/* Filters */}
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-6 export-hide print:hidden">
-          <div className="flex flex-wrap gap-4 items-end">
-            <div className="min-w-[160px]">
-              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">As Of Date</label>
-              <input
-                type="date"
-                value={asOfDate}
-                onChange={(e) => { setAsOfDate(e.target.value); setError("") }}
-                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="min-w-[200px]">
-              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Jump to Period End
-              </label>
-              <select
-                value={selectedPeriodStart || ""}
-                onChange={(e) => { setSelectedPeriodStart(e.target.value || null); setError("") }}
-                className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+          <div className="flex flex-wrap gap-3 gap-y-4 items-end">
+            <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setUseDateRange(false)
+                  setRangeStartDate("")
+                  setRangeEndDate("")
+                  setError("")
+                }}
+                className={`px-3 py-1.5 font-medium transition-colors ${!useDateRange ? "bg-blue-600 text-white" : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
               >
-                <option value="">— select period —</option>
-                {periods.map((p) => (
-                  <option key={p.id} value={p.period_start}>{formatPeriodOption(p)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2 pb-0.5">
-              <input
-                type="checkbox"
-                id="include-net-income"
-                checked={includePeriodNetIncome}
-                onChange={(e) => { setIncludePeriodNetIncome(e.target.checked); setError("") }}
-                disabled={!selectedPeriodStart}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 disabled:opacity-40"
-              />
-              <label htmlFor="include-net-income" className="text-sm text-gray-700 dark:text-gray-300">
-                Include period net income in equity
-              </label>
-              <span
-                title="Adds the period's net profit/loss into the equity section, giving you a provisionally closed balance sheet before the period is formally closed."
-                className="text-gray-400 hover:text-gray-600 cursor-help"
+                Accounting Period
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseDateRange(true)
+                  setSelectedPeriodStart(null)
+                  setIncludePeriodNetIncome(false)
+                  setError("")
+                }}
+                className={`px-3 py-1.5 font-medium transition-colors ${useDateRange ? "bg-blue-600 text-white" : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </span>
+                Custom Range
+              </button>
             </div>
+
+            {!useDateRange ? (
+              <>
+                <div className="min-w-[160px]">
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">As Of Date</label>
+                  <input
+                    type="date"
+                    value={asOfDate}
+                    onChange={(e) => { setAsOfDate(e.target.value); setError("") }}
+                    disabled={!!selectedPeriodStart}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                </div>
+                <div className="min-w-[200px]">
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                    Jump to Period End
+                  </label>
+                  <select
+                    value={selectedPeriodStart || ""}
+                    onChange={(e) => { setSelectedPeriodStart(e.target.value || null); setError("") }}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">— select period —</option>
+                    {periods.map((p) => (
+                      <option key={p.id} value={p.period_start}>{formatPeriodOption(p)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2 pb-0.5">
+                  <input
+                    type="checkbox"
+                    id="include-net-income"
+                    checked={includePeriodNetIncome}
+                    onChange={(e) => { setIncludePeriodNetIncome(e.target.checked); setError("") }}
+                    disabled={!selectedPeriodStart}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 disabled:opacity-40"
+                  />
+                  <label htmlFor="include-net-income" className="text-sm text-gray-700 dark:text-gray-300">
+                    Include period net income in equity
+                  </label>
+                  <span
+                    title="Adds the period's net profit/loss into the equity section, giving you a provisionally closed balance sheet before the period is formally closed."
+                    className="text-gray-400 hover:text-gray-600 cursor-help"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">From</label>
+                  <input
+                    type="date"
+                    value={rangeStartDate}
+                    onChange={(e) => { setRangeStartDate(e.target.value); setError("") }}
+                    className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <span className="text-gray-400 text-sm pb-0.5">to</span>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">To</label>
+                  <input
+                    type="date"
+                    value={rangeEndDate}
+                    onChange={(e) => { setRangeEndDate(e.target.value); setError("") }}
+                    className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xs pb-0.5">
+                  Resolves to the accounting period that contains the range start (same as Trial Balance). Statement date shown is that period&apos;s end.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

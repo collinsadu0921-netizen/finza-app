@@ -5,6 +5,7 @@ import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes 
 import { createAuditLog } from "@/lib/auditLog"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export async function GET(
   request: NextRequest,
@@ -146,12 +147,14 @@ export async function PUT(
       examination_fee,
       clearing_agent_fee,
       landed_cost_account_code,
+      currency_code: body_currency_code,
+      fx_rate: body_fx_rate,
     } = body
 
     // Verify bill exists and belongs to this business
     const { data: existingBill } = await supabase
       .from("bills")
-      .select("id, status")
+      .select("id, status, total, currency_code, fx_rate")
       .eq("id", billId)
       .eq("business_id", business.id)
       .single()
@@ -273,6 +276,67 @@ export async function PUT(
     if (notes             !== undefined) updateData.notes          = notes?.trim() || null
     if (status            !== undefined) updateData.status         = status
     if (attachment_path   !== undefined) updateData.attachment_path = attachment_path || null
+
+    const touchFx =
+      Object.prototype.hasOwnProperty.call(body, "currency_code") ||
+      Object.prototype.hasOwnProperty.call(body, "fx_rate")
+
+    if (touchFx) {
+      const { data: bizProf } = await supabase
+        .from("businesses")
+        .select("default_currency")
+        .eq("id", business.id)
+        .maybeSingle()
+
+      const homeCurrencyCode = bizProf?.default_currency
+      if (!homeCurrencyCode) {
+        return NextResponse.json(
+          {
+            error:
+              "Business currency is required. Please set it in Business Profile settings.",
+          },
+          { status: 400 }
+        )
+      }
+
+      const nextCode =
+        "currency_code" in body
+          ? body_currency_code
+            ? String(body_currency_code).trim()
+            : null
+          : existingBill.currency_code
+      const nextRateRaw =
+        "fx_rate" in body ? body_fx_rate : existingBill.fx_rate
+      const nextRate =
+        nextRateRaw != null && nextRateRaw !== ""
+          ? Number(nextRateRaw)
+          : null
+      const isFxBill = !!(nextCode && nextCode !== homeCurrencyCode)
+      if (isFxBill && (!nextRate || nextRate <= 0)) {
+        return NextResponse.json(
+          {
+            error: `Exchange rate is required for ${nextCode} bills. Please enter the current rate.`,
+          },
+          { status: 400 }
+        )
+      }
+
+      const effectiveTotal =
+        updateData.total !== undefined
+          ? Number(updateData.total)
+          : Number(existingBill.total ?? 0)
+
+      updateData.currency_code = isFxBill ? nextCode : null
+      updateData.currency_symbol = isFxBill
+        ? getCurrencySymbol(nextCode!) || nextCode
+        : null
+      updateData.fx_rate = isFxBill ? nextRate : null
+      updateData.home_currency_code = isFxBill ? homeCurrencyCode : null
+      updateData.home_currency_total =
+        isFxBill && nextRate
+          ? Math.round(effectiveTotal * nextRate * 100) / 100
+          : null
+    }
 
     const { data: bill, error } = await supabase
       .from("bills")

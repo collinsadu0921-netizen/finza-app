@@ -74,7 +74,15 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { amount, date, method, reference, notes, business_id } = body
+    const {
+      amount,
+      date,
+      method,
+      reference,
+      notes,
+      business_id,
+      settlement_fx_rate,
+    } = body
 
     if (!amount || !date || !method) {
       return NextResponse.json(
@@ -104,7 +112,9 @@ export async function POST(
     // Verify bill exists and is open (payments only for open bills)
     const { data: bill } = await supabase
       .from("bills")
-      .select("id, total, business_id, status, wht_applicable, wht_amount")
+      .select(
+        "id, total, business_id, status, wht_applicable, wht_amount, currency_code, fx_rate, home_currency_code"
+      )
       .eq("id", billId)
       .eq("business_id", business_id)
       .is("deleted_at", null)
@@ -201,6 +211,34 @@ export async function POST(
       )
     }
 
+    let homeCode: string | null = bill.home_currency_code ?? null
+    if (!homeCode) {
+      const { data: bizRow } = await supabase
+        .from("businesses")
+        .select("default_currency")
+        .eq("id", business_id)
+        .maybeSingle()
+      homeCode = bizRow?.default_currency ?? null
+    }
+
+    const isFxBill = !!(
+      bill.fx_rate &&
+      bill.currency_code &&
+      homeCode &&
+      bill.currency_code !== homeCode
+    )
+    const parsedSettlementFxRate = settlement_fx_rate
+      ? Number(settlement_fx_rate)
+      : null
+    if (isFxBill && (!parsedSettlementFxRate || parsedSettlementFxRate <= 0)) {
+      return NextResponse.json(
+        {
+          error: `Settlement rate is required for ${bill.currency_code} bills. Enter today's exchange rate (1 ${bill.currency_code} = ? ${homeCode}).`,
+        },
+        { status: 400 }
+      )
+    }
+
     // Create payment
     const { data: payment, error: paymentError } = await supabase
       .from("bill_payments")
@@ -212,6 +250,7 @@ export async function POST(
         method: method.trim().toLowerCase(), // Ensure lowercase and trimmed
         reference: reference?.trim() || null,
         notes: notes?.trim() || null,
+        settlement_fx_rate: isFxBill ? parsedSettlementFxRate : null,
       })
       .select()
       .single()

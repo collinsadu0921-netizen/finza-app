@@ -24,7 +24,15 @@ export async function PUT(
     }
 
     const body = await request.json()
-    const { amount, date, method, reference, notes, business_id } = body
+    const {
+      amount,
+      date,
+      method,
+      reference,
+      notes,
+      business_id,
+      settlement_fx_rate,
+    } = body
 
     if (!business_id) {
       return NextResponse.json({ error: "business_id is required" }, { status: 400 })
@@ -38,7 +46,7 @@ export async function PUT(
     // Verify payment exists
     const { data: existingPayment } = await supabase
       .from("bill_payments")
-      .select("id, bill_id")
+      .select("id, bill_id, settlement_fx_rate")
       .eq("id", paymentId)
       .eq("bill_id", billId)
       .eq("business_id", business_id)
@@ -51,6 +59,48 @@ export async function PUT(
       )
     }
 
+    const { data: bill } = await supabase
+      .from("bills")
+      .select("currency_code, fx_rate, home_currency_code")
+      .eq("id", billId)
+      .eq("business_id", business_id)
+      .single()
+
+    let homeCode: string | null = bill?.home_currency_code ?? null
+    if (!homeCode) {
+      const { data: bizRow } = await supabase
+        .from("businesses")
+        .select("default_currency")
+        .eq("id", business_id)
+        .maybeSingle()
+      homeCode = bizRow?.default_currency ?? null
+    }
+
+    const isFxBill = !!(
+      bill?.fx_rate &&
+      bill?.currency_code &&
+      homeCode &&
+      bill.currency_code !== homeCode
+    )
+
+    const nextSettlementRaw =
+      settlement_fx_rate !== undefined
+        ? settlement_fx_rate
+        : existingPayment.settlement_fx_rate
+    const parsedSettlement =
+      nextSettlementRaw != null && nextSettlementRaw !== ""
+        ? Number(nextSettlementRaw)
+        : null
+
+    if (isFxBill && (!parsedSettlement || parsedSettlement <= 0)) {
+      return NextResponse.json(
+        {
+          error: `Settlement rate is required for ${bill?.currency_code} bills. Enter today's exchange rate (1 ${bill?.currency_code} = ? ${homeCode}).`,
+        },
+        { status: 400 }
+      )
+    }
+
     const updateData: any = {
       updated_at: new Date().toISOString(),
     }
@@ -60,6 +110,9 @@ export async function PUT(
     if (method !== undefined) updateData.method = method
     if (reference !== undefined) updateData.reference = reference?.trim() || null
     if (notes !== undefined) updateData.notes = notes?.trim() || null
+    if (settlement_fx_rate !== undefined) {
+      updateData.settlement_fx_rate = isFxBill ? parsedSettlement : null
+    }
 
     const { data: payment, error } = await supabase
       .from("bill_payments")

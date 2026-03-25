@@ -37,6 +37,9 @@ export default function EditBillPage() {
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
   const [currencyCode, setCurrencyCode] = useState<string>("")
   const [currencySymbol, setCurrencySymbol] = useState<string>("")
+  const [fxEnabled, setFxEnabled] = useState(false)
+  const [fxCurrencyCode, setFxCurrencyCode] = useState("USD")
+  const [fxRate, setFxRate] = useState("")
 
   // Import bill state
   const [isImportBill, setIsImportBill] = useState(false)
@@ -153,6 +156,22 @@ export default function EditBillPage() {
         } else {
           setError("Business currency is required. Please set your business currency in Business Profile settings.")
         }
+
+        const home = businessCurrency || ""
+        if (
+          bill.currency_code &&
+          bill.fx_rate &&
+          home &&
+          bill.currency_code !== home
+        ) {
+          setFxEnabled(true)
+          setFxCurrencyCode(bill.currency_code)
+          setFxRate(String(bill.fx_rate))
+        } else {
+          setFxEnabled(false)
+          setFxCurrencyCode("USD")
+          setFxRate("")
+        }
       }
 
       setLoading(false)
@@ -240,7 +259,29 @@ export default function EditBillPage() {
         grandTotal: subtotalIncludingTaxes,
       }
 
-  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
+  const homeCurrencyDisplay = resolveCurrencyDisplay({
+    currency_symbol: currencySymbol,
+    currency_code: currencyCode,
+  })
+  const homeCodeForFx = currencyCode || ""
+  const isDocForeign =
+    fxEnabled &&
+    !!fxCurrencyCode &&
+    !!homeCodeForFx &&
+    fxCurrencyCode !== homeCodeForFx
+  const docCurrencyDisplay = isDocForeign
+    ? getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode
+    : homeCurrencyDisplay
+  const fxRateNum =
+    fxRate && !Number.isNaN(parseFloat(fxRate)) ? parseFloat(fxRate) : 0
+  const approxHomeGrand =
+    isDocForeign && fxRateNum > 0
+      ? Math.round(
+          (isImportBill ? importGrandTotal : Number(taxResult.grandTotal ?? 0)) *
+            fxRateNum *
+            100
+        ) / 100
+      : null
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -253,6 +294,13 @@ export default function EditBillPage() {
 
     if (!billNumber.trim()) {
       setError("Bill number is required")
+      return
+    }
+
+    if (isDocForeign && (!fxRate || parseFloat(fxRate) <= 0)) {
+      setError(
+        `Exchange rate is required for ${fxCurrencyCode} bills. Please enter the current rate.`
+      )
       return
     }
 
@@ -282,6 +330,11 @@ export default function EditBillPage() {
         apply_taxes: applyTaxes,
         status,
         bill_type: isImportBill ? "import" : "standard",
+        currency_code: isDocForeign ? fxCurrencyCode : null,
+        fx_rate:
+          isDocForeign && fxRate && parseFloat(fxRate) > 0
+            ? parseFloat(fxRate)
+            : null,
       }
 
       if (isImportBill) {
@@ -448,6 +501,76 @@ export default function EditBillPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
                 />
               </div>
+
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/40 rounded-xl border border-gray-200 dark:border-gray-600">
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                      Bill in foreign currency?
+                    </span>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Supplier invoiced you in USD, EUR, GBP, etc. — booked in{" "}
+                      {currencyCode || "home currency"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={fxEnabled}
+                    onClick={() => setFxEnabled(!fxEnabled)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${fxEnabled ? "bg-purple-600" : "bg-gray-200 dark:bg-gray-600"}`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fxEnabled ? "translate-x-5" : "translate-x-0"}`}
+                    />
+                  </button>
+                </div>
+                {fxEnabled && (
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-gray-50 dark:bg-gray-700/40 rounded-xl border border-gray-200 dark:border-gray-600">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                        Bill currency
+                      </label>
+                      <select
+                        value={fxCurrencyCode}
+                        onChange={(e) => setFxCurrencyCode(e.target.value)}
+                        className="w-full border border-gray-300 dark:border-gray-600 text-sm rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                      >
+                        <option value="USD">USD — US Dollar</option>
+                        <option value="EUR">EUR — Euro</option>
+                        <option value="GBP">GBP — British Pound</option>
+                        <option value="KES">KES — Kenyan Shilling</option>
+                        <option value="NGN">NGN — Nigerian Naira</option>
+                        <option value="ZAR">ZAR — South African Rand</option>
+                        <option value="CNY">CNY — Chinese Yuan</option>
+                        <option value="INR">INR — Indian Rupee</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                        Rate: 1 {fxCurrencyCode} = ? {currencyCode || "home"}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        value={fxRate}
+                        onChange={(e) => setFxRate(e.target.value)}
+                        placeholder="e.g. 14.50"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-sm rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                      />
+                    </div>
+                    {fxRate &&
+                      !Number.isNaN(parseFloat(fxRate)) &&
+                      parseFloat(fxRate) > 0 && (
+                        <p className="sm:col-span-2 text-xs text-gray-600 dark:text-gray-300">
+                          Amounts entered in {fxCurrencyCode}. Booked in {currencyCode} at rate{" "}
+                          {parseFloat(fxRate).toFixed(4)}.
+                        </p>
+                      )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* ── Items / Import Breakdown ───────────────────────────────────── */}
@@ -511,7 +634,7 @@ export default function EditBillPage() {
                         <span className="font-normal text-gray-500">(Cost + Insurance + Freight)</span>
                       </label>
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{currency}</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">{docCurrencyDisplay}</span>
                         <input
                           type="number"
                           value={cifValue}
@@ -541,7 +664,7 @@ export default function EditBillPage() {
                         <option value={0.35}>35% — Sensitive goods (vehicles, beverages, etc.)</option>
                       </select>
                       <p className="text-xs text-gray-500 mt-1">
-                        Duty amount: {currency}{dutyAmt.toFixed(2)}
+                        Duty amount: {docCurrencyDisplay}{dutyAmt.toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -581,7 +704,7 @@ export default function EditBillPage() {
                             />
                           ) : (
                             <div className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded">
-                              {currency}{ecowasAmt.toFixed(2)}
+                              {docCurrencyDisplay}{ecowasAmt.toFixed(2)}
                             </div>
                           )}
                         </div>
@@ -599,7 +722,7 @@ export default function EditBillPage() {
                             />
                           ) : (
                             <div className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded">
-                              {currency}{auAmt.toFixed(2)}
+                              {docCurrencyDisplay}{auAmt.toFixed(2)}
                             </div>
                           )}
                         </div>
@@ -617,7 +740,7 @@ export default function EditBillPage() {
                             />
                           ) : (
                             <div className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded">
-                              {currency}{eximAmt.toFixed(2)}
+                              {docCurrencyDisplay}{eximAmt.toFixed(2)}
                             </div>
                           )}
                         </div>
@@ -635,7 +758,7 @@ export default function EditBillPage() {
                             />
                           ) : (
                             <div className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded">
-                              {currency}{silAmt.toFixed(2)}
+                              {docCurrencyDisplay}{silAmt.toFixed(2)}
                             </div>
                           )}
                         </div>
@@ -658,7 +781,7 @@ export default function EditBillPage() {
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Clearing Agent Fee</label>
                           <div className="relative">
-                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{currency}</span>
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{docCurrencyDisplay}</span>
                             <input
                               type="number"
                               value={clearingAgentFee}
@@ -691,7 +814,7 @@ export default function EditBillPage() {
                       <option value="5210">5210 — Import Duty &amp; Port Levies (expense)</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
-                      Where to debit CIF + duty + port levies ({currency}{vatBase.toFixed(2)})
+                      Where to debit CIF + duty + port levies ({docCurrencyDisplay}{vatBase.toFixed(2)})
                     </p>
                   </div>
 
@@ -701,42 +824,42 @@ export default function EditBillPage() {
                     <div className="space-y-1.5 text-sm">
                       <div className="flex justify-between text-indigo-700 dark:text-indigo-300">
                         <span>CIF Value:</span>
-                        <span className="font-medium">{currency}{cifNum.toFixed(2)}</span>
+                        <span className="font-medium">{docCurrencyDisplay}{cifNum.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-indigo-700 dark:text-indigo-300">
                         <span>Import Duty ({(importDutyRate * 100).toFixed(0)}%):</span>
-                        <span className="font-medium">{currency}{dutyAmt.toFixed(2)}</span>
+                        <span className="font-medium">{docCurrencyDisplay}{dutyAmt.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
                         <span>ECOWAS Levy (0.5%):</span>
-                        <span>{currency}{ecowasAmt.toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{ecowasAmt.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
                         <span>AU Levy (0.2%):</span>
-                        <span>{currency}{auAmt.toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{auAmt.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
                         <span>EXIM Levy (0.75%):</span>
-                        <span>{currency}{eximAmt.toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{eximAmt.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
                         <span>SIL (2%):</span>
-                        <span>{currency}{silAmt.toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{silAmt.toFixed(2)}</span>
                       </div>
                       {examAmt > 0 && (
                         <div className="flex justify-between text-indigo-500 dark:text-indigo-400 text-xs pl-2">
                           <span>Examination Fee (1%):</span>
-                          <span>{currency}{examAmt.toFixed(2)}</span>
+                          <span>{docCurrencyDisplay}{examAmt.toFixed(2)}</span>
                         </div>
                       )}
                       <div className="flex justify-between font-bold text-indigo-900 dark:text-indigo-100 pt-2 border-t border-indigo-200 dark:border-indigo-600">
                         <span>VAT Base (CIF + Duty + Levies):</span>
-                        <span>{currency}{vatBase.toFixed(2)}</span>
+                        <span>{docCurrencyDisplay}{vatBase.toFixed(2)}</span>
                       </div>
                       {clearingAmt > 0 && (
                         <div className="flex justify-between text-gray-600 dark:text-gray-400 text-xs pt-1">
                           <span>Clearing Agent Fee (separate — 5220):</span>
-                          <span>{currency}{clearingAmt.toFixed(2)}</span>
+                          <span>{docCurrencyDisplay}{clearingAmt.toFixed(2)}</span>
                         </div>
                       )}
                     </div>
@@ -858,38 +981,47 @@ export default function EditBillPage() {
                       <>
                         <div className="flex justify-between items-center text-sm">
                           <span className="text-purple-800 dark:text-purple-300">VAT Base (landed cost):</span>
-                          <span className="font-medium text-purple-900 dark:text-purple-200">{currency}{vatBase.toFixed(2)}</span>
+                          <span className="font-medium text-purple-900 dark:text-purple-200">{docCurrencyDisplay}{vatBase.toFixed(2)}</span>
                         </div>
                         {applyTaxes && isGhana && (
                           <div className="space-y-1 pt-2 border-t border-purple-200 dark:border-purple-500">
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-purple-800 dark:text-purple-400">NHIL (2.5%):</span>
-                              <span className="text-purple-900 dark:text-purple-300">{currency}{Number(importTaxResult.nhil ?? 0).toFixed(2)}</span>
+                              <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(importTaxResult.nhil ?? 0).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-purple-800 dark:text-purple-400">GETFund (2.5%):</span>
-                              <span className="text-purple-900 dark:text-purple-300">{currency}{Number(importTaxResult.getfund ?? 0).toFixed(2)}</span>
+                              <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(importTaxResult.getfund ?? 0).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-purple-800 dark:text-purple-400">VAT (15%):</span>
-                              <span className="text-purple-900 dark:text-purple-300">{currency}{Number(importTaxResult.vat ?? 0).toFixed(2)}</span>
+                              <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(importTaxResult.vat ?? 0).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between items-center pt-2 border-t border-purple-200 dark:border-purple-500">
                               <span className="text-purple-900 dark:text-purple-300 font-medium">Total Tax:</span>
-                              <span className="font-semibold text-purple-900 dark:text-purple-300">{currency}{Number(importTaxResult.totalTax ?? 0).toFixed(2)}</span>
+                              <span className="font-semibold text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(importTaxResult.totalTax ?? 0).toFixed(2)}</span>
                             </div>
                           </div>
                         )}
                         {clearingAmt > 0 && (
                           <div className="flex justify-between items-center text-sm text-gray-600 dark:text-gray-400">
                             <span>Clearing Agent Fee:</span>
-                            <span>{currency}{clearingAmt.toFixed(2)}</span>
+                            <span>{docCurrencyDisplay}{clearingAmt.toFixed(2)}</span>
                           </div>
                         )}
                         <div className="flex justify-between items-center pt-3 border-t-2 border-purple-300 dark:border-purple-500">
                           <span className="text-purple-900 dark:text-purple-300 font-bold text-lg">Total:</span>
-                          <span className="font-bold text-purple-600 dark:text-purple-400 text-xl">{currency}{importGrandTotal.toFixed(2)}</span>
+                          <span className="font-bold text-purple-600 dark:text-purple-400 text-xl">{docCurrencyDisplay}{importGrandTotal.toFixed(2)}</span>
                         </div>
+                        {isDocForeign && approxHomeGrand != null && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-right">
+                            ≈ {homeCurrencyDisplay}
+                            {approxHomeGrand.toFixed(2)} in home currency
+                            {fxRateNum > 0 && (
+                              <span> (rate {fxRateNum.toFixed(4)})</span>
+                            )}
+                          </p>
+                        )}
                       </>
                     ) : (
                       /* Standard totals */
@@ -898,27 +1030,27 @@ export default function EditBillPage() {
                           <span className="text-purple-900 dark:text-purple-300 font-medium">
                             {applyTaxes ? "Subtotal (before tax):" : "Subtotal:"}
                           </span>
-                          <span className="font-semibold text-purple-900 dark:text-purple-300 text-lg">{currency}{Number(taxResult.subtotalBeforeTax ?? 0).toFixed(2)}</span>
+                          <span className="font-semibold text-purple-900 dark:text-purple-300 text-lg">{docCurrencyDisplay}{Number(taxResult.subtotalBeforeTax ?? 0).toFixed(2)}</span>
                         </div>
                         {applyTaxes && isGhana && (
                           <>
                             <div className="space-y-1 pt-2 border-t border-purple-200 dark:border-purple-500">
                               <div className="flex justify-between items-center text-sm">
                                 <span className="text-purple-800 dark:text-purple-400">NHIL (2.5%):</span>
-                                <span className="text-purple-900 dark:text-purple-300">{currency}{Number(taxResult.nhil ?? 0).toFixed(2)}</span>
+                                <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(taxResult.nhil ?? 0).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
                                 <span className="text-purple-800 dark:text-purple-400">GETFund (2.5%):</span>
-                                <span className="text-purple-900 dark:text-purple-300">{currency}{Number(taxResult.getfund ?? 0).toFixed(2)}</span>
+                                <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(taxResult.getfund ?? 0).toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between items-center text-sm">
                                 <span className="text-purple-800 dark:text-purple-400">VAT (15%):</span>
-                                <span className="text-purple-900 dark:text-purple-300">{currency}{Number(taxResult.vat ?? 0).toFixed(2)}</span>
+                                <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(taxResult.vat ?? 0).toFixed(2)}</span>
                               </div>
                             </div>
                             <div className="flex justify-between items-center pt-2 border-t border-purple-200 dark:border-purple-500">
                               <span className="text-purple-900 dark:text-purple-300 font-medium">Total Tax:</span>
-                              <span className="font-semibold text-purple-900 dark:text-purple-300">{currency}{Number(taxResult.totalTax ?? 0).toFixed(2)}</span>
+                              <span className="font-semibold text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(taxResult.totalTax ?? 0).toFixed(2)}</span>
                             </div>
                           </>
                         )}
@@ -926,18 +1058,27 @@ export default function EditBillPage() {
                           <div className="space-y-1 pt-2 border-t border-purple-200 dark:border-purple-500">
                             <div className="flex justify-between items-center text-sm">
                               <span className="text-purple-800 dark:text-purple-400">VAT:</span>
-                              <span className="text-purple-900 dark:text-purple-300">{currency}{Number(taxResult.vat ?? 0).toFixed(2)}</span>
+                              <span className="text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(taxResult.vat ?? 0).toFixed(2)}</span>
                             </div>
                             <div className="flex justify-between items-center pt-2 border-t border-purple-200 dark:border-purple-500">
                               <span className="text-purple-900 dark:text-purple-300 font-medium">Total Tax:</span>
-                              <span className="font-semibold text-purple-900 dark:text-purple-300">{currency}{Number(taxResult.totalTax ?? 0).toFixed(2)}</span>
+                              <span className="font-semibold text-purple-900 dark:text-purple-300">{docCurrencyDisplay}{Number(taxResult.totalTax ?? 0).toFixed(2)}</span>
                             </div>
                           </div>
                         )}
                         <div className="flex justify-between items-center pt-3 border-t-2 border-purple-300 dark:border-purple-500">
                           <span className="text-purple-900 dark:text-purple-300 font-bold text-lg">Total:</span>
-                          <span className="font-bold text-purple-600 dark:text-purple-400 text-xl">{currency}{Number(taxResult.grandTotal ?? 0).toFixed(2)}</span>
+                          <span className="font-bold text-purple-600 dark:text-purple-400 text-xl">{docCurrencyDisplay}{Number(taxResult.grandTotal ?? 0).toFixed(2)}</span>
                         </div>
+                        {isDocForeign && approxHomeGrand != null && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-right">
+                            ≈ {homeCurrencyDisplay}
+                            {approxHomeGrand.toFixed(2)} in home currency
+                            {fxRateNum > 0 && (
+                              <span> (rate {fxRateNum.toFixed(4)})</span>
+                            )}
+                          </p>
+                        )}
                       </>
                     )}
                   </div>

@@ -8,6 +8,7 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
+import { formatMoney } from "@/lib/money"
 
 type Bill = {
   id: string
@@ -96,6 +97,7 @@ type BillPayment = {
   method: string
   reference: string | null
   notes: string | null
+  settlement_fx_rate?: number | null
 }
 
 export default function BillViewPage() {
@@ -627,6 +629,15 @@ export default function BillViewPage() {
                             <p className="text-xs text-slate-500">
                               {formatMethod(payment.method)} • {new Date(payment.date).toLocaleDateString("en-GH")}
                             </p>
+                            {payment.settlement_fx_rate != null &&
+                              payment.settlement_fx_rate > 0 &&
+                              billIsForeign && (
+                              <p className="text-xs text-slate-500">
+                                Settlement: 1 {bill.currency_code} ={" "}
+                                {Number(payment.settlement_fx_rate).toFixed(4)}{" "}
+                                {homeCodeForBill}
+                              </p>
+                            )}
                             {payment.reference && (
                               <p className="text-xs text-slate-500">Ref: {payment.reference}</p>
                             )}
@@ -737,6 +748,7 @@ export default function BillViewPage() {
         {/* Add Payment Modal */}
         {showPaymentModal && bill && (
           <AddPaymentModal
+            key={editingPayment?.id ?? "new-bill-payment"}
             billId={id}
             businessId={bill.business_id}
             balance={balance}
@@ -747,6 +759,9 @@ export default function BillViewPage() {
             businessCountry={businessCountry}
             whtApplicable={bill.wht_applicable}
             whtAmount={Number(bill.wht_amount) || 0}
+            billFxRate={bill.fx_rate ?? null}
+            billCurrencyCode={bill.currency_code ?? null}
+            homeCurrencyCode={currencyCode || null}
           />
         )}
       </div>
@@ -765,6 +780,9 @@ function AddPaymentModal({
   businessCountry,
   whtApplicable = false,
   whtAmount = 0,
+  billFxRate = null,
+  billCurrencyCode = null,
+  homeCurrencyCode = null,
 }: {
   billId: string
   businessId: string
@@ -776,6 +794,9 @@ function AddPaymentModal({
   businessCountry?: string | null
   whtApplicable?: boolean
   whtAmount?: number
+  billFxRate?: number | null
+  billCurrencyCode?: string | null
+  homeCurrencyCode?: string | null
 }) {
   // Get allowed payment methods based on country
   const countryCode = normalizeCountry(businessCountry)
@@ -799,9 +820,36 @@ function AddPaymentModal({
   const [method, setMethod] = useState(editingPayment ? editingPayment.method : defaultMethod)
   const [reference, setReference] = useState(editingPayment ? editingPayment.reference || "" : "")
   const [notes, setNotes] = useState(editingPayment ? editingPayment.notes || "" : "")
+  const [settlementFxRate, setSettlementFxRate] = useState(
+    editingPayment?.settlement_fx_rate != null
+      ? String(editingPayment.settlement_fx_rate)
+      : ""
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const hasNoAllowedMethods = allowedMethods.length === 0
+
+  const isFxBill = !!(
+    billFxRate &&
+    billCurrencyCode &&
+    homeCurrencyCode &&
+    billCurrencyCode !== homeCurrencyCode
+  )
+  const parsedSettlementRate = parseFloat(settlementFxRate) || 0
+  const amountNum = Number(amount) || 0
+  const apClearHome =
+    isFxBill && billFxRate && amountNum > 0
+      ? Math.round(amountNum * billFxRate * 100) / 100
+      : null
+  const cashOutHome =
+    isFxBill && parsedSettlementRate > 0 && amountNum > 0
+      ? Math.round(amountNum * parsedSettlementRate * 100) / 100
+      : null
+  const fxDiff =
+    apClearHome != null && cashOutHome != null
+      ? Math.round((apClearHome - cashOutHome) * 100) / 100
+      : null
+  const originalRate = billFxRate ?? 0
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -809,6 +857,13 @@ function AddPaymentModal({
 
     if (!amount || Number(amount) <= 0) {
       setError("Please enter a valid amount")
+      return
+    }
+
+    if (isFxBill && parsedSettlementRate <= 0) {
+      setError(
+        `Settlement rate is required for ${billCurrencyCode} bills. Enter today's exchange rate.`
+      )
       return
     }
 
@@ -835,6 +890,7 @@ function AddPaymentModal({
           method: method, // Payment method (cash, bank, momo, etc.)
           reference: reference.trim() || null,
           notes: notes.trim() || null,
+          settlement_fx_rate: isFxBill ? parsedSettlementRate : null,
         }),
       })
 
@@ -942,6 +998,63 @@ function AddPaymentModal({
               <option value="other">Other</option>
             </select>
           </div>
+
+          {isFxBill && billCurrencyCode && homeCurrencyCode && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Settlement rate <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 text-sm">
+                  1 {billCurrencyCode} =
+                </div>
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0.0001"
+                  required
+                  value={settlementFxRate}
+                  onChange={(e) => setSettlementFxRate(e.target.value)}
+                  className="w-full pl-[5.5rem] pr-16 py-2.5 rounded-lg border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 focus:outline-none bg-white tabular-nums text-sm"
+                  placeholder="e.g. 15.20"
+                />
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400 text-sm">
+                  {homeCurrencyCode}
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">
+                Bill booked at 1 {billCurrencyCode} = {originalRate.toFixed(4)}{" "}
+                {homeCurrencyCode}
+              </p>
+              {parsedSettlementRate > 0 && fxDiff !== null && (
+                <div
+                  className={`text-xs font-semibold px-3 py-2 rounded-lg ${
+                    fxDiff > 0
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : fxDiff < 0
+                        ? "bg-red-50 text-red-700 border border-red-200"
+                        : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {fxDiff > 0
+                    ? `FX gain: +${formatMoney(fxDiff, homeCurrencyCode)}`
+                    : fxDiff < 0
+                      ? `FX loss: ${formatMoney(fxDiff, homeCurrencyCode)}`
+                      : "No FX difference"}
+                </div>
+              )}
+              <p className="text-xs text-slate-600">
+                Cash out (approx.):{" "}
+                {cashOutHome != null
+                  ? formatMoney(cashOutHome, homeCurrencyCode)
+                  : "—"}{" "}
+                · AP reduction:{" "}
+                {apClearHome != null
+                  ? formatMoney(apClearHome, homeCurrencyCode)
+                  : "—"}
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">Reference</label>

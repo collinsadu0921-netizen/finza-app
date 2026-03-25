@@ -37,8 +37,17 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
     const periodId = searchParams.get("period_id")
-    const asOfDate = searchParams.get("as_of_date") || new Date().toISOString().split("T")[0]
     const periodStart = searchParams.get("period_start")
+    const rangeStart = searchParams.get("start_date")
+    const rangeEnd = searchParams.get("end_date")
+    const hasCustomRange =
+      !!(rangeStart?.trim() && rangeEnd?.trim() && /^\d{4}-\d{2}-\d{2}$/.test(rangeStart.trim()) && /^\d{4}-\d{2}-\d{2}$/.test(rangeEnd.trim()))
+    const asOfDateRaw = searchParams.get("as_of_date")
+    const asOfDate =
+      hasCustomRange
+        ? null
+        : asOfDateRaw?.trim() ||
+          (periodStart?.trim() ? null : new Date().toISOString().split("T")[0])
     const includeMetadata = searchParams.get("include_metadata") !== "0"
 
     if (!businessId) {
@@ -75,7 +84,14 @@ export async function GET(request: NextRequest) {
 
     const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
       supabase,
-      { businessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate }
+      {
+        businessId,
+        period_id: periodId,
+        period_start: periodStart,
+        as_of_date: asOfDate,
+        start_date: hasCustomRange ? rangeStart!.trim() : null,
+        end_date: hasCustomRange ? rangeEnd!.trim() : null,
+      }
     )
     if (resolveError || !resolvedPeriod) {
       return NextResponse.json(
