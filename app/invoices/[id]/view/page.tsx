@@ -490,7 +490,7 @@ export default function InvoiceViewPage() {
             <div className="hidden sm:block text-slate-300 text-2xl font-light select-none">=</div>
             <div className="flex flex-col sm:border-l-2 border-slate-100 dark:border-slate-700 sm:pl-8 ml-auto sm:ml-0 pt-4 sm:pt-0 border-t sm:border-t-0 w-full sm:w-auto mt-2 sm:mt-0">
               <span className={`text-[10px] uppercase font-bold tracking-wider mb-1 ${remainingBalance > 0.01 ? "text-rose-600" : "text-emerald-600"}`}>
-                {remainingBalance > 0.01 ? "Amount Due" : "Settled"}
+                {remainingBalance > 0.01 ? "Amount Due" : "Balance"}
               </span>
               <span className={`text-2xl font-semibold tabular-nums ${remainingBalance > 0.01 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                 {formatMoney(Number(remainingBalance), invoice.currency_code)}
