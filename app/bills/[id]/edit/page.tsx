@@ -14,6 +14,13 @@ type LineItem = {
   qty: number
   unit_price: number
   discount_amount: number
+  material_id: string | null
+}
+
+type Material = {
+  id: string
+  name: string
+  unit: string | null
 }
 
 export default function EditBillPage() {
@@ -54,10 +61,23 @@ export default function EditBillPage() {
   const [clearingAgentFee, setClearingAgentFee] = useState("")
   const [landedCostAccount, setLandedCostAccount] = useState("5200")
   const [importLeviesManual, setImportLeviesManual] = useState(false)
+  const [materials, setMaterials] = useState<Material[]>([])
+  const [importInventoryEnabled, setImportInventoryEnabled] = useState(false)
+  const [importMaterialId, setImportMaterialId] = useState("")
+  const [importQuantity, setImportQuantity] = useState("1")
 
   useEffect(() => {
     loadBill()
   }, [id])
+
+  useEffect(() => {
+    fetch("/api/service/materials/list")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.materials) setMaterials(d.materials)
+      })
+      .catch(() => {})
+  }, [])
 
   const loadBill = async () => {
     try {
@@ -86,6 +106,17 @@ export default function EditBillPage() {
       setIsImportBill(importBill)
 
       if (importBill) {
+        if (bill.material_id) {
+          setImportInventoryEnabled(true)
+          setImportMaterialId(bill.material_id)
+          setImportQuantity(
+            bill.quantity != null ? String(bill.quantity) : "1"
+          )
+        } else {
+          setImportInventoryEnabled(false)
+          setImportMaterialId("")
+          setImportQuantity("1")
+        }
         // Populate import fields from stored bill data
         setCifValue(bill.cif_value != null ? String(bill.cif_value) : "")
         setImportDutyRate(bill.import_duty_rate != null ? Number(bill.import_duty_rate) : 0.20)
@@ -120,6 +151,7 @@ export default function EditBillPage() {
               qty: Number(item.qty) || 0,
               unit_price: Number(item.unit_price) || 0,
               discount_amount: Number(item.discount_amount) || 0,
+              material_id: item.material_id || null,
             }))
           )
         } else {
@@ -130,6 +162,7 @@ export default function EditBillPage() {
               qty: 1,
               unit_price: 0,
               discount_amount: 0,
+              material_id: null,
             },
           ])
         }
@@ -190,6 +223,7 @@ export default function EditBillPage() {
         qty: 1,
         unit_price: 0,
         discount_amount: 0,
+        material_id: null,
       },
     ])
   }
@@ -350,12 +384,21 @@ export default function EditBillPage() {
         body.clearing_agent_fee       = clearingAmt
         body.landed_cost_account_code = landedCostAccount
         body.items                    = []
+        body.material_id =
+          importInventoryEnabled && importMaterialId
+            ? importMaterialId
+            : null
+        body.quantity =
+          importInventoryEnabled && importMaterialId
+            ? Number(importQuantity) || 1
+            : null
       } else {
         body.items = items.map((item) => ({
-          description:     item.description,
-          qty:             item.qty,
-          unit_price:      item.unit_price,
+          description: item.description,
+          qty: item.qty,
+          unit_price: item.unit_price,
           discount_amount: item.discount_amount,
+          material_id: item.material_id || null,
         }))
       }
 
@@ -626,6 +669,82 @@ export default function EditBillPage() {
                     />
                   </div>
 
+                  {materials.length > 0 && (
+                    <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
+                            Link to service material inventory
+                          </span>
+                          <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
+                            Posts landed cost to account 1450 and updates stock when the bill is posted
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={importInventoryEnabled}
+                          onClick={() => {
+                            if (importInventoryEnabled) {
+                              setImportInventoryEnabled(false)
+                              setImportMaterialId("")
+                            } else {
+                              setImportInventoryEnabled(true)
+                              setLandedCostAccount("1450")
+                            }
+                          }}
+                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${importInventoryEnabled ? "bg-emerald-600" : "bg-gray-200 dark:bg-gray-600"}`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${importInventoryEnabled ? "translate-x-5" : "translate-x-0"}`}
+                          />
+                        </button>
+                      </div>
+                      {importInventoryEnabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-emerald-800 dark:text-emerald-300 mb-1">
+                              Material *
+                            </label>
+                            <select
+                              value={importMaterialId}
+                              onChange={(e) => {
+                                setImportMaterialId(e.target.value)
+                                if (e.target.value) setLandedCostAccount("1450")
+                              }}
+                              className="w-full border border-emerald-300 dark:border-emerald-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500"
+                            >
+                              <option value="">— select material —</option>
+                              {materials.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name}
+                                  {m.unit ? ` (${m.unit})` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-emerald-800 dark:text-emerald-300 mb-1">
+                              Quantity imported
+                            </label>
+                            <input
+                              type="number"
+                              value={importQuantity}
+                              onChange={(e) => setImportQuantity(e.target.value)}
+                              min="0.001"
+                              step="0.001"
+                              className="w-full border border-emerald-300 dark:border-emerald-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500"
+                              placeholder="1"
+                            />
+                            <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
+                              Unit cost = landed cost ÷ quantity (average cost)
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* CIF value + Duty rate */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -883,7 +1002,15 @@ export default function EditBillPage() {
 
                   <div className="space-y-4">
                     {items.map((item) => (
-                      <div key={item.id} className="grid grid-cols-12 gap-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                      <div
+                        key={item.id}
+                        className={`p-4 border rounded-lg ${
+                          item.material_id
+                            ? "border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/20"
+                            : "border-gray-200 dark:border-gray-700"
+                        }`}
+                      >
+                        <div className="grid grid-cols-12 gap-4">
                         <div className="col-span-12 md:col-span-5">
                           <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Description</label>
                           <input
@@ -941,6 +1068,53 @@ export default function EditBillPage() {
                             </svg>
                           </button>
                         </div>
+                        </div>
+                        {materials.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                            {item.material_id ? (
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                  Post to inventory:
+                                </span>
+                                <select
+                                  value={item.material_id}
+                                  onChange={(e) =>
+                                    updateItem(item.id, "material_id", e.target.value || null)
+                                  }
+                                  className="text-xs border border-emerald-300 dark:border-emerald-700 rounded-lg px-2 py-1.5 dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-emerald-500"
+                                >
+                                  <option value="">— remove —</option>
+                                  {materials.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.name}
+                                      {m.unit ? ` (${m.unit})` : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="text-xs text-emerald-700 dark:text-emerald-400">
+                                  Dr 1450 · stock updated when bill is posted
+                                </span>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateItem(
+                                    item.id,
+                                    "material_id",
+                                    materials[0]?.id ?? null
+                                  )
+                                }
+                                className="text-xs text-emerald-700 dark:text-emerald-400 hover:text-emerald-900 dark:hover:text-emerald-300 flex items-center gap-1"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                Post to inventory (service materials)
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

@@ -222,14 +222,6 @@ export async function PUT(
       updateData.vat                      = vat
       updateData.total_tax                = totalTax
       updateData.total                    = grandTotal
-      updateData.material_id =
-        body_material_id != null && String(body_material_id).trim() !== ""
-          ? String(body_material_id).trim()
-          : null
-      updateData.quantity =
-        updateData.material_id != null
-          ? Math.max(Number(body_import_quantity) || 0, 0.000001)
-          : null
 
     } else if (items && items.length > 0) {
       // ── Standard bill: reverse-calculate taxes from tax-inclusive total ───
@@ -277,6 +269,19 @@ export async function PUT(
       updateData.total      = taxResult.grandTotal
       updateData.material_id = null
       updateData.quantity = null
+    }
+
+    if (
+      isImportBill &&
+      Object.prototype.hasOwnProperty.call(body, "material_id")
+    ) {
+      const mid =
+        body_material_id != null && String(body_material_id).trim() !== ""
+          ? String(body_material_id).trim()
+          : null
+      updateData.material_id = mid
+      updateData.quantity =
+        mid != null ? Number(body_import_quantity) || 1 : null
     }
 
     if (supplier_name     !== undefined) updateData.supplier_name  = supplier_name.trim()
@@ -367,18 +372,40 @@ export async function PUT(
 
     // Update line items for standard bills only
     if (!isImportBill && items && items.length > 0) {
-      // Delete existing items
       await supabase.from("bill_items").delete().eq("bill_id", billId)
 
-      // Insert new items
-      const billItems = items.map((item: any) => ({
-        bill_id: billId,
-        description: item.description || "",
-        qty: Number(item.qty) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        discount_amount: Number(item.discount_amount) || 0,
-        line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
-      }))
+      const hasInventoryLines = items.some(
+        (item: any) => item.material_id != null && String(item.material_id).trim() !== ""
+      )
+      let inventoryAccountId: string | null = null
+      if (hasInventoryLines) {
+        const { data: invAcct } = await supabase
+          .from("chart_of_accounts")
+          .select("id")
+          .eq("business_id", business.id)
+          .eq("code", "1450")
+          .maybeSingle()
+        inventoryAccountId = invAcct?.id ?? null
+      }
+
+      const billItems = items.map((item: any) => {
+        const mid =
+          item.material_id != null && String(item.material_id).trim() !== ""
+            ? String(item.material_id).trim()
+            : null
+        return {
+          bill_id: billId,
+          description: item.description || "",
+          qty: Number(item.qty) || 0,
+          unit_price: Number(item.unit_price) || 0,
+          discount_amount: Number(item.discount_amount) || 0,
+          line_subtotal:
+            (Number(item.qty) || 0) * (Number(item.unit_price) || 0) -
+            (Number(item.discount_amount) || 0),
+          material_id: mid,
+          account_id: mid ? inventoryAccountId : null,
+        }
+      })
 
       await supabase.from("bill_items").insert(billItems)
     }
