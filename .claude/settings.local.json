@@ -160,7 +160,15 @@
       "Bash(grep -r \"NEXT_PUBLIC_RETAIL_POS_IDLE\\\\|SESSION\\\\|TIMEOUT\\\\|EXPIRY\" /c/projects/finza-web/finza-web/.env*)",
       "Bash(grep -ri \"automat\\\\|Automat\" /c/projects/finza-web/finza-web/app --include=*.tsx)",
       "Bash(grep -ri Automationsb /c/projects/finza-web/finza-web --include=*.tsx --include=*.ts)",
-      "Bash(find /c/projects/finza-web/finza-web -type f -name *login*.tsx -o -type f -name *login*.ts)"
+      "Bash(find /c/projects/finza-web/finza-web -type f -name *login*.tsx -o -type f -name *login*.ts)",
+      "Bash(ls -la /c/projects/finza-web/finza-web/app/service/jobs/[id]/)",
+      "Bash(grep -r service_jobs /c/projects/finza-web/finza-web --include=*.ts --include=*.tsx --include=*.sql -l)",
+      "Bash(grep -r \"proforma_invoice_id\\\\|service_jobs\\\\|/service/jobs\" /c/projects/finza-web/finza-web/app --include=*.tsx --include=*.ts -l)",
+      "Bash(grep -n \"proforma_invoice_id\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -A 30 \"service_jobs\" /c/projects/finza-web/finza-web/app/api/credit-notes/[id]/route.ts)",
+      "Bash(find /c/projects/finza-web/finza-web -name *.ts -type f -exec grep -l \"type.*Job\\\\|interface.*Job\" {})",
+      "Bash(2)",
+      "Bash(cat /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)"
     ]
   }
 }

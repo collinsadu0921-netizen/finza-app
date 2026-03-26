@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import LoadingScreen from "@/components/ui/LoadingScreen"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 
 type MaterialRow = {
@@ -15,6 +14,10 @@ type MaterialRow = {
   quantity_on_hand: number
   average_cost: number
   reorder_level: number
+  is_active: boolean
+  last_movement_at: string | null
+  last_movement_type: string | null
+  last_movement_reference_id: string | null
 }
 
 export default function ServiceMaterialsPage() {
@@ -23,35 +26,74 @@ export default function ServiceMaterialsPage() {
   const [rows, setRows] = useState<MaterialRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [search, setSearch] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all")
+  const [filterStock, setFilterStock] = useState<"all" | "low" | "ok">("all")
+  const searchDebounce = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     load()
   }, [])
 
+  useEffect(() => {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current)
+    searchDebounce.current = setTimeout(() => setSearchQuery(search), 280)
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current) }
+  }, [search])
+
   const load = async () => {
     try {
       setError("")
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
-      }
+      if (!user) { setLoading(false); return }
       const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setLoading(false)
-        return
-      }
+      if (!business) { setLoading(false); return }
+
       const { data, error: qErr } = await supabase
         .from("service_material_inventory")
-        .select("*")
+        .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active")
         .eq("business_id", business.id)
         .order("name", { ascending: true })
+
       if (qErr) {
         setError(qErr.message || "Failed to load materials")
         setLoading(false)
         return
       }
-      setRows((data ?? []) as MaterialRow[])
+
+      const materials = (data ?? []) as Omit<MaterialRow, "last_movement_at" | "last_movement_type" | "last_movement_reference_id">[]
+
+      // Fetch last movement per material
+      const lastByMaterial: Record<string, { created_at: string; movement_type: string; reference_id: string | null }> = {}
+      if (materials.length > 0) {
+        const { data: movements } = await supabase
+          .from("service_material_movements")
+          .select("material_id, created_at, movement_type, reference_id")
+          .eq("business_id", business.id)
+          .in("material_id", materials.map((m) => m.id))
+          .order("created_at", { ascending: false })
+
+        if (movements) {
+          for (const m of movements as { material_id: string; created_at: string; movement_type: string; reference_id: string | null }[]) {
+            if (!lastByMaterial[m.material_id]) {
+              lastByMaterial[m.material_id] = { created_at: m.created_at, movement_type: m.movement_type, reference_id: m.reference_id ?? null }
+            }
+          }
+        }
+      }
+
+      setRows(
+        materials.map((m) => {
+          const last = lastByMaterial[m.id]
+          return {
+            ...m,
+            last_movement_at: last?.created_at ?? null,
+            last_movement_type: last?.movement_type ?? null,
+            last_movement_reference_id: last?.reference_id ?? null,
+          }
+        })
+      )
       setLoading(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load")
@@ -59,70 +101,338 @@ export default function ServiceMaterialsPage() {
     }
   }
 
-  if (loading) return <LoadingScreen />
+  // Derived stats
+  const totalItems = rows.length
+  const activeItems = rows.filter((r) => r.is_active).length
+  const lowStockItems = rows.filter(
+    (r) => r.is_active && Number(r.reorder_level) > 0 && Number(r.quantity_on_hand) <= Number(r.reorder_level)
+  ).length
+  const totalValue = rows.reduce(
+    (sum, r) => sum + Number(r.quantity_on_hand) * Number(r.average_cost),
+    0
+  )
+
+  // Client-side filtering
+  const visible = rows.filter((r) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      if (
+        !r.name.toLowerCase().includes(q) &&
+        !(r.sku ?? "").toLowerCase().includes(q)
+      )
+        return false
+    }
+    if (filterStatus === "active" && !r.is_active) return false
+    if (filterStatus === "inactive" && r.is_active) return false
+    if (filterStock === "low") {
+      const isLow =
+        r.is_active &&
+        Number(r.reorder_level) > 0 &&
+        Number(r.quantity_on_hand) <= Number(r.reorder_level)
+      if (!isLow) return false
+    }
+    if (filterStock === "ok") {
+      const isLow =
+        r.is_active &&
+        Number(r.reorder_level) > 0 &&
+        Number(r.quantity_on_hand) <= Number(r.reorder_level)
+      if (isLow) return false
+    }
+    return true
+  })
+
+  const filtersActive = !!(search || filterStatus !== "all" || filterStock !== "all")
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Materials</h1>
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Materials</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Track service materials and stock levels</p>
+          </div>
           <button
             onClick={() => router.push("/service/materials/new")}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
           >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
             Add Material
           </button>
         </div>
+
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
         )}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 dark:bg-gray-700">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SKU</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Unit</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Quantity on hand</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Average cost</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Reorder level</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
-                      No materials yet. Add your first material to get started.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row) => (
-                    <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{row.name}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">{row.sku ?? "—"}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">{row.unit}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">{Number(row.quantity_on_hand ?? 0)}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">{format(Number(row.average_cost ?? 0))}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">{Number(row.reorder_level ?? 0)}</td>
-                      <td className="px-6 py-4 text-sm">
-                        <button
-                          onClick={() => router.push(`/service/materials/${row.id}/edit`)}
-                          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+
+        {/* Stat Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{totalItems}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Total</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{activeItems}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Active</p>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className={`bg-white rounded-xl border shadow-sm p-5 cursor-pointer transition-colors ${
+              lowStockItems > 0
+                ? "border-amber-300 hover:bg-amber-50"
+                : "border-slate-200"
+            }`}
+            onClick={() => lowStockItems > 0 && setFilterStock(filterStock === "low" ? "all" : "low")}
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${lowStockItems > 0 ? "bg-amber-100" : "bg-slate-100"}`}>
+                <svg className={`w-5 h-5 ${lowStockItems > 0 ? "text-amber-600" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <p className={`text-2xl font-bold ${lowStockItems > 0 ? "text-amber-600" : "text-slate-900"}`}>{lowStockItems}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Low Stock</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-slate-900 truncate">{format(totalValue)}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Total Value</p>
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or SKU…"
+              className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
+            />
+          </div>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as "all" | "active" | "inactive")}
+            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <select
+            value={filterStock}
+            onChange={(e) => setFilterStock(e.target.value as "all" | "low" | "ok")}
+            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+          >
+            <option value="all">All Stock</option>
+            <option value="low">Low Stock</option>
+            <option value="ok">In Stock</option>
+          </select>
+          {filtersActive && (
+            <button
+              onClick={() => { setSearch(""); setSearchQuery(""); setFilterStatus("all"); setFilterStock("all") }}
+              className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Table / Empty State */}
+        {visible.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+            </div>
+            <p className="text-slate-700 font-semibold mb-1">
+              {filtersActive ? "No materials match your filters" : "No materials yet"}
+            </p>
+            <p className="text-slate-500 text-sm mb-4">
+              {filtersActive
+                ? "Try adjusting your search or filters."
+                : "Add your first material to start tracking service stock."}
+            </p>
+            {!filtersActive && (
+              <button
+                onClick={() => router.push("/service/materials/new")}
+                className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+              >
+                Add Material
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">SKU</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">On Hand</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg Cost</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Value</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Reorder At</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Movement</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((row) => {
+                    const isLow =
+                      row.is_active &&
+                      Number(row.reorder_level) > 0 &&
+                      Number(row.quantity_on_hand) <= Number(row.reorder_level)
+                    const lineValue = Number(row.quantity_on_hand) * Number(row.average_cost)
+                    return (
+                      <tr
+                        key={row.id}
+                        className={`border-b border-slate-100 transition-colors ${isLow ? "bg-amber-50/60 hover:bg-amber-50" : "hover:bg-slate-50"}`}
+                      >
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-slate-900">{row.name}</span>
+                            {isLow && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                Low
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className="text-sm text-slate-500 font-mono">{row.sku ?? "—"}</span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className="text-sm text-slate-600">{row.unit}</span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <span className={`text-sm font-semibold tabular-nums ${isLow ? "text-amber-600" : "text-slate-900"}`}>
+                            {Number(row.quantity_on_hand ?? 0)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <span className="text-sm text-slate-600 tabular-nums">{format(Number(row.average_cost ?? 0))}</span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <span className="text-sm font-medium text-slate-800 tabular-nums">{format(lineValue)}</span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <span className="text-sm text-slate-500 tabular-nums">
+                            {Number(row.reorder_level) > 0 ? Number(row.reorder_level) : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${row.is_active ? "text-emerald-700" : "text-slate-500"}`}>
+                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${row.is_active ? "bg-emerald-500" : "bg-slate-400"}`} />
+                            {row.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {row.last_movement_at ? (
+                            <div>
+                              <p className="text-xs text-slate-700 font-medium capitalize">
+                                {(row.last_movement_type ?? "").replace(/_/g, " ")}
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                {new Date(row.last_movement_at).toLocaleDateString("en-GH", { day: "2-digit", month: "short", year: "numeric" })}
+                              </p>
+                              {row.last_movement_reference_id && row.last_movement_type === "job_usage" && (
+                                <a
+                                  href={`/service/jobs/${row.last_movement_reference_id}`}
+                                  className="text-xs text-blue-600 hover:underline font-mono"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {row.last_movement_reference_id.slice(0, 8)}…
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              onClick={() => router.push(`/service/materials/${row.id}/adjust`)}
+                              className="text-xs px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg font-medium hover:bg-slate-100 transition-colors"
+                            >
+                              Adjust Stock
+                            </button>
+                            <button
+                              onClick={() => router.push(`/service/materials/${row.id}/edit`)}
+                              className="text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors"
+                            >
+                              Edit →
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )

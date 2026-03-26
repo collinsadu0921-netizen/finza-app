@@ -4,10 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import LoadingScreen from "@/components/ui/LoadingScreen"
-import PageHeader from "@/components/ui/PageHeader"
-import Button from "@/components/ui/Button"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { useConfirm } from "@/components/ui/ConfirmProvider"
 
 type Job = {
   id: string
@@ -44,22 +42,55 @@ type Material = {
   average_cost: number
 }
 
+const STATUS_DOT: Record<string, string> = {
+  draft:       "bg-slate-400",
+  in_progress: "bg-blue-500",
+  completed:   "bg-emerald-500",
+  cancelled:   "bg-red-400",
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  draft:       "Draft",
+  in_progress: "In Progress",
+  completed:   "Completed",
+  cancelled:   "Cancelled",
+}
+
+const USAGE_STATUS_STYLE: Record<string, string> = {
+  allocated: "bg-amber-100 text-amber-800 border-amber-200",
+  consumed:  "bg-emerald-100 text-emerald-800 border-emerald-200",
+  returned:  "bg-slate-100 text-slate-600 border-slate-200",
+}
+
 export default function ServiceJobDetailPage() {
   const router = useRouter()
   const params = useParams()
   const jobId = params?.id as string
   const { format } = useBusinessCurrency()
+  const { openConfirm } = useConfirm()
+
   const [job, setJob] = useState<Job | null>(null)
   const [usages, setUsages] = useState<Usage[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState<string | null>(null)
+
+  // Inline editing
+  const [editingStatus, setEditingStatus] = useState(false)
+  const [statusDraft, setStatusDraft] = useState("")
+  const [savingStatus, setSavingStatus] = useState(false)
+
+  // Material allocation
   const [addMaterialId, setAddMaterialId] = useState("")
   const [addQty, setAddQty] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [cancelling, setCancelling] = useState(false)
   const [consumingId, setConsumingId] = useState<string | null>(null)
+
+  // Cancel
+  const [cancelling, setCancelling] = useState(false)
+
+  // Proforma linking
   const [proformas, setProformas] = useState<ProformaOption[]>([])
   const [linkingProforma, setLinkingProforma] = useState(false)
   const [selectedProformaId, setSelectedProformaId] = useState("")
@@ -74,16 +105,9 @@ export default function ServiceJobDetailPage() {
       setLoading(true)
       setError("")
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
-      }
+      if (!user) { setLoading(false); return }
       const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setError("Business not found")
-        setLoading(false)
-        return
-      }
+      if (!business) { setError("Business not found"); setLoading(false); return }
       setBusinessId(business.id)
 
       const { data: jobData, error: jobErr } = await supabase
@@ -92,15 +116,18 @@ export default function ServiceJobDetailPage() {
         .eq("id", jobId)
         .eq("business_id", business.id)
         .single()
-      if (jobErr || !jobData) {
-        setError("Project not found")
-        setLoading(false)
-        return
-      }
-      setJob(jobData as unknown as Job)
-      setSelectedProformaId((jobData as any).proforma_invoice_id || "")
+      if (jobErr || !jobData) { setError("Project not found"); setLoading(false); return }
 
-      // Load available proformas for linking
+      const normalised = {
+        ...jobData,
+        customers: Array.isArray((jobData as any).customers)
+          ? ((jobData as any).customers[0] ?? null)
+          : ((jobData as any).customers ?? null),
+      } as Job
+      setJob(normalised)
+      setStatusDraft(normalised.status)
+      setSelectedProformaId(normalised.proforma_invoice_id ?? "")
+
       const { data: proformaData } = await supabase
         .from("proforma_invoices")
         .select("id, proforma_number, customers(name)")
@@ -109,10 +136,10 @@ export default function ServiceJobDetailPage() {
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
       setProformas(
-        (proformaData || []).map((p: any) => ({
+        ((proformaData ?? []) as any[]).map((p) => ({
           id: p.id,
           proforma_number: p.proforma_number,
-          customer_name: p.customers?.name ?? null,
+          customer_name: Array.isArray(p.customers) ? (p.customers[0]?.name ?? null) : (p.customers?.name ?? null),
         }))
       )
 
@@ -122,7 +149,20 @@ export default function ServiceJobDetailPage() {
         .eq("job_id", jobId)
         .eq("business_id", business.id)
         .order("created_at", { ascending: false })
-      if (!usageErr) setUsages((usageData || []).map((u) => ({ ...u, quantity_used: Number(u.quantity_used), unit_cost: Number(u.unit_cost), total_cost: Number(u.total_cost), status: (u as any).status ?? 'allocated', service_material_inventory: Array.isArray((u as any).service_material_inventory) ? ((u as any).service_material_inventory[0] ?? { name: '', unit: '' }) : ((u as any).service_material_inventory ?? { name: '', unit: '' }) })) as Usage[])
+      if (!usageErr) {
+        setUsages(
+          ((usageData ?? []) as any[]).map((u) => ({
+            ...u,
+            quantity_used: Number(u.quantity_used),
+            unit_cost: Number(u.unit_cost),
+            total_cost: Number(u.total_cost),
+            status: u.status ?? "allocated",
+            service_material_inventory: Array.isArray(u.service_material_inventory)
+              ? (u.service_material_inventory[0] ?? null)
+              : (u.service_material_inventory ?? null),
+          }))
+        )
+      }
 
       const { data: matData } = await supabase
         .from("service_material_inventory")
@@ -131,7 +171,7 @@ export default function ServiceJobDetailPage() {
         .eq("is_active", true)
         .order("name")
       setMaterials(
-        (matData || []).map((m) => ({
+        ((matData ?? []) as any[]).map((m) => ({
           ...m,
           quantity_on_hand: Number(m.quantity_on_hand ?? 0),
           average_cost: Number(m.average_cost ?? 0),
@@ -144,26 +184,40 @@ export default function ServiceJobDetailPage() {
     }
   }
 
+  // --- Status save ---
+  const handleSaveStatus = async () => {
+    if (!job || !businessId || statusDraft === job.status) { setEditingStatus(false); return }
+    setSavingStatus(true)
+    setError("")
+    try {
+      const { error: err } = await supabase
+        .from("service_jobs")
+        .update({ status: statusDraft })
+        .eq("id", jobId)
+        .eq("business_id", businessId)
+      if (err) throw err
+      setJob({ ...job, status: statusDraft })
+      setEditingStatus(false)
+    } catch (e: any) {
+      setError(e.message || "Failed to update status")
+    } finally {
+      setSavingStatus(false)
+    }
+  }
+
+  // --- Add material usage ---
   const handleAddUsage = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!jobId || !businessId || !addMaterialId || !addQty) return
     const qty = parseFloat(addQty)
-    if (isNaN(qty) || qty <= 0) {
-      setError("Quantity must be a positive number")
-      return
-    }
+    if (isNaN(qty) || qty <= 0) { setError("Quantity must be a positive number"); return }
     setSubmitting(true)
     setError("")
     try {
       const res = await fetch("/api/service/jobs/use-material", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          business_id: businessId,
-          job_id: jobId,
-          material_id: addMaterialId,
-          quantity_used: qty,
-        }),
+        body: JSON.stringify({ business_id: businessId, job_id: jobId, material_id: addMaterialId, quantity_used: qty }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to record usage")
@@ -177,6 +231,7 @@ export default function ServiceJobDetailPage() {
     }
   }
 
+  // --- Confirm consumption ---
   const handleConfirmConsumption = async (usageId: string) => {
     setConsumingId(usageId)
     setError("")
@@ -196,59 +251,70 @@ export default function ServiceJobDetailPage() {
     }
   }
 
-  const handleLinkProforma = async () => {
+  // --- Proforma link/unlink ---
+  const handleLinkProforma = async (newId: string | null) => {
     if (!jobId || !businessId) return
     setLinkingProforma(true)
     setError("")
     try {
       const { error: err } = await supabase
         .from("service_jobs")
-        .update({ proforma_invoice_id: selectedProformaId || null })
+        .update({ proforma_invoice_id: newId })
         .eq("id", jobId)
         .eq("business_id", businessId)
       if (err) throw err
-      load()
+      setJob((j) => j ? { ...j, proforma_invoice_id: newId } : j)
+      setSelectedProformaId(newId ?? "")
     } catch (e: any) {
-      setError(e.message || "Failed to link proforma")
+      setError(e.message || "Failed to update proforma link")
     } finally {
       setLinkingProforma(false)
     }
   }
 
-  const handleCancelJob = async () => {
-    if (!jobId || !window.confirm("Cancel this project? Material stock will be restored and COGS reversed.")) return
-    setCancelling(true)
-    setError("")
-    try {
-      const res = await fetch(`/api/service/jobs/${jobId}/cancel`, { method: "POST" })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Failed to cancel project")
-      load()
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to cancel project")
-    } finally {
-      setCancelling(false)
-    }
+  // --- Cancel project ---
+  const handleCancelJob = () => {
+    openConfirm({
+      title: "Cancel Project",
+      description: "Cancelling will restore all material stock and reverse any COGS entries. This cannot be undone.",
+      onConfirm: async () => {
+        setCancelling(true)
+        setError("")
+        try {
+          const res = await fetch(`/api/service/jobs/${jobId}/cancel`, { method: "POST" })
+          const data = await res.json()
+          if (!res.ok) throw new Error(data.error || "Failed to cancel project")
+          load()
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : "Failed to cancel project")
+        } finally {
+          setCancelling(false)
+        }
+      },
+    })
   }
 
-  if (loading) return <LoadingScreen />
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <svg className="animate-spin h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
+    )
+  }
 
   if (!job) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center">
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Project not found</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              This project does not exist or you do not have access to it.
-            </p>
-            <button
-              onClick={() => router.push("/service/jobs")}
-              className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-            >
-              Back to Projects
-            </button>
+      <div className="min-h-screen bg-slate-50 flex items-start justify-center p-8">
+        <div className="w-full max-w-md space-y-4">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+            {error || "Project not found."}
           </div>
+          <button onClick={() => router.push("/service/jobs")} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors">
+            Back to Projects
+          </button>
         </div>
       </div>
     )
@@ -257,222 +323,317 @@ export default function ServiceJobDetailPage() {
   const totalCost = usages.reduce((s, u) => s + u.total_cost, 0)
   const addQtyNum = parseFloat(addQty)
   const canSubmitUsage = addMaterialId && !isNaN(addQtyNum) && addQtyNum > 0
-  const selectedMaterial = addMaterialId ? materials.find((m) => m.id === addMaterialId) : null
   const isCancelled = job.status === "cancelled"
   const materialsAlreadyReversed = job.materials_reversed === true
   const showCancelButton = !isCancelled && !materialsAlreadyReversed
+  const selectedMaterial = addMaterialId ? materials.find((m) => m.id === addMaterialId) : null
+  const linkedProforma = job.proforma_invoice_id
+    ? proformas.find((p) => p.id === job.proforma_invoice_id) ?? null
+    : null
+
+  const formatDate = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString("en-GH", { day: "2-digit", month: "short", year: "numeric" }) : "—"
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <PageHeader
-          title={`Project — ${job.status}`}
-          subtitle={(job as any).customers?.name ? `Customer: ${(job as any).customers.name}` : "No customer"}
-          actions={
-            <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+        {/* Back */}
+        <button
+          onClick={() => router.push("/service/jobs")}
+          className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-sm font-medium transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Projects
+        </button>
+
+        {/* Header */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <h1 className="text-xl font-bold text-slate-900">Project</h1>
+                <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${STATUS_LABEL[job.status] ? "text-slate-700" : "text-slate-500"}`}>
+                  <span className={`w-2 h-2 rounded-full ${STATUS_DOT[job.status] ?? "bg-slate-400"}`} />
+                  {STATUS_LABEL[job.status] ?? job.status}
+                </span>
+              </div>
+              <p className="text-sm text-slate-500">
+                {job.customers?.name ?? <span className="italic">No customer</span>}
+                {job.customers?.email && <> · {job.customers.email}</>}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               {showCancelButton && (
-                <Button
-                  variant="outline"
+                <button
                   onClick={handleCancelJob}
                   disabled={cancelling}
-                  className="border-red-200 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
+                  className="px-3 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50"
                 >
-                  {cancelling ? "Cancelling..." : "Cancel Project"}
-                </Button>
+                  {cancelling ? "Cancelling…" : "Cancel Project"}
+                </button>
               )}
               {materialsAlreadyReversed && (
-                <span className="text-sm text-amber-600 dark:text-amber-400">Materials already reversed.</span>
+                <span className="text-xs text-amber-600 font-medium px-2.5 py-1 bg-amber-50 rounded-lg border border-amber-200">
+                  Materials reversed
+                </span>
               )}
-              <Button variant="outline" onClick={() => router.push("/service/jobs")}>
-                Back to Projects
-              </Button>
             </div>
-          }
-        />
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
           </div>
-        )}
-        <div className="grid gap-6">
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Details</h2>
-            <dl className="grid grid-cols-2 gap-2 text-sm">
-              <dt className="text-gray-500 dark:text-gray-400">Status</dt>
-              <dd className="font-medium capitalize">{job.status}</dd>
-              <dt className="text-gray-500 dark:text-gray-400">Start date</dt>
-              <dd>{job.start_date ? new Date(job.start_date).toLocaleDateString() : "—"}</dd>
-              <dt className="text-gray-500 dark:text-gray-400">End date</dt>
-              <dd>{job.end_date ? new Date(job.end_date).toLocaleDateString() : "—"}</dd>
-            </dl>
+        </div>
 
-            {/* Proforma Invoice link */}
-            <div className="mt-5 pt-5 border-t border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Linked Proforma Invoice</h3>
-              {job.proforma_invoice_id ? (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      {proformas.find(p => p.id === job.proforma_invoice_id)?.proforma_number
-                        ? `PRF — ${proformas.find(p => p.id === job.proforma_invoice_id)?.proforma_number}`
-                        : "Draft Proforma"}
-                    </span>
-                    {proformas.find(p => p.id === job.proforma_invoice_id)?.customer_name && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {proformas.find(p => p.id === job.proforma_invoice_id)?.customer_name}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => router.push(`/service/proforma/${job.proforma_invoice_id}/view`)}
-                      className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-                    >
-                      View
-                    </button>
-                    <button
-                      onClick={() => { setSelectedProformaId(""); setJob({ ...job, proforma_invoice_id: null }) }}
-                      className="text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-                    >
-                      Unlink
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
+        )}
+
+        {/* Details card */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+          <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">Details</h2>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+            {/* Status (editable) */}
+            <div>
+              <p className="text-xs text-slate-500 mb-1">Status</p>
+              {editingStatus ? (
+                <div className="flex items-center gap-2">
                   <select
-                    value={selectedProformaId}
-                    onChange={(e) => setSelectedProformaId(e.target.value)}
-                    className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:text-white"
+                    value={statusDraft}
+                    onChange={(e) => setStatusDraft(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+                    disabled={savingStatus}
                   >
-                    <option value="">— No proforma linked —</option>
-                    {proformas.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.proforma_number ?? "Draft"}{p.customer_name ? ` — ${p.customer_name}` : ""}
-                      </option>
-                    ))}
+                    <option value="draft">Draft</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="completed">Completed</option>
                   </select>
-                  <button
-                    onClick={handleLinkProforma}
-                    disabled={linkingProforma || !selectedProformaId}
-                    className="text-sm bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-40 font-medium"
-                  >
-                    {linkingProforma ? "Saving…" : "Link"}
+                  <button onClick={handleSaveStatus} disabled={savingStatus} className="text-xs text-emerald-600 font-semibold hover:text-emerald-700 disabled:opacity-50">
+                    {savingStatus ? "…" : "Save"}
+                  </button>
+                  <button onClick={() => { setStatusDraft(job.status); setEditingStatus(false) }} className="text-xs text-slate-400 hover:text-slate-600">
+                    ✕
                   </button>
                 </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 text-sm font-medium`}>
+                    <span className={`w-2 h-2 rounded-full ${STATUS_DOT[job.status] ?? "bg-slate-400"}`} />
+                    {STATUS_LABEL[job.status] ?? job.status}
+                  </span>
+                  {!isCancelled && (
+                    <button onClick={() => setEditingStatus(true)} className="text-xs text-slate-400 hover:text-slate-600 font-medium">
+                      Edit
+                    </button>
+                  )}
+                </div>
               )}
             </div>
+
+            <div>
+              <p className="text-xs text-slate-500 mb-1">Start Date</p>
+              <p className="text-sm font-semibold text-slate-800">{formatDate(job.start_date)}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-500 mb-1">End Date</p>
+              <p className="text-sm font-semibold text-slate-800">{formatDate(job.end_date)}</p>
+            </div>
+
+            {job.invoice_id && (
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Linked Invoice</p>
+                <button
+                  onClick={() => router.push(`/service/invoices/${job.invoice_id}/view`)}
+                  className="text-sm font-semibold text-blue-600 hover:underline"
+                >
+                  View Invoice →
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Materials Used</h2>
-            <form onSubmit={handleAddUsage} className="flex flex-wrap gap-4 mb-6">
-              <div>
+          {/* Proforma section */}
+          <div className="pt-5 border-t border-slate-100">
+            <p className="text-xs text-slate-500 uppercase tracking-wide mb-3 font-semibold">Linked Proforma</p>
+            {job.proforma_invoice_id && linkedProforma ? (
+              <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-indigo-800">
+                    {linkedProforma.proforma_number ? `PRF — ${linkedProforma.proforma_number}` : "Draft Proforma"}
+                  </p>
+                  {linkedProforma.customer_name && (
+                    <p className="text-xs text-indigo-500 mt-0.5">{linkedProforma.customer_name}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => router.push(`/service/proforma/${job.proforma_invoice_id}/view`)}
+                    className="text-sm font-medium text-indigo-600 hover:underline"
+                  >
+                    View
+                  </button>
+                  <button
+                    onClick={() => handleLinkProforma(null)}
+                    disabled={linkingProforma}
+                    className="text-sm text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                  >
+                    Unlink
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
                 <select
-                  value={addMaterialId}
-                  onChange={(e) => setAddMaterialId(e.target.value)}
-                  className="border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
+                  value={selectedProformaId}
+                  onChange={(e) => setSelectedProformaId(e.target.value)}
+                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
                 >
-                  <option value="">Select material</option>
-                  {materials.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} — {Number(m.quantity_on_hand ?? 0)} on hand (unit: {m.unit})
+                  <option value="">— No proforma linked —</option>
+                  {proformas.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.proforma_number ?? "Draft"}{p.customer_name ? ` — ${p.customer_name}` : ""}
                     </option>
                   ))}
                 </select>
-                {selectedMaterial && (
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    On hand: <strong>{Number(selectedMaterial.quantity_on_hand ?? 0)}</strong> {selectedMaterial.unit}
-                    {Number(selectedMaterial.quantity_on_hand ?? 0) === 0 && (
-                      <span className="block mt-1 text-amber-600 dark:text-amber-400">
-                        Add stock via Service Inventory → Adjust, or Materials → Add stock.
-                      </span>
-                    )}
-                  </p>
-                )}
+                <button
+                  onClick={() => handleLinkProforma(selectedProformaId || null)}
+                  disabled={linkingProforma || !selectedProformaId}
+                  className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                >
+                  {linkingProforma ? "Saving…" : "Link"}
+                </button>
               </div>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={addQty}
-                onChange={(e) => setAddQty(e.target.value)}
-                placeholder="Qty"
-                className="border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 w-24 dark:bg-gray-700 dark:text-white"
-              />
-              <Button type="submit" disabled={submitting || !canSubmitUsage}>
-                {submitting ? "Saving..." : "Allocate Material"}
-              </Button>
-            </form>
-            {usages.length === 0 ? (
-              <p className="text-gray-500 dark:text-gray-400 text-sm">No materials recorded yet. Allocate a material above; then confirm consumption to post to the ledger.</p>
-            ) : (
-              <>
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-300">Material</th>
-                      <th className="px-4 py-2 text-right font-semibold text-gray-700 dark:text-gray-300">Quantity</th>
-                      <th className="px-4 py-2 text-right font-semibold text-gray-700 dark:text-gray-300">Cost</th>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-300">Status</th>
-                      <th className="px-4 py-2 text-right font-semibold text-gray-700 dark:text-gray-300">Date</th>
-                      <th className="px-4 py-2 text-right font-semibold text-gray-700 dark:text-gray-300">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {usages.map((u) => (
-                      <tr key={u.id}>
-                        <td className="px-4 py-2 text-gray-900 dark:text-gray-100">
-                          {(u as any).service_material_inventory?.name ?? u.material_id}
-                        </td>
-                        <td className="px-4 py-2 text-right">{u.quantity_used}</td>
-                        <td className="px-4 py-2 text-right font-medium">{format(u.total_cost)}</td>
-                        <td className="px-4 py-2">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                            u.status === "consumed" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" :
-                            u.status === "returned" ? "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300" :
-                            "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
-                          }`}>
-                            {u.status ?? "allocated"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2 text-right text-gray-500 dark:text-gray-400">
-                          {u.created_at ? new Date(u.created_at).toLocaleString() : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          {u.status === "allocated" && (
-                            <button
-                              type="button"
-                              onClick={() => handleConfirmConsumption(u.id)}
-                              disabled={consumingId === u.id}
-                              className="text-blue-600 dark:text-blue-400 hover:underline font-medium disabled:opacity-50"
-                            >
-                              {consumingId === u.id ? "Posting…" : "Confirm consumption"}
-                            </button>
-                          )}
-                          {u.status === "consumed" && businessId && (
-                            <a
-                              href={`/service/ledger?business_id=${businessId}&reference_type=service_job_usage&reference_id=${u.id}`}
-                              className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                            >
-                              View in Ledger
-                            </a>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="mt-4 text-right font-semibold text-gray-900 dark:text-gray-100">
-                  Total cost: {format(totalCost)}
-                </p>
-              </>
             )}
           </div>
         </div>
+
+        {/* Materials card */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">Materials Used</h2>
+            {usages.length > 0 && (
+              <span className="text-sm font-semibold text-slate-800">Total: {format(totalCost)}</span>
+            )}
+          </div>
+
+          {/* Allocate form — only when not cancelled */}
+          {!isCancelled && (
+            <form onSubmit={handleAddUsage} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Allocate Material</p>
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-[200px]">
+                  <select
+                    value={addMaterialId}
+                    onChange={(e) => setAddMaterialId(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+                  >
+                    <option value="">Select material…</option>
+                    {materials.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — {Number(m.quantity_on_hand)} {m.unit} on hand
+                      </option>
+                    ))}
+                  </select>
+                  {selectedMaterial && Number(selectedMaterial.quantity_on_hand) === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">No stock available. Adjust via Materials → Adjust Stock.</p>
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={addQty}
+                    onChange={(e) => setAddQty(e.target.value)}
+                    placeholder="Qty"
+                    className="border border-slate-200 rounded-lg px-3 py-2.5 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={submitting || !canSubmitUsage}
+                  className="px-4 py-2.5 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                >
+                  {submitting ? "Saving…" : "Allocate"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Usage table */}
+          {usages.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">
+              No materials allocated yet.{!isCancelled && " Allocate a material above, then confirm consumption to post COGS."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="pb-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Material</th>
+                    <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty</th>
+                    <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit Cost</th>
+                    <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Total</th>
+                    <th className="pb-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pl-4">Status</th>
+                    <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+                    <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usages.map((u) => (
+                    <tr key={u.id} className="border-b border-slate-100 last:border-0">
+                      <td className="py-3 text-sm font-medium text-slate-800">
+                        {u.service_material_inventory?.name ?? <span className="text-slate-400 font-mono text-xs">{u.material_id.slice(0, 8)}</span>}
+                        {u.service_material_inventory?.unit && (
+                          <span className="text-xs text-slate-400 ml-1">({u.service_material_inventory.unit})</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-right text-sm tabular-nums text-slate-700">{u.quantity_used}</td>
+                      <td className="py-3 text-right text-sm tabular-nums text-slate-600">{format(u.unit_cost)}</td>
+                      <td className="py-3 text-right text-sm tabular-nums font-medium text-slate-900">{format(u.total_cost)}</td>
+                      <td className="py-3 pl-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${USAGE_STATUS_STYLE[u.status] ?? USAGE_STATUS_STYLE.allocated}`}>
+                          {u.status.charAt(0).toUpperCase() + u.status.slice(1)}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right text-xs text-slate-400">
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString("en-GH", { day: "2-digit", month: "short" }) : "—"}
+                      </td>
+                      <td className="py-3 text-right">
+                        {u.status === "allocated" && (
+                          <button
+                            onClick={() => handleConfirmConsumption(u.id)}
+                            disabled={consumingId === u.id}
+                            className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                          >
+                            {consumingId === u.id ? "Posting…" : "Confirm"}
+                          </button>
+                        )}
+                        {u.status === "consumed" && businessId && (
+                          <a
+                            href={`/service/ledger?business_id=${businessId}&reference_type=service_job_usage&reference_id=${u.id}`}
+                            className="text-xs font-medium text-blue-600 hover:underline"
+                          >
+                            Ledger →
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200">
+                    <td colSpan={3} className="pt-3 text-sm font-bold text-slate-900">Total Material Cost</td>
+                    <td className="pt-3 text-right text-sm font-bold text-slate-900 tabular-nums">{format(totalCost)}</td>
+                    <td colSpan={3} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   )

@@ -4,9 +4,6 @@ import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
-import LoadingScreen from "@/components/ui/LoadingScreen"
-import PageHeader from "@/components/ui/PageHeader"
-import Button from "@/components/ui/Button"
 
 type Customer = { id: string; name: string }
 type ProformaOption = { id: string; proforma_number: string | null; customer_name: string | null }
@@ -50,7 +47,7 @@ export default function ServiceJobsNewPage() {
           proformaData.map((p: any) => ({
             id: p.id,
             proforma_number: p.proforma_number,
-            customer_name: p.customers?.name ?? null,
+            customer_name: Array.isArray(p.customers) ? (p.customers[0]?.name ?? null) : (p.customers?.name ?? null),
           }))
         )
       }
@@ -68,24 +65,16 @@ export default function ServiceJobsNewPage() {
       if (!user) throw new Error("Not authenticated")
       const business = await getCurrentBusiness(supabase, user.id)
       if (!business) throw new Error("Business not found")
-      const payload: {
-        business_id: string
-        customer_id: string | null
-        status: string
-        start_date: string | null
-        end_date: string | null
-        proforma_invoice_id: string | null
-      } = {
-        business_id: business.id,
-        customer_id: customerId.trim() || null,
-        status,
-        start_date: startDate || null,
-        end_date: endDate || null,
-        proforma_invoice_id: proformaInvoiceId || null,
-      }
       const { data: job, error: err } = await supabase
         .from("service_jobs")
-        .insert(payload)
+        .insert({
+          business_id: business.id,
+          customer_id: customerId.trim() || null,
+          status,
+          start_date: startDate || null,
+          end_date: endDate || null,
+          proforma_invoice_id: proformaInvoiceId || null,
+        })
         .select("id")
         .single()
       if (err) throw err
@@ -98,78 +87,95 @@ export default function ServiceJobsNewPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <PageHeader
-          title="New Project"
-          subtitle="Create a service engagement"
-          actions={
-            <Button variant="outline" onClick={() => router.push("/service/jobs")}>
-              Back to Projects
-            </Button>
-          }
-        />
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => router.push("/service/jobs")}
+            className="text-slate-500 hover:text-slate-800 flex items-center gap-1.5 text-sm font-medium transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Projects
+          </button>
+        </div>
+
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">New Project</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Create a new service engagement</p>
+        </div>
+
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
         )}
-        <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 space-y-4">
+
+        <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-5">
+
+          {/* Customer */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer (optional)</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              Customer <span className="font-normal text-slate-400">(optional)</span>
+            </label>
             <select
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
             >
-              <option value="">No customer</option>
+              <option value="">— No customer —</option>
               {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-            />
+
+          {/* Dates */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+              />
+            </div>
           </div>
+
+          {/* Status */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Initial Status</label>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
             >
               <option value="draft">Draft</option>
-              <option value="in_progress">In progress</option>
+              <option value="in_progress">In Progress</option>
               <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
             </select>
           </div>
+
+          {/* Proforma link */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Link Proforma Invoice{" "}
-              <span className="font-normal text-gray-500">(optional)</span>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              Link Proforma Invoice <span className="font-normal text-slate-400">(optional)</span>
             </label>
             <select
               value={proformaInvoiceId}
               onChange={(e) => setProformaInvoiceId(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
             >
               <option value="">— No proforma —</option>
               {proformas.map((p) => (
@@ -178,19 +184,28 @@ export default function ServiceJobsNewPage() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Link this project to an accepted or sent Proforma Invoice
-            </p>
+            <p className="text-xs text-slate-400 mt-1">Only sent or accepted proformas can be linked.</p>
           </div>
-          <div className="flex gap-3 pt-4">
-            <Button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create Project"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => router.push("/service/jobs")}>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-5 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
+            >
+              {loading ? "Creating…" : "Create Project"}
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/service/jobs")}
+              className="px-4 py-2.5 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+            >
               Cancel
-            </Button>
+            </button>
           </div>
         </form>
+
       </div>
     </div>
   )

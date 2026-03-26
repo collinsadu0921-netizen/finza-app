@@ -150,10 +150,10 @@ export default function ServiceMaterialAdjustPage() {
               This material does not exist or you do not have access to it.
             </p>
             <button
-              onClick={() => router.push("/service/inventory")}
+              onClick={() => router.push("/service/materials")}
               className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
             >
-              Back to Service Inventory
+              Back to Materials
             </button>
           </div>
         </div>
@@ -170,7 +170,7 @@ export default function ServiceMaterialAdjustPage() {
           title="Adjust stock"
           subtitle={`${material.name} — current: ${Number(material.quantity_on_hand ?? 0)} ${material.unit}`}
           actions={
-            <Button variant="outline" onClick={() => router.push("/service/inventory")}>
+            <Button variant="outline" onClick={() => router.push("/service/materials")}>
               Back
             </Button>
           }
@@ -230,7 +230,7 @@ export default function ServiceMaterialAdjustPage() {
             )}
           </div>
           <div className="flex gap-4 pt-4">
-            <Button type="button" variant="outline" onClick={() => router.push("/service/inventory")} disabled={saving}>
+            <Button type="button" variant="outline" onClick={() => router.push("/service/materials")} disabled={saving}>
               Cancel
             </Button>
             <Button type="submit" disabled={saving}>
