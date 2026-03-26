@@ -26,6 +26,14 @@ type Material = {
   unit: string | null
 }
 
+type Supplier = {
+  id: string
+  name: string
+  phone: string | null
+  email: string | null
+  status: "active" | "blocked"
+}
+
 export default function CreateBillPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -49,6 +57,8 @@ export default function CreateBillPage() {
     },
   ])
   const [materials, setMaterials] = useState<Material[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [applyWHT, setApplyWHT] = useState(false)
   const [whtRateCode, setWhtRateCode] = useState("GH_SVC_5")
@@ -106,11 +116,26 @@ export default function CreateBillPage() {
 
   useEffect(() => {
     loadBusiness()
+    fetch("/api/suppliers")
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d.suppliers)) setSuppliers(d.suppliers) })
+      .catch(() => {})
     fetch("/api/service/materials/list")
       .then((r) => r.json())
       .then((d) => { if (d.materials) setMaterials(d.materials) })
       .catch(() => {})
   }, [])
+
+  const handleSupplierSelect = (supplierId: string) => {
+    setSelectedSupplierId(supplierId)
+    if (!supplierId) return
+    const selected = suppliers.find((s) => s.id === supplierId)
+    if (!selected) return
+    setSupplierName(selected.name || "")
+    setSupplierPhone(selected.phone || "")
+    setSupplierEmail(selected.email || "")
+    setOcrSuggestedFields((prev) => ({ ...prev, supplier_name: false }))
+  }
 
   const loadBusiness = async () => {
     try {
@@ -454,6 +479,7 @@ export default function CreateBillPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           business_id: businessId,
+          supplier_id: selectedSupplierId || null,
           supplier_name: supplierName.trim(),
           supplier_phone: supplierPhone.trim() || null,
           supplier_email: supplierEmail.trim() || null,
@@ -551,6 +577,24 @@ export default function CreateBillPage() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Supplier Information</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Choose Existing Supplier
+                  </label>
+                  <select
+                    value={selectedSupplierId}
+                    onChange={(e) => handleSupplierSelect(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
+                  >
+                    <option value="">Type manually (or select supplier)</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}{supplier.status === "blocked" ? " (blocked)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div />
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Supplier Name *

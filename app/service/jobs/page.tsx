@@ -9,6 +9,7 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 type JobRow = {
   id: string
   customer_id: string | null
+  title: string | null
   status: string
   start_date: string | null
   end_date: string | null
@@ -67,7 +68,7 @@ export default function ServiceJobsPage() {
       const [{ data: jobs, error: jobErr }, { data: usages }] = await Promise.all([
         supabase
           .from("service_jobs")
-          .select("id, customer_id, status, start_date, end_date, created_at, customers(name)")
+          .select("id, customer_id, title, status, start_date, end_date, created_at, customers(name)")
           .eq("business_id", business.id)
           .order("created_at", { ascending: false }),
         supabase
@@ -111,7 +112,9 @@ export default function ServiceJobsPage() {
     if (filterStatus !== "all" && r.status !== filterStatus) return false
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
-      if (!(r.customers?.name ?? "").toLowerCase().includes(q)) return false
+      const matchesTitle = (r.title ?? "").toLowerCase().includes(q)
+      const matchesCustomer = (r.customers?.name ?? "").toLowerCase().includes(q)
+      if (!matchesTitle && !matchesCustomer) return false
     }
     return true
   })
@@ -197,7 +200,7 @@ export default function ServiceJobsPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by customer…"
+              placeholder="Search by title or customer…"
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
@@ -254,7 +257,7 @@ export default function ServiceJobsPage() {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Project</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Start</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">End</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Materials</th>
@@ -272,10 +275,13 @@ export default function ServiceJobsPage() {
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <StatusBadge status={row.status} />
                       </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span className="text-sm font-medium text-slate-800">
-                          {row.customers?.name ?? <span className="text-slate-400 italic">No customer</span>}
-                        </span>
+                      <td className="px-4 py-3.5">
+                        <p className="text-sm font-medium text-slate-800">
+                          {row.title ?? <span className="text-slate-400 italic">Untitled</span>}
+                        </p>
+                        {row.customers?.name && (
+                          <p className="text-xs text-slate-400 mt-0.5">{row.customers.name}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <span className="text-sm text-slate-500">{formatDate(row.start_date)}</span>

@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       business_id,
+      supplier_id = null,
       supplier_name,
       supplier_phone,
       supplier_email,
@@ -62,9 +63,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    if (!supplier_name || !supplier_name.trim()) {
+    if ((!supplier_name || !supplier_name.trim()) && !supplier_id) {
       return NextResponse.json(
-        { success: false, error: "Supplier name is required" },
+        { success: false, error: "Supplier name is required (or choose an existing supplier)" },
         { status: 400 }
       )
     }
@@ -96,6 +97,30 @@ export async function POST(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business || business.id !== business_id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
+
+    let supplierNameValue = supplier_name?.trim() || ""
+    let supplierPhoneValue = supplier_phone?.trim() || null
+    let supplierEmailValue = supplier_email?.trim() || null
+
+    if (supplier_id) {
+      const { data: supplierRow, error: supplierError } = await supabase
+        .from("suppliers")
+        .select("id, name, phone, email")
+        .eq("id", supplier_id)
+        .eq("business_id", business_id)
+        .maybeSingle()
+
+      if (supplierError || !supplierRow) {
+        return NextResponse.json(
+          { success: false, error: "Selected supplier not found for this business" },
+          { status: 400 }
+        )
+      }
+
+      if (!supplierNameValue) supplierNameValue = supplierRow.name
+      if (!supplierPhoneValue) supplierPhoneValue = supplierRow.phone
+      if (!supplierEmailValue) supplierEmailValue = supplierRow.email
     }
 
     // Resolve home currency for FX validation
@@ -197,9 +222,10 @@ export async function POST(request: NextRequest) {
       .from("bills")
       .insert({
         business_id,
-        supplier_name: supplier_name.trim(),
-        supplier_phone: supplier_phone?.trim() || null,
-        supplier_email: supplier_email?.trim() || null,
+        supplier_id: supplier_id || null,
+        supplier_name: supplierNameValue,
+        supplier_phone: supplierPhoneValue,
+        supplier_email: supplierEmailValue,
         bill_number: bill_number.trim(),
         issue_date,
         due_date: due_date || null,

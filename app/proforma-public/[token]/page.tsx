@@ -83,6 +83,7 @@ const formatDate = (d: string | null) =>
 export default function ProformaPublicPage() {
   const params = useParams()
   const token = params.token as string
+  const tokenEnc = encodeURIComponent(token || "")
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -424,6 +425,20 @@ export default function ProformaPublicPage() {
                 <p className="text-xs text-gray-400 mt-0.5">{formatDate(proforma.signed_at)}</p>
               </div>
             )}
+          </div>
+
+          <div className="no-print flex justify-end">
+            <a
+              href={`/api/public/proforma/${tokenEnc}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm hover:bg-slate-50"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+              </svg>
+              Download / Print PDF
+            </a>
           </div>
 
           {/* Action buttons — only shown when awaiting client response */}

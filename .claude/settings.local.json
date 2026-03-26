@@ -168,7 +168,12 @@
       "Bash(grep -A 30 \"service_jobs\" /c/projects/finza-web/finza-web/app/api/credit-notes/[id]/route.ts)",
       "Bash(find /c/projects/finza-web/finza-web -name *.ts -type f -exec grep -l \"type.*Job\\\\|interface.*Job\" {})",
       "Bash(2)",
-      "Bash(cat /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)"
+      "Bash(cat /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
+      "Bash(xargs find:*)",
+      "Bash(find /c/projects/finza-web/finza-web -name *migrations* -o -name *schema* -o -name supabase.json)",
+      "Bash(grep -n \"invoice_id\\\\|proforma_invoice\" /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
+      "Bash(grep -n \"TODO\\\\|FIXME\\\\|BUG\\\\|XXX\\\\|HACK\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
+      "Bash(grep -E \"fetch\\\\\\(|\\\\.from\\\\\\(\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)"
     ]
   }
 }
