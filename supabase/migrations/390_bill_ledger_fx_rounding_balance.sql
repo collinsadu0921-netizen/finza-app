@@ -65,6 +65,21 @@ DECLARE
   v_new_avg_cost           NUMERIC;
   v_import_unit_cost       NUMERIC;
   v_apply_fx               BOOLEAN := FALSE;
+  -- Final assembly balance guard/correction
+  v_total_debit_lines      NUMERIC := 0;
+  v_total_credit_lines     NUMERIC := 0;
+  v_balance_delta          NUMERIC := 0; -- credits - debits
+  v_last_tax_debit_idx     INTEGER := NULL;
+  v_last_expense_debit_idx INTEGER := NULL;
+  v_candidate_idx          INTEGER := NULL;
+  v_line_account_id        UUID;
+  v_tax_account_ids        UUID[] := ARRAY[]::UUID[];
+  v_tax_account_code       TEXT;
+  v_line_json              JSONB;
+  v_line_debit             NUMERIC;
+  v_line_credit            NUMERIC;
+  v_new_debit              NUMERIC;
+  v_line_rec               RECORD;
 BEGIN
   SELECT
     b.business_id,
@@ -391,6 +406,84 @@ BEGIN
           'debit', v_total_tax, 'description', 'Input tax')
       );
     END IF;
+  END IF;
+
+  -- Final 1-pesewa balancing correction on assembled bill journal lines only.
+  -- Priority:
+  --   1) last tax debit line
+  --   2) otherwise last expense debit line
+  -- If drift is > 0.01, keep fail-fast behavior.
+  -- Build structural tax account id set (no label matching).
+  FOR v_tax_account_code IN
+    SELECT unnest(ARRAY['2100','2110','2120','2130'])
+  LOOP
+    tax_account_id := get_account_by_code(business_id_val, v_tax_account_code);
+    IF tax_account_id IS NOT NULL THEN
+      v_tax_account_ids := array_append(v_tax_account_ids, tax_account_id);
+    END IF;
+  END LOOP;
+  FOR tax_line_item IN SELECT * FROM unnest(parsed_tax_lines)
+  LOOP
+    tax_ledger_account_code := tax_line_item->>'ledger_account_code';
+    IF tax_ledger_account_code IS NOT NULL THEN
+      tax_account_id := get_account_by_code(business_id_val, tax_ledger_account_code);
+      IF tax_account_id IS NOT NULL AND NOT (tax_account_id = ANY(v_tax_account_ids)) THEN
+        v_tax_account_ids := array_append(v_tax_account_ids, tax_account_id);
+      END IF;
+    END IF;
+  END LOOP;
+
+  FOR v_line_rec IN
+    SELECT value AS line_value, (ordinality - 1) AS idx
+    FROM jsonb_array_elements(journal_lines) WITH ORDINALITY
+  LOOP
+    v_line_json := v_line_rec.line_value;
+    v_line_account_id := NULLIF(v_line_json->>'account_id','')::UUID;
+    v_line_debit := COALESCE((v_line_json->>'debit')::NUMERIC, 0);
+    v_line_credit := COALESCE((v_line_json->>'credit')::NUMERIC, 0);
+
+    v_total_debit_lines := v_total_debit_lines + v_line_debit;
+    v_total_credit_lines := v_total_credit_lines + v_line_credit;
+
+    IF v_line_debit > 0 THEN
+      IF v_line_account_id IS NOT NULL AND v_line_account_id = ANY(v_tax_account_ids) THEN
+        v_last_tax_debit_idx := v_line_rec.idx;
+      ELSIF v_line_account_id IS DISTINCT FROM ap_account_id THEN
+        v_last_expense_debit_idx := v_line_rec.idx;
+      END IF;
+    END IF;
+  END LOOP;
+
+  v_balance_delta := ROUND(v_total_credit_lines - v_total_debit_lines, 2);
+
+  IF ABS(v_balance_delta) = 0.01 THEN
+    v_candidate_idx := COALESCE(v_last_tax_debit_idx, v_last_expense_debit_idx);
+    IF v_candidate_idx IS NULL THEN
+      RAISE EXCEPTION
+        'Bill posting 0.01 drift detected but no eligible debit line found for deterministic correction. Bill ID: %, Debits: %, Credits: %',
+        p_bill_id, v_total_debit_lines, v_total_credit_lines;
+    END IF;
+
+    v_line_json := journal_lines -> v_candidate_idx;
+    v_line_debit := COALESCE((v_line_json->>'debit')::NUMERIC, 0);
+    v_new_debit := ROUND(v_line_debit + v_balance_delta, 2);
+
+    IF v_new_debit <= 0 THEN
+      RAISE EXCEPTION
+        'Bill posting correction would produce non-positive debit. Bill ID: %, line_idx: %, old_debit: %, delta: %',
+        p_bill_id, v_candidate_idx, v_line_debit, v_balance_delta;
+    END IF;
+
+    journal_lines := jsonb_set(
+      journal_lines,
+      ARRAY[v_candidate_idx::TEXT, 'debit'],
+      to_jsonb(v_new_debit),
+      FALSE
+    );
+  ELSIF ABS(v_balance_delta) > 0.01 THEN
+    RAISE EXCEPTION
+      'Bill journal assembly unbalanced before posting. Bill ID: %, Debits: %, Credits: %, Delta: %',
+      p_bill_id, ROUND(v_total_debit_lines, 2), ROUND(v_total_credit_lines, 2), v_balance_delta;
   END IF;
 
   SELECT post_journal_entry(
