@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { canUserInitializeAccounting } from "@/lib/accountingBootstrap"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/reports/profit-and-loss
@@ -23,13 +25,27 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
+    const businessId = resolved.businessId
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {

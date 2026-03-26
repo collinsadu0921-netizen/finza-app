@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getAccountingAuthority } from "@/lib/accountingAuthorityEngine"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { CLIENT_REQUIRED } from "@/lib/accounting/reasonCodes"
 
 /**

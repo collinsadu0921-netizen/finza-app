@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getActiveFirmId } from "@/lib/firmSession"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
-import { resolveAuthority } from "@/lib/firmAuthority"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
+import { resolveAuthority } from "@/lib/accounting/firm/authority"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/drafts
@@ -40,12 +41,34 @@ export async function GET(request: NextRequest) {
     const firmId = searchParams.get("firm_id")
     const clientBusinessId = searchParams.get("client_business_id")
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     if (!firmId || !clientBusinessId) {
       return NextResponse.json(
         { error: "Missing required parameters: firm_id, client_business_id" },
         { status: 400 }
       )
     }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: clientBusinessId }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required parameters: firm_id, client_business_id" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
 
     // Check authority: View drafts requires read engagement access
     const { data: firmUser } = await supabase
@@ -66,7 +89,7 @@ export async function GET(request: NextRequest) {
     const engagement = await getActiveEngagement(
       supabase,
       firmId,
-      clientBusinessId
+      resolvedBusinessId
     )
 
     // Check authority
@@ -115,7 +138,7 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq("accounting_firm_id", firmId)
-      .eq("client_business_id", clientBusinessId)
+      .eq("client_business_id", resolvedBusinessId)
       .order("created_at", { ascending: false })
 
     // Apply filters

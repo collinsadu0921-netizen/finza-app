@@ -7,10 +7,11 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getAccountingAuthority } from "@/lib/accountingAuthorityEngine"
+import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { evaluateEngagementState } from "@/lib/accounting/evaluateEngagementState"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 
 export async function GET(request: NextRequest) {
   if (process.env.NODE_ENV === "production") {
@@ -29,6 +30,13 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")?.trim() ?? null
+
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
 
     if (!businessId) {
       return NextResponse.json(

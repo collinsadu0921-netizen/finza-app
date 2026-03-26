@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { logAudit } from "@/lib/auditLog"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * POST /api/accounting/adjustments/apply
@@ -44,6 +46,13 @@ export async function POST(request: NextRequest) {
       adjustment_ref,
     } = body
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     // Validate required fields
     if (!business_id || !period_start || !entry_date || !description || !lines) {
       return NextResponse.json(
@@ -51,6 +60,21 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required fields: business_id, period_start, entry_date, description, lines" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
 
     // PHASE 6: Validate adjustment_reason is required
     if (!adjustment_reason || typeof adjustment_reason !== 'string' || adjustment_reason.trim().length === 0) {
@@ -141,7 +165,7 @@ export async function POST(request: NextRequest) {
     const { data: business } = await supabase
       .from("businesses")
       .select("id")
-      .eq("id", business_id)
+      .eq("id", resolvedBusinessId)
       .single()
 
     if (!business) {
@@ -151,7 +175,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, business_id, "write")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants with write access can apply adjusting journals." },
@@ -170,7 +194,7 @@ export async function POST(request: NextRequest) {
 
     // PHASE 6: Call the canonical apply_adjusting_journal RPC function with adjustment metadata
     const { data: journalEntryId, error: rpcError } = await supabase.rpc("apply_adjusting_journal", {
-      p_business_id: business_id,
+      p_business_id: resolvedBusinessId,
       p_period_start: period_start,
       p_entry_date: entry_date,
       p_description: description.trim(),
@@ -198,19 +222,19 @@ export async function POST(request: NextRequest) {
     const { data: periodRow } = await supabase
       .from("accounting_periods")
       .select("id")
-      .eq("business_id", business_id)
+      .eq("business_id", resolvedBusinessId)
       .eq("period_start", period_start)
       .maybeSingle()
     const period_id = periodRow?.id ?? null
 
     await logAudit({
-      businessId: business_id,
+      businessId: resolvedBusinessId,
       userId: user.id,
       actionType: "adjustment",
       entityType: "journal_entry",
       entityId: journalEntryId,
       description: (adjustment_reason && typeof adjustment_reason === "string" ? adjustment_reason.trim() : description?.trim()) || "Adjusting journal applied",
-      newValues: { period_id, business_id },
+      newValues: { period_id, business_id: resolvedBusinessId },
       request,
     })
 

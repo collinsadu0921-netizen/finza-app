@@ -6,7 +6,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,21 +18,35 @@ export async function GET(request: NextRequest) {
     const scopeType = searchParams.get("scopeType") ?? ""
     const scopeId = searchParams.get("scopeId") ?? ""
 
-    if (!businessId || !scopeType || !scopeId) {
-      return NextResponse.json(
-        { error: "Missing required query params: businessId, scopeType, scopeId" },
-        { status: 400 }
-      )
-    }
-
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 })
     }
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+    if (!resolvedBusinessId || !scopeType || !scopeId) {
+      return NextResponse.json(
+        { error: "Missing required query params: businessId, scopeType, scopeId" },
+        { status: 400 }
+      )
+    }
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 })
     }
@@ -39,7 +55,7 @@ export async function GET(request: NextRequest) {
     const { data: resolution, error: resolutionError } = await supabase
       .from("reconciliation_resolutions")
       .select("approved_by, approved_at, reference_id")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("scope_type", scopeType)
       .eq("scope_id", scopeId)
       .order("approved_at", { ascending: false })
@@ -58,7 +74,7 @@ export async function GET(request: NextRequest) {
     const { data: approvals, error: approvalsError } = await supabase
       .from("ledger_adjustment_approvals")
       .select("approved_by, approved_at, approver_role")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("scope_type", scopeType)
       .eq("scope_id", scopeId)
       .order("approved_at", { ascending: true })
@@ -77,7 +93,7 @@ export async function GET(request: NextRequest) {
       const { data: je } = await supabase
         .from("journal_entries")
         .select("id")
-        .eq("business_id", businessId)
+        .eq("business_id", resolvedBusinessId)
         .eq("reference_type", "reconciliation")
         .eq("reference_id", resolution.reference_id)
         .maybeSingle()

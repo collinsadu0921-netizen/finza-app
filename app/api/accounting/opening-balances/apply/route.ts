@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * POST /api/accounting/opening-balances/apply
@@ -37,6 +39,13 @@ export async function POST(request: NextRequest) {
       lines,
       note,
     } = body
+
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
 
     // Validate required fields
     if (!business_id || !period_start || !equity_offset_account_id || !lines) {
@@ -86,7 +95,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, business_id, "write")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required fields: business_id, period_start, equity_offset_account_id, lines" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants with write access can apply opening balances." },
@@ -96,7 +120,7 @@ export async function POST(request: NextRequest) {
 
     // Call the canonical apply_opening_balances RPC function
     const { data: result, error: rpcError } = await supabase.rpc("apply_opening_balances", {
-      p_business_id: business_id,
+      p_business_id: resolvedBusinessId,
       p_period_start: period_start,
       p_equity_offset_account_id: equity_offset_account_id,
       p_lines: lines.map((line: any) => ({

@@ -1,6 +1,36 @@
 {
   "extends": "next/core-web-vitals",
   "rules": {
-    "no-alert": "error"
-  }
+    "no-alert": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["@/service/*", "@/retail/*"],
+            "message": "Accounting domain cannot import from Service or Retail"
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["app/accounting/**/*", "app/api/accounting/**/*", "lib/accounting/**/*"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@/service/*", "@/retail/*"],
+                "message": "Accounting domain cannot import from Service or Retail"
+              },
+              "@/!(*accounting|shared)/*"
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

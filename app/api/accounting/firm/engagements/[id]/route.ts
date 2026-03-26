@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getEngagementById } from "@/lib/firmEngagements"
-import { logFirmActivity } from "@/lib/firmActivityLog"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getEngagementById } from "@/lib/accounting/firm/engagements"
+import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
 
 /**
  * GET /api/accounting/firm/engagements/[id]
@@ -233,7 +233,7 @@ export async function PATCH(
 
       case "terminate":
         // Use canonical authority resolver
-        const { resolveAuthority: resolveTerminateAuthority } = await import("@/lib/firmAuthority")
+        const { resolveAuthority: resolveTerminateAuthority } = await import("@/lib/accounting/firm/authority")
         const terminateAuthority = resolveTerminateAuthority({
           firmRole: firmUser?.role as any || null,
           engagementAccess: engagement.access_level as any,
@@ -242,7 +242,7 @@ export async function PATCH(
         })
 
         if (!terminateAuthority.allowed) {
-          const logModule = await import("@/lib/firmActivityLog") as typeof import("@/lib/firmActivityLog") & {
+          const logModule = await import("@/lib/accounting/firm/activityLog") as typeof import("@/lib/accounting/firm/activityLog") & {
             logBlockedActionAttempt?: (supabase: unknown, firmId: string, userId: string, actionType: string, reasonCode: string, _reqAccess?: string, _reqRole?: string, businessId?: string) => Promise<unknown>
           }
           if (logModule.logBlockedActionAttempt) {
@@ -276,7 +276,7 @@ export async function PATCH(
 
       case "update":
         // Use canonical authority resolver (update_engagement = Partner only, same as change_engagement_access intent)
-        const { resolveAuthority: resolveUpdateAuthority } = await import("@/lib/firmAuthority")
+        const { resolveAuthority: resolveUpdateAuthority } = await import("@/lib/accounting/firm/authority")
         const updateAuthority = resolveUpdateAuthority({
           firmRole: (firmUser?.role as "partner" | "senior" | "junior" | "readonly") || null,
           engagementAccess: engagement.access_level as "read" | "write" | "approve",
@@ -285,7 +285,7 @@ export async function PATCH(
         })
 
         if (!updateAuthority.allowed) {
-          const logModuleUpdate = await import("@/lib/firmActivityLog") as typeof import("@/lib/firmActivityLog") & {
+          const logModuleUpdate = await import("@/lib/accounting/firm/activityLog") as typeof import("@/lib/accounting/firm/activityLog") & {
             logBlockedActionAttempt?: (supabase: unknown, firmId: string, userId: string, actionType: string, reasonCode: string, _reqAccess?: string, _reqRole?: string, businessId?: string) => Promise<unknown>
           }
           if (logModuleUpdate.logBlockedActionAttempt) {

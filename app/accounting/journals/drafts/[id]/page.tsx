@@ -9,8 +9,8 @@ import Modal from "@/components/ui/Modal"
 import EmptyState from "@/components/ui/EmptyState"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
 import { useToast } from "@/components/ui/ToastProvider"
 import {
   useAccountingBusiness,

@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { logAudit } from "@/lib/auditLog"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
-import { resolveAuthority } from "@/lib/firmAuthority"
-import { logBlockedActionAttempt } from "@/lib/firmActivityLog"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
+import { resolveAuthority } from "@/lib/accounting/firm/authority"
+import { logBlockedActionAttempt } from "@/lib/accounting/firm/activityLog"
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,6 +24,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { business_id, period_start, reason } = body
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     // Validate required fields
     if (!business_id || !period_start || !reason) {
       return NextResponse.json(
@@ -29,6 +38,21 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required fields: business_id, period_start, reason" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
 
     // Validate reason is non-empty and minimum length
     const reasonTrimmed = typeof reason === "string" ? reason.trim() : ""
@@ -67,7 +91,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, business_id, "write")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only accountants with write access can reopen periods." },
@@ -78,7 +102,7 @@ export async function POST(request: NextRequest) {
     const onboardingCheck = await checkFirmOnboardingForAction(
       supabase,
       user.id,
-      business_id
+      resolvedBusinessId
     )
 
     // Role checks for reopen_period (partner etc.) when user is firm user
@@ -95,7 +119,7 @@ export async function POST(request: NextRequest) {
       const engagement = await getActiveEngagement(
         supabase,
         onboardingCheck.firmId,
-        business_id
+        resolvedBusinessId
       )
 
       // Check if engagement is effective
@@ -133,7 +157,7 @@ export async function POST(request: NextRequest) {
           authority.reasonCode!,
           authority.requiredEngagementAccess,
           authority.requiredFirmRole,
-          business_id
+          resolvedBusinessId
         )
 
         return NextResponse.json(
@@ -143,7 +167,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // For business owners (not firm users), check admin/owner role
-      const userRole = await getUserRole(supabase, user.id, business_id)
+      const userRole = await getUserRole(supabase, user.id, resolvedBusinessId)
 
       if (!userRole) {
         return NextResponse.json(
@@ -165,7 +189,7 @@ export async function POST(request: NextRequest) {
     const { data: period, error: periodError } = await supabase
       .from("accounting_periods")
       .select("*")
-      .eq("business_id", business_id)
+      .eq("business_id", resolvedBusinessId)
       .eq("period_start", period_start)
       .single()
 
@@ -215,7 +239,7 @@ export async function POST(request: NextRequest) {
     const { error: auditError } = await supabase
       .from("accounting_period_actions")
       .insert({
-        business_id: business_id,
+        business_id: resolvedBusinessId,
         period_start: period_start,
         action: "reopen",
         performed_by: user.id,
@@ -243,7 +267,7 @@ export async function POST(request: NextRequest) {
     }
 
     await logAudit({
-      businessId: business_id,
+      businessId: resolvedBusinessId,
       userId: user.id,
       actionType: "period_reopen",
       entityType: "period",

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/periods/has-active-engagement?business_id=
@@ -21,14 +23,30 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const business_id = searchParams.get("business_id")
 
-    if (!business_id) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+
+    if (!resolvedBusinessId) {
       return NextResponse.json(
         { error: "Missing required query param: business_id" },
         { status: 400 }
       )
     }
 
-    const auth = await checkAccountingAuthority(supabase, user.id, business_id, "read")
+    const auth = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!auth.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Accounting access required." },
@@ -37,7 +55,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { data, error } = await supabase.rpc("business_has_active_engagement", {
-      p_business_id: business_id,
+      p_business_id: resolvedBusinessId,
     })
 
     if (error) {

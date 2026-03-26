@@ -6,7 +6,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,21 +16,35 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("businessId") ?? ""
 
-    if (!businessId) {
-      return NextResponse.json(
-        { error: "Missing required query param: businessId" },
-        { status: 400 }
-      )
-    }
-
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 })
     }
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+    if (!resolvedBusinessId) {
+      return NextResponse.json(
+        { error: "Missing required query param: businessId" },
+        { status: 400 }
+      )
+    }
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 })
     }
@@ -36,7 +52,7 @@ export async function GET(request: NextRequest) {
     const { data: rows, error } = await supabase
       .from("ledger_adjustment_approvals")
       .select("scope_type, scope_id, proposal_hash, delta, approved_by, approved_at, approver_role")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .order("approved_at", { ascending: false })
 
     if (error) {

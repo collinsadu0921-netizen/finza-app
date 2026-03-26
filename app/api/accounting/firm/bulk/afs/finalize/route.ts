@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { checkFirmClientAccess } from "@/lib/firmClientAccess"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { checkFirmClientAccess } from "@/lib/accounting/firm/clientAccess"
 
 /**
  * POST /api/accounting/firm/bulk/afs/finalize

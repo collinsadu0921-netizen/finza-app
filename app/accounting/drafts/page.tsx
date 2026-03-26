@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import EmptyState from "@/components/ui/EmptyState"
 import { useRouter } from "next/navigation"
-import { getActiveFirmId } from "@/lib/firmSession"
+import { getActiveFirmId } from "@/lib/accounting/firm/session"
 import AccountingBreadcrumbs from "@/components/AccountingBreadcrumbs"
 import { useAccountingBusiness } from "@/lib/accounting/useAccountingBusiness"
 

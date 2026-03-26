@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/reports/general-ledger
@@ -20,7 +22,6 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
     const accountId = searchParams.get("account_id")
     const periodId = searchParams.get("period_id")
     const periodStart = searchParams.get("period_start")
@@ -32,12 +33,27 @@ export async function GET(request: NextRequest) {
     const cursorJournalEntryId = searchParams.get("cursor_journal_entry_id")
     const cursorLineId = searchParams.get("cursor_line_id")
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
     if (!accountId) {
       return NextResponse.json(
@@ -49,7 +65,7 @@ export async function GET(request: NextRequest) {
     const auth = await checkAccountingAuthority(
       supabase,
       user.id,
-      businessId,
+      resolvedBusinessId,
       "read"
     )
     if (!auth.authorized) {
@@ -63,7 +79,7 @@ export async function GET(request: NextRequest) {
       .from("accounts")
       .select("id, code, name, type")
       .eq("id", accountId)
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .is("deleted_at", null)
       .single()
 
@@ -84,7 +100,7 @@ export async function GET(request: NextRequest) {
     } else {
       const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
         supabase,
-        { businessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
+        { businessId: resolvedBusinessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
       )
       if (resolveError || !resolvedPeriod) {
         return NextResponse.json(
@@ -119,7 +135,7 @@ export async function GET(request: NextRequest) {
     if (usePagination) {
       // Use paginated function
       const { data, error } = await supabase.rpc("get_general_ledger_paginated", {
-        p_business_id: businessId,
+        p_business_id: resolvedBusinessId,
         p_account_id: accountId,
         p_start_date: effectiveStartDate,
         p_end_date: effectiveEndDate,
@@ -133,7 +149,7 @@ export async function GET(request: NextRequest) {
     } else {
       // Use regular function (no pagination)
       const { data, error } = await supabase.rpc("get_general_ledger", {
-        p_business_id: businessId,
+        p_business_id: resolvedBusinessId,
         p_account_id: accountId,
         p_start_date: effectiveStartDate,
         p_end_date: effectiveEndDate,

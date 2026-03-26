@@ -12,10 +12,12 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getUserRole } from "@/lib/userRoles"
 import { logAudit } from "@/lib/auditLog"
-import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
 import {
   proposalHashFromResultAndProposal,
   getLedgerAdjustmentPolicy,
@@ -85,8 +87,29 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 })
     }
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "write")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ businessId: String(businessId) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+    if (!resolvedBusinessId) {
+      return NextResponse.json(
+        { error: "Missing required fields: businessId, scopeType, scopeId, clientSeen" },
+        { status: 400 }
+      )
+    }
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Only accountants, admins, or owner can post ledger adjustments." },
@@ -95,7 +118,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      await assertBusinessNotArchived(supabase, businessId)
+      await assertBusinessNotArchived(supabase, resolvedBusinessId)
     } catch (e: any) {
       return NextResponse.json({ error: e?.message || "Business is archived" }, { status: 403 })
     }
@@ -106,7 +129,7 @@ export async function POST(request: NextRequest) {
         : authResult.authority_source === "employee"
           ? await getUserRole(supabase, user.id, businessId) ?? "accountant"
           : "accountant"
-    const auth = { userId: user.id, businessId, role }
+    const auth = { userId: user.id, businessId: resolvedBusinessId, role }
 
     const scope = buildScope(scopeType, scopeId, auth.businessId)
     if (!scope) {

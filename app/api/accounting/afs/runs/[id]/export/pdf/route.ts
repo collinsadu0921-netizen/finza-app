@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/afs/runs/[id]/export/pdf
@@ -35,11 +37,26 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
 
-    if (!businessId) {
-      return NextResponse.json({ error: "Missing required parameter: business_id" }, { status: 400 })
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json({ error: "Missing required parameter: business_id" }, { status: 400 })
+    }
+    const resolvedBusinessId = resolved.businessId
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can export AFS." },
@@ -52,7 +69,7 @@ export async function GET(
       .from("afs_runs")
       .select("*")
       .eq("id", id)
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .single()
 
     if (runError || !run) {
@@ -63,7 +80,7 @@ export async function GET(
     const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
       supabase,
       {
-        businessId,
+        businessId: resolvedBusinessId,
         period_start: run.period_start ?? null,
         end_date: run.period_end ?? null,
       }
@@ -81,7 +98,7 @@ export async function GET(
     const { data: business } = await supabase
       .from("businesses")
       .select("name, legal_name, default_currency, business_type")
-      .eq("id", businessId)
+      .eq("id", resolvedBusinessId)
       .single()
 
     const businessName = (business as any)?.legal_name || (business as any)?.name || "Business"

@@ -18,9 +18,9 @@ import {
   ENGAGEMENT_TERMINATED,
   NO_ENGAGEMENT,
 } from "@/lib/accounting/reasonCodes"
-import { resolveAuthority } from "@/lib/firmAuthority"
-import type { FirmRole } from "@/lib/firmAuthority"
-import type { Engagement, EngagementStatus } from "@/lib/firmEngagements"
+import { resolveAuthority } from "@/lib/accounting/firm/authority"
+import type { FirmRole } from "@/lib/accounting/firm/authority"
+import type { Engagement, EngagementStatus } from "@/lib/accounting/firm/engagements"
 
 const STATUS_ALLOWED: Record<string, string[]> = {
   pending: ["accepted", "terminated"],

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { canUserCreateEngagements, getFirmEngagements } from "@/lib/firmEngagements"
-import { isFirmOnboardingComplete } from "@/lib/firmOnboarding"
-import { logFirmActivity } from "@/lib/firmActivityLog"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { canUserCreateEngagements, getFirmEngagements } from "@/lib/accounting/firm/engagements"
+import { isFirmOnboardingComplete } from "@/lib/accounting/firm/onboarding"
+import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
 
 /**
  * POST /api/accounting/firm/engagements

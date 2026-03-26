@@ -13,7 +13,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getUserRole } from "@/lib/userRoles"
 import {
   getLedgerAdjustmentPolicy,
@@ -36,24 +38,38 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("businessId") ?? ""
 
-    if (!businessId) {
-      return NextResponse.json(
-        { error: "Missing required query param: businessId" },
-        { status: 400 }
-      )
-    }
-
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+    if (!resolvedBusinessId) {
+      return NextResponse.json(
+        { error: "Missing required query param: businessId" },
+        { status: 400 }
+      )
+    }
 
     const auth = await checkAccountingAuthority(
       supabase,
       user.id,
-      businessId,
+      resolvedBusinessId,
       "read"
     )
     if (!auth.authorized) {
@@ -63,11 +79,11 @@ export async function GET(request: NextRequest) {
     const writeAuth = await checkAccountingAuthority(
       supabase,
       user.id,
-      businessId,
+      resolvedBusinessId,
       "write"
     )
     const canPostLedger = writeAuth.authorized
-    const policy = await getLedgerAdjustmentPolicy(supabase, businessId)
+    const policy = await getLedgerAdjustmentPolicy(supabase, resolvedBusinessId)
 
     const limitParam = searchParams.get("limit")
     const periodId = searchParams.get("periodId") ?? undefined
@@ -79,7 +95,7 @@ export async function GET(request: NextRequest) {
     const { data: invoices } = await supabase
       .from("invoices")
       .select("id")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .neq("status", "draft")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -90,7 +106,7 @@ export async function GET(request: NextRequest) {
 
     if (invoices && invoices.length > 0) {
       const engine = createReconciliationEngine(supabase)
-      const scopeBase = { businessId, periodId }
+      const scopeBase = { businessId: resolvedBusinessId, periodId }
       const pairs = await runWithConcurrencyLimit(
         invoices,
         CONCURRENCY,
@@ -128,7 +144,7 @@ export async function GET(request: NextRequest) {
       auth.authority_source === "owner"
         ? "owner"
         : auth.authority_source === "employee"
-          ? await getUserRole(supabase, user.id, businessId)
+          ? await getUserRole(supabase, user.id, resolvedBusinessId)
           : "accountant"
     return NextResponse.json({ results, proposals, mismatches, canPostLedger, policy, userRole: userRole ?? "accountant" })
   } catch (err: unknown) {

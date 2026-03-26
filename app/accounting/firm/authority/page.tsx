@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
-import { getActiveFirmId } from "@/lib/firmSession"
+import { getActiveFirmId } from "@/lib/accounting/firm/session"
 import { RoleCapabilityMatrix } from "@/components/RoleCapabilityMatrix"
-import { FirmRole } from "@/lib/firmAuthority"
+import { FirmRole } from "@/lib/accounting/firm/authority"
 
 /**
  * Authority Matrix Page

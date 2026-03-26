@@ -20,14 +20,14 @@ jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(),
 }))
 
-jest.mock("@/lib/firmOnboarding", () => ({
+jest.mock("@/lib/accounting/firm/onboarding", () => ({
   checkFirmOnboardingForAction: jest.fn(async (supabase, userId, businessId) => ({
     isComplete: true,
     firmId: process.env.TEST_FIRM_ID,
   })),
 }))
 
-jest.mock("@/lib/firmEngagements", () => ({
+jest.mock("@/lib/accounting/firm/engagements", () => ({
   getActiveEngagement: jest.fn(async (supabase, firmId, businessId) => ({
     id: process.env.TEST_ENGAGEMENT_ID,
     status: "active",

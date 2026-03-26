@@ -4,7 +4,6 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { getCurrentBusiness } from "@/lib/business"
 import { logAccountingContextResolverUsage } from "./devContextLogger"
 import { CLIENT_REQUIRED } from "./reasonCodes"
 
@@ -28,7 +27,7 @@ export type ResolveAccountingContextOpts = {
 /**
  * Resolve business context for accounting workspace and related routes (portal, reports).
  * - Accountant: MUST have business_id in URL. Missing → CLIENT_REQUIRED (dev log).
- * - Owner/Employee: Use business_id from URL if present; else fallback to getCurrentBusiness.
+ * - Owner/Employee: business_id must be explicit in URL context.
  */
 export async function resolveAccountingContext(
   opts: ResolveAccountingContextOpts
@@ -73,10 +72,5 @@ export async function resolveAccountingContext(
     return { businessId: urlBusinessId, authoritySource }
   }
 
-  const business = await getCurrentBusiness(supabase, userId)
-  if (!business?.id) {
-    return { error: CLIENT_REQUIRED }
-  }
-  const authoritySource: AccountingAuthoritySource = business.owner_id === userId ? "owner" : "employee"
-  return { businessId: business.id, authoritySource }
+  return { error: CLIENT_REQUIRED }
 }

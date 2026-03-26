@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getTaxControlAccountCodes } from "@/lib/taxControlAccounts"
+import { getTaxControlAccountCodes } from "@/lib/accounting/taxControlAccounts"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/exports/vat
@@ -32,6 +34,13 @@ export async function GET(request: NextRequest) {
     const businessId = searchParams.get("business_id")
     const periodParam = searchParams.get("period") // Format: YYYY-MM
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     if (!businessId) {
       return NextResponse.json(
         { error: "business_id parameter is required" },
@@ -39,12 +48,27 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "business_id parameter is required" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
     // Check accountant firm access
     const { data: accessLevel, error: accessError } = await supabase.rpc(
       "can_accountant_access_business",
       {
         p_user_id: user.id,
-        p_business_id: businessId,
+        p_business_id: resolvedBusinessId,
       }
     )
 
@@ -86,12 +110,12 @@ export async function GET(request: NextRequest) {
     const { data: accountingPeriod } = await supabase
       .from("accounting_periods")
       .select("status")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("period_start", periodStart)
       .maybeSingle()
 
     // Resolve VAT control account code from control map
-    const taxControlCodes = await getTaxControlAccountCodes(supabase, businessId)
+    const taxControlCodes = await getTaxControlAccountCodes(supabase, resolvedBusinessId)
     const vatAccountCode = taxControlCodes.vat
 
     if (!vatAccountCode) {
@@ -105,7 +129,7 @@ export async function GET(request: NextRequest) {
     const { data: vatAccount } = await supabase
       .from("accounts")
       .select("id")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("code", vatAccountCode)
       .is("deleted_at", null)
       .maybeSingle()
@@ -125,7 +149,7 @@ export async function GET(request: NextRequest) {
     const { data: openingBalance } = await supabase.rpc(
       "calculate_account_balance_as_of",
       {
-        p_business_id: businessId,
+        p_business_id: resolvedBusinessId,
         p_account_id: vatAccount.id,
         p_as_of_date: openingDateStr,
       }

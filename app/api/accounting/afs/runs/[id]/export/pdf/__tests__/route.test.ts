@@ -18,11 +18,11 @@ import { NextRequest } from "next/server"
 // ── Module mocks ──────────────────────────────────────────────────────────
 
 jest.mock("@/lib/supabaseServer")
-jest.mock("@/lib/accountingAuth")
+jest.mock("@/lib/accounting/auth")
 jest.mock("@/lib/accounting/resolveAccountingPeriodForReport")
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority }   from "@/lib/accountingAuth"
+import { checkAccountingAuthority }   from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<typeof createSupabaseServerClient>

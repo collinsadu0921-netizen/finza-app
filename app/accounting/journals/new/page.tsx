@@ -8,8 +8,8 @@ import Button from "@/components/ui/Button"
 import EmptyState from "@/components/ui/EmptyState"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getActiveEngagement } from "@/lib/firmEngagements"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
+import { getActiveEngagement } from "@/lib/accounting/firm/engagements"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
 import { useToast } from "@/components/ui/ToastProvider"
 import {
   useAccountingBusiness,

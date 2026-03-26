@@ -10,7 +10,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 export interface AuditReadinessFailure {
   code: string
@@ -43,14 +45,30 @@ export async function GET(request: NextRequest) {
     const businessId = searchParams.get("businessId")
     const periodId = searchParams.get("periodId")
 
-    if (!businessId || !periodId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+
+    if (!resolvedBusinessId || !periodId) {
       return NextResponse.json(
         { error: "Missing required query params: businessId, periodId" },
         { status: 400 }
       )
     }
 
-    const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const auth = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!auth.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Accountant or admin access required." },
@@ -62,7 +80,7 @@ export async function GET(request: NextRequest) {
     const { data: checks, error: checksError } = await supabase.rpc(
       "run_period_close_checks",
       {
-        p_business_id: businessId,
+        p_business_id: resolvedBusinessId,
         p_period_id: periodId,
       }
     )

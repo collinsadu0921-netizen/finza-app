@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { logAudit } from "@/lib/auditLog"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 const MIN_REASON_LENGTH = 10
 
@@ -24,6 +26,12 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
     }
 
     const body = await request.json().catch(() => ({}))
@@ -78,7 +86,21 @@ export async function POST(request: NextRequest) {
     }
 
     const businessId = originalJe.business_id as string
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "write")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: businessId }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required parameter: business_id" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "You do not have permission to reverse journal entries for this business." },
@@ -89,7 +111,7 @@ export async function POST(request: NextRequest) {
     const { data: existingReversal } = await supabase
       .from("journal_entries")
       .select("id")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("reference_type", "reversal")
       .eq("reference_id", original_je_id)
       .limit(1)
@@ -106,7 +128,7 @@ export async function POST(request: NextRequest) {
     const { data: period } = await supabase
       .from("accounting_periods")
       .select("id, status, period_start, period_end")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .lte("period_start", reversal_date)
       .gte("period_end", reversal_date)
       .maybeSingle()
@@ -152,7 +174,7 @@ export async function POST(request: NextRequest) {
     }))
 
     const { data: journalEntryId, error: postError } = await supabase.rpc("post_journal_entry", {
-      p_business_id: businessId,
+      p_business_id: resolvedBusinessId,
       p_date: reversal_date,
       p_description: description,
       p_reference_type: "reversal",
@@ -186,7 +208,7 @@ export async function POST(request: NextRequest) {
     }
 
     await logAudit({
-      businessId,
+      businessId: resolvedBusinessId,
       userId: user.id,
       actionType: "reversal",
       entityType: "journal_entry",
@@ -194,7 +216,7 @@ export async function POST(request: NextRequest) {
       description: reason,
       newValues: {
         reversal_je_id: journalEntryId,
-        business_id: businessId,
+        business_id: resolvedBusinessId,
         period_id: period.id,
       },
       request,
@@ -214,7 +236,7 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", refId)
-        .eq("business_id", businessId)
+        .eq("business_id", resolvedBusinessId)
         .is("deleted_at", null)
 
       if (updatePaymentError) {

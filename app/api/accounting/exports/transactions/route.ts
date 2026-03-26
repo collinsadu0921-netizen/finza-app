@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getTaxControlAccountCodes } from "@/lib/taxControlAccounts"
+import { getTaxControlAccountCodes } from "@/lib/accounting/taxControlAccounts"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/exports/transactions
@@ -36,6 +38,13 @@ export async function GET(request: NextRequest) {
     const businessId = searchParams.get("business_id")
     const periodParam = searchParams.get("period") // Format: YYYY-MM
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     if (!businessId) {
       return NextResponse.json(
         { error: "business_id parameter is required" },
@@ -43,12 +52,27 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "business_id parameter is required" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
     // Check accountant firm access
     const { data: accessLevel, error: accessError } = await supabase.rpc(
       "can_accountant_access_business",
       {
         p_user_id: user.id,
-        p_business_id: businessId,
+        p_business_id: resolvedBusinessId,
       }
     )
 
@@ -87,7 +111,7 @@ export async function GET(request: NextRequest) {
     const periodEnd = new Date(year, month, 0).toISOString().split("T")[0] // Last day of month
 
     // Resolve tax control account codes from control map
-    const taxControlCodes = await getTaxControlAccountCodes(supabase, businessId)
+    const taxControlCodes = await getTaxControlAccountCodes(supabase, resolvedBusinessId)
     
     // Build tax account codes list (exclude COVID for periods >= 2026-01-01)
     const excludeCovid = periodStart >= "2026-01-01"
@@ -122,7 +146,7 @@ export async function GET(request: NextRequest) {
     const { data: taxAccounts } = await supabase
       .from("accounts")
       .select("id, code")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .in("code", taxAccountCodes)
       .is("deleted_at", null)
 
@@ -162,7 +186,7 @@ export async function GET(request: NextRequest) {
       `
       )
       .in("account_id", taxAccountIds)
-      .eq("journal_entries.business_id", businessId)
+      .eq("journal_entries.business_id", resolvedBusinessId)
       .gte("journal_entries.date", periodStart)
       .lte("journal_entries.date", periodEnd)
       .order("journal_entries.date", { ascending: true })

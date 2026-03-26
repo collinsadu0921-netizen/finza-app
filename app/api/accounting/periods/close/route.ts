@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { logAudit } from "@/lib/auditLog"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
-import { resolveAuthority } from "@/lib/firmAuthority"
-import { logBlockedActionAttempt } from "@/lib/firmActivityLog"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
+import { resolveAuthority } from "@/lib/accounting/firm/authority"
+import { logBlockedActionAttempt } from "@/lib/accounting/firm/activityLog"
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,6 +23,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { business_id, period_start, action } = body
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     // Validate required fields
     if (!business_id || !period_start || !action) {
       return NextResponse.json(
@@ -28,6 +37,21 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required fields: business_id, period_start, action" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
 
     // Validate action
     if (!["soft_close", "lock", "request_close", "approve_close", "reject_close"].includes(action)) {
@@ -52,7 +76,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, business_id, "write")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only accountants with write access can close or lock periods." },
@@ -63,7 +87,7 @@ export async function POST(request: NextRequest) {
     const onboardingCheck = await checkFirmOnboardingForAction(
       supabase,
       user.id,
-      business_id
+      resolvedBusinessId
     )
 
     // Role checks for close_period (partner etc.) via resolveAuthority when user is firm user
@@ -80,7 +104,7 @@ export async function POST(request: NextRequest) {
       const engagement = await getActiveEngagement(
         supabase,
         onboardingCheck.firmId,
-        business_id
+        resolvedBusinessId
       )
 
       // Check if engagement is effective
@@ -113,7 +137,7 @@ export async function POST(request: NextRequest) {
       const authority = resolveAuthority({
         firmRole: firmUser?.role as any || null,
         engagementAccess: engagement?.access_level as any || null,
-        action: actionName as import("@/lib/firmAuthority").ActionType,
+        action: actionName as import("@/lib/accounting/firm/authority").ActionType,
         engagementStatus: engagement?.status as any || null,
       })
 
@@ -127,7 +151,7 @@ export async function POST(request: NextRequest) {
           authority.reasonCode!,
           authority.requiredEngagementAccess,
           authority.requiredFirmRole,
-          business_id
+          resolvedBusinessId
         )
 
         return NextResponse.json(
@@ -141,7 +165,7 @@ export async function POST(request: NextRequest) {
     const { data: period, error: periodError } = await supabase
       .from("accounting_periods")
       .select("*")
-      .eq("business_id", business_id)
+      .eq("business_id", resolvedBusinessId)
       .eq("period_start", period_start)
       .single()
 
@@ -155,7 +179,7 @@ export async function POST(request: NextRequest) {
     // Run pre-close audit checks and log attempt (for any close action)
     const runAndLogCloseChecks = async (): Promise<{ ok: boolean; failures: Array<{ code: string; title: string; detail: string }> }> => {
       const { data: checks, error: checksErr } = await supabase.rpc("run_period_close_checks", {
-        p_business_id: business_id,
+        p_business_id: resolvedBusinessId,
         p_period_id: period.id,
       })
       if (checksErr) {
@@ -164,7 +188,7 @@ export async function POST(request: NextRequest) {
       }
       const result = checks as { ok: boolean; failures: Array<{ code: string; title: string; detail: string }> }
       await supabase.from("period_close_attempts").insert({
-        business_id,
+          business_id: resolvedBusinessId,
         period_id: period.id,
         performed_by: user.id,
         performed_at: new Date().toISOString(),
@@ -196,7 +220,7 @@ export async function POST(request: NextRequest) {
       const { data: readiness, error: readinessError } = await supabase.rpc(
         "check_period_close_readiness",
         {
-          p_business_id: business_id,
+          p_business_id: resolvedBusinessId,
           p_period_start: period_start,
         }
       )
@@ -254,7 +278,7 @@ export async function POST(request: NextRequest) {
       const { error: auditError } = await supabase
         .from("accounting_period_actions")
         .insert({
-          business_id: business_id,
+          business_id: resolvedBusinessId,
           period_start: period_start,
           action: "request_close",
           performed_by: user.id,
@@ -318,7 +342,7 @@ export async function POST(request: NextRequest) {
       const { error: auditError } = await supabase
         .from("accounting_period_actions")
         .insert({
-          business_id: business_id,
+          business_id: resolvedBusinessId,
           period_start: period_start,
           action: "approve_close",
           performed_by: user.id,
@@ -330,7 +354,7 @@ export async function POST(request: NextRequest) {
       }
 
       await logAudit({
-        businessId: business_id,
+        businessId: resolvedBusinessId,
         userId: user.id,
         actionType: "period_soft_close",
         entityType: "period",
@@ -379,7 +403,7 @@ export async function POST(request: NextRequest) {
       const { error: auditError } = await supabase
         .from("accounting_period_actions")
         .insert({
-          business_id: business_id,
+          business_id: resolvedBusinessId,
           period_start: period_start,
           action: "reject_close",
           performed_by: user.id,
@@ -408,7 +432,7 @@ export async function POST(request: NextRequest) {
     // When business has active firm engagement, require request_close → approve_close (prevent bypass)
     if (action === "soft_close") {
       const { data: hasEngagement, error: engErr } = await supabase.rpc("business_has_active_engagement", {
-        p_business_id: business_id,
+        p_business_id: resolvedBusinessId,
       })
       if (!engErr && (hasEngagement === true || hasEngagement === "true")) {
         return NextResponse.json(
@@ -466,7 +490,7 @@ export async function POST(request: NextRequest) {
     const { error: auditError } = await supabase
       .from("accounting_period_actions")
       .insert({
-        business_id: business_id,
+        business_id: resolvedBusinessId,
         period_start: period_start,
         action: action,
         performed_by: user.id,
@@ -482,7 +506,7 @@ export async function POST(request: NextRequest) {
     const auditActionType = action === "lock" ? "period_close" : "period_soft_close"
     const auditDescription = action === "lock" ? "closed" : "soft_closed"
     await logAudit({
-      businessId: business_id,
+      businessId: resolvedBusinessId,
       userId: user.id,
       actionType: auditActionType,
       entityType: "period",

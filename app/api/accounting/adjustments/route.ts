@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/adjustments?business_id=...&period_start=...
@@ -25,14 +27,29 @@ export async function GET(request: NextRequest) {
     const businessId = searchParams.get("business_id")
     const periodStart = searchParams.get("period_start")
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can view adjusting journals." },
@@ -52,7 +69,7 @@ export async function GET(request: NextRequest) {
         created_by,
         created_at
       `)
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("reference_type", "adjustment")
       .order("date", { ascending: false })
       .order("created_at", { ascending: false })
@@ -72,7 +89,7 @@ export async function GET(request: NextRequest) {
       const { data: period, error: periodError } = await supabase
         .from("accounting_periods")
         .select("period_start, period_end")
-        .eq("business_id", businessId)
+        .eq("business_id", resolvedBusinessId)
         .eq("period_start", periodStart)
         .single()
 

@@ -5,7 +5,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import EmptyState from "@/components/ui/EmptyState"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getActiveFirmId } from "@/lib/firmSession"
+import { getActiveFirmId } from "@/lib/accounting/firm/session"
 import AccountingBreadcrumbs from "@/components/AccountingBreadcrumbs"
 import { useToast } from "@/components/ui/ToastProvider"
 import {

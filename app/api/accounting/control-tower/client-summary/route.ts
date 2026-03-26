@@ -7,9 +7,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getAccountingAuthority } from "@/lib/accountingAuthorityEngine"
-import type { ControlTowerClientSummary } from "@/lib/controlTower/types"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
+import type { ControlTowerClientSummary } from "@/lib/accounting/controlTower/types"
 
 function qs(params: Record<string, string>): string {
   return new URLSearchParams(params).toString()

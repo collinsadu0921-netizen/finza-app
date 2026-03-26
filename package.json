@@ -18,7 +18,8 @@
     "ci:accounting-audit": "ts-node scripts/accounting-ci-audit.ts",
     "ci:detect-bypass": "ts-node scripts/detect-report-bypass.ts",
     "ci:detect-non-ledger": "ts-node scripts/detect-non-ledger-reports.ts",
-    "ci:accounting": "npm run ci:accounting-audit && npm run ci:detect-bypass && npm run ci:detect-non-ledger"
+    "ci:accounting": "npm run ci:accounting-audit && npm run ci:detect-bypass && npm run ci:detect-non-ledger",
+    "check:boundaries": "node scripts/check-boundaries.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

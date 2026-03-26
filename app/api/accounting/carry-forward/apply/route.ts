@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * POST /api/accounting/carry-forward/apply
@@ -38,6 +40,13 @@ export async function POST(request: NextRequest) {
       to_period_start,
       note,
     } = body
+
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
 
     // Validate required fields
     if (!business_id || !from_period_start || !to_period_start) {
@@ -91,7 +100,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, business_id, "write")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required fields: business_id, from_period_start, to_period_start" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants with write access can apply carry-forward." },
@@ -101,7 +125,7 @@ export async function POST(request: NextRequest) {
 
     // Call the canonical apply_carry_forward RPC function
     const { data: result, error: rpcError } = await supabase.rpc("apply_carry_forward", {
-      p_business_id: business_id,
+      p_business_id: resolvedBusinessId,
       p_from_period_start: from_period_start,
       p_to_period_start: to_period_start,
       p_created_by: user.id,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/reversal/status
@@ -27,14 +29,29 @@ export async function GET(request: NextRequest) {
       ? jeIdsParam.split(",").map((id) => id.trim()).filter(Boolean)
       : []
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "business_id is required" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "You do not have permission to view this business." },
@@ -51,7 +68,7 @@ export async function GET(request: NextRequest) {
     const { data: entries } = await supabase
       .from("journal_entries")
       .select("id, business_id, date")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .in("id", jeIds)
 
     const entryMap = new Map((entries || []).map((e) => [e.id, e]))
@@ -59,7 +76,7 @@ export async function GET(request: NextRequest) {
     const { data: reversals } = await supabase
       .from("journal_entries")
       .select("id, reference_id")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("reference_type", "reversal")
       .in("reference_id", jeIds)
 
@@ -71,7 +88,7 @@ export async function GET(request: NextRequest) {
     const { data: periods } = await supabase
       .from("accounting_periods")
       .select("id, status, period_start, period_end")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
 
     const openPeriodRanges: Array<{ start: string; end: string }> = (periods || [])
       .filter((p) => p.status === "open")

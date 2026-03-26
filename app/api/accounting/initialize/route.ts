@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { canUserInitializeAccounting } from "@/lib/accountingBootstrap"
-import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
+import { ensureAccountingInitialized } from "@/lib/accounting/bootstrap"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * POST /api/accounting/initialize
@@ -24,6 +26,13 @@ export async function POST(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")?.trim()
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     if (!businessId) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
@@ -31,32 +40,47 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const auth = await checkAccountingAuthority(supabase, user.id, businessId, "write")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required parameter: business_id" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
+    const auth = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!auth.authorized) {
       return NextResponse.json(
-        { error: "ACCOUNTING_INIT_FORBIDDEN", business_id: businessId },
+        { error: "ACCOUNTING_INIT_FORBIDDEN", business_id: resolvedBusinessId },
         { status: 403 }
       )
     }
 
     if (!canUserInitializeAccounting(auth.authority_source)) {
       return NextResponse.json(
-        { error: "ACCOUNTING_INIT_FORBIDDEN", business_id: businessId },
+        { error: "ACCOUNTING_INIT_FORBIDDEN", business_id: resolvedBusinessId },
         { status: 403 }
       )
     }
 
-    const bootstrap = await ensureAccountingInitialized(supabase, businessId)
+    const bootstrap = await ensureAccountingInitialized(supabase, resolvedBusinessId)
     if (bootstrap.error) {
       return NextResponse.json(
-        { error: "ACCOUNTING_INIT_FORBIDDEN", business_id: businessId, message: bootstrap.error },
+        { error: "ACCOUNTING_INIT_FORBIDDEN", business_id: resolvedBusinessId, message: bootstrap.error },
         { status: 403 }
       )
     }
 
-    await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+    await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
 
-    return NextResponse.json({ success: true, business_id: businessId })
+    return NextResponse.json({ success: true, business_id: resolvedBusinessId })
   } catch (error: any) {
     console.error("Error in accounting initialize:", error)
     return NextResponse.json(

@@ -7,9 +7,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { logFirmActivity } from "@/lib/firmActivityLog"
-import { getUserFirmIds } from "@/lib/firmActivityLog"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { getUserFirmIds } from "@/lib/accounting/firm/activityLog"
 
 const ALLOWED_ACTION_TYPES = new Set([
   "CONTROL_TOWER_BULK_ACTION",

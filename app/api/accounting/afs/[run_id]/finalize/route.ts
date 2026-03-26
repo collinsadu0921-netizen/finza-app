@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * POST /api/accounting/afs/[run_id]/finalize
@@ -35,6 +37,13 @@ export async function POST(
     const body = await request.json()
     const { business_id } = body
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     if (!business_id) {
       return NextResponse.json(
         { error: "Missing required field: business_id" },
@@ -42,7 +51,22 @@ export async function POST(
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, business_id, "write")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "Missing required field: business_id" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can finalize AFS runs." },
@@ -55,7 +79,7 @@ export async function POST(
       .from("afs_runs")
       .select("*")
       .eq("id", run_id)
-      .eq("business_id", business_id)
+      .eq("business_id", resolvedBusinessId)
       .single()
 
     if (runError || !afsRun) {
@@ -93,7 +117,7 @@ export async function POST(
     const { count: newEntriesCount, error: entriesError } = await supabase
       .from("journal_entries")
       .select("*", { count: "exact", head: true })
-      .eq("business_id", business_id)
+      .eq("business_id", resolvedBusinessId)
       .gt("created_at", inputHashTimestamp.toISOString())
 
     if (entriesError) {
@@ -116,7 +140,7 @@ export async function POST(
     const { count: newExceptionsCount, error: exceptionsError } = await supabase
       .from("accounting_exceptions")
       .select("*", { count: "exact", head: true })
-      .eq("business_id", business_id)
+      .eq("business_id", resolvedBusinessId)
       .eq("severity", "critical")
       .gt("created_at", inputHashTimestamp.toISOString())
 

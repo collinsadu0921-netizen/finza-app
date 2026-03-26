@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accountingBootstrap"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,14 +20,29 @@ export async function GET(request: NextRequest) {
     const businessId = searchParams.get("business_id")
     const periodParam = searchParams.get("period") // Format: YYYY-MM
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "business_id parameter is required" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
-    const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const auth = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!auth.authorized) {
       return NextResponse.json(
         { error: "This action isn't available to your role." },
@@ -35,12 +52,12 @@ export async function GET(request: NextRequest) {
 
     const canInit = canUserInitializeAccounting(auth.authority_source)
     if (canInit) {
-      const bootstrap = await ensureAccountingInitialized(supabase, businessId)
+      const bootstrap = await ensureAccountingInitialized(supabase, resolvedBusinessId)
       if (bootstrap.error) {
         const structured = bootstrap.structuredError
         const body = {
           error: "ACCOUNTING_NOT_READY",
-          business_id: businessId,
+          business_id: resolvedBusinessId,
           authority_source: auth.authority_source,
           ...(structured && {
             error_code: structured.error_code,
@@ -73,23 +90,23 @@ export async function GET(request: NextRequest) {
     const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
 
     if (canUserInitializeAccounting(auth.authority_source)) {
-      await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+      await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
     }
 
     const { data: accountingPeriod, error: periodError } = await supabase
       .from("accounting_periods")
       .select("id, status, period_start, period_end")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("period_start", periodStart)
       .maybeSingle()
 
     if (periodError) {
-      console.error("Trial balance period fetch failed:", { businessId, periodStart, periodError })
+      console.error("Trial balance period fetch failed:", { businessId: resolvedBusinessId, periodStart, periodError })
       return NextResponse.json(
         {
           error: "Failed to fetch accounting period",
           step: "fetch_period",
-          business_id: businessId,
+          business_id: resolvedBusinessId,
           period_start: periodStart,
           supabase_error: { message: periodError.message, code: periodError.code },
         },
@@ -99,7 +116,7 @@ export async function GET(request: NextRequest) {
 
     if (!accountingPeriod) {
       return NextResponse.json(
-        { error: "Accounting period not found for period: " + periodParam, business_id: businessId },
+        { error: "Accounting period not found for period: " + periodParam, business_id: resolvedBusinessId },
         { status: 404 }
       )
     }
@@ -114,12 +131,12 @@ export async function GET(request: NextRequest) {
     })
 
     if (rpcError) {
-      console.error("Error fetching trial balance:", { businessId, period_id: accountingPeriod.id, rpcError })
+      console.error("Error fetching trial balance:", { businessId: resolvedBusinessId, period_id: accountingPeriod.id, rpcError })
       return NextResponse.json(
         {
           error: rpcError.message || "Failed to fetch trial balance",
           step: "get_trial_balance_from_snapshot",
-          business_id: businessId,
+          business_id: resolvedBusinessId,
           period_id: accountingPeriod.id,
           period_start: periodStart,
           period_end: periodEnd,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/carry-forward?business_id=...&from_period_start=...&to_period_start=...
@@ -22,11 +24,26 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
     const fromPeriodStart = searchParams.get("from_period_start")
     const toPeriodStart = searchParams.get("to_period_start")
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+
+    if (!resolvedBusinessId) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
@@ -47,7 +64,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can access carry-forward." },
@@ -111,7 +128,7 @@ export async function GET(request: NextRequest) {
         created_at,
         note
       `)
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .eq("from_period_start", fromPeriodStart)
       .eq("to_period_start", toPeriodStart)
       .single()
@@ -123,7 +140,7 @@ export async function GET(request: NextRequest) {
         const { data: fromPeriod, error: periodError } = await supabase
           .from("accounting_periods")
           .select("period_start, period_end, status")
-          .eq("business_id", businessId)
+          .eq("business_id", resolvedBusinessId)
           .eq("period_start", fromPeriodStart)
           .single()
 
@@ -138,7 +155,7 @@ export async function GET(request: NextRequest) {
         const { data: toPeriod, error: toPeriodError } = await supabase
           .from("accounting_periods")
           .select("period_start, period_end, status")
-          .eq("business_id", businessId)
+          .eq("business_id", resolvedBusinessId)
           .eq("period_start", toPeriodStart)
           .single()
 
@@ -153,7 +170,7 @@ export async function GET(request: NextRequest) {
         const { data: balances, error: balancesError } = await supabase.rpc(
           "compute_ending_balances_for_carry_forward",
           {
-            p_business_id: businessId,
+            p_business_id: resolvedBusinessId,
             p_as_of_date: fromPeriod.period_end,
           }
         )

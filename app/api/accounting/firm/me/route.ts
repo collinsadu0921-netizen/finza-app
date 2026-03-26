@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
 
 /**
  * GET /api/accounting/firm/me

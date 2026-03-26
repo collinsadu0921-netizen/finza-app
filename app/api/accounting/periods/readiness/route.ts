@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,11 +16,26 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const business_id = searchParams.get("business_id")
     const period_start = searchParams.get("period_start")
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+
     // Validate required fields
-    if (!business_id || !period_start) {
+    if (!resolvedBusinessId || !period_start) {
       return NextResponse.json(
         { error: "Missing required fields: business_id, period_start" },
         { status: 400 }
@@ -40,7 +57,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const auth = await checkAccountingAuthority(supabase, user.id, business_id, "read")
+    const auth = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!auth.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Accountant access required." },
@@ -52,7 +69,7 @@ export async function GET(request: NextRequest) {
     const { data: readinessResult, error: readinessError } = await supabase.rpc(
       "check_period_close_readiness",
       {
-        p_business_id: business_id,
+        p_business_id: resolvedBusinessId,
         p_period_start: period_start,
       }
     )
@@ -77,7 +94,7 @@ export async function GET(request: NextRequest) {
       const { data: periodRow } = await supabase
         .from("accounting_periods")
         .select("id")
-        .eq("business_id", business_id)
+        .eq("business_id", resolvedBusinessId)
         .eq("period_start", period_start)
         .maybeSingle()
       return periodRow?.id ?? null
@@ -85,7 +102,7 @@ export async function GET(request: NextRequest) {
 
     if (periodId) {
       const { data: checks, error: checksErr } = await supabase.rpc("run_period_close_checks", {
-        p_business_id: business_id,
+        p_business_id: resolvedBusinessId,
         p_period_id: periodId,
       })
       if (!checksErr && checks && typeof checks === "object" && "ok" in checks && !(checks as { ok: boolean }).ok) {

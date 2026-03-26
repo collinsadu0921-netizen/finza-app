@@ -5,7 +5,7 @@
 
 import { redirect } from "next/navigation"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getAccountingAuthority } from "@/lib/accountingAuthorityEngine"
+import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import {

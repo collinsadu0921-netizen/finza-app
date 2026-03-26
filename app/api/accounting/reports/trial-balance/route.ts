@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accountingBootstrap"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/reports/trial-balance
@@ -33,24 +35,38 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
     const periodId = searchParams.get("period_id")
     const periodStart = searchParams.get("period_start")
     const asOfDate = searchParams.get("as_of_date")
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
     const auth = await checkAccountingAuthority(
       supabase,
       user.id,
-      businessId,
+      resolvedBusinessId,
       "read"
     )
     if (!auth.authorized) {
@@ -61,27 +77,27 @@ export async function GET(request: NextRequest) {
     }
 
     if (!canUserInitializeAccounting(auth.authority_source)) {
-      const { ready } = await checkAccountingReadiness(supabase, businessId)
+      const { ready } = await checkAccountingReadiness(supabase, resolvedBusinessId)
       if (!ready) {
         return NextResponse.json(
-          { error: "ACCOUNTING_NOT_READY", business_id: businessId, authority_source: auth.authority_source },
+          { error: "ACCOUNTING_NOT_READY", business_id: resolvedBusinessId, authority_source: auth.authority_source },
           { status: 403 }
         )
       }
     } else {
-      const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, businessId)
+      const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, resolvedBusinessId)
       if (bootstrapErr) {
         return NextResponse.json(
-          { error: "ACCOUNTING_NOT_READY", business_id: businessId, authority_source: auth.authority_source },
+          { error: "ACCOUNTING_NOT_READY", business_id: resolvedBusinessId, authority_source: auth.authority_source },
           { status: 500 }
         )
       }
-      await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+      await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
     }
 
     const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
       supabase,
-      { businessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
+      { businessId: resolvedBusinessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
     )
     if (resolveError || !resolvedPeriod) {
       return NextResponse.json(

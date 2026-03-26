@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getUserFirmIds } from "@/lib/firmActivityLog"
-import { getEngagementById } from "@/lib/firmEngagements"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getUserFirmIds } from "@/lib/accounting/firm/activityLog"
+import { getEngagementById } from "@/lib/accounting/firm/engagements"
 
 /**
  * GET /api/accounting/firm/activity

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
 
 /**
  * GET /api/accounting/opening-balances?business_id=...
@@ -32,12 +34,37 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const business_id = searchParams.get("business_id")
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     if (!business_id) {
       return NextResponse.json(
         {
           error: "Missing required parameter: business_id",
           reasonCode: "MISSING_PARAMETER",
           message: "business_id is required"
+        },
+        { status: 400 }
+      )
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        {
+          error: "Missing required parameter: business_id",
+          reasonCode: "MISSING_PARAMETER",
+          message: "business_id is required",
         },
         { status: 400 }
       )
@@ -179,6 +206,13 @@ export async function POST(request: NextRequest) {
       lines = [],
     } = body
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     // Validate required fields
     if (!business_id || !period_id) {
       return NextResponse.json(
@@ -186,6 +220,24 @@ export async function POST(request: NextRequest) {
           error: "Missing required fields",
           reasonCode: "MISSING_FIELDS",
           message: "business_id and period_id are required"
+        },
+        { status: 400 }
+      )
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: String(business_id) }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        {
+          error: "Missing required fields",
+          reasonCode: "MISSING_FIELDS",
+          message: "business_id and period_id are required",
         },
         { status: 400 }
       )

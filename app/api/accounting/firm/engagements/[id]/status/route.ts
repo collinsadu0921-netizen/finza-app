@@ -9,9 +9,9 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getEngagementById } from "@/lib/firmEngagements"
-import { logFirmActivity } from "@/lib/firmActivityLog"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getEngagementById } from "@/lib/accounting/firm/engagements"
+import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
 
 const ALLOWED: Record<string, string[]> = {
   pending: ["accepted"],

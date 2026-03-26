@@ -5,20 +5,20 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getLedgerAdjustmentPolicy } from "@/lib/accounting/reconciliation/governance"
 
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("businessId") ?? ""
-
-    if (!businessId) {
-      return NextResponse.json(
-        { error: "Missing required query param: businessId" },
-        { status: 400 }
-      )
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
     }
 
     const {
@@ -28,12 +28,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 })
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+
+    if (!resolvedBusinessId) {
+      return NextResponse.json(
+        { error: "Missing required query param: businessId" },
+        { status: 400 }
+      )
+    }
+
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 })
     }
 
-    const policy = await getLedgerAdjustmentPolicy(supabase, businessId)
+    const policy = await getLedgerAdjustmentPolicy(supabase, resolvedBusinessId)
     return NextResponse.json({ policy })
   } catch (err: unknown) {
     console.error("Reconciliation policy error:", err)

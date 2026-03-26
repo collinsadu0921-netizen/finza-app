@@ -8,12 +8,12 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getAccountingAuthority, getEffectiveBusinessIdsForFirmUser } from "@/lib/accountingAuthorityEngine"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getAccountingAuthority, getEffectiveBusinessIdsForFirmUser } from "@/lib/accounting/authorityEngine"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { evaluateEngagementState } from "@/lib/accounting/evaluateEngagementState"
-import type { ControlTowerWorkItem } from "@/lib/controlTower/types"
+import type { ControlTowerWorkItem } from "@/lib/accounting/controlTower/types"
 
 const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 200

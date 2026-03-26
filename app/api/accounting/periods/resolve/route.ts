@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/periods/resolve
@@ -28,10 +30,25 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
     const fromDate = searchParams.get("from_date")
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    const resolvedBusinessId = "error" in resolved ? null : resolved.businessId
+
+    if (!resolvedBusinessId) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
@@ -48,7 +65,7 @@ export async function GET(request: NextRequest) {
     const auth = await checkAccountingAuthority(
       supabase,
       user.id,
-      businessId,
+      resolvedBusinessId,
       "read"
     )
     if (!auth.authorized) {
@@ -70,7 +87,7 @@ export async function GET(request: NextRequest) {
     const { data: periods, error: findError } = await supabase
       .from("accounting_periods")
       .select("id, period_start, period_end")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .lte("period_start", fromIso)
       .gte("period_end", fromIso)
       .order("period_start", { ascending: false })
@@ -95,7 +112,7 @@ export async function GET(request: NextRequest) {
 
     // 2) No period found — try to ensure one exists for this date (read-only from caller's perspective; RPC may create period)
     const { error: ensureError } = await supabase.rpc("ensure_accounting_period", {
-      p_business_id: businessId,
+      p_business_id: resolvedBusinessId,
       p_date: fromIso,
     })
 
@@ -111,14 +128,14 @@ export async function GET(request: NextRequest) {
     const { data: refetchPeriods, error: refetchError } = await supabase
       .from("accounting_periods")
       .select("id, period_start, period_end")
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .lte("period_start", fromIso)
       .gte("period_end", fromIso)
       .order("period_start", { ascending: false })
       .limit(1)
 
-    const resolved = refetchPeriods?.[0]
-    if (refetchError || !resolved) {
+    const resolvedPeriod = refetchPeriods?.[0]
+    if (refetchError || !resolvedPeriod) {
       return NextResponse.json(
         { error: "No accounting period covers the selected dates." },
         { status: 404 }
@@ -126,9 +143,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      period_id: resolved.id,
-      period_start: resolved.period_start,
-      period_end: resolved.period_end,
+      period_id: resolvedPeriod.id,
+      period_start: resolvedPeriod.period_start,
+      period_end: resolvedPeriod.period_end,
     })
   } catch (error: any) {
     console.error("Error in periods/resolve:", error)

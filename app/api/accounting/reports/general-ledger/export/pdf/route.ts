@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/reports/general-ledger/export/pdf
@@ -44,17 +46,33 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
 
-    if (!businessId || !accountId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+
+    if ("error" in resolved || !accountId) {
       return NextResponse.json(
         { error: "Missing required parameters: business_id and account_id" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
     const auth = await checkAccountingAuthority(
       supabase,
       user.id,
-      businessId,
+      resolvedBusinessId,
       "read"
     )
     if (!auth.authorized) {
@@ -69,7 +87,7 @@ export async function GET(request: NextRequest) {
       .from("accounts")
       .select("id, code, name, type")
       .eq("id", accountId)
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .is("deleted_at", null)
       .single()
 
@@ -88,14 +106,14 @@ export async function GET(request: NextRequest) {
       let { data: period, error: periodError } = await supabase
         .from("accounting_periods")
         .select("period_start, period_end")
-        .eq("business_id", businessId)
+        .eq("business_id", resolvedBusinessId)
         .eq("period_start", periodStart)
         .single()
 
       if (periodError || !period) {
         const periodDate = periodStart.length === 7 ? `${periodStart}-01` : periodStart
         const { error: ensureError } = await supabase.rpc("ensure_accounting_period", {
-          p_business_id: businessId,
+          p_business_id: resolvedBusinessId,
           p_date: periodDate,
         })
         if (ensureError) {
@@ -105,7 +123,7 @@ export async function GET(request: NextRequest) {
         const refetch = await supabase
           .from("accounting_periods")
           .select("period_start, period_end")
-          .eq("business_id", businessId)
+          .eq("business_id", resolvedBusinessId)
           .eq("period_start", periodDate)
           .single()
         if (refetch.error || !refetch.data) {
@@ -139,7 +157,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch data (non-paginated for export)
     const { data: ledgerLines, error: rpcError } = await supabase.rpc("get_general_ledger", {
-      p_business_id: businessId,
+      p_business_id: resolvedBusinessId,
       p_account_id: accountId,
       p_start_date: effectiveStartDate,
       p_end_date: effectiveEndDate,

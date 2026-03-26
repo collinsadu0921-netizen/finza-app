@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
-import { resolveAuthority } from "@/lib/firmAuthority"
-import { logBlockedActionAttempt, logFirmActivity } from "@/lib/firmActivityLog"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
+import { resolveAuthority } from "@/lib/accounting/firm/authority"
+import { logBlockedActionAttempt, logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 
 /**
  * GET /api/accounting/journals/drafts

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkFirmOnboardingForAction } from "@/lib/firmOnboarding"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/firmEngagements"
+import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
+import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
 import { buildCanonicalPostingPayload, validateCanonicalPayload } from "@/lib/accounting/manualJournalDraftPosting"
-import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 
 /**
  * POST /api/accounting/journals/drafts/{id}/post

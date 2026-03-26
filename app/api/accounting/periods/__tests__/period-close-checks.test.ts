@@ -22,24 +22,24 @@ const mockSupabase = {
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(() => Promise.resolve(mockSupabase)),
 }))
-jest.mock("@/lib/accountingAuth", () => ({
+jest.mock("@/lib/accounting/auth", () => ({
   checkAccountingAuthority: jest.fn(() =>
     Promise.resolve({ authorized: true, businessId })
   ),
 }))
-jest.mock("@/lib/firmOnboarding", () => ({
+jest.mock("@/lib/accounting/firm/onboarding", () => ({
   checkFirmOnboardingForAction: jest.fn(() =>
     Promise.resolve({ isComplete: true, firmId: null })
   ),
 }))
-jest.mock("@/lib/firmEngagements", () => ({
+jest.mock("@/lib/accounting/firm/engagements", () => ({
   getActiveEngagement: jest.fn(() => Promise.resolve(null)),
   isEngagementEffective: jest.fn(() => true),
 }))
-jest.mock("@/lib/firmAuthority", () => ({
+jest.mock("@/lib/accounting/firm/authority", () => ({
   resolveAuthority: jest.fn(() => ({ allowed: true })),
 }))
-jest.mock("@/lib/firmActivityLog", () => ({
+jest.mock("@/lib/accounting/firm/activityLog", () => ({
   logBlockedActionAttempt: jest.fn(() => Promise.resolve()),
 }))
 

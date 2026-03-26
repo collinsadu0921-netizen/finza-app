@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { setActiveFirmId } from "@/lib/firmSession"
+import { setActiveFirmId } from "@/lib/accounting/firm/session"
 
 /**
  * Firm Setup Page

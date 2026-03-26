@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/afs/documents/[run_id]
@@ -32,14 +34,29 @@ export async function GET(
     const businessId = searchParams.get("business_id")
     const documentType = searchParams.get("document_type")
 
-    if (!businessId) {
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams,
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
+    const resolvedBusinessId = resolved.businessId
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
     if (!authResult.authorized) {
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can view AFS documents." },
@@ -52,7 +69,7 @@ export async function GET(
       .from("afs_runs")
       .select("id")
       .eq("id", run_id)
-      .eq("business_id", businessId)
+      .eq("business_id", resolvedBusinessId)
       .single()
 
     if (runError || !run) {

@@ -17,8 +17,8 @@ import { NextRequest } from "next/server"
 
 // Mock modules
 jest.mock("@/lib/supabaseServer")
-jest.mock("@/lib/firmOnboarding")
-jest.mock("@/lib/firmEngagements")
+jest.mock("@/lib/accounting/firm/onboarding")
+jest.mock("@/lib/accounting/firm/engagements")
 
 describe("Manual Journal Draft Posting API - Integration Tests", () => {
   describe("1. Happy Path Posting", () => {

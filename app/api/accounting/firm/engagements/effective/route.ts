@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
-import { getEffectiveBusinessIdsForFirmUser } from "@/lib/accountingAuthorityEngine"
+import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getEffectiveBusinessIdsForFirmUser } from "@/lib/accounting/authorityEngine"
 
 /**
  * GET /api/accounting/firm/engagements/effective
