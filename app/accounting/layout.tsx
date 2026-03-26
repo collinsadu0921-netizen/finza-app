@@ -1,6 +1,5 @@
-import { AccountingClientContextGate } from "@/components/AccountingClientContextGate"
-import PermissionVisibilityBanner from "@/components/accounting/PermissionVisibilityBanner"
-import ServiceOwnerAccountingBanner from "@/components/accounting/ServiceOwnerAccountingBanner"
+import AccountingWorkspaceShell from "@/components/accounting/AccountingWorkspaceShell"
+import ProtectedLayout from "@/components/ProtectedLayout"
 
 export default function AccountingLayout({
   children,
@@ -8,10 +7,8 @@ export default function AccountingLayout({
   children: React.ReactNode
 }) {
   return (
-    <AccountingClientContextGate>
-      <PermissionVisibilityBanner />
-      <ServiceOwnerAccountingBanner />
-      {children}
-    </AccountingClientContextGate>
+    <ProtectedLayout>
+      <AccountingWorkspaceShell>{children}</AccountingWorkspaceShell>
+    </ProtectedLayout>
   )
 }

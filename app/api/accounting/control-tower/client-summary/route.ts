@@ -10,6 +10,8 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import type { ControlTowerClientSummary } from "@/lib/accounting/controlTower/types"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 function qs(params: Record<string, string>): string {
   return new URLSearchParams(params).toString()
@@ -30,6 +32,12 @@ export async function GET(request: NextRequest) {
     if (forbidden) return forbidden
 
     const business_id = request.nextUrl.searchParams.get("business_id")
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
     if (!business_id?.trim()) {
       return NextResponse.json(
         { error: "MISSING_BUSINESS_ID" },
@@ -37,10 +45,25 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: request.nextUrl.searchParams,
+      pathname: request.nextUrl.pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        { error: "MISSING_BUSINESS_ID" },
+        { status: 400 }
+      )
+    }
+    const resolvedBusinessId = resolved.businessId
+
     const auth = await getAccountingAuthority({
       supabase,
       firmUserId: user.id,
-      businessId: business_id,
+      businessId: resolvedBusinessId,
       requiredLevel: "read",
     })
 
@@ -57,14 +80,14 @@ export async function GET(request: NextRequest) {
     const { data: business } = await supabase
       .from("businesses")
       .select("id, name")
-      .eq("id", business_id)
+      .eq("id", resolvedBusinessId)
       .maybeSingle()
 
     const { data: engagementRow } = await supabase
       .from("firm_client_engagements")
       .select("id, status, access_level, effective_from, effective_to")
       .eq("id", engagementId)
-      .eq("client_business_id", business_id)
+      .eq("client_business_id", resolvedBusinessId)
       .eq("accounting_firm_id", firmId)
       .maybeSingle()
 
@@ -79,32 +102,32 @@ export async function GET(request: NextRequest) {
         .from("manual_journal_drafts")
         .select("id", { count: "exact", head: true })
         .eq("accounting_firm_id", firmId)
-        .eq("client_business_id", business_id)
+        .eq("client_business_id", resolvedBusinessId)
         .eq("status", "submitted"),
       supabase
         .from("manual_journal_drafts")
         .select("id", { count: "exact", head: true })
         .eq("accounting_firm_id", firmId)
-        .eq("client_business_id", business_id)
+        .eq("client_business_id", resolvedBusinessId)
         .eq("status", "approved")
         .is("journal_entry_id", null),
       supabase
         .from("opening_balance_imports")
         .select("id", { count: "exact", head: true })
         .eq("accounting_firm_id", firmId)
-        .eq("client_business_id", business_id)
+        .eq("client_business_id", resolvedBusinessId)
         .eq("status", "draft"),
       supabase
         .from("opening_balance_imports")
         .select("id", { count: "exact", head: true })
         .eq("accounting_firm_id", firmId)
-        .eq("client_business_id", business_id)
+        .eq("client_business_id", resolvedBusinessId)
         .eq("status", "approved")
         .is("journal_entry_id", null),
       supabase
         .from("accounting_periods")
         .select("id, period_start, status")
-        .eq("business_id", business_id)
+        .eq("business_id", resolvedBusinessId)
         .order("period_start", { ascending: false })
         .limit(10),
     ])
@@ -119,7 +142,7 @@ export async function GET(request: NextRequest) {
 
     if (currentPeriod) {
       const { data: readiness } = await supabase.rpc("check_period_close_readiness", {
-        p_business_id: business_id,
+        p_business_id: resolvedBusinessId,
         p_period_start: currentPeriod.period_start,
       })
       if ((readiness as { status?: string } | null)?.status === "BLOCKED") {
@@ -132,7 +155,7 @@ export async function GET(request: NextRequest) {
     let reconExceptions = 0
     try {
       const res = await fetch(
-        `${origin}/api/accounting/reconciliation/mismatches?businessId=${encodeURIComponent(business_id)}&limit=10`,
+        `${origin}/api/accounting/reconciliation/mismatches?businessId=${encodeURIComponent(resolvedBusinessId)}&limit=10`,
         { headers: { cookie } }
       )
       const data = await res.json()
@@ -143,7 +166,7 @@ export async function GET(request: NextRequest) {
 
     const base = `/accounting`
     const summary: ControlTowerClientSummary = {
-      business_id,
+      business_id: resolvedBusinessId,
       client_name: business?.name ?? "Unknown",
       engagement: {
         status: engagementRow?.status ?? "unknown",
@@ -165,12 +188,12 @@ export async function GET(request: NextRequest) {
         last_closed_period_id: lastClosedPeriod?.id ?? null,
       },
       links: {
-        ledger: `${base}/ledger?${qs({ business_id })}`,
-        journals: `${base}/journals?${qs({ business_id })}`,
-        openingBalances: `${base}/opening-balances-imports?${qs({ business_id })}`,
-        reconciliation: `${base}/reconciliation?${qs({ business_id })}`,
-        periods: `${base}/periods?${qs({ business_id })}`,
-        reports: `${base}/reports/trial-balance?${qs({ business_id })}`,
+        ledger: `${base}/ledger?${qs({ business_id: resolvedBusinessId })}`,
+        journals: `${base}/journals?${qs({ business_id: resolvedBusinessId })}`,
+        openingBalances: `${base}/opening-balances-imports?${qs({ business_id: resolvedBusinessId })}`,
+        reconciliation: `${base}/reconciliation?${qs({ business_id: resolvedBusinessId })}`,
+        periods: `${base}/periods?${qs({ business_id: resolvedBusinessId })}`,
+        reports: `${base}/reports/trial-balance?${qs({ business_id: resolvedBusinessId })}`,
       },
     }
 

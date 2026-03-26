@@ -1,31 +1,36 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, createContext, useContext, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, usePathname } from "next/navigation"
 import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscriptionContext"
 import StoreSwitcher from "./StoreSwitcher"
-import ClientSelector from "./ClientSelector"
-import FirmSelector from "./FirmSelector"
-import FirmRoleBadge from "./FirmRoleBadge"
-import ClientContextWarning from "./ClientContextWarning"
-import AccountingBreadcrumbs from "./AccountingBreadcrumbs"
 import Sidebar from "./Sidebar"
 import { isCashierAuthenticated } from "@/lib/cashierSession"
-import { resolveAccess, getHomeRouteForRole, getWorkspaceFromPath } from "@/lib/accessControl"
+import { resolveAccess } from "@/lib/accessControl"
 import { autoBindSingleStore } from "@/lib/autoBindStore"
 import { useExportMode } from "@/lib/hooks/useExportMode"
 import RetailPosIdleSessionWatcher from "@/components/RetailPosIdleSessionWatcher"
 import AppIdleTimeoutWatcher from "@/components/AppIdleTimeoutWatcher"
 
+const ProtectedLayoutContext = createContext(false)
+
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  const isNestedProtectedLayout = useContext(ProtectedLayoutContext)
   const router = useRouter()
   const pathname = usePathname()
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(isNestedProtectedLayout ? false : true)
   const isExportMode = useExportMode()
   const isPOSRoute = pathname?.startsWith("/pos")
+  const isAccountingRoute = pathname?.startsWith("/accounting")
 
   useEffect(() => {
+    // Nested usage should be a transparent wrapper to prevent duplicate chrome.
+    if (isNestedProtectedLayout) {
+      if (loading) setLoading(false)
+      return
+    }
+
     let isMounted = true
     
     async function checkAccess() {
@@ -83,7 +88,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     return () => {
       isMounted = false
     }
-  }, [router, pathname])
+  }, [router, pathname, isNestedProtectedLayout, loading])
+
+  if (isNestedProtectedLayout) {
+    return <>{children}</>
+  }
 
   if (loading) {
     return (
@@ -96,63 +105,49 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const cashierAuth = isCashierAuthenticated()
 
   return (
-    <Suspense fallback={null}>
-      <ServiceSubscriptionProvider>
-        <RetailPosIdleSessionWatcher pathname={pathname} />
-        <AppIdleTimeoutWatcher pathname={pathname} />
-        <div
-          className="min-h-screen bg-gray-50 dark:bg-gray-900"
-          data-export-mode={isExportMode ? "true" : undefined}
-        >
-          {/* Sidebar - hidden in print/export/preview (export-hide) */}
-          {!cashierAuth && (
-            <div className="export-hide print-hide">
-              <Sidebar />
-            </div>
-          )}
+    <ProtectedLayoutContext.Provider value={true}>
+      <Suspense fallback={null}>
+        <ServiceSubscriptionProvider>
+          <RetailPosIdleSessionWatcher pathname={pathname} />
+          <AppIdleTimeoutWatcher pathname={pathname} />
+          <div
+            className="min-h-screen bg-gray-50 dark:bg-gray-900"
+            data-export-mode={isExportMode ? "true" : undefined}
+          >
+            {/* Sidebar - hidden in print/export/preview (export-hide) */}
+            {!cashierAuth && !isAccountingRoute && (
+              <div className="export-hide print-hide">
+                <Sidebar />
+              </div>
+            )}
 
-          {/* Main Layout */}
-          <div className={cashierAuth ? "" : "lg:pl-64"}>
-        {/* Top Navigation Bar — shown on accounting routes and non-service paths only.
-            On /service/* the bar is empty (no accounting selectors, logout moved to sidebar)
-            so we hide it to reclaim vertical space. */}
-        {!cashierAuth && !pathname?.startsWith('/service') && (
-          <nav className="export-hide print-hide bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm sticky top-0 z-30">
-            <div className="px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-between items-center h-16">
-                <div className="flex items-center gap-4">
-                  {/* Mobile menu button - will be handled by Sidebar component */}
-                </div>
-                <div className="flex items-center gap-4">
-                  {!isPOSRoute && <StoreSwitcher />}
-                  {/* Accounting workspace only: firm/client UI. /service/* uses business context only (no FirmSelector/ClientSelector). */}
-                  {pathname?.startsWith('/accounting') && <FirmSelector />}
-                  {pathname?.startsWith('/accounting') && <FirmRoleBadge />}
-                  {pathname?.startsWith('/accounting') && <ClientSelector />}
+            {/* Main Layout */}
+            <div className={cashierAuth || isAccountingRoute ? "" : "lg:pl-64"}>
+          {/* Top navigation for non-accounting workspaces. */}
+          {!cashierAuth && !pathname?.startsWith('/service') && !isAccountingRoute && (
+            <nav className="export-hide print-hide bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm sticky top-0 z-30">
+              <div className="px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-between items-center h-16">
+                  <div className="flex items-center gap-4">
+                    {/* Mobile menu button - will be handled by Sidebar component */}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {!isPOSRoute && <StoreSwitcher />}
+                  </div>
                 </div>
               </div>
-            </div>
-          </nav>
-        )}
-
-        {/* Main Content - Accounting breadcrumbs/warning only for /accounting/*; /service/* uses BusinessLayout mode (no firm chrome). */}
-        <main className={pathname?.startsWith('/service') ? "min-h-screen" : "min-h-[calc(100vh-4rem)]"}>
-          {pathname?.startsWith('/accounting') && (
-            <>
-              <div className="export-hide print-hide">
-                <AccountingBreadcrumbs />
-              </div>
-              <div className="export-hide print-hide">
-                <ClientContextWarning />
-              </div>
-            </>
+            </nav>
           )}
-          {children}
-        </main>
+
+          {/* Main content */}
+          <main className={pathname?.startsWith('/service') ? "min-h-screen" : "min-h-[calc(100vh-4rem)]"}>
+            {children}
+          </main>
+            </div>
           </div>
-        </div>
-      </ServiceSubscriptionProvider>
-    </Suspense>
+        </ServiceSubscriptionProvider>
+      </Suspense>
+    </ProtectedLayoutContext.Provider>
   )
 }
 

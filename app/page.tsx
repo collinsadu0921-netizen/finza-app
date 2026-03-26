@@ -19,6 +19,27 @@ export default function HomePage() {
         return
       }
 
+      // Account intent takes priority over workspace defaults.
+      // New accountant users should not be forced into service-first routing.
+      const { data: authData } = await supabase.auth.getUser()
+      const signupIntent = authData.user?.user_metadata?.signup_intent
+
+      if (signupIntent === "accounting_firm") {
+        const { data: firmUsers } = await supabase
+          .from("accounting_firm_users")
+          .select("firm_id")
+          .eq("user_id", userId)
+          .limit(1)
+
+        if (firmUsers && firmUsers.length > 0) {
+          router.replace("/accounting/firm")
+          return
+        }
+
+        router.replace("/accounting/firm/setup")
+        return
+      }
+
       const all = await getAllUserBusinesses(supabase, userId)
 
       if (all.length === 0) {

@@ -17,8 +17,8 @@ export default function ClientContextWarning() {
     return null
   }
 
-  // Don't show on firm dashboard (firm-only context is expected)
-  if (pathname === '/accounting/firm') {
+  // Don't show on firm routes (firm-only context is expected) or access-denied.
+  if (pathname?.startsWith("/accounting/firm") || pathname === "/accounting/access-denied") {
     return null
   }
 

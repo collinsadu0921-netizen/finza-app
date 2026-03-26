@@ -3,6 +3,8 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
 import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
 import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * POST /api/accounting/opening-balances/{id}/post
@@ -57,6 +59,13 @@ export async function POST(
       )
     }
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     // Get existing import
     const { data: existingImport, error: fetchError } = await supabase
       .from("opening_balance_imports")
@@ -72,6 +81,24 @@ export async function POST(
           message: `Opening balance import ${importId} not found`
         },
         { status: 404 }
+      )
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: existingImport.client_business_id }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return NextResponse.json(
+        {
+          error: "Import business context missing",
+          reasonCode: "MISSING_FIELDS",
+          message: "business_id is required"
+        },
+        { status: 400 }
       )
     }
 

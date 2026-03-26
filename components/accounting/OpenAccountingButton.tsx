@@ -9,11 +9,11 @@ type Props = {
 }
 
 /**
- * Client accounting shortcut: links to accounting hub with business_id so context is set.
- * Use wherever client pages previously had "advanced accounting" entry points.
+ * Client accounting shortcut: links directly to client overview.
+ * Use wherever client pages have "open accounting" entry points.
  */
 export default function OpenAccountingButton({ businessId, children, className }: Props) {
-  const href = `/accounting?business_id=${encodeURIComponent(businessId)}`
+  const href = `/accounting/clients/${encodeURIComponent(businessId)}/overview`
   return (
     <Link
       href={href}

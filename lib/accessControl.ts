@@ -170,6 +170,22 @@ export async function resolveAccess(
       return debugDecision({ allowed: true })
     }
 
+    // Allow accountant-intent users to complete firm setup/onboarding before firm membership exists.
+    const preMembershipFirmRoutes = ["/accounting/firm/setup", "/accounting/firm/onboarding"]
+    const isPreMembershipFirmRoute = preMembershipFirmRoutes.some(
+      (route) => normalizedPath === route || normalizedPath.startsWith(route + "/")
+    )
+    if (isPreMembershipFirmRoute) {
+      if (signupIntent === "accounting_firm") {
+        return debugDecision({ allowed: true })
+      }
+      return debugDecision({
+        allowed: false,
+        redirectTo: "/accounting/access-denied",
+        reason: "Firm setup/onboarding is only for accounting firm users",
+      })
+    }
+
     // Check if user belongs to an accounting firm
     const { data: firmUsers } = await supabase
       .from("accounting_firm_users")

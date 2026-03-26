@@ -4,6 +4,8 @@ import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
 import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
 import { buildCanonicalOpeningBalancePayload } from "@/lib/accounting/openingBalanceImports"
 import { getBusinessIdFromRequest, missingBusinessIdResponse } from "@/lib/accounting/requireBusinessId"
+import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
+import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 
 /**
  * GET /api/accounting/opening-balances/{id}
@@ -51,6 +53,25 @@ export async function GET(
       )
     }
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
+    const resolved = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: businessId }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolved) {
+      return missingBusinessIdResponse("GET", `/api/accounting/opening-balances/${importId}`, "opening-balances/[id]")
+    }
+    const resolvedBusinessId = resolved.businessId
+
     // Get import
     const { data: importData, error: fetchError } = await supabase
       .from("opening_balance_imports")
@@ -69,7 +90,7 @@ export async function GET(
       )
     }
 
-    if (importData.client_business_id !== businessId) {
+    if (importData.client_business_id !== resolvedBusinessId) {
       return NextResponse.json(
         { error: "Business mismatch", reasonCode: "BUSINESS_MISMATCH", message: "Import does not belong to the specified client" },
         { status: 403 }
@@ -189,6 +210,13 @@ export async function PATCH(
       )
     }
 
+    try {
+      assertAccountingAccess(accountingUserFromRequest(request))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Forbidden"
+      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+    }
+
     const body = await request.json()
     const { lines } = body
 
@@ -207,6 +235,24 @@ export async function PATCH(
           message: `Opening balance import ${importId} not found`
         },
         { status: 404 }
+      )
+    }
+
+    const resolvedPatch = await resolveAccountingContext({
+      supabase,
+      userId: user.id,
+      searchParams: new URLSearchParams({ business_id: existingImport.client_business_id }),
+      pathname: new URL(request.url).pathname,
+      source: "api",
+    })
+    if ("error" in resolvedPatch) {
+      return NextResponse.json(
+        {
+          error: "Import business context missing",
+          reasonCode: "MISSING_FIELDS",
+          message: "business_id is required"
+        },
+        { status: 400 }
       )
     }
 

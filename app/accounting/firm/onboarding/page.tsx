@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { useRouter } from "next/navigation"
 import { getActiveFirmId } from "@/lib/accounting/firm/session"
 
@@ -133,70 +132,65 @@ export default function FirmOnboardingPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
-            </div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
           </div>
         </div>
-      </ProtectedLayout>
+      </div>
     )
   }
 
   // Check if user is Partner
   if (userRole !== "partner") {
     return (
-      <ProtectedLayout>
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
-              <h2 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">
-                Access Denied
-              </h2>
-              <p className="text-red-600 dark:text-red-300">
-                Only Partners can complete firm onboarding. Please contact a Partner to complete this process.
-              </p>
-            </div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
+            <h2 className="text-xl font-bold text-red-800 dark:text-red-200 mb-2">
+              Access Denied
+            </h2>
+            <p className="text-red-600 dark:text-red-300">
+              Only Partners can complete firm onboarding. Please contact a Partner to complete this process.
+            </p>
           </div>
         </div>
-      </ProtectedLayout>
+      </div>
     )
   }
 
   return (
-    <ProtectedLayout>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-              Firm Onboarding
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 text-lg">
-              Complete your firm setup to start managing clients
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+            Firm Onboarding
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 text-lg">
+            Complete your firm setup to start managing clients
+          </p>
+        </div>
+
+        {firm && (
+          <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <p className="text-blue-800 dark:text-blue-200 text-sm">
+              <strong>Firm:</strong> {firm.name}
             </p>
           </div>
+        )}
 
-          {firm && (
-            <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <p className="text-blue-800 dark:text-blue-200 text-sm">
-                <strong>Firm:</strong> {firm.name}
-              </p>
-            </div>
-          )}
+        {error && (
+          <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+            <p className="text-red-800 dark:text-red-200">{error}</p>
+          </div>
+        )}
 
-          {error && (
-            <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-              <p className="text-red-800 dark:text-red-200">{error}</p>
-            </div>
-          )}
-
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-8">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-              Firm Details
-            </h2>
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-8">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+            Firm Details
+          </h2>
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
@@ -319,19 +313,18 @@ export default function FirmOnboardingPage() {
             </form>
           </div>
 
-          <div className="mt-8 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-2">
-              Important Notes
-            </h3>
-            <ul className="list-disc list-inside space-y-2 text-sm text-yellow-700 dark:text-yellow-300">
-              <li>Only Partners can complete firm onboarding</li>
-              <li>Clients cannot be added until onboarding is completed</li>
-              <li>Accounting actions are blocked until onboarding is completed</li>
-              <li>This information can be updated later in firm settings</li>
-            </ul>
-          </div>
+        <div className="mt-8 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-2">
+            Important Notes
+          </h3>
+          <ul className="list-disc list-inside space-y-2 text-sm text-yellow-700 dark:text-yellow-300">
+            <li>Only Partners can complete firm onboarding</li>
+            <li>Clients cannot be added until onboarding is completed</li>
+            <li>Accounting actions are blocked until onboarding is completed</li>
+            <li>This information can be updated later in firm settings</li>
+          </ul>
         </div>
       </div>
-    </ProtectedLayout>
+    </div>
   )
 }

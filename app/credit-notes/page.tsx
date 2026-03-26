@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 type CreditNote = {
@@ -44,11 +45,16 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function CreditNotesPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const [loading, setLoading] = useState(true)
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([])
   const [error, setError] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
+  const isServiceRoute = pathname?.startsWith("/service/")
+  const createPath = isServiceRoute ? "/service/credit-notes/create" : "/credit-notes/create"
+  const viewPath = (creditNoteId: string) =>
+    isServiceRoute ? `/service/credit-notes/${creditNoteId}/view` : `/credit-notes/${creditNoteId}/view`
 
   useEffect(() => {
     loadCreditNotes()
@@ -117,7 +123,7 @@ export default function CreditNotesPage() {
               <p className="text-sm text-slate-500 mt-0.5">Manage invoice adjustments and refunds</p>
             </div>
             <button
-              onClick={() => router.push("/credit-notes/create")}
+              onClick={() => router.push(createPath)}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -229,7 +235,7 @@ export default function CreditNotesPage() {
               </p>
               {!search && statusFilter === "all" && (
                 <button
-                  onClick={() => router.push("/credit-notes/create")}
+                  onClick={() => router.push(createPath)}
                   className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
                 >
                   Create Credit Note
@@ -255,7 +261,7 @@ export default function CreditNotesPage() {
                     {visible.map((cn) => (
                       <tr
                         key={cn.id}
-                        onClick={() => router.push(`/credit-notes/${cn.id}/view`)}
+                        onClick={() => router.push(viewPath(cn.id))}
                         className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
                       >
                         <td className="px-4 py-3.5 whitespace-nowrap">
