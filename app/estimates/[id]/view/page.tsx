@@ -166,7 +166,10 @@ export default function EstimateViewPage() {
             description: item.description,
             qty: item.quantity,
             unit_price: item.price,
-            discount_amount: 0,
+            discount_amount: Math.max(
+              0,
+              Math.round(((Number(item.quantity) || 0) * (Number(item.price) || 0) - Number(item.total || 0)) * 100) / 100
+            ),
           })),
         }),
       })
@@ -259,6 +262,13 @@ export default function EstimateViewPage() {
 
   // Extra check for TypeScript
   if (!estimate) return null
+
+  const lineDiscount = (item: EstimateItem): number => {
+    const gross = (Number(item.quantity) || 0) * (Number(item.price) || 0)
+    const net = Number(item.total) || 0
+    return Math.max(0, Math.round((gross - net) * 100) / 100)
+  }
+  const totalDiscount = (items || []).reduce((sum, item) => sum + lineDiscount(item), 0)
 
   return (
     <ProtectedLayout>
@@ -375,6 +385,7 @@ export default function EstimateViewPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Description</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Qty</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Price</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Discount</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Total</th>
                   </tr>
                 </thead>
@@ -384,6 +395,9 @@ export default function EstimateViewPage() {
                       <td className="px-4 py-3 text-sm text-slate-700">{item.description || "No description"}</td>
                       <td className="px-4 py-3 text-right text-sm text-slate-600">{Number(item.quantity) || 0}</td>
                       <td className="px-4 py-3 text-right text-sm text-slate-600">{currencySymbol || ""} {Number(item.price || 0).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right text-sm text-slate-600 tabular-nums">
+                        {lineDiscount(item) > 0 ? `${currencySymbol || ""} ${lineDiscount(item).toFixed(2)}` : "—"}
+                      </td>
                       <td className="px-4 py-3 text-right text-sm font-medium text-slate-800">{currencySymbol || ""} {Number(item.total || 0).toFixed(2)}</td>
                     </tr>
                   ))}
@@ -405,6 +419,12 @@ export default function EstimateViewPage() {
                   <span className="text-slate-500">Subtotal</span>
                   <span className="font-medium text-slate-800">{currencySymbol || ""} {Number(estimate.subtotal).toFixed(2)}</span>
                 </div>
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-500">Discounts</span>
+                    <span className="font-medium text-rose-600 tabular-nums">−{currencySymbol || ""} {totalDiscount.toFixed(2)}</span>
+                  </div>
+                )}
                 {estimate.total_tax_amount > 0 && (() => {
                   const taxBreakdown = estimate.tax_lines
                     ? getGhanaLegacyView(estimate.tax_lines)

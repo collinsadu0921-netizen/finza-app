@@ -265,6 +265,7 @@ export default function BillViewPage() {
     currencyCode,
     homeCurrencyDisplay
   )
+  const totalDiscount = (items || []).reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
   const homeCodeForBill = bill.home_currency_code || currencyCode || ""
   const billIsForeign = !!(
     bill.fx_rate &&
@@ -504,6 +505,7 @@ export default function BillViewPage() {
                           <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Description</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty</th>
                           <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit Price</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Discount</th>
                           <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Total</th>
                         </tr>
                       </thead>
@@ -514,6 +516,9 @@ export default function BillViewPage() {
                             <td className="px-4 py-3 text-sm text-center text-slate-600">{Number(item.qty)}</td>
                             <td className="px-4 py-3 text-sm text-right text-slate-600">
                               {docCurrencyDisplay}{Number(item.unit_price).toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right text-slate-600 tabular-nums">
+                              {Number(item.discount_amount || 0) > 0 ? `${docCurrencyDisplay}${Number(item.discount_amount).toFixed(2)}` : "—"}
                             </td>
                             <td className="px-4 py-3 text-sm text-right font-medium text-slate-800">
                               {docCurrencyDisplay}{Number(item.line_subtotal).toFixed(2)}
@@ -535,6 +540,12 @@ export default function BillViewPage() {
                       <span className="text-slate-500">Subtotal:</span>
                       <span className="font-semibold text-slate-800">{docCurrencyDisplay}{Number(bill.subtotal).toFixed(2)}</span>
                     </div>
+                    {totalDiscount > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-500">Discounts:</span>
+                        <span className="font-semibold text-rose-600">−{docCurrencyDisplay}{totalDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="space-y-2 pt-2 border-t border-slate-100">
                       {(() => {
                         const countryCode = businessCountry ? normalizeCountry(businessCountry) : null

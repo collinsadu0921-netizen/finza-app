@@ -348,6 +348,7 @@ export default function ProformaViewPage() {
     ? getGhanaLegacyView(proforma.tax_lines)
     : { nhil: proforma.nhil || 0, getfund: proforma.getfund || 0, covid: proforma.covid || 0, vat: proforma.vat || 0 }
   const allTaxLines = proforma.tax_lines ? getTaxBreakdown(proforma.tax_lines) : null
+  const totalDiscount = (items || []).reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -583,6 +584,14 @@ export default function ProformaViewPage() {
                     {currencyDisplay} {Number(proforma.subtotal).toFixed(2)}
                   </span>
                 </div>
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-500">Discounts:</span>
+                    <span className="font-medium text-rose-600 tabular-nums">
+                      −{currencyDisplay} {totalDiscount.toFixed(2)}
+                    </span>
+                  </div>
+                )}
                 {Number(proforma.total_tax) > 0 && (
                   <>
                     {proforma.tax_lines && allTaxLines ? (

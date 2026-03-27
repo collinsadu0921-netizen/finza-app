@@ -384,7 +384,8 @@ export async function PUT(
     const estimateItems = items.map((item: any) => {
       const qty = Number(item.qty || item.quantity) || 0
       const price = Number(item.unit_price || item.price) || 0
-      const total = qty * price
+      const discount = Number(item.discount_amount) || 0
+      const total = Math.round(Math.max(0, (qty * price) - discount) * 100) / 100
 
       return {
         estimate_id: finalEstimateId,

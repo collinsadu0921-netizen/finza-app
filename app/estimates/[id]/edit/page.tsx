@@ -22,6 +22,29 @@ type EstimateItem = {
   quantity: number
   price: number
   total: number
+  discount_type: "amount" | "percent"
+  discount_value: number
+  discount_amount?: number
+  _rawDiscount?: string
+}
+
+const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
+
+const getDiscountAmount = (item: Pick<EstimateItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = Math.max(0, (Number(item.quantity) || 0) * (Number(item.price) || 0))
+  const rawDiscount = Number(item.discount_value) || 0
+  if (rawDiscount <= 0 || gross <= 0) return 0
+
+  const discount = item.discount_type === "percent"
+    ? (gross * Math.min(100, Math.max(0, rawDiscount))) / 100
+    : Math.max(0, rawDiscount)
+
+  return round2(Math.min(discount, gross))
+}
+
+const getLineTotal = (item: Pick<EstimateItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = (Number(item.quantity) || 0) * (Number(item.price) || 0)
+  return round2(Math.max(0, gross - getDiscountAmount(item)))
 }
 
 type Estimate = {
@@ -146,6 +169,15 @@ export default function EstimateEditPage() {
           quantity: Number(item.quantity) || 1,
           price: Number(item.price) || 0,
           total: Number(item.total) || (Number(item.quantity) || 1) * (Number(item.price) || 0),
+          discount_type: "amount",
+          discount_value: Math.max(
+            0,
+            round2(((Number(item.quantity) || 0) * (Number(item.price) || 0)) - (Number(item.total) || 0))
+          ),
+          discount_amount: Math.max(
+            0,
+            round2(((Number(item.quantity) || 0) * (Number(item.price) || 0)) - (Number(item.total) || 0))
+          ),
         }))
         console.log("Mapped items:", mappedItems)
         setItems(mappedItems)
@@ -203,6 +235,9 @@ export default function EstimateEditPage() {
         quantity: 1,
         price: 0,
         total: 0,
+        discount_type: "amount",
+        discount_value: 0,
+        discount_amount: 0,
       },
     ])
   }
@@ -215,12 +250,22 @@ export default function EstimateEditPage() {
     setItems(
       items.map((item) => {
         if (item.id === id) {
-          // Handle quantity and price as numbers, ensuring proper conversion
+          // Handle numeric fields as numbers, ensuring proper conversion
           const updated = { ...item }
-          if (field === "quantity" || field === "price") {
+          if (field === "_rawDiscount") {
+            updated._rawDiscount = value
+            return updated
+          }
+          if (field === "quantity" || field === "price" || field === "discount_value") {
+            if (field === "discount_value") updated._rawDiscount = String(value)
             const numValue = value === "" || value === null || value === undefined ? 0 : Number(value)
             updated[field] = isNaN(numValue) ? 0 : numValue
-            updated.total = updated.quantity * updated.price
+            updated.total = getLineTotal(updated)
+            updated.discount_amount = getDiscountAmount(updated)
+          } else if (field === "discount_type") {
+            updated.discount_type = value as any
+            updated.total = getLineTotal(updated)
+            updated.discount_amount = getDiscountAmount(updated)
           } else {
             (updated as any)[field] = value
           }
@@ -234,10 +279,23 @@ export default function EstimateEditPage() {
   const selectProduct = (itemId: string, productId: string) => {
     const product = products.find((p) => p.id === productId)
     if (product) {
-      updateItem(itemId, "product_id", productId)
-      updateItem(itemId, "description", product.name)
-      updateItem(itemId, "price", Number(product.price))
-      updateItem(itemId, "total", Number(product.price))
+      const current = items.find((i) => i.id === itemId)
+      const quantity = current?.quantity || 1
+      const price = Number(product.price)
+      setItems(items.map((it) => {
+        if (it.id !== itemId) return it
+        const next: EstimateItem = {
+          ...it,
+          product_id: productId,
+          description: product.name,
+          price,
+          quantity,
+          total: 0,
+        }
+        next.total = getLineTotal(next)
+        next.discount_amount = getDiscountAmount(next)
+        return next
+      }))
     }
   }
 
@@ -295,9 +353,9 @@ export default function EstimateEditPage() {
   }
 
   const lineItemsSubtotal = items.reduce((sum, item) => {
-    const lineTotal = (Number(item.quantity) || 0) * (Number(item.price) || 0)
-    return sum + lineTotal
+    return sum + getLineTotal(item)
   }, 0)
+  const totalDiscount = items.reduce((sum, item) => sum + getDiscountAmount(item), 0)
 
   let taxResult: TaxResult | null = null
   let subtotal = 0
@@ -315,7 +373,7 @@ export default function EstimateEditPage() {
         items.map(item => ({
           quantity: Number(item.quantity) || 0,
           unit_price: Number(item.price) || 0,
-          discount_amount: 0,
+          discount_amount: getDiscountAmount(item),
         })),
         config
       )
@@ -367,6 +425,8 @@ export default function EstimateEditPage() {
             description: item.description,
             quantity: item.quantity,
             price: item.price,
+            discount_amount: getDiscountAmount(item),
+            total: getLineTotal(item),
           })),
           apply_taxes: applyGhanaTax,
         }),
@@ -586,6 +646,27 @@ export default function EstimateEditPage() {
                       required
                     />
                   </div>
+                  <div className="col-span-4 md:col-span-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={item.discount_type}
+                        onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
+                        className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                      >
+                        <option value="amount">Amt</option>
+                        <option value="percent">%</option>
+                      </select>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Discount"
+                        value={item._rawDiscount ?? (item.discount_value === 0 ? "" : String(item.discount_value))}
+                        onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
+                        onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
+                        className="w-full border border-gray-300 rounded-lg px-4 py-2 text-right tabular-nums"
+                      />
+                    </div>
+                  </div>
                   <div className="col-span-3 md:col-span-1 flex items-center justify-between">
                     <span className="font-medium">GHS {item.total.toFixed(2)}</span>
                     <button
@@ -646,6 +727,12 @@ export default function EstimateEditPage() {
                     <span>Subtotal (before tax):</span>
                     <span className="font-medium">GHS {subtotal.toFixed(2)}</span>
                   </div>
+                  {totalDiscount > 0 && (
+                    <div className="flex justify-between text-gray-600">
+                      <span>Discounts:</span>
+                      <span className="text-rose-600 font-medium">−GHS {totalDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
                   {taxResult.lines
                     .filter(line => Number(line.amount) > 0 && line.code.toUpperCase() !== "COVID")
                     .map(line => (
@@ -668,6 +755,12 @@ export default function EstimateEditPage() {
 
             {!applyGhanaTax && (
               <div className="mt-4 pt-4 border-t border-gray-200">
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between text-sm mb-2 text-gray-600">
+                    <span>Discounts:</span>
+                    <span className="text-rose-600 font-medium">−GHS {totalDiscount.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-lg">
                   <span className="font-bold">Total:</span>
                   <span className="font-bold">GHS {total.toFixed(2)}</span>

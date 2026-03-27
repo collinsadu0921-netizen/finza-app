@@ -32,11 +32,33 @@ type InvoiceItem = {
   description: string
   quantity: number
   price: number
+  discount_type: "amount" | "percent"
+  discount_value: number
   total: number
   // Raw strings kept during editing so decimal points / partial input aren't
   // lost on every keystroke (number inputs discard "500." immediately)
   _rawQty?: string
   _rawPrice?: string
+  _rawDiscount?: string
+}
+
+const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
+
+const getDiscountAmount = (item: Pick<InvoiceItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = Math.max(0, (Number(item.quantity) || 0) * (Number(item.price) || 0))
+  const rawDiscount = Number(item.discount_value) || 0
+  if (rawDiscount <= 0 || gross <= 0) return 0
+
+  const discount = item.discount_type === "percent"
+    ? (gross * rawDiscount) / 100
+    : rawDiscount
+
+  return round2(Math.min(Math.max(discount, 0), gross))
+}
+
+const getLineTotal = (item: Pick<InvoiceItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = (Number(item.quantity) || 0) * (Number(item.price) || 0)
+  return round2(Math.max(0, gross - getDiscountAmount(item)))
 }
 
 // Stable wrapper for service route: avoids defining a component inline inside
@@ -56,8 +78,8 @@ type LineItemRowProps = {
   /** ISO code for line totals (matches invoice view formatMoney). */
   amountCurrencyCode: string | null
   businessIndustry: string | null
-  onUpdate: (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => void
-  onCommit: (id: string, field: "quantity" | "price") => void
+  onUpdate: (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice" | "_rawDiscount", value: any) => void
+  onCommit: (id: string, field: "quantity" | "price" | "discount_value") => void
   onRemove: (id: string) => void
   onSelectProduct: (itemId: string, productId: string) => void
 }
@@ -123,6 +145,28 @@ const LineItemRow = memo(function LineItemRow({
           placeholder="0.00"
           className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
         />
+      </td>
+      <td className="px-4 py-3 align-top">
+        <div className="flex items-center gap-2">
+          <select
+            value={item.discount_type}
+            onChange={(e) => onUpdate(item.id, "discount_type", e.target.value as "amount" | "percent")}
+            className="w-20 text-xs border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+          >
+            <option value="amount">Amt</option>
+            <option value="percent">%</option>
+          </select>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={item._rawDiscount ?? (item.discount_value === 0 ? "" : String(item.discount_value))}
+            onChange={(e) => onUpdate(item.id, "discount_value", e.target.value)}
+            onBlur={() => onCommit(item.id, "discount_value")}
+            onFocus={(e) => e.target.select()}
+            placeholder={item.discount_type === "percent" ? "0" : "0.00"}
+            className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+          />
+        </div>
       </td>
       <td className="px-6 py-3 align-top text-right font-medium text-slate-900 tabular-nums pt-5">
         {formatMoney(item.total, amountCurrencyCode)}
@@ -357,6 +401,8 @@ export default function NewInvoicePage() {
         description: "",
         quantity: 1,
         price: 0,
+        discount_type: "amount",
+        discount_value: 0,
         total: 0,
       },
     ])
@@ -366,38 +412,45 @@ export default function NewInvoicePage() {
     setItems(prev => prev.filter((item) => item.id !== id))
   }, [])
 
-  const updateItem = useCallback((id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice", value: any) => {
+  const updateItem = useCallback((id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice" | "_rawDiscount", value: any) => {
     setItems(prev => prev.map((item) => {
       if (item.id !== id) return item
       const updated = { ...item }
 
-      if (field === "quantity" || field === "price") {
+      if (field === "quantity" || field === "price" || field === "discount_value") {
         // Keep raw string so the input can show "500." without losing the dot
         if (field === "quantity") updated._rawQty = String(value)
         if (field === "price")    updated._rawPrice = String(value)
+        if (field === "discount_value") updated._rawDiscount = String(value)
         const numValue = value === "" || value === null || value === undefined
           ? 0
           : parseFloat(String(value))
         updated[field] = isNaN(numValue) ? 0 : numValue
-        updated.total = updated.quantity * updated.price
+        updated.total = getLineTotal(updated)
       } else if (field === "_rawQty") {
         updated._rawQty = value
       } else if (field === "_rawPrice") {
         updated._rawPrice = value
+      } else if (field === "_rawDiscount") {
+        updated._rawDiscount = value
       } else {
         (updated as any)[field] = value
+        if (field === "discount_type") {
+          updated.total = getLineTotal(updated)
+        }
       }
       return updated
     }))
   }, [])
 
   // Called on blur — clears raw strings so the formatted number displays cleanly
-  const commitItem = useCallback((id: string, field: "quantity" | "price") => {
+  const commitItem = useCallback((id: string, field: "quantity" | "price" | "discount_value") => {
     setItems(prev => prev.map((item) => {
       if (item.id !== id) return item
       const updated = { ...item }
       if (field === "quantity") updated._rawQty = undefined
       if (field === "price")    updated._rawPrice = undefined
+      if (field === "discount_value") updated._rawDiscount = undefined
       return updated
     }))
   }, [])
@@ -411,13 +464,15 @@ export default function NewInvoicePage() {
       if (it.id !== itemId) return it
       const qty = it.quantity || 1
       const price = Number(product.price) || 0
-      return { ...it, product_id: productId, description: product.name, price, total: qty * price }
+      const nextItem = { ...it, product_id: productId, description: product.name, price, quantity: qty }
+      return { ...nextItem, total: getLineTotal(nextItem) }
     }))
   }, [products])
 
   // -- Financial Calculations (Strictly Preserved) --
   // Calculate subtotal from line items (sum of all line totals)
-  let subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0)
+  let subtotal = items.reduce((sum, item) => sum + getLineTotal(item), 0)
+  const totalDiscount = items.reduce((sum, item) => sum + getDiscountAmount(item), 0)
 
   // Tax Engine Integration
   const effectiveDate = issueDate || new Date().toISOString().split('T')[0]
@@ -425,7 +480,7 @@ export default function NewInvoicePage() {
   const lineItems = items.map((item) => ({
     quantity: Number(item.quantity) || 0,
     unit_price: Number(item.price) || 0,
-    discount_amount: 0,
+    discount_amount: getDiscountAmount(item),
   }))
 
   let tax = 0
@@ -546,8 +601,8 @@ export default function NewInvoicePage() {
           description: item.description || "",
           qty: Number(item.quantity) || 0,
           unit_price: Number(item.price) || 0,
-          discount_amount: 0,
-          line_subtotal: (Number(item.quantity) || 0) * (Number(item.price) || 0)
+          discount_amount: getDiscountAmount(item),
+          line_subtotal: getLineTotal(item)
         }))
       }
 
@@ -736,23 +791,6 @@ export default function NewInvoicePage() {
                     className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5"
                   />
                 </div>
-                <div className="col-span-2 pt-2">
-                  <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-md border border-slate-100">
-                    <div className="flex-1">
-                      <span className="text-sm font-medium text-slate-700">Tax Inclusive Pricing</span>
-                      <p className="text-xs text-slate-500">Prices include VAT/NHIL/GetFund</p>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={applyGhanaTax}
-                      onClick={() => setApplyGhanaTax(!applyGhanaTax)}
-                      className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${applyGhanaTax ? 'bg-blue-600' : 'bg-slate-300'}`}
-                    >
-                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyGhanaTax ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                </div>
 
                 {/* FX Currency Section */}
                 <div className="col-span-2 pt-1">
@@ -868,6 +906,7 @@ export default function NewInvoicePage() {
                       <th className="px-6 py-3 font-semibold w-1/2">Item Description</th>
                       <th className="px-4 py-3 font-semibold text-center w-24">Qty</th>
                       <th className="px-4 py-3 font-semibold text-right w-32">Price</th>
+                      <th className="px-4 py-3 font-semibold text-right w-40">Discount</th>
                       <th className="px-6 py-3 font-semibold text-right w-32">Total</th>
                       <th className="w-10"></th>
                     </tr>
@@ -875,7 +914,7 @@ export default function NewInvoicePage() {
                   <tbody className="divide-y divide-slate-100">
                     {items.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic bg-slate-50/30">
+                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic bg-slate-50/30">
                           No line items added. Click "Add Line Item" below to start.
                         </td>
                       </tr>
@@ -924,6 +963,24 @@ export default function NewInvoicePage() {
               </div>
 
               <div className="space-y-3">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-sm font-semibold text-slate-800">Add Ghana taxes</span>
+                      <p className="text-xs text-slate-500 mt-0.5">Apply VAT/NHIL/GetFund during tax calculation</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={applyGhanaTax}
+                      onClick={() => setApplyGhanaTax(!applyGhanaTax)}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${applyGhanaTax ? 'bg-blue-600' : 'bg-slate-300'}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyGhanaTax ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                </div>
+
                 {/* Subtotal */}
                 <div className="flex justify-between items-center text-sm text-slate-600">
                   <span>Subtotal</span>
@@ -931,6 +988,16 @@ export default function NewInvoicePage() {
                     {formatMoney(applyGhanaTax ? total : baseSubtotal, amountCurrencyCode)}
                   </span>
                 </div>
+
+                {/* Discounts */}
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between items-center text-sm text-slate-600">
+                    <span>Discounts</span>
+                    <span className="font-medium tabular-nums text-rose-600">
+                      −{formatMoney(totalDiscount, amountCurrencyCode)}
+                    </span>
+                  </div>
+                )}
 
                 {/* Tax breakdown (Visual Only) */}
                 {applyGhanaTax && legacyTaxAmounts && (
@@ -1060,7 +1127,7 @@ export default function NewInvoicePage() {
                     description: item.description || "",
                     qty: Number(item.quantity) || 0,
                     unit_price: Number(item.price) || 0,
-                    discount_amount: 0,
+                    discount_amount: getDiscountAmount(item),
                   })),
                   // Use FX currency when FX is enabled; fall back to home currency
                   currency_symbol: fxEnabled && fxCurrencyCode

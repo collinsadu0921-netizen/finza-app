@@ -124,6 +124,9 @@ export default function RecurringInvoiceViewPage() {
 
   const templateData = recurringInvoice.invoice_template_data || {}
   const lineItems = templateData.line_items || []
+  const totalDiscount = Array.isArray(lineItems)
+    ? lineItems.reduce((sum: number, item: any) => sum + Number(item?.discount_amount || 0), 0)
+    : 0
 
   const formatFrequency = (frequency: string) => {
     const frequencies: Record<string, string> = {
@@ -261,6 +264,12 @@ export default function RecurringInvoiceViewPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
                     <span className="font-medium text-gray-900 dark:text-white">₵{Number(templateData.subtotal).toFixed(2)}</span>
+                  </div>
+                )}
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Discounts</span>
+                    <span className="font-medium text-rose-600">−₵{Number(totalDiscount).toFixed(2)}</span>
                   </div>
                 )}
                 {templateData.apply_taxes && Array.isArray(templateData.tax_lines?.lines) && templateData.tax_lines.lines.length > 0 && (

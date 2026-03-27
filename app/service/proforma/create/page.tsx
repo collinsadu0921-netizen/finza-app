@@ -21,7 +21,30 @@ type LineItem = {
   description: string
   qty: number
   unit_price: number
+  discount_type: "amount" | "percent"
+  discount_value: number
+  /** Persisted/legacy amount stored on proforma_items. Derived from discount_type/value in the UI. */
   discount_amount: number
+  _rawDiscount?: string
+}
+
+const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
+
+const getDiscountAmount = (item: Pick<LineItem, "qty" | "unit_price" | "discount_type" | "discount_value">): number => {
+  const gross = Math.max(0, (Number(item.qty) || 0) * (Number(item.unit_price) || 0))
+  const rawDiscount = Number(item.discount_value) || 0
+  if (rawDiscount <= 0 || gross <= 0) return 0
+
+  const discount = item.discount_type === "percent"
+    ? (gross * Math.min(100, Math.max(0, rawDiscount))) / 100
+    : Math.max(0, rawDiscount)
+
+  return round2(Math.min(discount, gross))
+}
+
+const getLineTotal = (item: Pick<LineItem, "qty" | "unit_price" | "discount_type" | "discount_value">): number => {
+  const gross = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
+  return round2(Math.max(0, gross - getDiscountAmount(item)))
 }
 
 function ProformaCreateForm() {
@@ -169,6 +192,8 @@ function ProformaCreateForm() {
                   description: item.description || "",
                   qty: Number(item.quantity) || 1,
                   unit_price: Number(item.price) || 0,
+                  discount_type: "amount",
+                  discount_value: 0,
                   discount_amount: 0,
                 }))
               )
@@ -193,6 +218,8 @@ function ProformaCreateForm() {
         description: "",
         qty: 1,
         unit_price: 0,
+        discount_type: "amount",
+        discount_value: 0,
         discount_amount: 0,
       },
     ])
@@ -207,9 +234,18 @@ function ProformaCreateForm() {
       items.map((item) => {
         if (item.id !== id) return item
         const updated = { ...item }
-        if (field === "qty" || field === "unit_price" || field === "discount_amount") {
+        if (field === "_rawDiscount") {
+          updated._rawDiscount = value
+          return updated
+        }
+        if (field === "qty" || field === "unit_price" || field === "discount_value") {
+          if (field === "discount_value") updated._rawDiscount = String(value)
           const num = value === "" || value === null ? 0 : Number(value)
           ;(updated as any)[field] = isNaN(num) ? 0 : num
+          updated.discount_amount = getDiscountAmount(updated)
+        } else if (field === "discount_type") {
+          ;(updated as any)[field] = value
+          updated.discount_amount = getDiscountAmount(updated)
         } else {
           ;(updated as any)[field] = value
         }
@@ -235,9 +271,8 @@ function ProformaCreateForm() {
   }
 
   // Tax calculation
-  const lineItemsTotal = items.reduce((sum, item) => {
-    return sum + (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0)
-  }, 0)
+  const lineItemsTotal = items.reduce((sum, item) => sum + getLineTotal(item), 0)
+  const totalDiscount = items.reduce((sum, item) => sum + getDiscountAmount(item), 0)
 
   let taxResult: TaxResult | null = null
   let displaySubtotal = lineItemsTotal
@@ -251,7 +286,7 @@ function ProformaCreateForm() {
         items.map((item) => ({
           quantity: Number(item.qty) || 0,
           unit_price: Number(item.unit_price) || 0,
-          discount_amount: Number(item.discount_amount) || 0,
+          discount_amount: getDiscountAmount(item),
         })),
         {
           jurisdiction,
@@ -359,7 +394,7 @@ function ProformaCreateForm() {
             description: item.description,
             qty: item.qty,
             unit_price: item.unit_price,
-            discount_amount: item.discount_amount,
+            discount_amount: getDiscountAmount(item),
           })),
         }),
       })
@@ -500,22 +535,6 @@ function ProformaCreateForm() {
                   className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                 />
               </div>
-              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700 rounded-md border border-slate-100 dark:border-slate-600">
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Tax Inclusive Pricing</span>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Prices include VAT/NHIL/GETFund</p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={applyTaxes}
-                  onClick={() => setApplyTaxes(!applyTaxes)}
-                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${applyTaxes ? "bg-blue-600" : "bg-slate-300"}`}
-                >
-                  <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyTaxes ? "translate-x-4" : "translate-x-0"}`} />
-                </button>
-              </div>
-
               {/* FX Currency Section */}
               <div>
                 <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700 rounded-md border border-slate-100 dark:border-slate-600">
@@ -598,7 +617,7 @@ function ProformaCreateForm() {
                     </tr>
                   ) : (
                     items.map((item) => {
-                      const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0)
+        const lineTotal = getLineTotal(item)
                       return (
                         <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
                           <td className="px-6 py-3 align-top">
@@ -661,14 +680,25 @@ function ProformaCreateForm() {
                             />
                           </td>
                           <td className="px-4 py-3 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.discount_amount != null ? item.discount_amount : ""}
-                              onChange={(e) => updateItem(item.id, "discount_amount", Number(e.target.value))}
-                              className="block w-full text-right text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
-                            />
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={item.discount_type}
+                                onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
+                                className="w-20 text-xs border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                              >
+                                <option value="amount">Amt</option>
+                                <option value="percent">%</option>
+                              </select>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={item._rawDiscount ?? (item.discount_value === 0 ? "" : String(item.discount_value))}
+                                onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
+                                onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
+                                placeholder={item.discount_type === "percent" ? "0" : "0.00"}
+                                className="block w-full text-right text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+                              />
+                            </div>
                           </td>
                           <td className="px-6 py-3 align-top text-right font-medium text-slate-900 dark:text-white pt-5">
                             {effectiveCurrencyDisplay} {lineTotal.toFixed(2)}
@@ -731,10 +761,35 @@ function ProformaCreateForm() {
             </div>
 
             <div className="space-y-3">
+              <div className="rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Add Ghana taxes</span>
+                    <p className="text-xs text-slate-500 dark:text-slate-300 mt-0.5">Apply VAT/NHIL/GETFund during tax calculation</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={applyTaxes}
+                    onClick={() => setApplyTaxes(!applyTaxes)}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${applyTaxes ? "bg-blue-600" : "bg-slate-300"}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyTaxes ? "translate-x-4" : "translate-x-0"}`} />
+                  </button>
+                </div>
+              </div>
+
               <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                 <span>Subtotal</span>
                 <span className="font-medium">{effectiveCurrencyDisplay} {displaySubtotal.toFixed(2)}</span>
               </div>
+
+              {totalDiscount > 0 && (
+                <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
+                  <span>Discounts</span>
+                  <span className="font-medium text-rose-600">−{effectiveCurrencyDisplay} {totalDiscount.toFixed(2)}</span>
+                </div>
+              )}
 
               {applyTaxes && taxResult && (
                 <div className="py-3 border-y border-slate-100 dark:border-slate-700 space-y-2">

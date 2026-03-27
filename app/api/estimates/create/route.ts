@@ -307,7 +307,8 @@ export async function POST(request: NextRequest) {
     const estimateItems = items.map((item: any) => {
       const qty = Number(item.qty || item.quantity) || 0
       const price = Number(item.unit_price || item.price) || 0
-      const total = qty * price
+      const discount = Number(item.discount_amount) || 0
+      const total = Math.round(Math.max(0, (qty * price) - discount) * 100) / 100
       
       // Get product_service_id from the item (from products_services table)
       const productServiceId = item.product_id || item.product_service_id || null

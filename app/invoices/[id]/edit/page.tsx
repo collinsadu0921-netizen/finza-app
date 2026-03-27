@@ -26,7 +26,30 @@ type InvoiceItem = {
   quantity: number
   price: number
   total: number
+  discount_type: "amount" | "percent"
+  discount_value: number
+  /** Persisted/legacy amount stored on invoice_items. Derived from discount_type/value in the UI. */
   discount_amount?: number
+  _rawDiscount?: string
+}
+
+const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
+
+const getDiscountAmount = (item: Pick<InvoiceItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = Math.max(0, (Number(item.quantity) || 0) * (Number(item.price) || 0))
+  const rawDiscount = Number(item.discount_value) || 0
+  if (rawDiscount <= 0 || gross <= 0) return 0
+
+  const discount = item.discount_type === "percent"
+    ? (gross * Math.min(100, Math.max(0, rawDiscount))) / 100
+    : Math.max(0, rawDiscount)
+
+  return round2(Math.min(discount, gross))
+}
+
+const getLineSubtotal = (item: Pick<InvoiceItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = (Number(item.quantity) || 0) * (Number(item.price) || 0)
+  return round2(Math.max(0, gross - getDiscountAmount(item)))
 }
 
 type Invoice = {
@@ -304,6 +327,8 @@ export default function InvoiceEditPage() {
             quantity: quantity,
             price: price,
             total: Number(item.line_subtotal ?? 0),
+            discount_type: "amount" as const,
+            discount_value: Number(item.discount_amount ?? 0),
             discount_amount: Number(item.discount_amount ?? 0),
           }
 
@@ -333,6 +358,8 @@ export default function InvoiceEditPage() {
         quantity: 1,
         price: 0,
         total: 0,
+        discount_type: "amount",
+        discount_value: 0,
         discount_amount: 0,
       },
     ])
@@ -346,15 +373,28 @@ export default function InvoiceEditPage() {
     setItems(
       items.map((item) => {
         if (item.id === id) {
-          // Handle quantity, price, and discount_amount as numbers, ensuring proper conversion
+          // Handle numeric fields as numbers, ensuring proper conversion
           const updated = { ...item }
-          if (field === "quantity" || field === "price" || field === "discount_amount") {
+          if (field === "_rawDiscount") {
+            updated._rawDiscount = value
+            return updated
+          }
+          if (field === "quantity" || field === "price" || field === "discount_value") {
+            if (field === "discount_value") updated._rawDiscount = String(value)
             const numValue = value === "" || value === null || value === undefined ? 0 : Number(value)
             updated[field] = isNaN(numValue) ? 0 : numValue
             const qty = updated.quantity
             const price = updated.price
-            const discount = Number(updated.discount_amount) || 0
-            updated.total = qty * price - discount
+            const discountAmount = getDiscountAmount(updated)
+            updated.discount_amount = discountAmount
+            updated.total = Math.max(0, qty * price - discountAmount)
+          } else if (field === "discount_type") {
+            updated.discount_type = value as any
+            const qty = updated.quantity
+            const price = updated.price
+            const discountAmount = getDiscountAmount(updated)
+            updated.discount_amount = discountAmount
+            updated.total = Math.max(0, qty * price - discountAmount)
           }
           return updated
         }
@@ -370,9 +410,9 @@ export default function InvoiceEditPage() {
       if (!currentItem) return
 
       const qty = currentItem.quantity || 1
-      const discount = currentItem.discount_amount || 0
       const price = Number(product.price) || 0
-      const total = (qty * price) - discount
+      const discountAmount = getDiscountAmount({ ...currentItem, quantity: qty, price })
+      const total = Math.max(0, (qty * price) - discountAmount)
 
       // Update all fields in a single state update to prevent batching issues
       setItems(
@@ -383,6 +423,7 @@ export default function InvoiceEditPage() {
               product_id: productId,
               description: product.name, // Auto-fill description with product name
               price: price,
+              discount_amount: discountAmount,
               total: total,
             }
           }
@@ -455,10 +496,11 @@ export default function InvoiceEditPage() {
   let subtotal = items.reduce((sum, item) => {
     const qty = Number(item.quantity) || 0
     const price = Number(item.price) || 0
-    const discount = Number(item.discount_amount) || 0
+    const discount = getDiscountAmount(item)
     const lineTotal = qty * price - discount
     return sum + lineTotal
   }, 0)
+  const totalDiscount = items.reduce((sum, item) => sum + getDiscountAmount(item), 0)
 
   // Calculate taxes using shared tax engine
   // For drafts, use issue_date; for sent invoices, sent_at is used (handled by API)
@@ -467,7 +509,7 @@ export default function InvoiceEditPage() {
   const lineItems = items.map((item) => ({
     quantity: Number(item.quantity) || 0,
     unit_price: Number(item.price) || 0,
-    discount_amount: Number(item.discount_amount) || 0,
+    discount_amount: getDiscountAmount(item),
   }))
 
   let tax = 0
@@ -551,7 +593,7 @@ export default function InvoiceEditPage() {
         items: items.map(item => {
           const qty = Number(item.quantity) || 0
           const unitPrice = Number(item.price) || 0
-          const discount = Number(item.discount_amount) || 0
+          const discount = getDiscountAmount(item)
           const lineSubtotal = qty * unitPrice - discount
           return {
             id: item.id.startsWith("temp_") ? undefined : item.id,
@@ -834,35 +876,6 @@ export default function InvoiceEditPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <div className="flex-1">
-                <label className="text-sm font-medium text-gray-900">
-                  Apply Ghana Taxes
-                </label>
-                <p className="text-xs text-gray-500 mt-1">
-                  Include NHIL, GETFund, and VAT
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={applyGhanaTax}
-                onClick={() => setApplyGhanaTax(!applyGhanaTax)}
-                className={`
-                  relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
-                  transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-                  ${applyGhanaTax ? 'bg-blue-600' : 'bg-gray-200'}
-                `}
-              >
-                <span
-                  className={`
-                    pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0
-                    transition duration-200 ease-in-out
-                    ${applyGhanaTax ? 'translate-x-5' : 'translate-x-0'}
-                  `}
-                />
-              </button>
-            </div>
           </div>
 
           {/* Items Section */}
@@ -984,6 +997,30 @@ export default function InvoiceEditPage() {
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
+                      <div className="col-span-4 md:col-span-2">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Discount
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={item.discount_type}
+                            onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
+                            className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="amount">Amt</option>
+                            <option value="percent">%</option>
+                          </select>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={item._rawDiscount ?? (item.discount_value === 0 ? "" : String(item.discount_value))}
+                            onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
+                            onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
+                            placeholder={item.discount_type === "percent" ? "0" : "0.00"}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-right tabular-nums focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
                       <div className="col-span-4 md:col-span-1">
                         <label className="block text-xs font-medium text-gray-600 mb-1">
                           Total
@@ -1021,6 +1058,32 @@ export default function InvoiceEditPage() {
               <h2 className="text-xl font-semibold text-gray-900">Summary</h2>
             </div>
             <div className="space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                <div>
+                  <span className="text-sm font-medium text-gray-900">Add Ghana taxes</span>
+                  <p className="text-xs text-gray-500 mt-0.5">Apply VAT/NHIL/GETFund during tax calculation</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={applyGhanaTax}
+                  onClick={() => setApplyGhanaTax(!applyGhanaTax)}
+                  className={`
+                    relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
+                    transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                    ${applyGhanaTax ? 'bg-blue-600' : 'bg-gray-200'}
+                  `}
+                >
+                  <span
+                    className={`
+                      pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0
+                      transition duration-200 ease-in-out
+                      ${applyGhanaTax ? 'translate-x-5' : 'translate-x-0'}
+                    `}
+                  />
+                </button>
+              </div>
+
               <div className="flex justify-between items-center">
                 <span className="text-gray-700 font-medium">
                   {applyGhanaTax ? "Subtotal (tax inclusive):" : "Subtotal:"}
@@ -1029,6 +1092,12 @@ export default function InvoiceEditPage() {
                   {currency}{applyGhanaTax ? total.toFixed(2) : baseSubtotal.toFixed(2)}
                 </span>
               </div>
+              {totalDiscount > 0 && (
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Discounts</span>
+                  <span className="font-medium text-rose-600 tabular-nums">−{currency}{totalDiscount.toFixed(2)}</span>
+                </div>
+              )}
               {applyGhanaTax && (
                 <div className="text-xs text-gray-500 italic -mt-1">
                   Base amount: {currency}{baseSubtotal.toFixed(2)}

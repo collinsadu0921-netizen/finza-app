@@ -13,8 +13,26 @@ type LineItem = {
   description: string
   qty: number
   unit_price: number
+  discount_type: "amount" | "percent"
+  discount_value: number
+  /** Persisted/legacy amount stored on bill_items. Derived from discount_type/value in the UI. */
   discount_amount: number
+  _rawDiscount?: string
   material_id: string | null
+}
+
+const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
+
+const getDiscountAmount = (item: Pick<LineItem, "qty" | "unit_price" | "discount_type" | "discount_value">): number => {
+  const gross = Math.max(0, (Number(item.qty) || 0) * (Number(item.unit_price) || 0))
+  const rawDiscount = Number(item.discount_value) || 0
+  if (rawDiscount <= 0 || gross <= 0) return 0
+
+  const discount = item.discount_type === "percent"
+    ? (gross * Math.min(100, Math.max(0, rawDiscount))) / 100
+    : Math.max(0, rawDiscount)
+
+  return round2(Math.min(discount, gross))
 }
 
 type Material = {
@@ -150,6 +168,8 @@ export default function EditBillPage() {
               description: item.description || "",
               qty: Number(item.qty) || 0,
               unit_price: Number(item.unit_price) || 0,
+              discount_type: "amount",
+              discount_value: Number(item.discount_amount) || 0,
               discount_amount: Number(item.discount_amount) || 0,
               material_id: item.material_id || null,
             }))
@@ -161,6 +181,8 @@ export default function EditBillPage() {
               description: "",
               qty: 1,
               unit_price: 0,
+              discount_type: "amount",
+              discount_value: 0,
               discount_amount: 0,
               material_id: null,
             },
@@ -222,6 +244,8 @@ export default function EditBillPage() {
         description: "",
         qty: 1,
         unit_price: 0,
+        discount_type: "amount",
+        discount_value: 0,
         discount_amount: 0,
         material_id: null,
       },
@@ -238,7 +262,13 @@ export default function EditBillPage() {
     setItems(
       items.map((item) => {
         if (item.id === id) {
-          return { ...item, [field]: value }
+          const updated: any = { ...item, [field]: value }
+          if (field === "_rawDiscount") return updated
+          if (field === "qty" || field === "unit_price" || field === "discount_value" || field === "discount_type") {
+            if (field === "discount_value") updated._rawDiscount = String(value)
+            updated.discount_amount = getDiscountAmount(updated)
+          }
+          return updated
         }
         return item
       })
@@ -263,9 +293,10 @@ export default function EditBillPage() {
   // ── Standard calculations ──────────────────────────────────────────────────
   const subtotalIncludingTaxes = items.reduce((sum, item) => {
     const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
-    const discount  = Number(item.discount_amount) || 0
+    const discount  = getDiscountAmount(item)
     return sum + lineTotal - discount
   }, 0)
+  const totalDiscount = items.reduce((sum, item) => sum + getDiscountAmount(item), 0)
 
   const taxResult = applyTaxes
     ? (() => {
@@ -397,7 +428,7 @@ export default function EditBillPage() {
           description: item.description,
           qty: item.qty,
           unit_price: item.unit_price,
-          discount_amount: item.discount_amount,
+          discount_amount: getDiscountAmount(item),
           material_id: item.material_id || null,
         }))
       }
@@ -1047,14 +1078,25 @@ export default function EditBillPage() {
                         </div>
                         <div className="col-span-4 md:col-span-2">
                           <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Discount</label>
-                          <input
-                            type="number"
-                            value={item.discount_amount}
-                            onChange={(e) => updateItem(item.id, "discount_amount", Number(e.target.value) || 0)}
-                            min="0"
-                            step="0.01"
-                            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
-                          />
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={item.discount_type}
+                              onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
+                              className="w-20 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+                            >
+                              <option value="amount">Amt</option>
+                              <option value="percent">%</option>
+                            </select>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={item._rawDiscount ?? (item.discount_value === 0 ? "" : String(item.discount_value))}
+                              onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
+                              onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
+                              placeholder={item.discount_type === "percent" ? "0" : "0.00"}
+                              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white text-right tabular-nums"
+                            />
+                          </div>
                         </div>
                         <div className="col-span-12 md:col-span-1 flex items-end">
                           <button
@@ -1206,6 +1248,12 @@ export default function EditBillPage() {
                           </span>
                           <span className="font-semibold text-purple-900 dark:text-purple-300 text-lg">{docCurrencyDisplay}{Number(taxResult.subtotalBeforeTax ?? 0).toFixed(2)}</span>
                         </div>
+                        {totalDiscount > 0 && (
+                          <div className="flex justify-between items-center text-sm text-purple-800 dark:text-purple-400">
+                            <span>Discounts</span>
+                            <span className="font-medium text-rose-600">−{docCurrencyDisplay}{totalDiscount.toFixed(2)}</span>
+                          </div>
+                        )}
                         {applyTaxes && isGhana && (
                           <>
                             <div className="space-y-1 pt-2 border-t border-purple-200 dark:border-purple-500">

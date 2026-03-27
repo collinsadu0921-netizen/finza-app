@@ -20,6 +20,30 @@ type EstimateItem = {
   quantity: number
   price: number
   total: number
+  discount_type: "amount" | "percent"
+  discount_value: number
+  /** Derived for API/tax calc; persisted implicitly via `total` (line_total). */
+  discount_amount?: number
+  _rawDiscount?: string
+}
+
+const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
+
+const getDiscountAmount = (item: Pick<EstimateItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = Math.max(0, (Number(item.quantity) || 0) * (Number(item.price) || 0))
+  const rawDiscount = Number(item.discount_value) || 0
+  if (rawDiscount <= 0 || gross <= 0) return 0
+
+  const discount = item.discount_type === "percent"
+    ? (gross * Math.min(100, Math.max(0, rawDiscount))) / 100
+    : Math.max(0, rawDiscount)
+
+  return round2(Math.min(discount, gross))
+}
+
+const getLineTotal = (item: Pick<EstimateItem, "quantity" | "price" | "discount_type" | "discount_value">): number => {
+  const gross = (Number(item.quantity) || 0) * (Number(item.price) || 0)
+  return round2(Math.max(0, gross - getDiscountAmount(item)))
 }
 
 export default function NewEstimatePage() {
@@ -180,6 +204,8 @@ export default function NewEstimatePage() {
         quantity: 1,
         price: 0,
         total: 0,
+        discount_type: "amount",
+        discount_value: 0,
       },
     ])
   }
@@ -192,12 +218,22 @@ export default function NewEstimatePage() {
     setItems(
       items.map((item) => {
         if (item.id === id) {
-          // Handle quantity and price as numbers, ensuring proper conversion
+          // Handle numeric fields as numbers, ensuring proper conversion
           const updated = { ...item }
-          if (field === "quantity" || field === "price") {
+          if (field === "_rawDiscount") {
+            updated._rawDiscount = value
+            return updated
+          }
+          if (field === "quantity" || field === "price" || field === "discount_value") {
+            if (field === "discount_value") updated._rawDiscount = String(value)
             const numValue = value === "" || value === null || value === undefined ? 0 : Number(value)
             updated[field] = isNaN(numValue) ? 0 : numValue
-            updated.total = updated.quantity * updated.price
+            updated.total = getLineTotal(updated)
+            updated.discount_amount = getDiscountAmount(updated)
+          } else if (field === "discount_type") {
+            updated.discount_type = value as any
+            updated.total = getLineTotal(updated)
+            updated.discount_amount = getDiscountAmount(updated)
           } else {
             (updated as any)[field] = value
           }
@@ -215,7 +251,7 @@ export default function NewEstimatePage() {
       const currentItem = items.find((item) => item.id === itemId)
       const quantity = currentItem?.quantity || 1
       const productPrice = Number(product.price) || 0
-      const total = quantity * productPrice
+      const total = getLineTotal({ ...currentItem, quantity, price: productPrice } as any)
 
       // Update all fields at once to avoid multiple state updates
       setItems(
@@ -227,6 +263,7 @@ export default function NewEstimatePage() {
               description: product.name || "",
               price: productPrice,
               total: total,
+              discount_amount: getDiscountAmount({ ...item, quantity, price: productPrice } as any),
             }
           }
           return item
@@ -240,9 +277,9 @@ export default function NewEstimatePage() {
   // Calculate subtotal from line items
   // When taxes are applied, prices are always treated as tax-inclusive (like invoices)
   const subtotal = items.reduce((sum, item) => {
-    const lineTotal = (Number(item.quantity) || 0) * (Number(item.price) || 0)
-    return sum + lineTotal
+    return sum + getLineTotal(item)
   }, 0)
+  const totalDiscount = items.reduce((sum, item) => sum + getDiscountAmount(item), 0)
 
   // Calculate taxes using tax engine - treat entered prices as tax-inclusive
   let taxBreakdown: ReturnType<typeof calculateBaseFromTotalIncludingTaxes>["taxBreakdown"] | null = null
@@ -360,6 +397,8 @@ export default function NewEstimatePage() {
             qty: Number(item.quantity) || 0,
             price: Number(item.price) || 0,
             unit_price: Number(item.price) || 0,
+            discount_amount: getDiscountAmount(item),
+            total: getLineTotal(item),
           })),
           apply_taxes: applyGhanaTax,
           ...(fxEnabled && fxCurrencyCode && fxRate ? {
@@ -517,23 +556,7 @@ export default function NewEstimatePage() {
                       className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5"
                     />
                   </div>
-                  <div className="col-span-2 pt-2">
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-md border border-slate-100">
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-slate-700">Tax Inclusive Pricing</span>
-                        <p className="text-xs text-slate-500">Prices include VAT/NHIL/GetFund</p>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={applyGhanaTax}
-                        onClick={() => setApplyGhanaTax(!applyGhanaTax)}
-                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${applyGhanaTax ? "bg-blue-600" : "bg-slate-300"}`}
-                      >
-                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyGhanaTax ? "translate-x-4" : "translate-x-0"}`} />
-                      </button>
-                    </div>
-                  </div>
+                  {/* Tax toggle moved to summary for clarity */}
 
                   {/* FX Currency Section */}
                   <div className="col-span-2 pt-1">
@@ -603,6 +626,7 @@ export default function NewEstimatePage() {
                         <th className="px-6 py-3 font-semibold w-1/2">Item Description</th>
                         <th className="px-4 py-3 font-semibold text-center w-24">Qty</th>
                         <th className="px-4 py-3 font-semibold text-right w-32">Price</th>
+                        <th className="px-4 py-3 font-semibold text-right w-40">Discount</th>
                         <th className="px-6 py-3 font-semibold text-right w-32">Total</th>
                         <th className="w-10"></th>
                       </tr>
@@ -610,7 +634,7 @@ export default function NewEstimatePage() {
                     <tbody className="divide-y divide-slate-100">
                       {items.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic bg-slate-50/30">
+                          <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic bg-slate-50/30">
                             No line items added. Click "Add Line Item" below to start.
                           </td>
                         </tr>
@@ -686,6 +710,27 @@ export default function NewEstimatePage() {
                                 required
                               />
                             </td>
+                            <td className="px-4 py-3 align-top">
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={item.discount_type}
+                                  onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
+                                  className="w-20 text-xs border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                >
+                                  <option value="amount">Amt</option>
+                                  <option value="percent">%</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={item._rawDiscount ?? (item.discount_value === 0 ? "" : String(item.discount_value))}
+                                  onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
+                                  onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
+                                  placeholder={item.discount_type === "percent" ? "0" : "0.00"}
+                                  className="block w-full text-right text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+                                />
+                              </div>
+                            </td>
                             <td className="px-6 py-3 align-top text-right font-medium text-slate-900 pt-5">
                               {displaySymbol} {item.total.toFixed(2)}
                             </td>
@@ -734,11 +779,36 @@ export default function NewEstimatePage() {
                 </div>
 
                 <div className="space-y-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-semibold text-slate-800">Add Ghana taxes</span>
+                        <p className="text-xs text-slate-500 mt-0.5">Apply VAT/NHIL/GetFund during tax calculation</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={applyGhanaTax}
+                        onClick={() => setApplyGhanaTax(!applyGhanaTax)}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${applyGhanaTax ? "bg-blue-600" : "bg-slate-300"}`}
+                      >
+                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${applyGhanaTax ? "translate-x-4" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Subtotal */}
                   <div className="flex justify-between items-center text-sm text-slate-600">
                     <span>Subtotal</span>
                     <span className="font-medium">{displaySymbol} {(applyGhanaTax ? total : baseSubtotal).toFixed(2)}</span>
                   </div>
+
+                  {totalDiscount > 0 && (
+                    <div className="flex justify-between items-center text-sm text-slate-600">
+                      <span>Discounts</span>
+                      <span className="font-medium text-rose-600">−{displaySymbol} {totalDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
 
                   {/* Tax breakdown */}
                   {applyGhanaTax && taxBreakdown && (
