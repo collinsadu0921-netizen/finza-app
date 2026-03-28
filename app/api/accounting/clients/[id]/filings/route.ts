@@ -162,7 +162,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     await logFirmActivity({
       supabase,
-      firmId: auth.firmId,
+      firmId: auth.firmId!,
       actorUserId: user.id,
       actionType: "client_filing_created",
       entityType: "client",

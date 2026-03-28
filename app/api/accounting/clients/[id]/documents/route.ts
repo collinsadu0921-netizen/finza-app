@@ -177,6 +177,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       )
     }
     const { supabase, user, auth } = result
+    const firmId = auth.firmId
+    if (!firmId) {
+      return NextResponse.json({ error: "Forbidden", reason: auth.reason }, { status: 403 })
+    }
 
     // Verify the file actually exists in storage before registering
     const folder = storagePath.substring(0, storagePath.lastIndexOf("/"))
@@ -195,7 +199,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const { data: inserted, error: insertErr } = await supabase
       .from("client_documents")
       .insert({
-        firm_id: auth.firmId,
+        firm_id: firmId,
         client_business_id: businessId,
         uploaded_by_user_id: user.id,
         title,
@@ -217,7 +221,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     await logFirmActivity({
       supabase,
-      firmId: auth.firmId,
+      firmId,
       actorUserId: user.id,
       actionType: "client_document_uploaded",
       entityType: "client",

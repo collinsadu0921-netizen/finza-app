@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
       })
       if (auth.allowed && auth.firmId && auth.engagementId && auth.level) {
         authMap.set(bid, {
-          firmId: auth.firmId,
+      firmId: auth.firmId!,
           engagementId: auth.engagementId,
           level: auth.level,
         })

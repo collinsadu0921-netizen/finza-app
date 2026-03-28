@@ -77,7 +77,14 @@ export async function GET(request: NextRequest) {
     }
 
     const documents = (rows ?? []).map((row) => {
-      const business = row.businesses as { id: string; name: string } | null
+      const businessRaw = row.businesses as unknown
+      const businessCandidate = Array.isArray(businessRaw)
+        ? (businessRaw[0] as { id?: string; name?: string } | undefined)
+        : (businessRaw as { id?: string; name?: string } | null)
+      const business =
+        businessCandidate && typeof businessCandidate.name === "string"
+          ? { id: String(businessCandidate.id ?? ""), name: businessCandidate.name }
+          : null
       const { businesses: _drop, ...rest } = row as typeof row & { businesses: unknown }
       return {
         ...rest,

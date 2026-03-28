@@ -101,7 +101,14 @@ export async function GET(request: NextRequest) {
 
     // Flatten the joined business name for convenience
     const tasks = (rows ?? []).map((row) => {
-      const biz = row.businesses as { id: string; name: string } | null
+      const businessRaw = row.businesses as unknown
+      const bizCandidate = Array.isArray(businessRaw)
+        ? (businessRaw[0] as { id?: string; name?: string } | undefined)
+        : (businessRaw as { id?: string; name?: string } | null)
+      const biz =
+        bizCandidate && typeof bizCandidate.name === "string"
+          ? { id: String(bizCandidate.id ?? ""), name: bizCandidate.name }
+          : null
       const { businesses: _drop, ...rest } = row as typeof row & { businesses: unknown }
       return { ...rest, client_name: biz?.name ?? null }
     })

@@ -140,7 +140,7 @@ export async function PATCH(
 
     await logFirmActivity({
       supabase,
-      firmId: auth.firmId,
+      firmId: auth.firmId!,
       actorUserId: user.id,
       actionType: "client_request_updated",
       entityType: "client_request",

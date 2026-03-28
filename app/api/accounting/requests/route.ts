@@ -81,7 +81,14 @@ export async function GET(request: NextRequest) {
       }
 
       const requests = (rows ?? []).map((row) => {
-        const business = row.businesses as { id: string; name: string } | null
+      const businessRaw = row.businesses as unknown
+      const businessCandidate = Array.isArray(businessRaw)
+        ? (businessRaw[0] as { id?: string; name?: string } | undefined)
+        : (businessRaw as { id?: string; name?: string } | null)
+      const business =
+        businessCandidate && typeof businessCandidate.name === "string"
+          ? { id: String(businessCandidate.id ?? ""), name: businessCandidate.name }
+          : null
         const { businesses: _drop, ...rest } = row as typeof row & { businesses: unknown }
         return {
           ...rest,
@@ -214,7 +221,7 @@ export async function POST(request: NextRequest) {
 
     await logFirmActivity({
       supabase,
-      firmId: auth.firmId,
+      firmId: auth.firmId!,
       actorUserId: user.id,
       actionType: "client_request_created",
       entityType: "client_request",

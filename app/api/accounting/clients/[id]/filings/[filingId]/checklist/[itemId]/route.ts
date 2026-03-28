@@ -129,7 +129,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     await logFirmActivity({
       supabase,
-      firmId: auth.firmId,
+      firmId: auth.firmId!,
       actorUserId: user.id,
       actionType: "filing_checklist_item_updated",
       entityType: "client",
