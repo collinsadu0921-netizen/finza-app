@@ -1,7 +1,7 @@
 /**
  * Allowance and deduction type values allowed by DB constraints.
  * Source of truth: supabase/migrations/047_payroll_system.sql
- * - allowances: type IN ('transport', 'housing', 'utility', 'medical', 'bonus', 'other')
+ * - allowances: type IN ('transport', 'housing', 'utility', 'medical', 'bonus', 'overtime', 'other')
  * - deductions: type IN ('loan', 'advance', 'penalty', 'other')
  */
 
@@ -11,6 +11,7 @@ export const ALLOWANCE_TYPES = [
   "utility",
   "medical",
   "bonus",
+  "overtime",
   "other",
 ] as const
 
@@ -43,6 +44,7 @@ export const ALLOWANCE_TYPE_OPTIONS: { value: AllowanceType; label: string }[] =
   { value: "utility", label: "Utility" },
   { value: "medical", label: "Medical" },
   { value: "bonus", label: "Bonus" },
+  { value: "overtime", label: "Overtime" },
   { value: "other", label: "Other" },
 ]
 

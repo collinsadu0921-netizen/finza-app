@@ -19,10 +19,18 @@ export interface PayslipEmailParams {
   currencySymbol: string
   basicSalary: number
   allowancesTotal: number
+  regularAllowancesAmount?: number
+  bonusAmount?: number
+  overtimeAmount?: number
   deductionsTotal: number
   grossSalary: number
   ssnitEmployee: number
   paye: number
+  bonusTax5?: number
+  bonusTaxGraduated?: number
+  overtimeTax5?: number
+  overtimeTax10?: number
+  overtimeTaxGraduated?: number
   netSalary: number
   publicUrl: string
   position?: string
@@ -44,6 +52,9 @@ export function buildPayslipEmailHtml(p: PayslipEmailParams): string {
       : ""
 
   const totalDeductions = p.paye + p.ssnitEmployee + p.deductionsTotal
+  const bonusAmount = Number(p.bonusAmount ?? 0)
+  const overtimeAmount = Number(p.overtimeAmount ?? 0)
+  const regularAllowancesAmount = Math.max(0, Number(p.regularAllowancesAmount ?? p.allowancesTotal - bonusAmount - overtimeAmount))
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -92,10 +103,20 @@ export function buildPayslipEmailHtml(p: PayslipEmailParams): string {
                   <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Basic Salary</td>
                   <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(p.basicSalary, sym)}</td>
                 </tr>
-                ${p.allowancesTotal > 0 ? `
+                ${regularAllowancesAmount > 0 ? `
                 <tr>
-                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Allowances</td>
-                  <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(p.allowancesTotal, sym)}</td>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Recurring Allowances</td>
+                  <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(regularAllowancesAmount, sym)}</td>
+                </tr>` : ""}
+                ${bonusAmount > 0 ? `
+                <tr>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Bonus</td>
+                  <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(bonusAmount, sym)}</td>
+                </tr>` : ""}
+                ${overtimeAmount > 0 ? `
+                <tr>
+                  <td style="padding:9px 0;font-size:14px;color:#374151;border-bottom:1px solid #f9fafb;">Overtime</td>
+                  <td style="padding:9px 0;font-size:14px;color:#111827;font-weight:500;text-align:right;border-bottom:1px solid #f9fafb;">${fmt(overtimeAmount, sym)}</td>
                 </tr>` : ""}
                 <tr>
                   <td style="padding:10px 0;font-size:14px;font-weight:700;color:#111827;">Gross Pay</td>

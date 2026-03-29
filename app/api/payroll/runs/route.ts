@@ -7,6 +7,12 @@ import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
 
+function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; position?: string | null }): boolean {
+  const employmentType = String(staff.employment_type || "").toLowerCase()
+  const position = String(staff.position || "").toLowerCase()
+  return employmentType.includes("junior") || position.includes("junior")
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
@@ -154,11 +160,17 @@ export async function POST(request: NextRequest) {
       // Get recurring allowances
       const { data: allowances } = await supabase
         .from("allowances")
-        .select("amount")
+        .select("type, amount")
         .eq("staff_id", staff.id)
         .eq("recurring", true)
         .is("deleted_at", null)
 
+      const bonusAmount = allowances
+        ?.filter((a: any) => String(a.type || "").toLowerCase() === "bonus")
+        .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
+      const overtimeAmount = allowances
+        ?.filter((a: any) => String(a.type || "").toLowerCase() === "overtime")
+        .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
       const allowancesTotal = allowances?.reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0
 
       // Get recurring deductions (other deductions, not statutory)
@@ -180,6 +192,9 @@ export async function POST(request: NextRequest) {
             basicSalary: Number(staff.basic_salary) || 0,
             allowances: allowancesTotal,
             otherDeductions: deductionsTotal,
+            bonusAmount,
+            overtimeAmount,
+            isQualifyingJuniorEmployee: isQualifyingJuniorEmployee(staff),
           },
           businessCountry
         )
@@ -225,18 +240,42 @@ export async function POST(request: NextRequest) {
         const ssnitEmployee = Number.isFinite(employeeStatutoryContributions) ? employeeStatutoryContributions : 0
         const ssnitEmployer = Number.isFinite(employerStatutoryContributions) ? employerStatutoryContributions : 0
 
+        const breakdown = payrollResult.complianceBreakdown
+        const bonusAmountSnapshot = Number(breakdown?.bonusAmount ?? 0)
+        const overtimeAmountSnapshot = Number(breakdown?.overtimeAmount ?? 0)
+        const regularAllowancesSnapshot = Number(breakdown?.regularAllowancesAmount ?? allowancesTotal)
+
         payrollEntries.push({
           staff_id: staff.id,
           basic_salary: payrollResult.earnings.basicSalary,
           allowances_total: payrollResult.earnings.allowances,
+          regular_allowances_amount: regularAllowancesSnapshot,
+          bonus_amount: bonusAmountSnapshot,
+          overtime_amount: overtimeAmountSnapshot,
           deductions_total: payrollResult.totals.totalOtherDeductions,
           gross_salary: payrollResult.earnings.grossSalary,
           ssnit_employee: ssnitEmployee,
           ssnit_employer: ssnitEmployer,
           taxable_income: payrollResult.totals.taxableIncome,
           paye: paye,
+          bonus_tax_5: Number(breakdown?.bonusTax5 ?? 0),
+          bonus_tax_graduated: Number(breakdown?.bonusTaxGraduated ?? 0),
+          overtime_tax_5: Number(breakdown?.overtimeTax5 ?? 0),
+          overtime_tax_10: Number(breakdown?.overtimeTax10 ?? 0),
+          overtime_tax_graduated: Number(breakdown?.overtimeTaxGraduated ?? 0),
+          is_qualifying_junior_employee: Boolean(breakdown?.isQualifyingJuniorEmployee ?? false),
+          bonus_cap_amount: Number(breakdown?.bonusCapAmount ?? 0),
+          overtime_threshold_amount: Number(breakdown?.overtimeThresholdAmount ?? 0),
           net_salary: payrollResult.totals.netSalary,
         })
+
+        const expectedGross = Number(staff.basic_salary || 0) + allowancesTotal
+        if (Math.abs(Number(payrollResult.earnings.grossSalary || 0) - expectedGross) > 0.01) {
+          return NextResponse.json(
+            { error: `Payroll component reconciliation failed for ${staff.name || "staff"}: gross mismatch.` },
+            { status: 400 }
+          )
+        }
 
         totalGross += payrollResult.earnings.grossSalary
         totalAllowances += payrollResult.earnings.allowances

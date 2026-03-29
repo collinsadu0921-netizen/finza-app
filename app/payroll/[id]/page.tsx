@@ -8,6 +8,9 @@ type PayrollEntry = {
   id: string
   basic_salary: number
   allowances_total: number
+  regular_allowances_amount?: number
+  bonus_amount?: number
+  overtime_amount?: number
   deductions_total: number
   gross_salary: number
   ssnit_employee: number
@@ -231,6 +234,14 @@ export default function PayrollRunViewPage() {
     payslipByStaff[ps.staff_id] = ps
   }
   const hasPayslips = payslips.length > 0
+  const totals = entries.reduce(
+    (acc, entry) => {
+      acc.bonus += Number(entry.bonus_amount ?? 0)
+      acc.overtime += Number(entry.overtime_amount ?? 0)
+      return acc
+    },
+    { bonus: 0, overtime: 0 }
+  )
 
   const formatMonth = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
@@ -329,9 +340,11 @@ export default function PayrollRunViewPage() {
           </div>
 
           {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
             {[
               { label: "Gross Salary", value: payrollRun.total_gross_salary, color: "text-gray-900 dark:text-white" },
+              { label: "Bonus", value: totals.bonus, color: "text-violet-600 dark:text-violet-400" },
+              { label: "Overtime", value: totals.overtime, color: "text-indigo-600 dark:text-indigo-400" },
               { label: "PAYE", value: payrollRun.total_paye, color: "text-red-600 dark:text-red-400" },
               {
                 label: "SSNIT (employee)",
@@ -379,6 +392,8 @@ export default function PayrollRunViewPage() {
                     <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Basic</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Allowances</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Bonus</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Overtime</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Gross</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">SSNIT (emp.)</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">PAYE</th>
@@ -401,6 +416,8 @@ export default function PayrollRunViewPage() {
                         </td>
                         <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">₵{Number(entry.basic_salary).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">₵{Number(entry.allowances_total).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-violet-600 dark:text-violet-400 tabular-nums">₵{Number(entry.bonus_amount ?? 0).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-indigo-600 dark:text-indigo-400 tabular-nums">₵{Number(entry.overtime_amount ?? 0).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right font-medium text-gray-900 dark:text-white tabular-nums">₵{Number(entry.gross_salary).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-orange-600 dark:text-orange-400 tabular-nums">₵{Number(entry.ssnit_employee).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-red-600 dark:text-red-400 tabular-nums">₵{Number(entry.paye).toFixed(2)}</td>

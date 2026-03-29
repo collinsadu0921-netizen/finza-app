@@ -160,13 +160,43 @@ function calculatePaye(taxableIncome: number, effectiveDate: string): number {
  */
 export const ghanaPayrollEngine: PayrollEngine = {
   calculate(config: PayrollEngineConfig): PayrollCalculationResult {
-    const { basicSalary, allowances, otherDeductions, effectiveDate } = config
+    const {
+      basicSalary,
+      allowances,
+      otherDeductions,
+      effectiveDate,
+      bonusAmount = 0,
+      overtimeAmount = 0,
+      isQualifyingJuniorEmployee = false,
+    } = config
 
     // Use effectiveDate from config (defaults to payroll_month)
     const dateToUse = effectiveDate
 
-    // Calculate earnings: gross = basic + allowances (allowances increase gross and net but do not affect SSNIT base)
-    const grossSalary = basicSalary + allowances
+    const safeBonusAmount = roundPayroll(Math.max(0, Number(bonusAmount) || 0))
+    const safeOvertimeAmount = roundPayroll(Math.max(0, Number(overtimeAmount) || 0))
+    const regularAllowances = roundPayroll(Math.max(0, Number(allowances || 0) - safeBonusAmount - safeOvertimeAmount))
+
+    // Ghana bonus concession: first 15% of annual basic taxed at flat 5%.
+    const bonusCapAmount = roundPayroll(Math.max(0, basicSalary * 12 * 0.15))
+    const bonusConcessionalAmount = Math.min(safeBonusAmount, bonusCapAmount)
+    const bonusGraduatedAmount = roundPayroll(Math.max(0, safeBonusAmount - bonusConcessionalAmount))
+    const bonusTax5 = roundPayroll(bonusConcessionalAmount * 0.05)
+
+    // Ghana overtime concession (qualifying junior employees):
+    // first 50% of monthly basic taxed at 5%, excess taxed at 10%.
+    // Non-qualifying employees: overtime follows graduated PAYE.
+    const overtimeThresholdAmount = roundPayroll(Math.max(0, basicSalary * 0.5))
+    const overtimeTaxableAt5 = isQualifyingJuniorEmployee ? Math.min(safeOvertimeAmount, overtimeThresholdAmount) : 0
+    const overtimeTaxableAt10 = isQualifyingJuniorEmployee
+      ? roundPayroll(Math.max(0, safeOvertimeAmount - overtimeTaxableAt5))
+      : 0
+    const overtimeGraduatedAmount = isQualifyingJuniorEmployee ? 0 : safeOvertimeAmount
+    const overtimeTax5 = roundPayroll(overtimeTaxableAt5 * 0.05)
+    const overtimeTax10 = roundPayroll(overtimeTaxableAt10 * 0.10)
+
+    // Calculate earnings: gross = basic + regular allowances + bonus + overtime
+    const grossSalary = roundPayroll(basicSalary + regularAllowances + safeBonusAmount + safeOvertimeAmount)
 
     // Get SSNIT rates for effective date
     const ssnitRates = getSsnitRatesForDate(dateToUse)
@@ -176,11 +206,25 @@ export const ghanaPayrollEngine: PayrollEngine = {
     const ssnitEmployeeAmount = roundPayroll(ssnitBase * ssnitRates.employeeRate)
     const ssnitEmployerAmount = roundPayroll(ssnitBase * ssnitRates.employerRate)
 
-    // Taxable income = gross - employee SSNIT (SSNIT is tax-deductible). PAYE on taxable; employer SSNIT not in net.
+    // Taxable income = gross - employee SSNIT (SSNIT is tax-deductible).
     const taxableIncome = roundPayroll(grossSalary - ssnitEmployeeAmount)
 
-    // Calculate PAYE tax (progressive bands on taxable income)
-    const payeAmount = calculatePaye(taxableIncome, dateToUse)
+    // Graduated PAYE base excludes concessional bonus/overtime portions.
+    const graduatedPayeBase = roundPayroll(
+      taxableIncome - bonusConcessionalAmount - overtimeTaxableAt5 - overtimeTaxableAt10
+    )
+    const regularGraduatedBase = roundPayroll(
+      graduatedPayeBase - bonusGraduatedAmount - overtimeGraduatedAmount
+    )
+    const regularPayeAmount = calculatePaye(Math.max(0, regularGraduatedBase), dateToUse)
+    const regularPlusBonusPayeAmount = calculatePaye(
+      Math.max(0, regularGraduatedBase + bonusGraduatedAmount),
+      dateToUse
+    )
+    const graduatedPayeAmount = calculatePaye(Math.max(0, graduatedPayeBase), dateToUse)
+    const bonusTaxGraduated = roundPayroll(regularPlusBonusPayeAmount - regularPayeAmount)
+    const overtimeTaxGraduated = roundPayroll(graduatedPayeAmount - regularPlusBonusPayeAmount)
+    const payeAmount = roundPayroll(gradedTaxTotal(graduatedPayeAmount, bonusTax5, overtimeTax5, overtimeTax10))
 
     // Calculate net salary (taxable income - PAYE - other deductions)
     const netSalary = Math.max(0, roundPayroll(taxableIncome - payeAmount - otherDeductions))
@@ -245,6 +289,26 @@ export const ghanaPayrollEngine: PayrollEngine = {
         netSalary,
         totalEmployerContributions,
       },
+      complianceBreakdown: {
+        bonusAmount: safeBonusAmount,
+        overtimeAmount: safeOvertimeAmount,
+        regularAllowancesAmount: regularAllowances,
+        isQualifyingJuniorEmployee,
+        bonusCapAmount,
+        bonusTax5,
+        bonusTaxGraduated: roundPayroll(Math.max(0, bonusTaxGraduated)),
+        overtimeThresholdAmount,
+        overtimeTax5,
+        overtimeTax10,
+        overtimeTaxGraduated: roundPayroll(Math.max(0, overtimeTaxGraduated)),
+        graduatedPayeBase: roundPayroll(Math.max(0, graduatedPayeBase)),
+        graduatedPayeAmount: roundPayroll(graduatedPayeAmount),
+        totalIncomeTax: roundPayroll(payeAmount),
+      },
     }
   },
+}
+
+function gradedTaxTotal(graduatedPaye: number, bonusTax5: number, overtimeTax5: number, overtimeTax10: number): number {
+  return roundPayroll(graduatedPaye + bonusTax5 + overtimeTax5 + overtimeTax10)
 }

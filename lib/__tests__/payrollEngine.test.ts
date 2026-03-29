@@ -309,6 +309,77 @@ describe("Payroll Engine - Ghana Calculations", () => {
       expect(result.totals.netSalary).toBeCloseTo(expectedNet, 2)
     })
   })
+
+  describe("Ghana bonus and overtime compliance buckets", () => {
+    it("applies 5% bonus tax within concessional cap", () => {
+      const result = ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-01-01",
+        basicSalary: 5000,
+        allowances: 1000,
+        bonusAmount: 1000,
+        overtimeAmount: 0,
+        otherDeductions: 0,
+      })
+
+      expect(result.complianceBreakdown?.bonusAmount).toBeCloseTo(1000, 2)
+      expect(result.complianceBreakdown?.bonusTax5).toBeCloseTo(50, 2)
+      expect(result.complianceBreakdown?.bonusTaxGraduated).toBeCloseTo(0, 2)
+      expect(result.statutoryDeductions.find(d => d.code === "PAYE")?.amount).toBeCloseTo(531.13, 2)
+    })
+
+    it("splits bonus between 5% concession and graduated PAYE above cap", () => {
+      const result = ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-01-01",
+        basicSalary: 1000,
+        allowances: 3000,
+        bonusAmount: 3000,
+        overtimeAmount: 0,
+        otherDeductions: 0,
+      })
+
+      expect(result.complianceBreakdown?.bonusCapAmount).toBeCloseTo(1800, 2)
+      expect(result.complianceBreakdown?.bonusTax5).toBeCloseTo(90, 2)
+      expect(result.complianceBreakdown?.bonusTaxGraduated).toBeCloseTo(120, 2)
+    })
+
+    it("applies junior overtime 5%/10% split and excludes it from graduated base", () => {
+      const result = ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-01-01",
+        basicSalary: 2000,
+        allowances: 1500,
+        bonusAmount: 0,
+        overtimeAmount: 1500,
+        isQualifyingJuniorEmployee: true,
+        otherDeductions: 0,
+      })
+
+      expect(result.complianceBreakdown?.isQualifyingJuniorEmployee).toBe(true)
+      expect(result.complianceBreakdown?.overtimeTax5).toBeCloseTo(50, 2)
+      expect(result.complianceBreakdown?.overtimeTax10).toBeCloseTo(50, 2)
+      expect(result.complianceBreakdown?.overtimeTaxGraduated).toBeCloseTo(0, 2)
+    })
+
+    it("routes non-qualifying overtime through graduated PAYE", () => {
+      const result = ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-01-01",
+        basicSalary: 2000,
+        allowances: 1500,
+        bonusAmount: 0,
+        overtimeAmount: 1500,
+        isQualifyingJuniorEmployee: false,
+        otherDeductions: 0,
+      })
+
+      expect(result.complianceBreakdown?.overtimeTax5).toBeCloseTo(0, 2)
+      expect(result.complianceBreakdown?.overtimeTax10).toBeCloseTo(0, 2)
+      expect(result.complianceBreakdown?.overtimeTaxGraduated).toBeCloseTo(150, 2)
+      expect(result.statutoryDeductions.find(d => d.code === "PAYE")?.amount).toBeCloseTo(282, 2)
+    })
+  })
 })
 
 describe("Payroll Engine - Country Resolution", () => {

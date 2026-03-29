@@ -12,12 +12,20 @@ type PayslipData = {
   payroll_entries: {
     basic_salary: number
     allowances_total: number
+    regular_allowances_amount?: number
+    bonus_amount?: number
+    overtime_amount?: number
     deductions_total: number
     gross_salary: number
     ssnit_employee: number
     ssnit_employer: number
     taxable_income: number
     paye: number
+    bonus_tax_5?: number
+    bonus_tax_graduated?: number
+    overtime_tax_5?: number
+    overtime_tax_10?: number
+    overtime_tax_graduated?: number
     net_salary: number
   }
   staff: {
@@ -115,6 +123,14 @@ export default function PublicPayslipPage() {
   const payrollMonth = run?.payroll_month ? formatMonth(run.payroll_month) : "N/A"
   const totalStatDeductions = Number(entry.paye ?? 0) + Number(entry.ssnit_employee ?? 0)
   const totalDeductions = totalStatDeductions + Number(entry.deductions_total ?? 0)
+  const bonusAmount = Number(entry.bonus_amount ?? 0)
+  const overtimeAmount = Number(entry.overtime_amount ?? 0)
+  const regularAllowancesAmount = Math.max(0, Number(entry.regular_allowances_amount ?? Number(entry.allowances_total ?? 0) - bonusAmount - overtimeAmount))
+  const bonusTax5 = Number(entry.bonus_tax_5 ?? 0)
+  const bonusTaxGraduated = Number(entry.bonus_tax_graduated ?? 0)
+  const overtimeTax5 = Number(entry.overtime_tax_5 ?? 0)
+  const overtimeTax10 = Number(entry.overtime_tax_10 ?? 0)
+  const overtimeTaxGraduated = Number(entry.overtime_tax_graduated ?? 0)
 
   return (
     <div className="min-h-screen bg-slate-100 py-10 px-4 print:bg-white print:py-0">
@@ -183,10 +199,22 @@ export default function PublicPayslipPage() {
                   <span className="text-sm text-slate-600">Basic Salary</span>
                   <span className="text-sm font-medium text-slate-800">{fmt(entry.basic_salary, sym)}</span>
                 </div>
-                {Number(entry.allowances_total) > 0 && (
+                {regularAllowancesAmount > 0 && (
                   <div className="flex justify-between items-center py-2 border-b border-slate-50">
-                    <span className="text-sm text-slate-600">Allowances</span>
-                    <span className="text-sm font-medium text-slate-800">{fmt(entry.allowances_total, sym)}</span>
+                    <span className="text-sm text-slate-600">Recurring Allowances</span>
+                    <span className="text-sm font-medium text-slate-800">{fmt(regularAllowancesAmount, sym)}</span>
+                  </div>
+                )}
+                {bonusAmount > 0 && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                    <span className="text-sm text-slate-600">Bonus</span>
+                    <span className="text-sm font-medium text-slate-800">{fmt(bonusAmount, sym)}</span>
+                  </div>
+                )}
+                {overtimeAmount > 0 && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                    <span className="text-sm text-slate-600">Overtime</span>
+                    <span className="text-sm font-medium text-slate-800">{fmt(overtimeAmount, sym)}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center py-2 bg-slate-50 rounded-lg px-3">
@@ -204,6 +232,16 @@ export default function PublicPayslipPage() {
                   <div className="flex justify-between items-center py-2 border-b border-slate-50">
                     <span className="text-sm text-slate-600">PAYE Income Tax</span>
                     <span className="text-sm font-medium text-red-600">−{fmt(entry.paye, sym)}</span>
+                  </div>
+                )}
+                {(bonusTax5 > 0 || bonusTaxGraduated > 0 || overtimeTax5 > 0 || overtimeTax10 > 0 || overtimeTaxGraduated > 0) && (
+                  <div className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                    {(bonusTax5 > 0 || bonusTaxGraduated > 0) && (
+                      <div>Bonus tax: {fmt(bonusTax5 + bonusTaxGraduated, sym)} ({fmt(bonusTax5, sym)} @ 5%{bonusTaxGraduated > 0 ? `, ${fmt(bonusTaxGraduated, sym)} graduated` : ""})</div>
+                    )}
+                    {(overtimeTax5 > 0 || overtimeTax10 > 0 || overtimeTaxGraduated > 0) && (
+                      <div>Overtime tax: {fmt(overtimeTax5 + overtimeTax10 + overtimeTaxGraduated, sym)} ({fmt(overtimeTax5, sym)} @ 5%, {fmt(overtimeTax10, sym)} @ 10%{overtimeTaxGraduated > 0 ? `, ${fmt(overtimeTaxGraduated, sym)} graduated` : ""})</div>
+                    )}
                   </div>
                 )}
                 {Number(entry.ssnit_employee) > 0 && (

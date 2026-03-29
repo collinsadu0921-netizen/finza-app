@@ -38,6 +38,27 @@ export interface PayrollEngineConfig {
   otherDeductions: number
 
   /**
+   * Optional: One-off/variable bonus for this payroll period
+   * (Ghana-specific tax treatment supported by GH engine)
+   * Default: 0
+   */
+  bonusAmount?: number
+
+  /**
+   * Optional: Overtime earnings for this payroll period
+   * (Ghana-specific tax treatment supported by GH engine)
+   * Default: 0
+   */
+  overtimeAmount?: number
+
+  /**
+   * Optional: Whether staff qualifies as junior employee for overtime concession
+   * (Ghana-specific tax treatment supported by GH engine)
+   * Default: false
+   */
+  isQualifyingJuniorEmployee?: boolean
+
+  /**
    * Optional: Portion of allowances that is transport allowance
    * Used for base split calculations (e.g., Rwanda maternity excludes transport)
    * Default: 0
@@ -238,6 +259,27 @@ export interface PayrollCalculationResult {
      * Total employer contributions (expense to employer)
      */
     totalEmployerContributions: number
+  }
+
+  /**
+   * Optional component-level compliance breakdown for jurisdictions
+   * that require explicit tax bucket disclosures (e.g., Ghana bonus/overtime).
+   */
+  complianceBreakdown?: {
+    bonusAmount: number
+    overtimeAmount: number
+    regularAllowancesAmount: number
+    isQualifyingJuniorEmployee: boolean
+    bonusCapAmount: number
+    bonusTax5: number
+    bonusTaxGraduated: number
+    overtimeThresholdAmount: number
+    overtimeTax5: number
+    overtimeTax10: number
+    overtimeTaxGraduated: number
+    graduatedPayeBase: number
+    graduatedPayeAmount: number
+    totalIncomeTax: number
   }
 }
 

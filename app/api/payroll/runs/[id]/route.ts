@@ -166,6 +166,61 @@ export async function PUT(
         )
       }
 
+      const { data: entries, error: entriesError } = await supabase
+        .from("payroll_entries")
+        .select("gross_salary, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary")
+        .eq("payroll_run_id", runId)
+
+      if (entriesError) {
+        return NextResponse.json(
+          { error: `Failed to validate payroll entries before approval: ${entriesError.message}` },
+          { status: 500 }
+        )
+      }
+
+      const safe = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+      const aggregated = (entries || []).reduce(
+        (acc, entry: any) => {
+          acc.gross += safe(entry.gross_salary)
+          acc.deductions += safe(entry.deductions_total)
+          acc.ssnitEmployee += safe(entry.ssnit_employee)
+          acc.ssnitEmployer += safe(entry.ssnit_employer)
+          acc.paye += safe(entry.paye)
+          acc.net += safe(entry.net_salary)
+          return acc
+        },
+        { gross: 0, deductions: 0, ssnitEmployee: 0, ssnitEmployer: 0, paye: 0, net: 0 }
+      )
+
+      const { data: runTotals, error: runTotalsError } = await supabase
+        .from("payroll_runs")
+        .select("total_gross_salary, total_deductions, total_ssnit_employee, total_ssnit_employer, total_paye, total_net_salary")
+        .eq("id", runId)
+        .single()
+
+      if (runTotalsError || !runTotals) {
+        return NextResponse.json(
+          { error: "Failed to load payroll run totals for reconciliation." },
+          { status: 500 }
+        )
+      }
+
+      const TOLERANCE = 0.01
+      const mismatches: string[] = []
+      if (Math.abs(safe(runTotals.total_gross_salary) - aggregated.gross) > TOLERANCE) mismatches.push("gross salary")
+      if (Math.abs(safe(runTotals.total_deductions) - aggregated.deductions) > TOLERANCE) mismatches.push("deductions")
+      if (Math.abs(safe(runTotals.total_ssnit_employee) - aggregated.ssnitEmployee) > TOLERANCE) mismatches.push("employee statutory")
+      if (Math.abs(safe(runTotals.total_ssnit_employer) - aggregated.ssnitEmployer) > TOLERANCE) mismatches.push("employer statutory")
+      if (Math.abs(safe(runTotals.total_paye) - aggregated.paye) > TOLERANCE) mismatches.push("income tax")
+      if (Math.abs(safe(runTotals.total_net_salary) - aggregated.net) > TOLERANCE) mismatches.push("net salary")
+
+      if (mismatches.length > 0) {
+        return NextResponse.json(
+          { error: `Payroll reconciliation failed before approval. Please regenerate run totals (${mismatches.join(", ")} mismatch).` },
+          { status: 400 }
+        )
+      }
+
       // Post to ledger - if this fails, approval must fail
       const { data: postedJournalId, error: ledgerError } = await supabase.rpc(
         "post_payroll_to_ledger",
