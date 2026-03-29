@@ -21,7 +21,7 @@ type Invoice = {
   /** Issued invoice currency (FX invoices differ from business home currency). */
   currency_code?: string | null
   currency_symbol?: string | null
-  status: "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled"
+  status: "draft" | "sent" | "partially_paid" | "partial" | "paid" | "overdue" | "cancelled"
   issue_date: string | null
   due_date: string | null
   created_at: string
