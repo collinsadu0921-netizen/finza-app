@@ -44,9 +44,28 @@ const STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; te
   draft:          { label: "Draft",          dot: "bg-slate-400",   bg: "bg-slate-100",   text: "text-slate-600" },
   sent:           { label: "Sent",           dot: "bg-blue-500",    bg: "bg-blue-50",     text: "text-blue-700" },
   partially_paid: { label: "Partial",        dot: "bg-amber-500",   bg: "bg-amber-50",    text: "text-amber-700" },
-  paid:           { label: "Paid",           dot: "bg-emerald-500", bg: "bg-emerald-50",  text: "text-emerald-700" },
-  overdue:        { label: "Overdue",        dot: "bg-red-500",     bg: "bg-red-50",      text: "text-red-700" },
+  paid:           { label: "Paid",           dot: "bg-emerald-600", bg: "bg-emerald-100",  text: "text-emerald-800" },
+  overdue:        { label: "Overdue",        dot: "bg-red-600",     bg: "bg-red-100",      text: "text-red-800" },
   cancelled:      { label: "Cancelled",      dot: "bg-slate-300",   bg: "bg-slate-50",    text: "text-slate-400" },
+}
+
+/** Past calendar due date and still open — DB often keeps `sent` / `partially_paid` instead of `overdue`. */
+function invoiceIsPastDueOpen(invoice: Pick<Invoice, "status" | "due_date">): boolean {
+  const s = (invoice.status || "").toLowerCase()
+  if (s === "overdue") return true
+  if (!invoice.due_date) return false
+  if (s === "paid" || s === "draft" || s === "cancelled" || s === "void") return false
+  const due = String(invoice.due_date).split("T")[0]
+  const t = new Date()
+  const todayStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`
+  return due < todayStr
+}
+
+function statusForListBadge(invoice: Invoice): string {
+  if (invoiceIsPastDueOpen(invoice)) return "overdue"
+  const s = invoice.status
+  if (s === "partial") return "partially_paid"
+  return s
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -376,7 +395,7 @@ function InvoicesPageContent() {
             </div>
             <p className="text-2xl font-bold text-slate-900">{totalInvoices}</p>
             <p className="text-xs text-slate-400 mt-1">
-              {invoices.filter(i => i.status === "paid").length} paid · {invoices.filter(i => i.status === "overdue").length} overdue
+              {invoices.filter(i => i.status === "paid").length} paid · {invoices.filter(i => invoiceIsPastDueOpen(i)).length} overdue
             </p>
           </div>
         </div>
@@ -464,12 +483,19 @@ function InvoicesPageContent() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {invoices.map(invoice => {
-                    const isOverdue = invoice.status === "overdue"
+                    const isOverdue = invoiceIsPastDueOpen(invoice)
+                    const isPaid = invoice.status === "paid"
+                    const rowTint =
+                      isPaid
+                        ? "bg-emerald-100/90 hover:bg-emerald-200/90 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/55"
+                        : isOverdue
+                          ? "bg-red-100/90 hover:bg-red-200/90 dark:bg-red-950/40 dark:hover:bg-red-950/55"
+                          : "hover:bg-slate-50 dark:hover:bg-slate-800/40"
                     return (
                       <tr
                         key={invoice.id}
                         onClick={() => router.push(`/invoices/${invoice.id}/view`)}
-                        className="hover:bg-slate-50 cursor-pointer transition-colors group"
+                        className={`cursor-pointer transition-colors group ${rowTint}`}
                       >
                         <td className="px-5 py-4">
                           <span className="text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
@@ -485,13 +511,21 @@ function InvoicesPageContent() {
                           </span>
                         </td>
                         <td className="px-5 py-4">
-                          <StatusBadge status={invoice.status} />
+                          <StatusBadge status={statusForListBadge(invoice)} />
                         </td>
                         <td className="px-5 py-4">
                           <span className="text-sm text-slate-500">{fmt(invoice.issue_date)}</span>
                         </td>
                         <td className="px-5 py-4">
-                          <span className={`text-sm ${isOverdue ? "text-red-600 font-semibold" : "text-slate-500"}`}>
+                          <span
+                            className={`text-sm ${
+                              isOverdue
+                                ? "text-red-700 font-semibold dark:text-red-400"
+                                : isPaid
+                                  ? "text-emerald-800 dark:text-emerald-400"
+                                  : "text-slate-500"
+                            }`}
+                          >
                             {fmt(invoice.due_date)}
                           </span>
                         </td>

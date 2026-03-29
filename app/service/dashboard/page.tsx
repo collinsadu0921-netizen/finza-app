@@ -20,24 +20,29 @@ export default function ServiceDashboardPage() {
 
   useEffect(() => {
     async function loadDashboard() {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const user = sessionData?.session?.user
-      if (!user) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const user = sessionData?.session?.user
+        if (!user) {
+          setLoading(false)
+          return
+        }
+
+        // Derive a display name from auth metadata
+        const meta = user.user_metadata as Record<string, string> | undefined
+        const displayName =
+          meta?.full_name ??
+          meta?.name ??
+          (user.email ? user.email.split("@")[0] : null)
+        setUserName(displayName)
+
+        const biz = await getCurrentBusiness(supabase, user.id)
+        setBusiness(biz as any)
+      } catch (error) {
+        console.error("Failed to load dashboard:", error)
+      } finally {
         setLoading(false)
-        return
       }
-
-      // Derive a display name from auth metadata
-      const meta = user.user_metadata as Record<string, string> | undefined
-      const displayName =
-        meta?.full_name ??
-        meta?.name ??
-        (user.email ? user.email.split("@")[0] : null)
-      setUserName(displayName)
-
-      const biz = await getCurrentBusiness(supabase, user.id)
-      setBusiness(biz as any)
-      setLoading(false)
     }
 
     loadDashboard()

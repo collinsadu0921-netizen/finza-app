@@ -161,24 +161,34 @@ export default function OutstandingInvoicesPage() {
   }
 
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { bg: string; text: string; darkBg: string; darkText: string }> = {
+    const statusConfig: Record<string, { bg: string; text: string; darkBg: string; darkText: string; border: string }> = {
       sent: {
-        bg: "bg-orange-100",
-        text: "text-orange-800",
-        darkBg: "dark:bg-orange-900/30",
+        bg: "bg-orange-50/90",
+        text: "text-orange-700",
+        darkBg: "dark:bg-orange-950/25",
         darkText: "dark:text-orange-400",
+        border: "border border-orange-100 dark:border-orange-900/40",
       },
       partially_paid: {
-        bg: "bg-yellow-100",
-        text: "text-yellow-800",
-        darkBg: "dark:bg-yellow-900/30",
-        darkText: "dark:text-yellow-400",
+        bg: "bg-amber-50/90",
+        text: "text-amber-700",
+        darkBg: "dark:bg-amber-950/25",
+        darkText: "dark:text-amber-400",
+        border: "border border-amber-100 dark:border-amber-900/40",
+      },
+      paid: {
+        bg: "bg-emerald-50/90",
+        text: "text-emerald-600",
+        darkBg: "dark:bg-emerald-950/25",
+        darkText: "dark:text-emerald-400",
+        border: "border border-emerald-100 dark:border-emerald-900/40",
       },
       overdue: {
-        bg: "bg-red-100",
-        text: "text-red-800",
-        darkBg: "dark:bg-red-900/30",
+        bg: "bg-red-50/90",
+        text: "text-red-600",
+        darkBg: "dark:bg-red-950/20",
         darkText: "dark:text-red-400",
+        border: "border border-red-100 dark:border-red-900/40",
       },
     }
 
@@ -187,11 +197,12 @@ export default function OutstandingInvoicesPage() {
       text: "text-gray-800",
       darkBg: "dark:bg-gray-700",
       darkText: "dark:text-gray-300",
+      border: "border border-gray-200 dark:border-gray-600",
     }
 
     return (
       <span
-        className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${config.bg} ${config.text} ${config.darkBg} ${config.darkText}`}
+        className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${config.bg} ${config.text} ${config.darkBg} ${config.darkText} ${config.border}`}
       >
         {status.replace("_", " ").split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}
       </span>
@@ -286,16 +297,15 @@ export default function OutstandingInvoicesPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800">
-                    {invoices.map((invoice, index) => {
+                    {invoices.map((invoice) => {
                       const daysOverdue = calculateDaysOverdue(invoice.due_date)
                       return (
                         <tr
                           key={invoice.id}
                           className={`
                             cursor-pointer transition-colors duration-150
-                            ${index % 2 === 1 ? "bg-[rgba(255,255,255,0.02)] dark:bg-[rgba(255,255,255,0.02)]" : ""}
-                            border-b border-white/5 dark:border-gray-800
-                            hover:bg-[rgba(255,255,255,0.04)] dark:hover:bg-[rgba(255,255,255,0.04)]
+                            bg-red-100/90 hover:bg-red-200/90 dark:bg-red-950/40 dark:hover:bg-red-950/55
+                            border-b border-red-200/70 dark:border-red-900/30
                           `}
                         >
                           <td className="px-5 py-2 whitespace-nowrap text-left">

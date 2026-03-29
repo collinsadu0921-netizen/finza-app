@@ -86,11 +86,12 @@ export default function ServiceCustomerStatementPage() {
     const styles: Record<string, string> = {
       draft: "bg-gray-100 text-gray-800",
       sent: "bg-blue-100 text-blue-800",
-      partially_paid: "bg-yellow-100 text-yellow-800",
-      paid: "bg-green-100 text-green-800",
-      overdue: "bg-red-100 text-red-800",
+      partially_paid: "bg-amber-50 text-amber-700 border border-amber-100",
+      paid: "bg-emerald-100 text-emerald-800 border border-emerald-200",
+      overdue: "bg-red-100 text-red-800 border border-red-200",
     }
-    return <span className={`px-2 py-1 rounded text-xs font-medium ${styles[status] || styles.draft}`}>{status.replace("_", " ")}</span>
+    const label = status.replace(/_/g, " ")
+    return <span className={`px-2 py-1 rounded text-xs font-medium ${styles[status] || styles.draft}`}>{label}</span>
   }
 
   if (loading) {
@@ -176,14 +177,32 @@ export default function ServiceCustomerStatementPage() {
                 const invoicePayments = paymentsByInvoice[invoice.id] || []
                 const invoiceCredits = creditNotesByInvoice[invoice.id] || []
                 const totalPaid = invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)
-                const balance = Number(invoice.total) - totalPaid
+                const creditsTotal = invoiceCredits.reduce((sum, c) => sum + Number(c.total), 0)
+                const balance = Number(invoice.total) - totalPaid - creditsTotal
+                const dueStr = invoice.due_date ? String(invoice.due_date).split("T")[0] : null
+                const t = new Date()
+                const todayStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`
+                const isPastDueOpen = balance > 0.01 && !!dueStr && dueStr < todayStr
+                const badgeStatus =
+                  isPastDueOpen && !["paid", "draft", "cancelled"].includes((invoice.status || "").toLowerCase())
+                    ? "overdue"
+                    : invoice.status
                 return (
-                  <div key={invoice.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                  <div
+                    key={invoice.id}
+                    className={`rounded-lg border p-4 ${
+                      (invoice.status || "").toLowerCase() === "paid" || balance <= 0.01
+                        ? "border-emerald-200 bg-emerald-100/80 dark:border-emerald-800/50 dark:bg-emerald-950/35"
+                        : isPastDueOpen
+                          ? "border-red-200 bg-red-100/80 dark:border-red-800/50 dark:bg-red-950/35"
+                          : "border-gray-200 dark:border-gray-700"
+                    }`}
+                  >
                     <div className="flex justify-between items-start mb-3">
                       <div>
                         <div className="flex items-center gap-3">
                           <span className="font-semibold text-gray-900 dark:text-white">#{invoice.invoice_number}</span>
-                          {getStatusBadge(invoice.status)}
+                          {getStatusBadge(badgeStatus)}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                           {new Date(invoice.issue_date).toLocaleDateString("en-GH")}

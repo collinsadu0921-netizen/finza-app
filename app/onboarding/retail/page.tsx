@@ -12,6 +12,7 @@ import RetailOnboardingProducts from "./products"
 import RetailOnboardingRegister from "./register"
 import RetailOnboardingCompleted from "./completed"
 import { useToast } from "@/components/ui/ToastProvider"
+import OnboardingAIAssistant from "@/components/onboarding/OnboardingAIAssistant"
 
 type RetailOnboardingStep = 
   | "business_profile"
@@ -327,6 +328,10 @@ export default function RetailOnboardingPage() {
                 onComplete={() => updateOnboardingStep("complete")}
               />
             )}
+          </div>
+
+          <div className="mb-6">
+            <OnboardingAIAssistant step={currentStep} />
           </div>
 
           {/* Skip All Button */}

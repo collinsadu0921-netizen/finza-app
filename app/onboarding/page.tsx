@@ -7,6 +7,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { ensureTabIndustryMode } from "@/lib/industryMode"
 import { useToast } from "@/components/ui/ToastProvider"
+import OnboardingAIAssistant from "@/components/onboarding/OnboardingAIAssistant"
 
 type OnboardingStep =
   | "business_profile"
@@ -636,6 +637,10 @@ export default function OnboardingPage() {
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="mb-6">
+            <OnboardingAIAssistant step={currentStep} />
           </div>
 
           {/* Skip All Button */}

@@ -19,8 +19,8 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
         draft: "bg-gray-100 text-gray-600 border border-gray-200", // Neutral Gray (Pending)
         sent: "bg-blue-50 text-blue-700 border border-blue-200",   // Blue (Active)
         partially_paid: "bg-amber-50 text-amber-700 border border-amber-200", // Amber (Warning/Progress)
-        paid: "bg-emerald-50 text-emerald-700 border border-emerald-200", // Emerald (Success)
-        overdue: "bg-rose-50 text-rose-700 border border-rose-200", // Rose (Critical)
+        paid: "bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/50",
+        overdue: "bg-red-100 text-red-800 border border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/50",
         cancelled: "bg-slate-100 text-slate-500 border border-slate-200 line-through decoration-slate-400", // Slate (History)
         void: "bg-slate-100 text-slate-500 border border-slate-200 line-through decoration-slate-400",
 
