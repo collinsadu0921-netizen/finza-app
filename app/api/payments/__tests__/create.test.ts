@@ -13,8 +13,25 @@ import { NextRequest } from 'next/server'
 
 // Mock modules
 jest.mock('@/lib/supabaseServer')
+jest.mock('@/lib/business', () => ({
+  getCurrentBusiness: jest.fn(() => Promise.resolve({ id: 'test-business', address_country: 'GH' })),
+}))
 jest.mock('@/lib/auditLog', () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
+}))
+jest.mock('@/lib/accountingBootstrap', () => ({
+  ensureAccountingInitialized: jest.fn(() => Promise.resolve({ error: null })),
+}))
+jest.mock('@/lib/archivedBusiness', () => ({
+  assertBusinessNotArchived: jest.fn(() => Promise.resolve()),
+}))
+jest.mock('@/lib/accounting/reconciliation/engine-impl', () => ({
+  createReconciliationEngine: jest.fn(() => ({
+    reconcileInvoice: jest.fn(() => Promise.resolve({ status: 'ok' })),
+  })),
+}))
+jest.mock('@/lib/accounting/reconciliation/mismatch-logger', () => ({
+  logReconciliationMismatch: jest.fn(),
 }))
 jest.mock('@/lib/payments/eligibility', () => ({
   normalizeCountry: jest.fn((country: string) => 'GH'),
@@ -382,7 +399,7 @@ describe('POST /api/payments/create - Total Reconstruction Fix', () => {
         const invoiceData = { id: 'test-invoice-id', business_id: 'test-business', total: 120.00, issue_date: '2025-01-01', status: 'sent' }
         return {
           select: jest.fn((columns: string) => {
-            if (columns.includes('id') && columns.includes('total') && !columns.includes('business_id')) {
+            if (columns.includes('id') && columns.includes('total') && columns.includes('status')) {
               capturedSelectColumns = columns
             }
             return {
@@ -456,12 +473,11 @@ describe('POST /api/payments/create - Total Reconstruction Fix', () => {
     expect(capturedSelectColumns).not.toContain('subtotal')
     expect(capturedSelectColumns).not.toContain('apply_taxes')
     
-    // Should select id, total, and status (status required for draft-invoice guard)
+    // Should select operational invoice columns (including status and business ownership scope)
     expect(capturedSelectColumns).toContain('id')
     expect(capturedSelectColumns).toContain('total')
     expect(capturedSelectColumns).toContain('status')
-    const columns = capturedSelectColumns.split(',').map((c: string) => c.trim())
-    expect(columns.sort()).toEqual(['id', 'status', 'total'].sort())
+    expect(capturedSelectColumns).toContain('business_id')
   })
 
   it('rejects payment when invoice is draft (400, explicit message)', async () => {
@@ -489,5 +505,59 @@ describe('POST /api/payments/create - Total Reconstruction Fix', () => {
     expect(body.success).toBe(false)
     expect(body.error).toBe('Cannot record payment for a draft invoice. Issue the invoice first.')
     expect(body.message).toBe('Cannot record payment for a draft invoice. Issue the invoice first.')
+  })
+
+  it('accepts customer_credit settlement for home-currency invoices', async () => {
+    const { assertMethodAllowed } = require('@/lib/payments/eligibility')
+
+    const request = new NextRequest('http://localhost/api/payments/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        amount: 20.00,
+        date: '2025-01-01',
+        method: 'customer_credit',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const response = await POST(request)
+    const body = await response.json()
+
+    expect(response.status).toBe(201)
+    expect(body.success).toBe(true)
+
+    // customer_credit is internal settlement, not country-gated
+    expect(assertMethodAllowed).not.toHaveBeenCalled()
+  })
+
+  it('rejects customer_credit settlement for FX invoices', async () => {
+    const originalFxRate = (mockInvoiceWithMismatch as any).fx_rate
+    const originalCurrencyCode = (mockInvoiceWithMismatch as any).currency_code
+    ;(mockInvoiceWithMismatch as any).fx_rate = 15.2
+    ;(mockInvoiceWithMismatch as any).currency_code = 'USD'
+
+    const request = new NextRequest('http://localhost/api/payments/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        amount: 20.00,
+        date: '2025-01-01',
+        method: 'customer_credit',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const response = await POST(request)
+    const body = await response.json()
+
+    ;(mockInvoiceWithMismatch as any).fx_rate = originalFxRate
+    ;(mockInvoiceWithMismatch as any).currency_code = originalCurrencyCode
+
+    expect(response.status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('home-currency invoices')
   })
 })

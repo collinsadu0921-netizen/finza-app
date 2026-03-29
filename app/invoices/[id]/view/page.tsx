@@ -310,6 +310,7 @@ export default function InvoiceViewPage() {
       card: "Card Payment",
       cheque: "Cheque",
       paystack: "Paystack",
+      customer_credit: "Customer Credit",
       other: "Other",
     }
     return methods[method] || method

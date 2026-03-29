@@ -185,13 +185,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if credit note would exceed invoice balance (gross vs gross)
-    const { data: existingPayments } = await supabase
-      .from("payments")
-      .select("amount")
-      .eq("invoice_id", invoice_id)
-      .is("deleted_at", null)
-
+    // Check if credit note would exceed invoice creditable capacity.
+    // Accounting rule: payments do not reduce how much can be credited.
+    // A paid invoice can still be credited, potentially creating a customer refund/credit.
+    // Cap based on invoice gross minus already-applied credits.
     const { data: existingCredits } = await supabase
       .from("credit_notes")
       .select("total")
@@ -202,21 +199,18 @@ export async function POST(request: NextRequest) {
     const rawTotal = Number(invoice.total || 0)
     const derivedGross = Math.round((Number(invoice.subtotal || 0) + Number(invoice.total_tax || 0)) * 100) / 100
     const invoiceGross = rawTotal > 0 ? rawTotal : derivedGross
-    const paymentsGross =
-      (existingPayments ?? []).reduce((sum: number, p: any) => sum + Number(p.amount), 0)
     const creditsGross =
       (existingCredits ?? []).reduce((sum: number, c: any) => sum + Number(c.total), 0)
-    const remainingGross = invoiceGross - paymentsGross - creditsGross
-
-    const remainingGrossRounded = Math.round(remainingGross * 100) / 100
+    const remainingCreditCapacity = invoiceGross - creditsGross
+    const remainingCreditCapacityRounded = Math.round(Math.max(0, remainingCreditCapacity) * 100) / 100
     const creditTotalRounded = Math.round(creditNoteTotal * 100) / 100
 
-    if (creditTotalRounded > remainingGrossRounded) {
-      const hint = remainingGrossRounded === 0 && invoiceGross === 0
+    if (creditTotalRounded > remainingCreditCapacityRounded) {
+      const hint = remainingCreditCapacityRounded === 0 && invoiceGross === 0
         ? " Invoice total may be missing or zero; check the invoice."
         : ""
       return NextResponse.json(
-        { error: `Credit note amount (₵${creditTotalRounded.toFixed(2)}) cannot exceed invoice balance (₵${remainingGrossRounded.toFixed(2)}).${hint}` },
+        { error: `Credit note amount (₵${creditTotalRounded.toFixed(2)}) cannot exceed remaining creditable amount on this invoice (₵${remainingCreditCapacityRounded.toFixed(2)}).${hint}` },
         { status: 400 }
       )
     }

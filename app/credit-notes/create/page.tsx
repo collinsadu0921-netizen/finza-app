@@ -56,7 +56,6 @@ function CreateCreditNoteContent() {
   const [businessId, setBusinessId] = useState("")
   const [invoice, setInvoice] = useState<any>(null)
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([])
-  const [payments, setPayments] = useState<Array<{ amount?: number }>>([])
   const [creditNotes, setCreditNotes] = useState<Array<{ total?: number; status?: string }>>([])
   const [jurisdiction, setJurisdiction] = useState<string>("GH")
   const [items, setItems] = useState<LineItem[]>([])
@@ -157,7 +156,6 @@ function CreateCreditNoteContent() {
       const data = await response.json()
       setInvoice(data.invoice)
       setInvoiceItems(data.items || [])
-      setPayments(data.payments ?? [])
       setCreditNotes(data.creditNotes ?? [])
 
       // Prefill items from invoice
@@ -282,35 +280,33 @@ function CreateCreditNoteContent() {
       return
     }
 
-    // Check if credit note would exceed invoice balance (gross vs gross)
-    // Use payments/creditNotes from API (top-level siblings), not invoice.payments/invoice.creditNotes
+    // Check if credit note would exceed invoice credit cap.
+    // Accounting rule: paid invoices may still be credited; cap is invoice gross minus already-applied credits.
     const rawTotal = Number(invoice?.total || 0)
     const derivedGross = Math.round((Number(invoice?.subtotal || 0) + Number(invoice?.total_tax || 0)) * 100) / 100
     const invoiceGross = rawTotal > 0 ? rawTotal : derivedGross
-    const paymentsGross = Math.round(payments.reduce((sum, p) => sum + Number(p.amount || 0), 0) * 100) / 100
     const creditsGross =
       Math.round(
         creditNotes
           .filter((cn) => cn.status === "applied")
           .reduce((sum, cn) => sum + Number(cn.total || 0), 0) * 100
       ) / 100
-    const remainingGrossRounded = Math.round((invoiceGross - paymentsGross - creditsGross) * 100) / 100
+    const remainingCreditableRounded = Math.round(Math.max(0, invoiceGross - creditsGross) * 100) / 100
     const creditTotalRounded = Math.round(taxResult.grandTotal * 100) / 100
 
     // Temporary: verify remaining balance inputs (remove after verification)
-    console.log("[credit-note validation]", {
+    console.log("[credit-note credit-cap validation]", {
       invoiceGross,
-      paymentsGross,
       creditsGross,
-      remainingGrossRounded,
+      remainingCreditableRounded,
       creditTotalRounded,
     })
 
-    if (creditTotalRounded > remainingGrossRounded) {
-      const hint = remainingGrossRounded === 0 && invoiceGross === 0
+    if (creditTotalRounded > remainingCreditableRounded) {
+      const hint = remainingCreditableRounded === 0 && invoiceGross === 0
         ? " Invoice total may be missing or zero; check the invoice."
         : ""
-      setError(`Credit note amount (₵${creditTotalRounded.toFixed(2)}) cannot exceed invoice balance (₵${remainingGrossRounded.toFixed(2)}).${hint}`)
+      setError(`Credit note amount (₵${creditTotalRounded.toFixed(2)}) cannot exceed remaining creditable amount on this invoice (₵${remainingCreditableRounded.toFixed(2)}).${hint}`)
       return
     }
 

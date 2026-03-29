@@ -66,7 +66,7 @@ export default function AddPaymentModal({
     // Form State
     const [date, setDate] = useState(new Date().toISOString().split("T")[0])
     const [amount, setAmount] = useState("")
-    const [method, setMethod] = useState<"cash" | "bank" | "momo" | "card" | "cheque" | "paystack" | "other">("cash")
+    const [method, setMethod] = useState<"cash" | "bank" | "momo" | "card" | "cheque" | "paystack" | "other" | "customer_credit">("cash")
     const [reference, setReference] = useState("")
     const [notes, setNotes] = useState("")
     const [settlementFxRate, setSettlementFxRate] = useState("")
@@ -113,6 +113,13 @@ export default function AddPaymentModal({
     const canUseCard = allowedMethods.includes("card")
     const canUsePaystack = allowedMethods.includes("paystack")
 
+    useEffect(() => {
+        if (method === "customer_credit" && whtEnabled) {
+            setWhtEnabled(false)
+            setWhtAmountStr("")
+        }
+    }, [method, whtEnabled])
+
     // Auto-fill amount on mount
     useEffect(() => {
         if (!amount) {
@@ -155,7 +162,17 @@ export default function AddPaymentModal({
             return
         }
 
-        if (isFxInvoice && parsedSettlementRate <= 0) {
+        if (method === "customer_credit" && isFxInvoice) {
+            setError("Customer credit settlement is currently supported only for home-currency invoices.")
+            return
+        }
+
+        if (method === "customer_credit" && whtNum > 0) {
+            setError("WHT cannot be applied when using customer credit settlement.")
+            return
+        }
+
+        if (isFxInvoice && method !== "customer_credit" && parsedSettlementRate <= 0) {
             setError(`Settlement rate is required for ${invoiceCurrencyCode} invoices. Enter today's exchange rate.`)
             return
         }
@@ -200,7 +217,7 @@ export default function AddPaymentModal({
                     method: method,
                     reference: reference || null,
                     notes: notes || null,
-                    settlement_fx_rate: isFxInvoice ? parsedSettlementRate : null,
+                    settlement_fx_rate: isFxInvoice && method !== "customer_credit" ? parsedSettlementRate : null,
                     wht_amount: whtNum > 0 ? whtNum : 0,
                 }),
             })
@@ -377,6 +394,7 @@ export default function AddPaymentModal({
                                                 {canUseMobileMoney && <option value="momo">{mobileMoneyLabel}</option>}
                                                 {canUseCard && <option value="card">Card</option>}
                                                 {canUsePaystack && <option value="paystack">Paystack</option>}
+                                                <option value="customer_credit">Customer Credit</option>
                                                 <option value="cheque">Cheque</option>
                                                 <option value="other">Other</option>
                                             </select>
@@ -412,7 +430,7 @@ export default function AddPaymentModal({
                                 </div>
 
                                 {/* WHT — withholding tax toggle */}
-                                <div className={`rounded-xl border p-4 transition-colors ${whtEnabled ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                                <div className={`rounded-xl border p-4 transition-colors ${whtEnabled ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"} ${method === "customer_credit" ? "opacity-60" : ""}`}>
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <span className="text-sm font-semibold text-slate-800">
@@ -427,6 +445,7 @@ export default function AddPaymentModal({
                                             role="switch"
                                             aria-checked={whtEnabled}
                                             aria-label="Customer deducted withholding tax"
+                                            disabled={method === "customer_credit"}
                                             onClick={() => setWhtEnabled(!whtEnabled)}
                                             className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${whtEnabled ? "bg-amber-500" : "bg-slate-200"}`}
                                         >
@@ -462,7 +481,7 @@ export default function AddPaymentModal({
                                 </div>
 
                                 {/* FX Settlement Rate — only shown for foreign-currency invoices */}
-                                {isFxInvoice && (
+                                {isFxInvoice && method !== "customer_credit" && (
                                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
                                         <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                             Settlement Rate <span className="text-red-500">*</span>
@@ -508,11 +527,15 @@ export default function AddPaymentModal({
                                     <div>
                                         <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Ledger Impact</h4>
                                         <ul className="text-xs text-slate-600 mt-1.5 space-y-1 font-medium">
-                                            <li>↑ Dr. Cash/Bank {whtNum > 0 ? `(${formatInvoiceAmount(netCashReceived)} net of WHT)` : isFxInvoice && amountInHomeCurrency ? `(${formatMoney(amountInHomeCurrency, homeCurrencyCode)})` : ""}</li>
-                                            {whtNum > 0 && <li>↑ Dr. WHT Receivable ({formatInvoiceAmount(whtNum)})</li>}
+                                            {method === "customer_credit" ? (
+                                                <li>↑ Dr. Customer Credits Payable ({formatInvoiceAmount(amountNum)})</li>
+                                            ) : (
+                                                <li>↑ Dr. Cash/Bank {whtNum > 0 ? `(${formatInvoiceAmount(netCashReceived)} net of WHT)` : isFxInvoice && amountInHomeCurrency ? `(${formatMoney(amountInHomeCurrency, homeCurrencyCode)})` : ""}</li>
+                                            )}
+                                            {whtNum > 0 && method !== "customer_credit" && <li>↑ Dr. WHT Receivable ({formatInvoiceAmount(whtNum)})</li>}
                                             <li>↓ Cr. Accounts Receivable {isFxInvoice && arClearAmount ? `(${formatMoney(arClearAmount, homeCurrencyCode)})` : ""}</li>
-                                            {isFxInvoice && fxDiff !== null && fxDiff > 0 && <li>↓ Cr. FX Gain ({formatMoney(fxDiff, homeCurrencyCode)})</li>}
-                                            {isFxInvoice && fxDiff !== null && fxDiff < 0 && <li>↑ Dr. FX Loss ({formatMoney(Math.abs(fxDiff), homeCurrencyCode)})</li>}
+                                            {isFxInvoice && method !== "customer_credit" && fxDiff !== null && fxDiff > 0 && <li>↓ Cr. FX Gain ({formatMoney(fxDiff, homeCurrencyCode)})</li>}
+                                            {isFxInvoice && method !== "customer_credit" && fxDiff !== null && fxDiff < 0 && <li>↑ Dr. FX Loss ({formatMoney(Math.abs(fxDiff), homeCurrencyCode)})</li>}
                                         </ul>
                                     </div>
                                 </div>

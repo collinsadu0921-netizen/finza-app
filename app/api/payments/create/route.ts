@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     } = body
 
     // Validate method
-    const validMethods = ["cash", "bank", "momo", "card", "cheque", "paystack", "other"]
+    const validMethods = ["cash", "bank", "momo", "card", "cheque", "paystack", "other", "customer_credit"]
     if (!validMethods.includes(method)) {
       return NextResponse.json(
         { 
@@ -135,6 +135,28 @@ export async function POST(request: NextRequest) {
     // For FX invoices, settlement_fx_rate is required
     const isFxInvoice = !!(invoice as any).fx_rate
     const parsedSettlementFxRate = settlement_fx_rate ? Number(settlement_fx_rate) : null
+    if (method === "customer_credit" && isFxInvoice) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Customer credit settlement is currently supported only for home-currency invoices.",
+          message: "Customer credit not supported for FX invoices",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (method === "customer_credit" && Number(wht_amount) > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "WHT cannot be applied when using customer credit settlement.",
+          message: "Invalid WHT for customer credit",
+        },
+        { status: 400 }
+      )
+    }
+
     if (isFxInvoice && (!parsedSettlementFxRate || parsedSettlementFxRate <= 0)) {
       return NextResponse.json(
         {

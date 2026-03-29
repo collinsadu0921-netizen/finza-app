@@ -170,9 +170,10 @@ export async function PUT(
       }
     }
 
-    // APPLY balance check: canonical outstanding = invoice.total - SUM(payments) - SUM(other applied credit notes).
-    // Source of truth: never use stored balance fields. Only confirmed payments and status='applied' credit notes.
-    // Float/rounding: compute in cents then convert; reject only when credit > outstanding + 0.01 (tolerance).
+    // APPLY validation: cap credit notes to invoice gross (minus other applied credit notes).
+    // Accounting rule: a paid invoice may still be credited; settlement/refund is handled separately.
+    // Source of truth: never use stored balance fields.
+    // Float/rounding: compute in cents; reject only when credit exceeds remaining creditable amount + tolerance.
     if (status === "applied" && existingCreditNote.status !== "applied") {
       const safeNumber = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
 
@@ -189,12 +190,6 @@ export async function PUT(
           { status: 404 }
         )
       }
-
-      const { data: existingPayments } = await supabase
-        .from("payments")
-        .select("amount")
-        .eq("invoice_id", existingCreditNote.invoice_id)
-        .is("deleted_at", null)
 
       const { data: existingCredits } = await supabase
         .from("credit_notes")
@@ -222,55 +217,50 @@ export async function PUT(
         )
       }
 
-      const totalPaid = (existingPayments ?? []).reduce((sum, p) => sum + safeNumber(p.amount), 0)
       const totalCredits = (existingCredits ?? [])
         .filter((c: { id: string }) => c.id !== creditNoteId)
         .reduce((sum, c) => sum + safeNumber(c.total), 0)
 
-      // Canonical outstanding in cents to avoid floating-point drift; then convert back
+      // Remaining creditable amount in cents to avoid floating-point drift; then convert back
       const invoiceCents = Math.round(invoiceGross * 100)
-      const paidCents = Math.round(totalPaid * 100)
       const creditsCents = Math.round(totalCredits * 100)
-      const outstandingCents = Math.max(0, invoiceCents - paidCents - creditsCents)
-      const outstanding = outstandingCents / 100
+      const remainingCreditableCents = Math.max(0, invoiceCents - creditsCents)
+      const remainingCreditable = remainingCreditableCents / 100
       const creditAmount = safeNumber(creditNote?.total)
       const creditRounded = Math.round(creditAmount * 100) / 100
 
       if (process.env.NODE_ENV === "development") {
-        console.log("CN APPLY VALIDATION", {
+        console.log("CN APPLY CREDIT CAP VALIDATION", {
           invoiceGross,
-          totalPaid,
           totalCredits,
-          outstanding,
+          remainingCreditable,
           creditRounded,
         })
       }
 
-      // Reject only when credit exceeds outstanding by more than rounding tolerance (0.01)
+      // Reject only when credit exceeds remaining creditable amount by more than rounding tolerance (0.01)
       const TOLERANCE = 0.01
-      if (creditNote && creditRounded > outstanding + TOLERANCE) {
+      if (creditNote && creditRounded > remainingCreditable + TOLERANCE) {
         const logCtx = {
           invoice_total: invoiceGross,
-          total_payments: totalPaid,
           total_credits: totalCredits,
-          calculated_outstanding: outstanding,
+          calculated_remaining_creditable: remainingCreditable,
           credit_note_amount: creditAmount,
           invoice_id: existingCreditNote.invoice_id,
         }
-        console.warn("[credit-notes/apply] Credit note exceeds invoice balance", logCtx)
+        console.warn("[credit-notes/apply] Credit note exceeds invoice credit cap", logCtx)
         return NextResponse.json(
-          { error: "Credit note amount exceeds invoice balance" },
+          { error: "Credit note amount exceeds remaining creditable amount on invoice" },
           { status: 400 }
         )
       }
 
       // Defensive log on success (can be removed or downgraded in production)
       if (creditNote && process.env.NODE_ENV !== "production") {
-        console.info("[credit-notes/apply] Balance check passed", {
+        console.info("[credit-notes/apply] Credit cap check passed", {
           invoice_total: invoiceGross,
-          total_payments: totalPaid,
           total_credits: totalCredits,
-          calculated_outstanding: outstanding,
+          calculated_remaining_creditable: remainingCreditable,
           credit_note_amount: creditAmount,
         })
       }
