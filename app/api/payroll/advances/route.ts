@@ -230,7 +230,6 @@ export async function POST(request: NextRequest) {
         date: date_issued,
         description,
         reference_type: "salary_advance",
-        source_type: "payroll",
         period_id: period.id,
         created_by: user.id,
         posted_by: user.id,

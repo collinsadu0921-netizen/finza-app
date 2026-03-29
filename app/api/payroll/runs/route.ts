@@ -157,12 +157,13 @@ export async function POST(request: NextRequest) {
     let totalNet = 0
 
     for (const staff of staffList) {
-      // Get recurring allowances
+      // Get allowances:
+      // - include all allowance rows (recurring and non-recurring)
+      // - split bonus/overtime explicitly for Ghana tax bucket handling
       const { data: allowances } = await supabase
         .from("allowances")
-        .select("type, amount")
+        .select("type, amount, recurring")
         .eq("staff_id", staff.id)
-        .eq("recurring", true)
         .is("deleted_at", null)
 
       const bonusAmount = allowances
@@ -171,14 +172,19 @@ export async function POST(request: NextRequest) {
       const overtimeAmount = allowances
         ?.filter((a: any) => String(a.type || "").toLowerCase() === "overtime")
         .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
-      const allowancesTotal = allowances?.reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0
+      const regularAllowances = allowances
+        ?.filter((a: any) => {
+          const type = String(a.type || "").toLowerCase()
+          return type !== "bonus" && type !== "overtime"
+        })
+        .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
+      const allowancesTotal = regularAllowances + bonusAmount + overtimeAmount
 
-      // Get recurring deductions (other deductions, not statutory)
+      // Get deductions (other deductions, not statutory) - include recurring and non-recurring
       const { data: deductions } = await supabase
         .from("deductions")
         .select("amount")
         .eq("staff_id", staff.id)
-        .eq("recurring", true)
         .is("deleted_at", null)
 
       const deductionsTotal = deductions?.reduce((sum, d) => sum + Number(d.amount || 0), 0) || 0
