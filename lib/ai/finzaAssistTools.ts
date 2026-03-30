@@ -470,7 +470,7 @@ export async function executeFinzaAssistTool(
           overtime_amount?: number | null
         }
 
-        function serializePayrollEntry(e: EntryRowDb): PayrollStaffEntryOut {
+        const serializePayrollEntry = (e: EntryRowDb): PayrollStaffEntryOut => {
           const st = e.staff
           return {
             id: e.id,
