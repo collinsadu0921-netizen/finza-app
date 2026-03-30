@@ -25,7 +25,7 @@ export default function CloseRegisterModal({
   cashierId,
   onSuccess,
 }: CloseRegisterModalProps) {
-  const { format, currencySymbol } = useBusinessCurrency()
+  const { format, currencySymbol, currencyCode } = useBusinessCurrency()
   const [countedCash, setCountedCash] = useState("")
   const [expectedCash, setExpectedCash] = useState(0)
   const [variance, setVariance] = useState(0)
@@ -348,6 +348,7 @@ export default function CloseRegisterModal({
           varianceAmount={variance}
           countedCash={parseFloat(countedCash) || 0}
           expectedCash={expectedCash}
+          currencyCode={currencyCode ?? "GHS"}
           onSuccess={handleOverrideSuccess}
         />
       )}

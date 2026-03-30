@@ -17,6 +17,8 @@ import {
   RouteHeatmap,
 } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { formatMoney } from "@/lib/money"
+import { getCurrencySymbol } from "@/lib/currency"
 import {
   BarChart,
   Bar,
@@ -36,6 +38,7 @@ export default function AnalyticsPage() {
   const [earningsData, setEarningsData] = useState<RiderEarningsChart[]>([])
   const [routeData, setRouteData] = useState<RouteHeatmap[]>([])
   const [loading, setLoading] = useState(true)
+  const [currencyCode, setCurrencyCode] = useState("GHS")
 
   useEffect(() => {
     loadAnalytics()
@@ -57,6 +60,8 @@ export default function AnalyticsPage() {
         setLoading(false)
         return
       }
+
+      setCurrencyCode(business.default_currency || "GHS")
 
       try {
         const [
@@ -88,9 +93,8 @@ export default function AnalyticsPage() {
     }
   }
 
-  const formatAmount = (amount: number) => {
-    return `GHS ${amount.toFixed(2)}`
-  }
+  const formatAmount = (amount: number) => formatMoney(amount, currencyCode)
+  const earningsLegend = `Earnings (${getCurrencySymbol(currencyCode)})`
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
@@ -257,7 +261,7 @@ export default function AnalyticsPage() {
                   <Bar
                     dataKey="earnings"
                     fill="#10b981"
-                    name="Earnings (GHS)"
+                    name={earningsLegend}
                   />
                 </BarChart>
               </ResponsiveContainer>

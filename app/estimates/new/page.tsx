@@ -78,7 +78,7 @@ export default function NewEstimatePage() {
   const [fxRate, setFxRate] = useState<string>("")
 
   // Symbol used for all amount displays — switches to FX symbol when FX is enabled
-  const homeCurrencySymbol = getCurrencySymbol(businessCurrencyCode || "") || "GHS"
+  const homeCurrencySymbol = getCurrencySymbol(businessCurrencyCode || "") || "₵"
   const displaySymbol = fxEnabled && fxCurrencyCode
     ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
     : homeCurrencySymbol

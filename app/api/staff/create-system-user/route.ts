@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createClient } from "@supabase/supabase-js"
 import { randomUUID } from "node:crypto"
+import { findAuthUserIdByEmail } from "@/lib/authAdminLookup"
 
 // Service role client for admin operations (creating users)
 const getSupabaseAdmin = () => {
@@ -114,13 +115,8 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Check if email is already in auth
-      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers()
-      const emailExists = authUsers?.users?.some(
-        (u) => u.email?.toLowerCase() === email.trim().toLowerCase()
-      )
-
-      if (emailExists) {
+      const authIdForEmail = await findAuthUserIdByEmail(supabaseAdmin, email.trim().toLowerCase())
+      if (authIdForEmail) {
         return NextResponse.json(
           { error: "Email already exists" },
           { status: 400 }

@@ -148,6 +148,7 @@ export async function GET(
     
     return NextResponse.json({
       success: true,
+      currency_code: business.default_currency || "GHS",
       supplier: {
         name: supplierName,
         phone: firstBill?.supplier_phone || null,

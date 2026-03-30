@@ -91,15 +91,13 @@ export function formatMoney(
 }
 
 /**
- * Format money amount with currency code
- * 
- * @param amount - Numeric amount to format
- * @param currencyCode - ISO currency code
- * @returns Formatted string with code (e.g., "USD 1,234.50")
- * 
+ * Format money for display: uses the mapped symbol when one exists (e.g. GHS → ₵, USD → $),
+ * otherwise falls back to "CODE 1,234.50" for unmapped ISO codes.
+ *
  * @example
- * formatMoneyWithCode(1234.5, 'GHS') // "GHS 1,234.50"
- * formatMoneyWithCode(1234.5, 'KES') // "KES 1,234.50"
+ * formatMoneyWithCode(1234.5, 'GHS') // "₵1,234.50"
+ * formatMoneyWithCode(1234.5, 'USD') // "$1,234.50"
+ * formatMoneyWithCode(1234.5, 'XXX') // "XXX 1,234.50" (unknown code)
  * formatMoneyWithCode(1234.5, null) // "—"
  */
 export function formatMoneyWithCode(
@@ -114,14 +112,20 @@ export function formatMoneyWithCode(
     return "—"
   }
 
-  // Fixed locale 'en-US' for deterministic formatting across environments
-  const formattedNumber = new Intl.NumberFormat('en-US', {
+  const code = currencyCode.toUpperCase().trim()
+  const symbol = getCurrencySymbol(currencyCode)
+
+  if (symbol && symbol !== code) {
+    return formatMoney(amount, currencyCode)
+  }
+
+  const formattedNumber = new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
     useGrouping: true,
   }).format(amount)
 
-  return `${currencyCode} ${formattedNumber}`
+  return `${code} ${formattedNumber}`
 }
 
 /**
@@ -149,13 +153,13 @@ export function formatMoneyWithSymbol(
     return missingPlaceholder
   }
 
-  // Fixed locale 'en-US' for deterministic formatting across environments
-  const formattedNumber = new Intl.NumberFormat('en-US', {
+  const isNegative = amount < 0
+  const formattedNumber = new Intl.NumberFormat("en-US", {
     minimumFractionDigits,
     maximumFractionDigits,
     useGrouping,
-  }).format(amount)
+  }).format(Math.abs(amount))
 
-  return `${symbol}${formattedNumber}`
+  return isNegative ? `-${symbol}${formattedNumber}` : `${symbol}${formattedNumber}`
 }
 

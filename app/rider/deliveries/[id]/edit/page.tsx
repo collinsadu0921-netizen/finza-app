@@ -13,6 +13,8 @@ import {
   DistanceTier,
 } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { formatMoney } from "@/lib/money"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export default function EditDeliveryPage() {
   const router = useRouter()
@@ -40,6 +42,7 @@ export default function EditDeliveryPage() {
   const [existingBaseFee, setExistingBaseFee] = useState<number | null>(null)
   const [existingDistanceFee, setExistingDistanceFee] = useState<number | null>(null)
   const [existingTotalFee, setExistingTotalFee] = useState<number | null>(null)
+  const [currencyCode, setCurrencyCode] = useState("GHS")
 
   useEffect(() => {
     loadData()
@@ -65,6 +68,7 @@ export default function EditDeliveryPage() {
       }
 
       setBusinessId(business.id)
+      setCurrencyCode(business.default_currency || "GHS")
       // Use safe defaults - don't block rendering if values are null
       const tiers = business.rider_distance_tiers ?? []
       const baseFeeValue = business.rider_base_fee ?? null
@@ -272,7 +276,9 @@ export default function EditDeliveryPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Delivery Fee (GHS)</label>
+            <label className="block text-sm font-medium mb-1">
+              Delivery Fee ({getCurrencySymbol(currencyCode)})
+            </label>
             <input
               type="number"
               step="0.01"
@@ -300,21 +306,21 @@ export default function EditDeliveryPage() {
             {feePreview.pricing_model === "tier" && feePreview.tier_info ? (
               <>
                 <p className="font-semibold text-blue-600">
-                  Pricing Tier Applied: {feePreview.tier_info.min_km}–{feePreview.tier_info.max_km} km → GHS{" "}
-                  {feePreview.total_fee.toFixed(2)}
+                  Pricing Tier Applied: {feePreview.tier_info.min_km}–{feePreview.tier_info.max_km} km →{" "}
+                  {formatMoney(feePreview.total_fee, currencyCode)}
                 </p>
               </>
             ) : feePreview.pricing_model === "per_km" ? (
               <>
-                <p>Base fee: GHS {feePreview.base_fee.toFixed(2)}</p>
-                <p>Distance fee: GHS {feePreview.distance_fee.toFixed(2)}</p>
+                <p>Base fee: {formatMoney(feePreview.base_fee, currencyCode)}</p>
+                <p>Distance fee: {formatMoney(feePreview.distance_fee, currencyCode)}</p>
                 <p className="font-semibold">
-                  Total fee: GHS {feePreview.total_fee.toFixed(2)}
+                  Total fee: {formatMoney(feePreview.total_fee, currencyCode)}
                 </p>
               </>
             ) : (
               <p className="font-semibold">
-                Manual fee: GHS {feePreview.total_fee.toFixed(2)}
+                Manual fee: {formatMoney(feePreview.total_fee, currencyCode)}
               </p>
             )}
           </div>

@@ -178,19 +178,24 @@ describe("formatMoney", () => {
 })
 
 describe("formatMoneyWithCode", () => {
-  it("formats with currency code", () => {
+  it("formats USD using symbol", () => {
     const result = formatMoneyWithCode(1234.56, "USD")
-    validateMoneyFormatWithCode(result, "USD", 1234.56)
+    validateMoneyFormat(result, "$", 1234.56)
   })
 
-  it("formats GHS with code", () => {
+  it("formats GHS using cedi symbol", () => {
     const result = formatMoneyWithCode(1234.56, "GHS")
-    validateMoneyFormatWithCode(result, "GHS", 1234.56)
+    validateMoneyFormat(result, "₵", 1234.56)
   })
 
-  it("formats KES with code", () => {
+  it("formats KES using symbol", () => {
     const result = formatMoneyWithCode(1234.56, "KES")
-    validateMoneyFormatWithCode(result, "KES", 1234.56)
+    validateMoneyFormat(result, "KSh", 1234.56)
+  })
+
+  it("formats unknown ISO code with code prefix", () => {
+    const result = formatMoneyWithCode(1234.56, "XPD")
+    validateMoneyFormatWithCode(result, "XPD", 1234.56)
   })
 
   it("returns placeholder for null currency", () => {
@@ -201,9 +206,14 @@ describe("formatMoneyWithCode", () => {
     expect(formatMoneyWithCode(null, "USD")).toBe("—")
   })
 
-  it("formats negative amounts", () => {
+  it("formats negative amounts with symbol", () => {
     const result = formatMoneyWithCode(-1234.56, "USD")
-    validateMoneyFormatWithCode(result, "USD", -1234.56, { allowNegative: true })
+    validateMoneyFormat(result, "$", -1234.56, { allowNegative: true })
+  })
+
+  it("formats negative GHS with cedi symbol", () => {
+    const result = formatMoneyWithCode(-1234.56, "GHS")
+    validateMoneyFormat(result, "₵", -1234.56, { allowNegative: true })
   })
 })
 

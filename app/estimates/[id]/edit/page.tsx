@@ -8,6 +8,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
+import { getCurrencySymbol } from "@/lib/currency"
 import type { TaxResult } from "@/lib/taxEngine/types"
 
 type Customer = {
@@ -89,6 +90,7 @@ export default function EstimateEditPage() {
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
   const [estimate, setEstimate] = useState<Estimate | null>(null)
+  const [currencySymbol, setCurrencySymbol] = useState("₵")
 
   useEffect(() => {
     if (estimateId) {
@@ -119,6 +121,7 @@ export default function EstimateEditPage() {
       }
 
       setBusinessId(business.id)
+      setCurrencySymbol(getCurrencySymbol(business.default_currency) || "₵")
 
       // Load estimate data
       const response = await fetch(`/api/estimates/${estimateId}`)
@@ -668,7 +671,7 @@ export default function EstimateEditPage() {
                     </div>
                   </div>
                   <div className="col-span-3 md:col-span-1 flex items-center justify-between">
-                    <span className="font-medium">GHS {item.total.toFixed(2)}</span>
+                    <span className="font-medium">{currencySymbol}{item.total.toFixed(2)}</span>
                     <button
                       type="button"
                       onClick={() => removeItem(item.id)}
@@ -725,12 +728,12 @@ export default function EstimateEditPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span>Subtotal (before tax):</span>
-                    <span className="font-medium">GHS {subtotal.toFixed(2)}</span>
+                    <span className="font-medium">{currencySymbol}{subtotal.toFixed(2)}</span>
                   </div>
                   {totalDiscount > 0 && (
                     <div className="flex justify-between text-gray-600">
                       <span>Discounts:</span>
-                      <span className="text-rose-600 font-medium">−GHS {totalDiscount.toFixed(2)}</span>
+                      <span className="text-rose-600 font-medium">−{currencySymbol}{totalDiscount.toFixed(2)}</span>
                     </div>
                   )}
                   {taxResult.lines
@@ -738,16 +741,16 @@ export default function EstimateEditPage() {
                     .map(line => (
                       <div key={line.code} className="flex justify-between text-gray-600">
                         <span>{line.code}:</span>
-                        <span>GHS {Number(line.amount).toFixed(2)}</span>
+                        <span>{currencySymbol}{Number(line.amount).toFixed(2)}</span>
                       </div>
                     ))}
                   <div className="flex justify-between pt-2 border-t border-gray-200">
                     <span className="font-semibold">Total Tax:</span>
-                    <span className="font-semibold">GHS {tax.toFixed(2)}</span>
+                    <span className="font-semibold">{currencySymbol}{tax.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-lg pt-2 border-t border-gray-300">
                     <span className="font-bold">Grand Total:</span>
-                    <span className="font-bold">GHS {total.toFixed(2)}</span>
+                    <span className="font-bold">{currencySymbol}{total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -758,12 +761,12 @@ export default function EstimateEditPage() {
                 {totalDiscount > 0 && (
                   <div className="flex justify-between text-sm mb-2 text-gray-600">
                     <span>Discounts:</span>
-                    <span className="text-rose-600 font-medium">−GHS {totalDiscount.toFixed(2)}</span>
+                    <span className="text-rose-600 font-medium">−{currencySymbol}{totalDiscount.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-lg">
                   <span className="font-bold">Total:</span>
-                  <span className="font-bold">GHS {total.toFixed(2)}</span>
+                  <span className="font-bold">{currencySymbol}{total.toFixed(2)}</span>
                 </div>
               </div>
             )}

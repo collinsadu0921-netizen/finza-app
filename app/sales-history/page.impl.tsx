@@ -8,6 +8,7 @@ import { hasAccessToSalesHistory, getUserRole } from "@/lib/userRoles"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { getEffectiveStoreIdClient } from "@/lib/storeContext"
 import { useRefund } from "@/lib/hooks/useRefund"
+import { formatMoney } from "@/lib/money"
 import RefundModalWrapper from "@/components/RefundModalWrapper"
 
 type Sale = {
@@ -52,6 +53,7 @@ export default function SalesHistoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
+  const [currencyCode, setCurrencyCode] = useState("GHS")
   const [hasAccess, setHasAccess] = useState(false)
 
   // Filters - Initialize from URL params if present
@@ -162,6 +164,7 @@ export default function SalesHistoryPage() {
       }
 
       setBusinessId(business.id)
+      setCurrencyCode(business.default_currency || "GHS")
 
       // Check if business is in Service mode - Sales History is for Retail only
       // Redirect Service mode users to Invoices page
@@ -697,7 +700,7 @@ export default function SalesHistoryPage() {
                         {sale.register ? sale.register.name : "N/A"}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        GHS {sale.total_amount.toFixed(2)}
+                        {formatMoney(sale.total_amount, currencyCode)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {sale.payment_method_display}

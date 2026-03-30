@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { formatMoney } from "@/lib/money"
 
 interface SupervisorOverrideModalProps {
   isOpen: boolean
@@ -11,6 +12,8 @@ interface SupervisorOverrideModalProps {
   varianceAmount: number
   countedCash: number
   expectedCash: number
+  /** ISO currency code for display; defaults to GHS (₵) */
+  currencyCode?: string | null
   onSuccess?: () => void
 }
 
@@ -23,8 +26,10 @@ export default function SupervisorOverrideModal({
   varianceAmount,
   countedCash,
   expectedCash,
+  currencyCode = null,
   onSuccess,
 }: SupervisorOverrideModalProps) {
+  const homeCode = currencyCode ?? "GHS"
   const [supervisorEmail, setSupervisorEmail] = useState("")
   const [supervisorPassword, setSupervisorPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -118,7 +123,7 @@ export default function SupervisorOverrideModal({
             A variance of{" "}
             <span className="font-bold text-red-700 text-lg">
               {varianceAmount > 0 ? "+" : ""}
-              {varianceAmount.toFixed(2)} GHS
+              {formatMoney(varianceAmount, homeCode)}
             </span>{" "}
             was detected.
           </p>

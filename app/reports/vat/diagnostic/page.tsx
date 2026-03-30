@@ -8,6 +8,7 @@ import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingCont
 import { getActiveStoreId } from "@/lib/storeSession"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
+import { formatMoney } from "@/lib/money"
 
 type SaleDiagnostic = {
   sale_id: string
@@ -573,23 +574,23 @@ export default function VatDiagnosticPage() {
                     <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                       <div>
                         <span className="text-gray-600">Amount:</span>{" "}
-                        <span className="font-semibold">GHS {diagnostic.sale_amount.toFixed(2)}</span>
+                        <span className="font-semibold">{formatMoney(diagnostic.sale_amount, "GHS")}</span>
                       </div>
                       <div>
                         <span className="text-gray-600">Tax:</span>{" "}
-                        <span className="font-semibold">GHS {diagnostic.total_tax.toFixed(2)}</span>
+                        <span className="font-semibold">{formatMoney(diagnostic.total_tax, "GHS")}</span>
                       </div>
                       <div>
                         <span className="text-gray-600">Standard Rated:</span>{" "}
-                        <span className="font-semibold">GHS {diagnostic.standard_rated_total.toFixed(2)}</span>
+                        <span className="font-semibold">{formatMoney(diagnostic.standard_rated_total, "GHS")}</span>
                       </div>
                       <div>
                         <span className="text-gray-600">Zero Rated:</span>{" "}
-                        <span className="font-semibold">GHS {diagnostic.zero_rated_total.toFixed(2)}</span>
+                        <span className="font-semibold">{formatMoney(diagnostic.zero_rated_total, "GHS")}</span>
                       </div>
                       <div>
                         <span className="text-gray-600">Exempt:</span>{" "}
-                        <span className="font-semibold">GHS {diagnostic.exempt_total.toFixed(2)}</span>
+                        <span className="font-semibold">{formatMoney(diagnostic.exempt_total, "GHS")}</span>
                       </div>
                     </div>
                   </div>
@@ -636,10 +637,10 @@ export default function VatDiagnosticPage() {
                                     <span className="ml-2 text-red-600 font-semibold text-xs">(DELETED)</span>
                                   )}
                                 </td>
-                                <td className="px-3 py-2 text-right">GHS {item.price.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right">{formatMoney(item.price, "GHS")}</td>
                                 <td className="px-3 py-2 text-right">{item.qty}</td>
                                 <td className="px-3 py-2 text-right font-semibold">
-                                  GHS {item.line_total.toFixed(2)}
+                                  {formatMoney(item.line_total, "GHS")}
                                 </td>
                                 <td className="px-3 py-2">
                                   {item.is_deleted ? (
@@ -672,15 +673,15 @@ export default function VatDiagnosticPage() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
                           <span className="text-gray-600">NHIL:</span>{" "}
-                          <span className="font-semibold">GHS {diagnostic.nhil.toFixed(2)}</span>
+                          <span className="font-semibold">{formatMoney(diagnostic.nhil, "GHS")}</span>
                         </div>
                         <div>
                           <span className="text-gray-600">GETFund:</span>{" "}
-                          <span className="font-semibold">GHS {diagnostic.getfund.toFixed(2)}</span>
+                          <span className="font-semibold">{formatMoney(diagnostic.getfund, "GHS")}</span>
                         </div>
                         <div>
                           <span className="text-gray-600">VAT:</span>{" "}
-                          <span className="font-semibold">GHS {diagnostic.vat.toFixed(2)}</span>
+                          <span className="font-semibold">{formatMoney(diagnostic.vat, "GHS")}</span>
                         </div>
                       </div>
                     </div>

@@ -17,6 +17,7 @@ import {
   monthlyEquivalent,
   type BillingCycle,
 } from "@/lib/serviceWorkspace/subscriptionPricing"
+import { formatMoney } from "@/lib/money"
 
 const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
 
@@ -187,7 +188,7 @@ const BILLING_CYCLES: BillingCycle[] = ["monthly", "quarterly", "annual"]
 const TIER_ORDER: ServiceSubscriptionTier[] = ["starter", "professional", "business"]
 
 function formatGHS(amount: number): string {
-  return `GHS ${amount.toLocaleString()}`
+  return formatMoney(amount, "GHS")
 }
 
 function SubscriptionCallbackHandler() {

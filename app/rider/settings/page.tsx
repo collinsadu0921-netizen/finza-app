@@ -6,10 +6,12 @@ import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { updateBusinessRiderPricing, DistanceTier } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export default function RiderSettingsPage() {
   const router = useRouter()
   const [businessId, setBusinessId] = useState("")
+  const [currencySymbol, setCurrencySymbol] = useState("₵")
   const [baseFee, setBaseFee] = useState("")
   const [pricePerKm, setPricePerKm] = useState("")
   const [distanceTiers, setDistanceTiers] = useState<DistanceTier[]>([])
@@ -53,6 +55,8 @@ export default function RiderSettingsPage() {
 
       setIsRiderBusiness(true)
       setBusinessId(business.id)
+      const code = business.default_currency || "GHS"
+      setCurrencySymbol(getCurrencySymbol(code))
       // Use safe defaults with nullish coalescing
       const tiers = business.rider_distance_tiers ?? []
       const baseFeeValue = business.rider_base_fee ?? null
@@ -215,7 +219,7 @@ export default function RiderSettingsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Base Fee (GHS)</label>
+                <label className="block text-sm font-medium mb-1">Base Fee ({currencySymbol})</label>
                 <input
                   type="number"
                   step="0.01"
@@ -231,7 +235,7 @@ export default function RiderSettingsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Price Per KM (GHS)</label>
+                <label className="block text-sm font-medium mb-1">Price Per KM ({currencySymbol})</label>
                 <input
                   type="number"
                   step="0.01"
@@ -279,7 +283,7 @@ export default function RiderSettingsPage() {
                       <tr>
                         <th className="px-4 py-3 text-left text-sm font-semibold">Min km</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold">Max km</th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold">Price (GHS)</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">Price ({currencySymbol})</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold">Action</th>
                       </tr>
                     </thead>

@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto"
 import { hasPermission, type CustomPermissions } from "@/lib/permissions"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { logAudit } from "@/lib/auditLog"
+import { findAuthUserIdByEmail, isLikelyDuplicateAuthUserError } from "@/lib/authAdminLookup"
 
 const VALID_ROLES = ["admin", "manager", "accountant", "staff"]
 
@@ -97,34 +98,12 @@ export async function POST(request: NextRequest) {
     }
 
     const supabaseAdmin = getSupabaseAdmin()
+    const normalizedEmail = email.trim().toLowerCase()
 
-    // Check if a Supabase auth user with this email already exists
-    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers()
-    const existingAuthUser = existingUsers?.users?.find(
-      (u: any) => u.email?.toLowerCase() === email.toLowerCase().trim()
-    )
+    let targetUserId = await findAuthUserIdByEmail(supabaseAdmin, normalizedEmail)
+    let isExistingUser = !!targetUserId
 
-    let targetUserId: string
-
-    if (existingAuthUser) {
-      // User already has a Finza account — just add them to this business
-      targetUserId = existingAuthUser.id
-
-      // Check if they're already a member
-      const { data: existing } = await supabase
-        .from("business_users")
-        .select("id, role")
-        .eq("business_id", business.id)
-        .eq("user_id", targetUserId)
-        .maybeSingle()
-
-      if (existing) {
-        return NextResponse.json({
-          error: "This user is already a member of this workspace",
-        }, { status: 409 })
-      }
-    } else {
-      // Create a new Supabase auth user
+    if (!targetUserId) {
       const generatedPassword = auto_generate_password
         ? randomBytes(8).toString("hex")
         : password
@@ -134,27 +113,71 @@ export async function POST(request: NextRequest) {
       }
 
       const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-        email: email.trim(),
+        email: normalizedEmail,
         password: generatedPassword,
         email_confirm: true,
         user_metadata: { full_name: display_name || email.split("@")[0] },
       })
 
-      if (createError || !newUser?.user) {
-        return NextResponse.json({ error: createError?.message || "Failed to create user" }, { status: 400 })
+      if (createError || !newUser?.user?.id) {
+        if (createError && isLikelyDuplicateAuthUserError(createError.message)) {
+          targetUserId = await findAuthUserIdByEmail(supabaseAdmin, normalizedEmail)
+          if (!targetUserId) {
+            return NextResponse.json(
+              {
+                error:
+                  "An account with this email already exists, but it could not be loaded. Try again in a moment or contact support if this persists.",
+              },
+              { status: 409 }
+            )
+          }
+          isExistingUser = true
+        } else {
+          return NextResponse.json(
+            { error: createError?.message || "Failed to create user" },
+            { status: 400 }
+          )
+        }
+      } else {
+        targetUserId = newUser.user.id
+        isExistingUser = false
       }
-      targetUserId = newUser.user.id
     }
 
-    // Add to business_users
-    const { data: memberRow, error: insertError } = await supabase
+    if (!targetUserId) {
+      return NextResponse.json({ error: "Could not resolve the invited user account." }, { status: 500 })
+    }
+
+    const { data: verified, error: verifyErr } = await supabaseAdmin.auth.admin.getUserById(targetUserId)
+    if (verifyErr || !verified?.user?.id) {
+      return NextResponse.json(
+        { error: "Could not verify the invited user's login account in Auth. Check Supabase configuration and try again." },
+        { status: 502 }
+      )
+    }
+
+    const { data: existingMember } = await supabaseAdmin
+      .from("business_users")
+      .select("id, role")
+      .eq("business_id", business.id)
+      .eq("user_id", targetUserId)
+      .maybeSingle()
+
+    if (existingMember) {
+      return NextResponse.json(
+        { error: "This user is already a member of this workspace" },
+        { status: 409 }
+      )
+    }
+
+    const { data: memberRow, error: insertError } = await supabaseAdmin
       .from("business_users")
       .insert({
         business_id: business.id,
         user_id: targetUserId,
         role,
         display_name: display_name || email.split("@")[0],
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         invited_by: user.id,
         invited_at: new Date().toISOString(),
       })
@@ -169,15 +192,20 @@ export async function POST(request: NextRequest) {
       actionType: "team.member_invited",
       entityType: "team_member",
       entityId: memberRow.id,
-      newValues: { email: email.trim().toLowerCase(), role, display_name: display_name || null, is_existing_user: !!existingAuthUser },
-      description: `Invited ${email.trim()} as ${role}`,
+      newValues: {
+        email: normalizedEmail,
+        role,
+        display_name: display_name || null,
+        is_existing_user: isExistingUser,
+      },
+      description: `Invited ${normalizedEmail} as ${role}`,
       request,
     })
 
     return NextResponse.json({
       success: true,
       member: memberRow,
-      isExistingUser: !!existingAuthUser,
+      isExistingUser,
     })
   } catch (err: any) {
     console.error("POST /api/service/team error:", err)

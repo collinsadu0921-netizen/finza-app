@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { getCurrencySymbol } from "@/lib/currency"
 
 type Estimate = {
   id: string
@@ -49,6 +50,7 @@ export default function EstimatesPage() {
   const [businessId, setBusinessId] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
+  const [listCurrencySymbol, setListCurrencySymbol] = useState("₵")
 
   useEffect(() => {
     loadEstimates()
@@ -68,6 +70,7 @@ export default function EstimatesPage() {
       if (!business) { setError("Business not found"); setLoading(false); return }
 
       setBusinessId(business.id)
+      setListCurrencySymbol(getCurrencySymbol(business.default_currency) || "₵")
 
       let query = supabase
         .from("estimates")
@@ -300,7 +303,8 @@ export default function EstimatesPage() {
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
                         <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                          GHS {estimate.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {listCurrencySymbol}
+                          {estimate.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">

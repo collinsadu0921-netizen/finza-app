@@ -6,6 +6,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
+import { formatMoney } from "@/lib/money"
 
 type Bill = {
   id: string
@@ -51,6 +52,7 @@ export default function SupplierStatementPage() {
   const [bills, setBills] = useState<Bill[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [currencyCode, setCurrencyCode] = useState("GHS")
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -84,6 +86,11 @@ export default function SupplierStatementPage() {
         totalOutstanding: 0,
         totalOverdue: 0,
       })
+      setCurrencyCode(
+        typeof data.currency_code === "string" && data.currency_code
+          ? data.currency_code
+          : "GHS"
+      )
       setLoading(false)
     } catch (err: any) {
       console.error("Error loading statement:", err)
@@ -98,7 +105,10 @@ export default function SupplierStatementPage() {
       return
     }
 
-    const message = `Hello, here is your latest Statement of Account from Business:\n\nTotal Billed: GHS ${summary?.totalBilled.toFixed(2) || "0.00"}\nTotal Paid: GHS ${summary?.totalPaid.toFixed(2) || "0.00"}\nTotal Outstanding: GHS ${summary?.totalOutstanding.toFixed(2) || "0.00"}\n\nFor any clarifications, please reply here.`
+    const billed = formatMoney(summary?.totalBilled ?? 0, currencyCode)
+    const paid = formatMoney(summary?.totalPaid ?? 0, currencyCode)
+    const outstanding = formatMoney(summary?.totalOutstanding ?? 0, currencyCode)
+    const message = `Hello, here is your latest Statement of Account from Business:\n\nTotal Billed: ${billed}\nTotal Paid: ${paid}\nTotal Outstanding: ${outstanding}\n\nFor any clarifications, please reply here.`
 
     const result = buildWhatsAppLink(supplier.phone, message)
     if (!result.ok) {
@@ -193,19 +203,19 @@ export default function SupplierStatementPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border border-purple-200 dark:border-purple-700 rounded-xl p-4">
               <div className="text-purple-900 dark:text-purple-300 font-semibold text-sm mb-1">Total Billed</div>
-              <div className="text-purple-900 dark:text-purple-300 font-bold text-xl">₵{summary.totalBilled.toFixed(2)}</div>
+              <div className="text-purple-900 dark:text-purple-300 font-bold text-xl">{formatMoney(summary.totalBilled, currencyCode)}</div>
             </div>
             <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 border border-green-200 dark:border-green-700 rounded-xl p-4">
               <div className="text-green-900 dark:text-green-300 font-semibold text-sm mb-1">Total Paid</div>
-              <div className="text-green-900 dark:text-green-300 font-bold text-xl">₵{summary.totalPaid.toFixed(2)}</div>
+              <div className="text-green-900 dark:text-green-300 font-bold text-xl">{formatMoney(summary.totalPaid, currencyCode)}</div>
             </div>
             <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border border-orange-200 dark:border-orange-700 rounded-xl p-4">
               <div className="text-orange-900 dark:text-orange-300 font-semibold text-sm mb-1">Outstanding</div>
-              <div className="text-orange-900 dark:text-orange-300 font-bold text-xl">₵{summary.totalOutstanding.toFixed(2)}</div>
+              <div className="text-orange-900 dark:text-orange-300 font-bold text-xl">{formatMoney(summary.totalOutstanding, currencyCode)}</div>
             </div>
             <div className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-xl p-4">
               <div className="text-red-900 dark:text-red-300 font-semibold text-sm mb-1">Overdue</div>
-              <div className="text-red-900 dark:text-red-300 font-bold text-xl">₵{summary.totalOverdue.toFixed(2)}</div>
+              <div className="text-red-900 dark:text-red-300 font-bold text-xl">{formatMoney(summary.totalOverdue, currencyCode)}</div>
             </div>
           </div>
 
@@ -245,7 +255,7 @@ export default function SupplierStatementPage() {
                         <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
                           {bill.due_date ? new Date(bill.due_date).toLocaleDateString("en-GH") : "—"}
                         </td>
-                        <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-white">₵{Number(bill.total).toFixed(2)}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-white">{formatMoney(Number(bill.total), currencyCode)}</td>
                         <td className="px-6 py-4 text-sm">
                           <span className={`px-2 py-1 rounded text-xs ${
                             bill.status === "paid" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300" :
@@ -256,7 +266,7 @@ export default function SupplierStatementPage() {
                             {bill.status.replace("_", " ")}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-white">₵{balance.toFixed(2)}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-gray-900 dark:text-white">{formatMoney(balance, currencyCode)}</td>
                       </tr>
                     )
                   })}
@@ -293,7 +303,7 @@ export default function SupplierStatementPage() {
                           <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{bill?.bill_number || "N/A"}</td>
                           <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{payment.method}</td>
                           <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{payment.reference || "—"}</td>
-                          <td className="px-6 py-4 text-sm font-semibold text-green-600 dark:text-green-400 text-right">₵{Number(payment.amount).toFixed(2)}</td>
+                          <td className="px-6 py-4 text-sm font-semibold text-green-600 dark:text-green-400 text-right">{formatMoney(Number(payment.amount), currencyCode)}</td>
                         </tr>
                       )
                     })}

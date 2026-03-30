@@ -11,6 +11,8 @@ import {
   DistanceTier,
 } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { formatMoney } from "@/lib/money"
+import { getCurrencySymbol } from "@/lib/currency"
 
 export default function NewDeliveryPage() {
   const router = useRouter()
@@ -31,6 +33,7 @@ export default function NewDeliveryPage() {
     tiers: DistanceTier[] | null
   }>({ base: null, perKm: null, tiers: null })
   const [loading, setLoading] = useState(true)
+  const [currencyCode, setCurrencyCode] = useState("GHS")
 
   useEffect(() => {
     loadData()
@@ -56,6 +59,7 @@ export default function NewDeliveryPage() {
       }
 
       setBusinessId(business.id)
+      setCurrencyCode(business.default_currency || "GHS")
       // Use safe defaults - don't block rendering if values are null
       const tiers = business.rider_distance_tiers ?? []
       const baseFeeValue = business.rider_base_fee ?? null
@@ -277,7 +281,7 @@ export default function NewDeliveryPage() {
           <input
             className="border p-2 w-full"
             type="number"
-            placeholder="Delivery Fee (GHS)"
+            placeholder={`Delivery Fee (${getCurrencySymbol(currencyCode)})`}
             value={fee}
             onChange={(e) => setFee(e.target.value)}
             required
@@ -296,21 +300,21 @@ export default function NewDeliveryPage() {
             {feePreview.pricing_model === "tier" && feePreview.tier_info ? (
               <>
                 <p className="font-semibold text-blue-600">
-                  Pricing Tier Applied: {feePreview.tier_info.min_km}–{feePreview.tier_info.max_km} km → GHS{" "}
-                  {(feePreview.total_fee || 0).toFixed(2)}
+                  Pricing Tier Applied: {feePreview.tier_info.min_km}–{feePreview.tier_info.max_km} km →{" "}
+                  {formatMoney(feePreview.total_fee || 0, currencyCode)}
                 </p>
               </>
             ) : feePreview.pricing_model === "per_km" ? (
               <>
-                <p>Base fee: GHS {(feePreview.base_fee || 0).toFixed(2)}</p>
-                <p>Distance fee: GHS {(feePreview.distance_fee || 0).toFixed(2)}</p>
+                <p>Base fee: {formatMoney(feePreview.base_fee || 0, currencyCode)}</p>
+                <p>Distance fee: {formatMoney(feePreview.distance_fee || 0, currencyCode)}</p>
                 <p className="font-semibold">
-                  Total fee: GHS {(feePreview.total_fee || 0).toFixed(2)}
+                  Total fee: {formatMoney(feePreview.total_fee || 0, currencyCode)}
                 </p>
               </>
             ) : (
               <p className="font-semibold">
-                Manual fee: GHS {(feePreview.total_fee || 0).toFixed(2)}
+                Manual fee: {formatMoney(feePreview.total_fee || 0, currencyCode)}
               </p>
             )}
           </div>

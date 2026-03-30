@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { getActiveStoreId } from "@/lib/storeSession"
+import { formatMoney } from "@/lib/money"
+import { getCurrencySymbol } from "@/lib/currency"
 
 interface RetailOnboardingProductsProps {
   business: any
@@ -28,6 +30,8 @@ export default function RetailOnboardingProducts({
   businessId,
   onComplete
 }: RetailOnboardingProductsProps) {
+  const homeCode = business?.default_currency || "GHS"
+  const currencySymbol = getCurrencySymbol(homeCode)
   const [products, setProducts] = useState<Product[]>([])
   const [formData, setFormData] = useState<Omit<Product, "tax_category"> & { tax_category: TaxCategory | "" }>({
     name: "",
@@ -164,7 +168,7 @@ export default function RetailOnboardingProducts({
           <ul className="space-y-1">
             {products.map((product, index) => (
               <li key={index} className="text-sm text-gray-600 dark:text-gray-300">
-                • {product.name} - GHS {product.price}
+                • {product.name} - {formatMoney(parseFloat(product.price), homeCode)}
               </li>
             ))}
           </ul>
@@ -189,7 +193,7 @@ export default function RetailOnboardingProducts({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Price (GHS) *
+              Price ({currencySymbol}) *
             </label>
             <input
               type="number"

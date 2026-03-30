@@ -65,6 +65,7 @@ describe("POST /api/receipt-ocr", () => {
       select: jest.fn().mockReturnValue({
         eq: jest.fn().mockReturnValue({
           single: jest.fn(() => Promise.resolve({ data: { default_currency: "GHS" } })),
+          maybeSingle: jest.fn(() => Promise.resolve({ data: { default_currency: "GHS" } })),
         }),
       }),
     })

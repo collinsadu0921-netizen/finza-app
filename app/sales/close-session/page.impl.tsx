@@ -29,7 +29,7 @@ export default function CloseSessionPage() {
   const [countedCash, setCountedCash] = useState("")
   const [expectedCash, setExpectedCash] = useState(0)
   const [variance, setVariance] = useState(0)
-  const { format } = useBusinessCurrency()
+  const { format, currencyCode } = useBusinessCurrency()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -383,6 +383,7 @@ export default function CloseSessionPage() {
           varianceAmount={variance}
           expectedCash={expectedCash}
           countedCash={Number(countedCash) || 0}
+          currencyCode={currencyCode ?? "GHS"}
         />
       </div>
   )

@@ -2482,6 +2482,7 @@ export default function POSPage() {
         {showParkedSales && (
           <ParkedSalesList
             businessId={businessId}
+            currencyCode={currencyCode}
             onClose={() => setShowParkedSales(false)}
             onResume={async (parkedSale) => {
               // Categories are optional - can proceed without them (defaults to standard VAT)
@@ -2538,6 +2539,7 @@ export default function POSPage() {
             productId={selectedProductForVariant.id}
             productName={selectedProductForVariant.name}
             productPrice={selectedProductForVariant.price}
+            currencyCode={currencyCode}
             onSelect={handleVariantSelected}
             onClose={() => {
               setShowVariantModal(false)

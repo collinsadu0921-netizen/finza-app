@@ -1,15 +1,25 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import dynamic from "next/dynamic"
 import { supabase } from "@/lib/supabaseClient"
 import MetricCard from "./MetricCard"
 import DashboardHeader from "./DashboardHeader"
 import QuickActionsBar from "./QuickActionsBar"
 import RecentActivityFeed from "./RecentActivityFeed"
 import type { ActivityItem } from "./RecentActivityFeed"
-import TrendsSection from "./TrendsSection"
 import ServiceDashboardSkeleton from "./ServiceDashboardSkeleton"
 import DashboardErrorBanner from "./DashboardErrorBanner"
+
+const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
+  loading: () => (
+    <div
+      className="h-72 w-full animate-pulse rounded-xl border border-slate-200 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-800/50"
+      aria-hidden
+    />
+  ),
+  ssr: false,
+})
 
 type Business = { id: string; default_currency?: string }
 
@@ -85,6 +95,71 @@ const QUICK_ACTIONS = [
   { label: "View Reports", href: "/service/reports/profit-and-loss", icon: "reports" as const },
 ]
 
+async function fetchTimelineData(businessId: string): Promise<TimelineItem[]> {
+  if (SERVICE_ANALYTICS_V2) {
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - 365)
+    const timelineRes = await fetch(
+      `/api/dashboard/service-analytics?business_id=${encodeURIComponent(businessId)}&start_date=${start.toISOString().split("T")[0]}&end_date=${end.toISOString().split("T")[0]}&interval=day`
+    )
+    const json = timelineRes.ok ? await timelineRes.json() : {}
+    return (json.timeline ?? []).map((r: Record<string, unknown>) => ({
+      period_start: r.period_start as string,
+      period_end: r.period_end as string,
+      revenue: (r.revenue as number) ?? 0,
+      expenses: (r.expenses as number) ?? 0,
+      netProfit: (r.netProfit as number) ?? 0,
+      cashMovement: (r.cashMovement as number) ?? 0,
+    }))
+  }
+  const timelineRes = await fetch(
+    `/api/dashboard/service-timeline?business_id=${encodeURIComponent(businessId)}&periods=12`
+  )
+  return timelineRes.ok ? (await timelineRes.json()).timeline ?? [] : []
+}
+
+async function fetchMetricsPayload(
+  params: URLSearchParams
+): Promise<{ ok: true; payload: Metrics } | { ok: false; errMessage: string }> {
+  const res = await fetch(`/api/dashboard/service-metrics?${params.toString()}`)
+  if (res.ok) {
+    return { ok: true, payload: await res.json() }
+  }
+  let errMessage: string
+  try {
+    const body = await res.json()
+    errMessage = body?.error ?? body?.message ?? `Request failed (${res.status})`
+  } catch {
+    errMessage = `Request failed (${res.status})`
+  }
+  return { ok: false, errMessage }
+}
+
+async function fetchActivityItems(businessId: string): Promise<ActivityItem[]> {
+  const actRes = await fetch(
+    `/api/dashboard/service-activity?business_id=${encodeURIComponent(businessId)}&limit=10`
+  )
+  if (!actRes.ok) return []
+  const actJson = await actRes.json()
+  return actJson.items ?? []
+}
+
+async function fetchOverdueInvoiceCount(businessId: string): Promise<number | null> {
+  try {
+    const today = new Date().toISOString().split("T")[0]
+    const { count } = await supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("business_id", businessId)
+      .in("status", ["sent", "overdue", "partial"])
+      .lt("due_date", today)
+    return count ?? 0
+  } catch {
+    return null
+  }
+}
+
 export default function ServiceDashboardCockpit({ business }: ServiceDashboardCockpitProps) {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
@@ -108,81 +183,54 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
     }
     setLoading(true)
     setMetricsError(null)
-    try {
-      // ── Timeline ──────────────────────────────────────────────────────────
-      let tl: TimelineItem[] = []
-      if (SERVICE_ANALYTICS_V2) {
-        const end = new Date()
-        const start = new Date(end)
-        start.setDate(start.getDate() - 365)
-        const timelineRes = await fetch(
-          `/api/dashboard/service-analytics?business_id=${encodeURIComponent(businessId)}&start_date=${start.toISOString().split("T")[0]}&end_date=${end.toISOString().split("T")[0]}&interval=day`
-        )
-        const json = timelineRes.ok ? await timelineRes.json() : {}
-        tl = (json.timeline ?? []).map((r: Record<string, unknown>) => ({
-          period_start: r.period_start as string,
-          period_end: r.period_end as string,
-          revenue: (r.revenue as number) ?? 0,
-          expenses: (r.expenses as number) ?? 0,
-          netProfit: (r.netProfit as number) ?? 0,
-          cashMovement: (r.cashMovement as number) ?? 0,
-        }))
-      } else {
-        const timelineRes = await fetch(
-          `/api/dashboard/service-timeline?business_id=${encodeURIComponent(businessId)}&periods=12`
-        )
-        tl = timelineRes.ok ? (await timelineRes.json()).timeline ?? [] : []
-      }
-      setTimeline(tl)
 
-      // ── Metrics ───────────────────────────────────────────────────────────
-      const params = new URLSearchParams({ business_id: businessId })
-      if (selectedPeriodStart != null && selectedPeriodStart !== "") {
-        params.set("period_start", selectedPeriodStart)
+    const applyMetricsResult = (
+      result: { ok: true; payload: Metrics } | { ok: false; errMessage: string }
+    ) => {
+      if (result.ok) {
+        setMetrics(result.payload)
+        setMetricsError(null)
+      } else {
+        setMetrics(null)
+        setMetricsError(result.errMessage)
+      }
+    }
+
+    try {
+      const needsTimelineBeforeMetrics =
+        selectedPeriodStart != null && selectedPeriodStart !== ""
+
+      if (needsTimelineBeforeMetrics) {
+        const tl = await fetchTimelineData(businessId)
+        setTimeline(tl)
+
+        const params = new URLSearchParams({ business_id: businessId })
+        params.set("period_start", selectedPeriodStart!)
         const idx = tl.findIndex((t) => t.period_start === selectedPeriodStart)
         if (idx > 0) {
           params.set("previous_period_start", tl[idx - 1].period_start)
         }
-      }
 
-      const res = await fetch(`/api/dashboard/service-metrics?${params.toString()}`)
-      if (res.ok) {
-        const metricsPayload = await res.json()
-        setMetrics(metricsPayload)
-        setMetricsError(null)
+        const [metricsResult, activity, overdue] = await Promise.all([
+          fetchMetricsPayload(params),
+          fetchActivityItems(businessId),
+          fetchOverdueInvoiceCount(businessId),
+        ])
+        applyMetricsResult(metricsResult)
+        setActivityItems(activity)
+        setOverdueCount(overdue)
       } else {
-        setMetrics(null)
-        let errMessage: string
-        try {
-          const body = await res.json()
-          errMessage = body?.error ?? body?.message ?? `Request failed (${res.status})`
-        } catch {
-          errMessage = `Request failed (${res.status})`
-        }
-        setMetricsError(errMessage)
-      }
-
-      // ── Recent Activity ───────────────────────────────────────────────────
-      const actRes = await fetch(
-        `/api/dashboard/service-activity?business_id=${encodeURIComponent(businessId)}&limit=10`
-      )
-      if (actRes.ok) {
-        const actJson = await actRes.json()
-        setActivityItems(actJson.items ?? [])
-      }
-
-      // ── Overdue invoices count ────────────────────────────────────────────
-      try {
-        const today = new Date().toISOString().split("T")[0]
-        const { count } = await supabase
-          .from("invoices")
-          .select("id", { count: "exact", head: true })
-          .eq("business_id", businessId)
-          .in("status", ["sent", "overdue", "partial"])
-          .lt("due_date", today)
-        setOverdueCount(count ?? 0)
-      } catch {
-        setOverdueCount(null)
+        const baseParams = new URLSearchParams({ business_id: businessId })
+        const [tl, metricsResult, activity, overdue] = await Promise.all([
+          fetchTimelineData(businessId),
+          fetchMetricsPayload(baseParams),
+          fetchActivityItems(businessId),
+          fetchOverdueInvoiceCount(businessId),
+        ])
+        setTimeline(tl)
+        applyMetricsResult(metricsResult)
+        setActivityItems(activity)
+        setOverdueCount(overdue)
       }
     } catch (e) {
       setMetrics(null)
@@ -366,7 +414,7 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
       {/* Trends + Recent Activity */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <TrendsSection
+          <TrendsSectionLazy
             data={chartData}
             currencyCode={currencyCode}
             currentRevenue={metrics?.revenue ?? 0}

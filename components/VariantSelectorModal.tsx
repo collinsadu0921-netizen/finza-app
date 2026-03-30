@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { useToast } from "@/components/ui/ToastProvider"
+import { formatMoney } from "@/lib/money"
 
 type Variant = {
   id: string
@@ -24,6 +25,8 @@ type VariantSelectorModalProps = {
   productId: string
   productName: string
   productPrice: number
+  /** Business home currency; defaults to GHS for symbol formatting */
+  currencyCode?: string | null
   onSelect: (variantId: string | null, variantName: string, variantPrice: number, modifiers: Modifier[]) => void
   onClose: () => void
 }
@@ -32,10 +35,12 @@ export default function VariantSelectorModal({
   productId,
   productName,
   productPrice,
+  currencyCode = null,
   onSelect,
   onClose,
 }: VariantSelectorModalProps) {
   const toast = useToast()
+  const homeCode = currencyCode ?? "GHS"
   const [variants, setVariants] = useState<Variant[]>([])
   const [modifiers, setModifiers] = useState<Modifier[]>([])
   const [selectedVariant, setSelectedVariant] = useState<string | null>(null)
@@ -188,7 +193,7 @@ export default function VariantSelectorModal({
                       className="w-4 h-4"
                     />
                     <span className="flex-1 dark:text-white">{modifier.name}</span>
-                    <span className="text-gray-600 dark:text-gray-400">+GHS {modifier.price.toFixed(2)}</span>
+                    <span className="text-gray-600 dark:text-gray-400">+{formatMoney(modifier.price, homeCode)}</span>
                   </label>
                 ))}
               </div>
@@ -198,7 +203,7 @@ export default function VariantSelectorModal({
           <div className="flex justify-between items-center mb-4">
             <span className="font-semibold dark:text-white">Total:</span>
             <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
-              GHS {getSelectedPrice().toFixed(2)}
+              {formatMoney(getSelectedPrice(), homeCode)}
             </span>
           </div>
 
@@ -256,7 +261,7 @@ export default function VariantSelectorModal({
                     )}
                   </div>
                   <div className="text-right">
-                    <div className="font-semibold dark:text-white">GHS {price.toFixed(2)}</div>
+                    <div className="font-semibold dark:text-white">{formatMoney(price, homeCode)}</div>
                     {!isOutOfStock && (
                       <div className="text-xs text-gray-500 dark:text-gray-400">Stock: {stock}</div>
                     )}
@@ -283,7 +288,7 @@ export default function VariantSelectorModal({
                     className="w-4 h-4"
                   />
                   <span className="flex-1 dark:text-white">{modifier.name}</span>
-                  <span className="text-gray-600 dark:text-gray-400">+GHS {modifier.price.toFixed(2)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">+{formatMoney(modifier.price, homeCode)}</span>
                 </label>
               ))}
             </div>
@@ -294,7 +299,7 @@ export default function VariantSelectorModal({
           <div className="flex justify-between items-center mb-4">
             <span className="font-semibold dark:text-white">Total:</span>
             <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
-              GHS {getSelectedPrice().toFixed(2)}
+              {formatMoney(getSelectedPrice(), homeCode)}
             </span>
           </div>
         )}

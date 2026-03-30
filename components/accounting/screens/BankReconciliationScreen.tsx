@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
+import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { formatMoney } from "@/lib/money"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -102,6 +104,9 @@ type Props = {
 }
 
 export default function BankReconciliationScreen({ mode, businessId }: Props) {
+  const { currencyCode } = useBusinessCurrency()
+  const homeCode = currencyCode ?? "GHS"
+
   // Account selection
   const [bankAccounts, setBankAccounts] = useState<Account[]>([])
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([])
@@ -276,7 +281,11 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Match failed")
-      showToast(hasDifference ? `Matched — GHS ${fmt(feeDifference)} fee posted to expense account` : "Transactions matched")
+      showToast(
+        hasDifference
+          ? `Matched — ${formatMoney(feeDifference, homeCode)} fee posted to expense account`
+          : "Transactions matched"
+      )
       setSelectedBankId(null); setPendingMatchSysId(null); setFeeAccountId("")
       loadTransactions()
     } catch (e: any) {
@@ -423,7 +432,7 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
               {pendingMatchSysId && hasDifference && (
                 <div className="space-y-2">
                   <p>
-                    <strong>Amount difference: GHS {fmt(feeDifference)}</strong> — this is likely a payment processor fee (Paystack, MoMo, etc.).
+                    <strong>Amount difference: {formatMoney(feeDifference, homeCode)}</strong> — this is likely a payment processor fee (Paystack, MoMo, etc.).
                     Select an expense account to book it.
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
@@ -438,7 +447,7 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
                         <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
                       ))}
                     </select>
-                    <span className="text-xs text-amber-600">(creates JE: Dr this account / Cr bank for GHS {fmt(feeDifference)})</span>
+                    <span className="text-xs text-amber-600">(creates JE: Dr this account / Cr bank for {formatMoney(feeDifference, homeCode)})</span>
                   </div>
                 </div>
               )}
@@ -531,7 +540,8 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`text-sm font-semibold ${txn.type === "credit" ? "text-green-700" : "text-slate-800"}`}>
-                        {txn.type === "debit" ? "−" : "+"}GHS {fmt(txn.amount)}
+                        {txn.type === "debit" ? "−" : "+"}
+                        {formatMoney(txn.amount, homeCode)}
                       </p>
                       <p className="text-xs text-slate-400 capitalize">{txn.type}</p>
                     </div>
@@ -595,7 +605,7 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
                           <p className="text-xs text-slate-400">{fmtDate(txn.date)}{txn.reference ? ` · ${txn.reference}` : ""}</p>
                           {isClickable && hasDiff && (
                             <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
-                              Δ {fmt(diff)} fee
+                              Δ {formatMoney(diff, homeCode)} fee
                             </span>
                           )}
                         </div>
@@ -603,7 +613,8 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`text-sm font-semibold ${txn.type === "credit" ? "text-green-700" : "text-slate-800"}`}>
-                        {txn.type === "debit" ? "−" : "+"}GHS {fmt(txn.amount)}
+                        {txn.type === "debit" ? "−" : "+"}
+                        {formatMoney(txn.amount, homeCode)}
                       </p>
                       <p className="text-xs text-slate-400 capitalize">{txn.type}</p>
                     </div>
@@ -622,27 +633,27 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <p className="text-xs text-slate-500">Opening Balance</p>
-              <p className="text-lg font-bold text-slate-800 mt-1">GHS {fmt(balances.opening)}</p>
+              <p className="text-lg font-bold text-slate-800 mt-1">{formatMoney(balances.opening, homeCode)}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">Bank Ending</p>
-              <p className="text-lg font-bold text-slate-800 mt-1">GHS {fmt(balances.bankEnding)}</p>
+              <p className="text-lg font-bold text-slate-800 mt-1">{formatMoney(balances.bankEnding, homeCode)}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">System Balance</p>
-              <p className="text-lg font-bold text-slate-800 mt-1">GHS {fmt(balances.systemEnding)}</p>
+              <p className="text-lg font-bold text-slate-800 mt-1">{formatMoney(balances.systemEnding, homeCode)}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">Difference</p>
               <p className={`text-lg font-bold mt-1 ${isDiff0 ? "text-green-600" : "text-red-600"}`}>
-                GHS {fmt(Math.abs(balances.difference))}
+                {formatMoney(Math.abs(balances.difference), homeCode)}
                 {isDiff0 && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Reconciled</span>}
               </p>
             </div>
           </div>
           {!isDiff0 && balances.difference !== 0 && (
             <p className="text-xs text-red-500 mt-3">
-              Unreconciled difference of GHS {fmt(Math.abs(balances.difference))}. Match or ignore remaining bank transactions to reconcile.
+              Unreconciled difference of {formatMoney(Math.abs(balances.difference), homeCode)}. Match or ignore remaining bank transactions to reconcile.
             </p>
           )}
         </div>
@@ -696,7 +707,8 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
                             <td className="px-3 py-2 text-slate-600">{r.date}</td>
                             <td className="px-3 py-2 text-slate-700">{r.description}</td>
                             <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-slate-800" : "text-green-700"}`}>
-                              {r.amount < 0 ? "−" : "+"}GHS {fmt(Math.abs(r.amount))}
+                              {r.amount < 0 ? "−" : "+"}
+                              {formatMoney(Math.abs(r.amount), homeCode)}
                             </td>
                             <td className="px-3 py-2 text-slate-400">{r.reference || "—"}</td>
                           </tr>

@@ -6,10 +6,12 @@ import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getRiderBalances, RiderBalance } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { formatMoney } from "@/lib/money"
 
 export default function PayoutsPage() {
   const router = useRouter()
   const [balances, setBalances] = useState<RiderBalance[]>([])
+  const [currencyCode, setCurrencyCode] = useState("GHS")
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -33,6 +35,8 @@ export default function PayoutsPage() {
         return
       }
 
+      setCurrencyCode(business.default_currency || "GHS")
+
       try {
         const balancesList = await getRiderBalances(business.id)
         setBalances(balancesList)
@@ -46,9 +50,7 @@ export default function PayoutsPage() {
     }
   }
 
-  const formatAmount = (amount: number) => {
-    return `GHS ${amount.toFixed(2)}`
-  }
+  const formatAmount = (amount: number) => formatMoney(amount, currencyCode)
 
   if (loading) {
     return (

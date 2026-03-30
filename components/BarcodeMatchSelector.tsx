@@ -1,5 +1,7 @@
 "use client"
 
+import { formatMoney } from "@/lib/money"
+
 type Match = {
   id: string
   name: string
@@ -13,6 +15,7 @@ type Match = {
 type BarcodeMatchSelectorProps = {
   matches: Match[]
   barcode: string
+  currencyCode?: string | null
   onSelect: (match: Match) => void
   onClose: () => void
 }
@@ -20,9 +23,11 @@ type BarcodeMatchSelectorProps = {
 export default function BarcodeMatchSelector({
   matches,
   barcode,
+  currencyCode = null,
   onSelect,
   onClose,
 }: BarcodeMatchSelectorProps) {
+  const homeCode = currencyCode ?? "GHS"
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
@@ -46,7 +51,7 @@ export default function BarcodeMatchSelector({
                 </div>
               )}
               <div className="text-sm text-blue-600 dark:text-blue-400">
-                GHS {match.price.toFixed(2)}
+                {formatMoney(match.price, homeCode)}
               </div>
             </button>
           ))}

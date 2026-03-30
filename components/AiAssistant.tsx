@@ -1,6 +1,13 @@
 "use client"
 
 import { FormEvent, useEffect, useRef, useState } from "react"
+import { supabase } from "@/lib/supabaseClient"
+
+function businessIdFromContext(context: unknown): string | null {
+  if (!context || typeof context !== "object") return null
+  const id = (context as Record<string, unknown>).business_id
+  return typeof id === "string" && id.trim() ? id.trim() : null
+}
 
 type ChatMessage = {
   role: "user" | "assistant"
@@ -9,15 +16,33 @@ type ChatMessage = {
 
 type AiAssistantProps = {
   context?: unknown
+  /** Refetch client-side AI context when the user opens the panel (e.g. fresher snapshot). */
+  onPanelOpen?: () => void
 }
 
-export default function AiAssistant({ context }: AiAssistantProps) {
+const AI_FETCH_TIMEOUT_MS = 180_000
+
+const SUGGESTED_PROMPTS = [
+  "What are my totals this month?",
+  "How do I create an invoice?",
+  "Where is payroll?",
+  "Explain VAT flat rate vs standard",
+  "I attached a receipt — what does it say?",
+]
+
+export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [receiptUploading, setReceiptUploading] = useState(false)
+  /** Shown in the assistant bubble while waiting (OCR + LLM can take 30–90s). */
+  const [loadHint, setLoadHint] = useState("")
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  const wasOpenRef = useRef(false)
 
   useEffect(() => {
     const el = messagesContainerRef.current
@@ -25,30 +50,88 @@ export default function AiAssistant({ context }: AiAssistantProps) {
     el.scrollTop = el.scrollHeight
   }, [messages, loading])
 
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) onPanelOpen?.()
+    wasOpenRef.current = isOpen
+  }, [isOpen, onPanelOpen])
+
   const sendMessage = async (e: FormEvent) => {
     e.preventDefault()
     const text = input.trim()
-    if (!text || loading) return
+    if ((!text && !receiptFile) || loading) return
+
+    const businessId = businessIdFromContext(context)
+    let receiptPath: string | undefined
+
+    if (receiptFile) {
+      if (!businessId) {
+        setError("Receipt scan needs a loaded workspace. Wait for the page to finish loading, then try again.")
+        return
+      }
+      if (!receiptFile.type.startsWith("image/")) {
+        setError("Attach an image receipt (JPG, PNG, WebP). PDF is not supported for OCR yet.")
+        return
+      }
+    }
 
     setLoading(true)
+    setLoadHint("")
     setError("")
     setInput("")
 
+    const userDisplay =
+      text ||
+      (receiptFile ? `[Receipt image: ${receiptFile.name}]` : "")
+
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: text },
+      { role: "user", content: userDisplay },
       { role: "assistant", content: "" },
     ])
 
     try {
-      const response = await fetch("/api/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          context,
-        }),
-      })
+      if (receiptFile && businessId) {
+        setLoadHint("Uploading receipt…")
+        setReceiptUploading(true)
+        try {
+          const ext = receiptFile.name.split(".").pop() || "jpg"
+          const filePath = `expenses/${businessId}/${Date.now()}.${ext}`
+          const { error: upErr } = await supabase.storage.from("receipts").upload(filePath, receiptFile)
+          if (upErr) {
+            throw new Error(upErr.message || "Could not upload receipt for scanning")
+          }
+          receiptPath = filePath
+          setReceiptFile(null)
+          if (fileInputRef.current) fileInputRef.current.value = ""
+        } finally {
+          setReceiptUploading(false)
+        }
+      }
+
+      setLoadHint(
+        receiptPath
+          ? "Reading receipt & contacting AI… (first scan can take 30–90s)"
+          : "Contacting AI…"
+      )
+
+      const controller = new AbortController()
+      const timeoutId = window.setTimeout(() => controller.abort(), AI_FETCH_TIMEOUT_MS)
+      let response: Response
+      try {
+        response = await fetch("/api/ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          signal: controller.signal,
+          body: JSON.stringify({
+            message: text || undefined,
+            context,
+            ...(receiptPath ? { receipt_path: receiptPath, document_type: "expense" } : {}),
+          }),
+        })
+      } finally {
+        window.clearTimeout(timeoutId)
+      }
 
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => ({}))
@@ -73,8 +156,27 @@ export default function AiAssistant({ context }: AiAssistantProps) {
           return next
         })
       }
+
+      if (!assistantText.trim()) {
+        setMessages((prev) => {
+          const next = [...prev]
+          const lastIndex = next.length - 1
+          if (lastIndex >= 0 && next[lastIndex].role === "assistant") {
+            next[lastIndex] = {
+              ...next[lastIndex],
+              content:
+                "No text came back from the AI. If you use Ollama locally, ensure it is running (e.g. ollama serve), set AI_BASE_URL and AI_MODEL in .env.local, and try a shorter question. For receipt scans, try RECEIPT_OCR_USE_STUB=true in .env.local to rule out OCR delays.",
+            }
+          }
+          return next
+        })
+      }
     } catch (err: any) {
-      setError(err?.message || "Failed to get AI response")
+      const msg =
+        err?.name === "AbortError"
+          ? `Request timed out after ${Math.round(AI_FETCH_TIMEOUT_MS / 1000)}s. Receipt OCR plus the language model can be slow — try a smaller/clearer image, or set RECEIPT_OCR_USE_STUB=true for local dev. Confirm your AI backend is running.`
+          : err?.message || "Failed to get AI response"
+      setError(msg)
       setMessages((prev) => {
         if (prev.length === 0) return prev
         const next = [...prev]
@@ -86,6 +188,7 @@ export default function AiAssistant({ context }: AiAssistantProps) {
       })
     } finally {
       setLoading(false)
+      setLoadHint("")
     }
   }
 
@@ -134,7 +237,9 @@ export default function AiAssistant({ context }: AiAssistantProps) {
     return (
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          setIsOpen(true)
+        }}
         className="group flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-2xl hover:from-blue-700 hover:to-indigo-700"
         aria-label="Open Finza Assist"
       >
@@ -152,7 +257,7 @@ export default function AiAssistant({ context }: AiAssistantProps) {
           </div>
           <div>
             <p className="text-sm font-semibold leading-tight">Finza Assist</p>
-            <p className="text-[11px] text-blue-100">Online</p>
+            <p className="text-[11px] text-blue-100">Read-only · won&apos;t change your books</p>
           </div>
         </div>
         <button
@@ -161,7 +266,7 @@ export default function AiAssistant({ context }: AiAssistantProps) {
           className="rounded-md px-2 py-1 text-xs font-semibold bg-white/15 hover:bg-white/25"
           aria-label="Minimize Finza Assist"
         >
-          Minimize
+          −
         </button>
       </header>
 
@@ -170,10 +275,26 @@ export default function AiAssistant({ context }: AiAssistantProps) {
         className="h-80 overflow-y-auto space-y-3 bg-slate-50/70 dark:bg-slate-900/40 px-3 py-3"
       >
         {messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center px-3">
+          <div className="h-full flex flex-col justify-center gap-3 px-2 py-2">
             <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
-              Ask Finza Assist about invoices, bills, tax, reports, payroll, and where to go in the app.
+              Ask anything, or try a suggestion. Attach a receipt image to extract amounts (same OCR as expenses). Live
+              figures use secure read-only tools on the server.
             </p>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {SUGGESTED_PROMPTS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    setInput(p)
+                  }}
+                  className="text-left text-[11px] px-2.5 py-1.5 rounded-full border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 max-w-[100%]"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((m, idx) => (
@@ -187,7 +308,9 @@ export default function AiAssistant({ context }: AiAssistantProps) {
             >
               {m.content
                 ? renderWithLinks(m.content)
-                : (loading && m.role === "assistant" ? "..." : "")}
+                : loading && m.role === "assistant"
+                  ? loadHint || "…"
+                  : ""}
             </div>
           ))
         )}
@@ -197,22 +320,59 @@ export default function AiAssistant({ context }: AiAssistantProps) {
         <p className="px-3 pt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
 
-      <form onSubmit={sendMessage} className="border-t border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-3 flex gap-2">
+      <form onSubmit={sendMessage} className="border-t border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-3 space-y-2">
         <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask Finza Assist..."
-          className="flex-1 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-          disabled={loading}
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null
+            setReceiptFile(f)
+            setError("")
+          }}
         />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
-        >
-          {loading ? "..." : "Send"}
-        </button>
+        {receiptFile && (
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-100 dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-300">
+            <span className="truncate">Receipt: {receiptFile.name}</span>
+            <button
+              type="button"
+              className="shrink-0 font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-100"
+              onClick={() => {
+                setReceiptFile(null)
+                if (fileInputRef.current) fileInputRef.current.value = ""
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0 rounded-xl border border-slate-300 dark:border-slate-600 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+            title="Attach receipt image for OCR"
+          >
+            Receipt
+          </button>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask Finza Assist..."
+            className="flex-1 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || (!input.trim() && !receiptFile) || receiptUploading}
+            className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+          >
+            {loading || receiptUploading ? "..." : "Send"}
+          </button>
+        </div>
       </form>
     </section>
   )

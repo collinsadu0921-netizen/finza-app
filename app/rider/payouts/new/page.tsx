@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getRiders, createPayout, Rider } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { getCurrencySymbol } from "@/lib/currency"
 
 import { Suspense } from "react"
 
@@ -20,6 +21,7 @@ function NewPayoutContent() {
   const [note, setNote] = useState("")
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
+  const [currencySymbol, setCurrencySymbol] = useState("₵")
 
   useEffect(() => {
     loadData()
@@ -43,6 +45,7 @@ function NewPayoutContent() {
       if (!business) return
 
       setBusinessId(business.id)
+      setCurrencySymbol(getCurrencySymbol(business.default_currency || "GHS"))
       const ridersList = await getRiders(business.id)
       setRiders(ridersList)
     } catch (err: any) {
@@ -98,7 +101,7 @@ function NewPayoutContent() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Amount (GHS)</label>
+            <label className="block text-sm font-medium mb-1">Amount ({currencySymbol})</label>
             <input
               type="number"
               step="0.01"

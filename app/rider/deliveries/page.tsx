@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { filterDeliveries, getRiders, updateDeliveryStatus, Rider, DeliveryFilters } from "@/lib/rider"
 import { getCurrentBusiness } from "@/lib/business"
+import { formatMoney } from "@/lib/money"
 
 export default function DeliveriesPage() {
   const router = useRouter()
@@ -13,6 +14,7 @@ export default function DeliveriesPage() {
   const [riders, setRiders] = useState<Rider[]>([])
   const [loading, setLoading] = useState(true)
   const [businessId, setBusinessId] = useState("")
+  const [currencyCode, setCurrencyCode] = useState("GHS")
   const [totalCount, setTotalCount] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -34,7 +36,7 @@ export default function DeliveriesPage() {
   const [customStartDate, setCustomStartDate] = useState("")
   const [customEndDate, setCustomEndDate] = useState("")
 
-  const formatAmount = (amount: number) => `GHS ${amount.toFixed(2)}`
+  const formatAmount = (amount: number) => formatMoney(amount, currencyCode)
   const getEffectiveFee = (delivery: any) =>
     Number(
       delivery.total_fee !== null && delivery.total_fee !== undefined
@@ -78,6 +80,7 @@ export default function DeliveriesPage() {
       }
 
       setBusinessId(business.id)
+      setCurrencyCode(business.default_currency || "GHS")
       const ridersList = await getRiders(business.id)
       setRiders(ridersList)
       setLoading(false)

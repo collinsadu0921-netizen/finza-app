@@ -14,6 +14,11 @@ import RetailPosIdleSessionWatcher from "@/components/RetailPosIdleSessionWatche
 import AppIdleTimeoutWatcher from "@/components/AppIdleTimeoutWatcher"
 import { getCurrentBusiness } from "@/lib/business"
 import AiAssistant from "@/components/AiAssistant"
+import {
+  WorkspaceBusinessProvider,
+  type WorkspaceBusiness,
+  type WorkspaceSessionUser,
+} from "@/components/WorkspaceBusinessContext"
 
 const ProtectedLayoutContext = createContext(false)
 
@@ -24,6 +29,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(isNestedProtectedLayout ? false : true)
   const [aiBusinessId, setAiBusinessId] = useState<string | null>(null)
   const [aiContext, setAiContext] = useState<Record<string, unknown> | null>(null)
+  const [aiContextRefreshKey, setAiContextRefreshKey] = useState(0)
+  const [workspaceBusiness, setWorkspaceBusiness] = useState<WorkspaceBusiness>(null)
+  const [workspaceSessionUser, setWorkspaceSessionUser] = useState<WorkspaceSessionUser>(null)
   const isExportMode = useExportMode()
   const isPOSRoute = pathname?.startsWith("/pos")
   const isAccountingRoute = pathname?.startsWith("/accounting")
@@ -87,13 +95,28 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           const business = await getCurrentBusiness(supabase, userId)
           if (isMounted) {
             setAiBusinessId(business?.id || null)
+            setWorkspaceBusiness((business as WorkspaceBusiness) ?? null)
+            setWorkspaceSessionUser(
+              sessionData?.session?.user
+                ? {
+                    id: sessionData.session.user.id,
+                    email: sessionData.session.user.email,
+                    user_metadata: sessionData.session.user.user_metadata,
+                  }
+                : null
+            )
           }
         } catch (error) {
           console.error("ProtectedLayout: Failed to resolve business for AI context", error)
           if (isMounted) {
             setAiBusinessId(null)
+            setWorkspaceBusiness(null)
+            setWorkspaceSessionUser(null)
           }
         }
+      } else if (isMounted) {
+        setWorkspaceBusiness(null)
+        setWorkspaceSessionUser(null)
       }
       
       console.log("ProtectedLayout: Access granted")
@@ -539,7 +562,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     return () => {
       isMounted = false
     }
-  }, [aiBusinessId, isNestedProtectedLayout])
+  }, [aiBusinessId, isNestedProtectedLayout, aiContextRefreshKey])
 
   if (isNestedProtectedLayout) {
     return <>{children}</>
@@ -557,6 +580,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
   return (
     <ProtectedLayoutContext.Provider value={true}>
+      <WorkspaceBusinessProvider
+        value={{ business: workspaceBusiness, sessionUser: workspaceSessionUser }}
+      >
       <Suspense fallback={null}>
         <ServiceSubscriptionProvider>
           <RetailPosIdleSessionWatcher pathname={pathname} />
@@ -595,6 +621,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             {children}
             <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)]">
               <AiAssistant
+                onPanelOpen={() => setAiContextRefreshKey((k) => k + 1)}
                 context={{
                   ...(aiContext ?? { page_scope: "global", warning: "AI context is still loading." }),
                   current_path: pathname || "/",
@@ -606,6 +633,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           </div>
         </ServiceSubscriptionProvider>
       </Suspense>
+      </WorkspaceBusinessProvider>
     </ProtectedLayoutContext.Provider>
   )
 }

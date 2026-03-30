@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { getCurrentBusiness } from "@/lib/business"
+import {
+  FINZA_ASSIST_TOOL_DEFINITIONS,
+  executeFinzaAssistTool,
+  checkAiRateLimit,
+} from "@/lib/ai/finzaAssistTools"
+import { performReceiptOcr } from "@/lib/receipt/performReceiptOcr"
+import type { DocumentType } from "@/lib/receipt/receiptOcr"
 
-const SYSTEM_PROMPT = `You are Finza Assist, a finance assistant for a Ghanaian small business using Finza, a ledger-first accounting platform.
-You help users understand finances, explain transactions, VAT (flat rate and standard scheme), income tax, withholding tax, and bookkeeping.
-Be concise and practical.
+/** Receipt OCR + LLM can exceed default serverless limits; align with /api/receipt-ocr. */
+export const maxDuration = 120
+export const runtime = "nodejs"
 
-Routing rules:
-- Prefer real, clickable app routes.
-- For this workspace, prefer /service/* routes when guiding users.
-- Only suggest a route that exists in the sitemap below.
-- If no exact route exists, clearly say it is coming soon.
-
-Authoritative service sitemap:
+const SITEMAP = `Authoritative service sitemap:
 /service
 /service/dashboard
 /service/invoices
@@ -90,6 +93,27 @@ Authoritative service sitemap:
 /service/invitations
 /service/health`
 
+const GUARDRAILS = `Guardrails (mandatory):
+- You cannot create, edit, delete, or post any data in Finza. You do not run transactions, journals, payments, invoices, or tax filings.
+- For numbers and lists about THIS business, prefer facts returned from tool calls (they are read-only and server-verified). Client-provided JSON may be stale; say so if it conflicts with tools.
+- Do not invent routes: only use paths from the sitemap. If unsure, say the page may be under Settings or suggest /service/dashboard.
+- You give educational guidance on Ghana VAT/WHT/PAYE and bookkeeping — not legal or binding tax advice; suggest a qualified accountant for edge cases.
+- Never ask for passwords, PINs, API keys, or full card numbers.
+- Keep answers concise. When giving navigation, lead with one line: Go to: /service/... then brief steps.`
+
+const BASE_INSTRUCTIONS = `You are Finza Assist, a finance assistant for a Ghanaian small business using Finza, a ledger-first accounting platform.
+You help users understand finances, explain transactions, VAT (flat rate and standard scheme), income tax, withholding tax, and bookkeeping.
+
+You have read-only tools to fetch live summaries, search invoices/bills, read tax profile fields, read payroll runs, and run receipt OCR on images already stored in Finza (extract_receipt_ocr). When the user attaches a receipt in Assist, the server may include a pre-extracted OCR block in their message — summarize it clearly and say figures are unverified until they create an expense or bill.
+
+Receipt OCR does not post to the ledger. To record spending, direct them to Go to: /service/expenses/create (or /service/bills for supplier bills).
+
+Payroll and salary: for questions about salary paid, wages, net pay, gross payroll, PAYE/SSNIT from payroll, payslips, or payroll by month, call get_payroll_runs_summary. Use all_history true for full run history (not just recent months); use include_staff_entries true when the user needs per-employee payroll lines. Do not answer those from get_dashboard_summary alone (that tool uses customer payments and expense records, not payroll_runs).
+
+Routing: prefer /service/* URLs. ${SITEMAP}
+
+${GUARDRAILS}`
+
 function getClient() {
   const baseURL = process.env.AI_BASE_URL || "http://localhost:11434/v1"
   const apiKey = process.env.AI_API_KEY || "ollama"
@@ -100,63 +124,212 @@ function getClient() {
   })
 }
 
+const MAX_TOOL_ROUNDS = 5
+const MAX_TOOL_CALLS_PER_REQUEST = 10
+
+async function streamTextResponse(text: string): Promise<Response> {
+  const encoder = new TextEncoder()
+  const chunkSize = 48
+  const readable = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for (let i = 0; i < text.length; i += chunkSize) {
+          controller.enqueue(encoder.encode(text.slice(i, i + chunkSize)))
+        }
+        controller.close()
+      } catch (e) {
+        controller.error(e)
+      }
+    },
+  })
+  return new NextResponse(readable, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  })
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => null)
-    const message = String(body?.message || "").trim()
+    let message = String(body?.message || "").trim()
     const context = body?.context ?? null
+    const receiptPathRaw = body?.receipt_path
+    const receiptDocRaw = body?.document_type
+    const receiptPath =
+      typeof receiptPathRaw === "string" && receiptPathRaw.trim() ? receiptPathRaw.trim() : ""
+
+    if (!message && !receiptPath) {
+      return NextResponse.json({ error: "message or receipt_path is required" }, { status: 400 })
+    }
+
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const rate = checkAiRateLimit(user.id)
+    if (!rate.ok) {
+      return NextResponse.json(
+        { error: `Too many requests. Try again in ${rate.retryAfterSec}s.` },
+        { status: 429 }
+      )
+    }
+
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business?.id) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    let receiptOcrPrefix = ""
+    if (receiptPath) {
+      const docType: DocumentType =
+        receiptDocRaw === "supplier_bill" ? "supplier_bill" : "expense"
+      const ocr = await performReceiptOcr(supabase, {
+        userId: user.id,
+        businessId: business.id,
+        receiptPath,
+        documentType: docType,
+      })
+      if (ocr.ok) {
+        receiptOcrPrefix = `[Attached receipt OCR — suggestion only, not booked]\n${JSON.stringify({
+          suggestions: ocr.suggestions,
+          confidence: ocr.confidence,
+          receipt_path: receiptPath,
+          document_type: docType,
+        })}\n\n`
+      } else {
+        receiptOcrPrefix = `[Attached receipt OCR failed]\n${JSON.stringify({
+          error: ocr.error,
+          code: ocr.code,
+          receipt_path: receiptPath,
+        })}\n\n`
+      }
+    }
 
     if (!message) {
-      return NextResponse.json({ error: "message is required" }, { status: 400 })
+      message =
+        "Summarize what was read from the attached receipt, list amounts and dates clearly, and tell me how to record this in Finza if I want to."
     }
 
     const model = process.env.AI_MODEL || "gemma3:12b"
     const client = getClient()
 
-    const serializedContext = context == null ? null : JSON.stringify(context)
-    const systemPrompt = serializedContext
-      ? `${SYSTEM_PROMPT}\n\nHere is the user's current financial data: ${serializedContext}`
-      : SYSTEM_PROMPT
+    const contextNote =
+      context == null
+        ? ""
+        : `\n\nOptional client UI snapshot (may be stale; prefer tools for authoritative figures): ${JSON.stringify(context)}`
 
-    const stream = await client.chat.completions.create({
-      model,
-      stream: true,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
-    })
+    const systemContent = `${BASE_INSTRUCTIONS}${contextNote}`
 
-    const encoder = new TextEncoder()
-    const readable = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for await (const chunk of stream) {
-            const text = chunk.choices?.[0]?.delta?.content
-            if (text) {
-              controller.enqueue(encoder.encode(text))
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: systemContent },
+      { role: "user", content: receiptOcrPrefix + message },
+    ]
+
+    let toolCallsSoFar = 0
+    let finalText = ""
+    let usedTools = false
+
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      let completion: OpenAI.Chat.Completions.ChatCompletion
+      try {
+        completion = await client.chat.completions.create({
+          model,
+          messages,
+          tools: FINZA_ASSIST_TOOL_DEFINITIONS,
+          tool_choice: "auto",
+          stream: false,
+        })
+      } catch (toolErr: unknown) {
+        const msg = toolErr instanceof Error ? toolErr.message : String(toolErr)
+        console.warn("[api/ai] Tool-enabled completion failed, retrying without tools:", msg)
+        const llmStream = await client.chat.completions.create({
+          model,
+          messages,
+          stream: true,
+        })
+        const encoder = new TextEncoder()
+        const readable = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              for await (const chunk of llmStream) {
+                const text = chunk.choices?.[0]?.delta?.content
+                if (text) controller.enqueue(encoder.encode(text))
+              }
+              controller.close()
+            } catch (e) {
+              controller.error(e)
             }
-          }
-          controller.close()
-        } catch (error) {
-          controller.error(error)
-        }
-      },
-    })
+          },
+        })
+        return new NextResponse(readable, {
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+          },
+        })
+      }
 
-    return new NextResponse(readable, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      },
-    })
-  } catch (error: any) {
+      const choice = completion.choices[0]
+      const assistantMessage = choice?.message
+      if (!assistantMessage) break
+
+      const toolCalls = assistantMessage.tool_calls
+      if (toolCalls?.length) {
+        usedTools = true
+        messages.push({
+          role: "assistant",
+          content: assistantMessage.content ?? null,
+          tool_calls: toolCalls,
+        })
+
+        for (const tc of toolCalls) {
+          if (tc.type !== "function") continue
+          if (toolCallsSoFar >= MAX_TOOL_CALLS_PER_REQUEST) {
+            messages.push({
+              role: "tool",
+              tool_call_id: tc.id,
+              content: JSON.stringify({
+                error: "Tool call limit reached for this request. Answer from what you already know.",
+              }),
+            })
+            continue
+          }
+          toolCallsSoFar += 1
+          const name = tc.function.name
+          const args = tc.function.arguments || "{}"
+          const exec = await executeFinzaAssistTool(supabase, business.id, user.id, name, args)
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: exec.ok ? exec.result : JSON.stringify({ error: exec.error }),
+          })
+        }
+        continue
+      }
+
+      finalText = (assistantMessage.content || "").trim()
+      break
+    }
+
+    if (!finalText) {
+      finalText = usedTools
+        ? "I ran the requested lookups but could not form a reply. Please try rephrasing your question."
+        : "I could not generate a reply. Check that your local model is running and try again."
+    }
+
+    return streamTextResponse(finalText)
+  } catch (error: unknown) {
     console.error("Error in /api/ai:", error)
-    return NextResponse.json(
-      { error: error?.message || "Internal server error" },
-      { status: 500 }
-    )
+    const msg = error instanceof Error ? error.message : "Internal server error"
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
-

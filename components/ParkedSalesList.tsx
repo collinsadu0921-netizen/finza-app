@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { formatMoney } from "@/lib/money"
 
 type ParkedSale = {
   id: string
@@ -21,15 +22,18 @@ type ParkedSale = {
 
 interface ParkedSalesListProps {
   businessId: string
+  currencyCode?: string | null
   onClose: () => void
   onResume: (sale: ParkedSale) => void
 }
 
 export default function ParkedSalesList({
   businessId,
+  currencyCode = null,
   onClose,
   onResume,
 }: ParkedSalesListProps) {
+  const homeCode = currencyCode ?? "GHS"
   const { openConfirm } = useConfirm()
   const [parkedSales, setParkedSales] = useState<ParkedSale[]>([])
   const [loading, setLoading] = useState(true)
@@ -155,13 +159,13 @@ export default function ParkedSalesList({
                     </div>
                     <div className="flex gap-4 text-sm">
                       <span>
-                        <strong>Subtotal:</strong> GHS {Number(sale.subtotal.toFixed(2))}
+                        <strong>Subtotal:</strong> {formatMoney(sale.subtotal, homeCode)}
                       </span>
                       <span>
-                        <strong>Tax:</strong> GHS {Number(sale.taxes.toFixed(2))}
+                        <strong>Tax:</strong> {formatMoney(sale.taxes, homeCode)}
                       </span>
                       <span className="font-bold text-blue-600">
-                        <strong>Total:</strong> GHS {Number(sale.total.toFixed(2))}
+                        <strong>Total:</strong> {formatMoney(sale.total, homeCode)}
                       </span>
                     </div>
                   </div>
