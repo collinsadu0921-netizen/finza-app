@@ -7,6 +7,7 @@ import {
   parseServiceSubscriptionTier,
   tryParseServiceSubscriptionTier,
 } from "@/lib/serviceWorkspace/subscriptionTiers"
+import { FinzaLogo } from "@/components/FinzaLogo"
 
 /**
  * Valid workspaces that support the trial flow.
@@ -190,6 +191,9 @@ function SignupPageInner() {
       <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
         {/* Header */}
         <div className="text-center mb-8">
+          <div className="flex justify-center mb-5">
+            <FinzaLogo height={28} />
+          </div>
           {hasTrial ? (
             <>
               <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-100 px-4 py-1.5 text-xs font-semibold text-blue-700 mb-4">

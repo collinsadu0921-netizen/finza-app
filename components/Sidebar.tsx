@@ -11,6 +11,7 @@ import { clearSelectedBusinessId } from "@/lib/business"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
+import { FinzaLogo } from "@/components/FinzaLogo"
 
 type MenuSection = {
   title: string
@@ -408,10 +409,14 @@ export default function Sidebar() {
           <div className="p-4 border-b border-slate-200">
             <button
               onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
-              className="text-left"
+              className="text-left w-full"
             >
-              <p className="text-sm font-bold text-slate-900">{businessDisplay.name ?? "Finza"}</p>
-              <p className="text-xs text-slate-400">Finza</p>
+              <div className="mb-1.5">
+                <FinzaLogo height={26} />
+              </div>
+              {businessDisplay.name ? (
+                <p className="text-sm font-bold text-slate-900 truncate">{businessDisplay.name}</p>
+              ) : null}
             </button>
           </div>
 

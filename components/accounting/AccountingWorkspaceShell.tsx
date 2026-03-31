@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import WorkspaceSidebar from "@/components/accounting/WorkspaceSidebar"
 import PermissionVisibilityBanner from "@/components/accounting/PermissionVisibilityBanner"
 import ServiceOwnerAccountingBanner from "@/components/accounting/ServiceOwnerAccountingBanner"
+import { FinzaLogo } from "@/components/FinzaLogo"
 
 type AccountingWorkspaceShellProps = {
   children: React.ReactNode
@@ -132,7 +133,9 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
     return (
       <div className="min-h-[70vh] flex items-center justify-center px-4">
         <div className="w-full max-w-xl rounded-2xl border border-gray-200 bg-white p-8">
-          <p className="text-sm font-semibold text-blue-700 mb-3">Finza</p>
+          <div className="mb-3">
+            <FinzaLogo height={26} />
+          </div>
           <h1 className="text-3xl font-semibold text-gray-900 mb-3">Set up your accounting firm</h1>
           <p className="text-gray-600 mb-6">
             Create your firm to start managing clients, filings, and tasks.

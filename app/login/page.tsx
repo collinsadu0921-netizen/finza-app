@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
+import { FinzaLogo } from "@/components/FinzaLogo"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -52,6 +53,9 @@ export default function LoginPage() {
       <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
         {/* Header Section */}
         <div className="text-center mb-8">
+          <div className="flex justify-center mb-5">
+            <FinzaLogo height={28} />
+          </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h1>
           <p className="text-gray-600 text-sm">
             Sign in to your account to continue
