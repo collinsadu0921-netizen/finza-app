@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
@@ -12,6 +12,9 @@ import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptio
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { getUserRole } from "@/lib/userRoles"
+import type { CustomPermissions } from "@/lib/permissions"
+import { filterServiceNavSections } from "@/lib/nav/filterServiceNavSections"
 
 type MenuSection = {
   title: string
@@ -35,6 +38,9 @@ export default function Sidebar() {
   const [isAccountantFirmUser, setIsAccountantFirmUser] = useState<boolean>(false)
   const [serviceBusinessId, setServiceBusinessId] = useState<string | null>(null)
   const [businessDisplay, setBusinessDisplay] = useState<{ name: string | null; logo_url: string | null }>({ name: null, logo_url: null })
+  const [navRole, setNavRole] = useState<string | null>(null)
+  const [navCustomPermissions, setNavCustomPermissions] = useState<CustomPermissions | null>(null)
+  const [navPermsResolved, setNavPermsResolved] = useState(false)
   const isAccountingPath = pathname?.startsWith("/accounting") ?? false
   const { canAccessTier } = useServiceSubscription()
 
@@ -46,6 +52,66 @@ export default function Sidebar() {
     loadIndustry(urlBusinessId, pathname ?? "")
     checkAccountantFirmUser()
   }, [pathname, urlBusinessId])
+
+  // Phase B: role + custom_permissions for service nav (firm users: no filter)
+  useEffect(() => {
+    let cancelled = false
+    const resolvedIndustry =
+      businessIndustry ?? (pathname?.startsWith("/service/") && urlBusinessId ? "service" : null)
+
+    if (resolvedIndustry !== "service") {
+      setNavPermsResolved(true)
+      setNavRole(null)
+      setNavCustomPermissions(null)
+      return
+    }
+    if (isAccountantFirmUser) {
+      setNavPermsResolved(true)
+      setNavRole(null)
+      setNavCustomPermissions(null)
+      return
+    }
+
+    const bid = urlBusinessId ?? serviceBusinessId
+    if (!bid) {
+      setNavPermsResolved(true)
+      setNavRole(null)
+      setNavCustomPermissions(null)
+      return
+    }
+
+    setNavPermsResolved(false)
+    ;(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user || cancelled) {
+          if (!cancelled) setNavPermsResolved(true)
+          return
+        }
+        const role = await getUserRole(supabase, user.id, bid)
+        const { data: buRow } = await supabase
+          .from("business_users")
+          .select("custom_permissions")
+          .eq("business_id", bid)
+          .eq("user_id", user.id)
+          .maybeSingle()
+        if (cancelled) return
+        setNavRole(role)
+        setNavCustomPermissions((buRow?.custom_permissions as CustomPermissions) ?? null)
+      } catch {
+        if (!cancelled) {
+          setNavRole(null)
+          setNavCustomPermissions(null)
+        }
+      } finally {
+        if (!cancelled) setNavPermsResolved(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [businessIndustry, pathname, urlBusinessId, serviceBusinessId, isAccountantFirmUser])
 
   // Resolve current service business only when URL has no business_id and not on accounting route.
   // Do NOT run getCurrentBusiness when urlBusinessId exists (e.g. direct /service/* deep link).
@@ -366,7 +432,35 @@ export default function Sidebar() {
     return []
   }
 
-  const menuSections = getMenuSections()
+  const menuSections = useMemo(() => {
+    const raw = getMenuSections()
+    const resolvedIndustry =
+      businessIndustry ?? (pathname?.startsWith("/service/") && urlBusinessId ? "service" : null)
+    if (
+      resolvedIndustry !== "service" ||
+      isAccountantFirmUser ||
+      !navPermsResolved ||
+      !navRole ||
+      navRole === "owner"
+    ) {
+      return raw
+    }
+    return filterServiceNavSections(raw as Parameters<typeof filterServiceNavSections>[0], {
+      role: navRole,
+      customPermissions: navCustomPermissions,
+    })
+  }, [
+    businessIndustry,
+    pathname,
+    urlBusinessId,
+    serviceBusinessId,
+    isAccountantFirmUser,
+    navPermsResolved,
+    navRole,
+    navCustomPermissions,
+    effectiveIndustry,
+    sidebarBusinessId,
+  ])
 
   const isActive = (route: string) => {
     const pathOnly = route.split("?")[0]

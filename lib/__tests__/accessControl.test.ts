@@ -81,7 +81,7 @@ describe("accessControl", () => {
       ]) {
         const res = await resolveAccess(supabase, "user-1", path)
         expect(res.allowed).toBe(false)
-        expect(res.redirectTo).toBe("/dashboard")
+        expect(res.redirectTo).toBe("/service/dashboard")
       }
     })
 
@@ -91,7 +91,7 @@ describe("accessControl", () => {
 
       const res = await resolveAccess(supabase, "user-1", "/accounting/journals")
       expect(res.allowed).toBe(false)
-      expect(res.redirectTo).toBe("/dashboard")
+      expect(res.redirectTo).toBe("/service/dashboard")
     })
 
     it("denies service user on /accounting/adjustments/*", async () => {
@@ -100,7 +100,7 @@ describe("accessControl", () => {
 
       const res = await resolveAccess(supabase, "user-1", "/accounting/adjustments")
       expect(res.allowed).toBe(false)
-      expect(res.redirectTo).toBe("/dashboard")
+      expect(res.redirectTo).toBe("/service/dashboard")
     })
 
     it("denies service user on /accounting/periods/*, /accounting/forensic/*, /accounting/tenants/*", async () => {
@@ -114,7 +114,7 @@ describe("accessControl", () => {
       ]) {
         const res = await resolveAccess(supabase, "user-1", path)
         expect(res.allowed).toBe(false)
-        expect(res.redirectTo).toBe("/dashboard")
+        expect(res.redirectTo).toBe("/service/dashboard")
       }
     })
   })

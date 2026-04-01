@@ -21,6 +21,7 @@ import { isCashierAuthenticated } from "./cashierSession"
 import { getCurrentBusiness } from "./business"
 import { logAccessDeniedAttempt } from "./firmActivityLog"
 import { hasPermission, type CustomPermissions } from "./permissions"
+import { ROUTE_PERMISSION_RULES } from "./nav/routePermissionRules"
 
 export type Workspace = "retail" | "service" | "accounting"
 
@@ -220,8 +221,23 @@ export async function resolveAccess(
     }
 
     if (business) {
-      // Owner or employee with a business: allow access to /accounting/* for their own business.
-      // Client-scoped pages show EmptyState when business_id is missing; no redirect here.
+      // Service / professional businesses use /service/* (and firm users use /accounting/* as accountants).
+      const ind = (business.industry || "").toLowerCase()
+      if (ind === "service" || ind === "professional") {
+        return debugDecision({
+          allowed: false,
+          redirectTo: "/service/dashboard",
+          reason: "Service workspace: use /service/accounting and /service/reports routes",
+        })
+      }
+      if (ind === "retail") {
+        return debugDecision({
+          allowed: false,
+          redirectTo: "/retail/dashboard",
+          reason: "Retail workspace does not use /accounting/* client routes",
+        })
+      }
+      // Other industries (e.g. logistics) may use /accounting/* when product allows.
       return debugDecision({ allowed: true })
     } else {
       // No business, no firm - redirect to appropriate setup
@@ -397,28 +413,8 @@ export async function resolveAccess(
     const normalizedPath = path.endsWith("/") && path !== "/" ? path.slice(0, -1) : path
     const landing = businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard"
 
-    // Map route prefixes to the permission required to access them
-    // IMPORTANT: more-specific prefixes MUST come before general ones.
-    // The loop breaks on the first match, so /service/settings/team must appear
-    // before /service/settings, otherwise the general entry would swallow it.
-    const routePermissionMap: Array<{ prefix: string; permission: Parameters<typeof hasPermission>[2] }> = [
-      { prefix: "/payroll",                       permission: "payroll.view" },
-      // Settings — specific first, general last
-      { prefix: "/service/settings/team",         permission: "team.manage" },
-      { prefix: "/service/settings/staff",        permission: "staff.manage" },
-      { prefix: "/settings/staff",                permission: "staff.manage" },
-      { prefix: "/service/settings",              permission: "settings.view" }, // catch-all for other settings pages
-      { prefix: "/admin",                         permission: "settings.edit" },
-      { prefix: "/retail/admin",                  permission: "settings.edit" },
-      { prefix: "/bills",                         permission: "bills.view" },
-      { prefix: "/accounting",                    permission: "accounting.view" },
-      { prefix: "/service/accounting",            permission: "accounting.view" },
-      { prefix: "/reports/vat",                   permission: "reports.view" },
-      { prefix: "/vat-returns",                   permission: "reports.view" },
-      { prefix: "/assets",                        permission: "reports.view" },
-    ]
-
-    for (const { prefix, permission } of routePermissionMap) {
+    // Single ordered list: lib/nav/routePermissionRules.ts (shared with nav filtering)
+    for (const { prefix, permission } of ROUTE_PERMISSION_RULES) {
       if (normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")) {
         if (!hasPermission(role, customPermissions, permission)) {
           return debugDecision({
