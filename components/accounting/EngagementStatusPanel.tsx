@@ -38,7 +38,7 @@ const STATE_STYLES: Record<
 }
 
 export interface EngagementStatusPanelProps {
-  authoritySource: "owner" | "employee" | "accountant" | null
+  authoritySource: "owner" | "employee" | "accountant" | "report_viewer" | null
   engagementState?: EngagementState | null
   engagementStatus?: string | null
   accessLevel?: string | null
@@ -71,7 +71,9 @@ export default function EngagementStatusPanel({
         ? "Owner"
         : authoritySource === "employee"
           ? "Employee"
-          : "—"
+          : authoritySource === "report_viewer"
+            ? "Report access"
+            : "—"
 
   return (
     <section className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 p-4">

@@ -15,7 +15,7 @@ export type AccountingAuthorityAccess = "read" | "write"
 export type AccountingAuthorityResult = {
   authorized: boolean
   businessId: string
-  authority_source?: "owner" | "employee" | "accountant"
+  authority_source?: "owner" | "employee" | "accountant" | "report_viewer"
 }
 
 /**
@@ -59,7 +59,7 @@ export async function checkAccountingAuthority(
     const customPermissions = (buRow?.custom_permissions as CustomPermissions) ?? null
     if (hasPermission(role, customPermissions, "reports.view")) {
       result.authorized = true
-      result.authority_source = "employee"
+      result.authority_source = "report_viewer"
       return result
     }
   }

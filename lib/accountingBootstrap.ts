@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 /**
  * Only owner or business_users (admin/accountant) may trigger bootstrap.
  * Firm users (authority_source === "accountant" from engagement) must never bootstrap.
+ * report_viewer (reports.view only) must never bootstrap.
  */
 export function canUserInitializeAccounting(authoritySource?: string): boolean {
   return authoritySource === "owner" || authoritySource === "employee"

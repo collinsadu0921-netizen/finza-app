@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 
 export type AccountingReadinessState = {
   ready: boolean | null
-  authority_source: "owner" | "employee" | "accountant" | null
+  authority_source: "owner" | "employee" | "accountant" | "report_viewer" | null
   loading: boolean
   error: string | null
   refetch: () => void

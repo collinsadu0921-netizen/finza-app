@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 
 type ReadinessBannerProps = {
   ready: boolean | null
-  authoritySource: "owner" | "employee" | "accountant" | null
+  authoritySource: "owner" | "employee" | "accountant" | "report_viewer" | null
   businessId: string | null
   onInitSuccess?: () => void
 }

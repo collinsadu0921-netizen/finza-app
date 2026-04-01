@@ -8,13 +8,14 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { getUserRole } from "@/lib/userRoles"
 import { isUserAccountantReadonly } from "@/lib/userRoles"
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
+import { hasPermission, type CustomPermissions } from "@/lib/permissions"
 
 export type AccountingAuthorityAccess = "read" | "write"
 
 export type AccountingAuthorityResult = {
   authorized: boolean
   businessId: string
-  authority_source?: "owner" | "employee" | "accountant"
+  authority_source?: "owner" | "employee" | "accountant" | "report_viewer"
 }
 
 /**
@@ -44,6 +45,23 @@ export async function checkAccountingAuthority(
     result.authorized = true
     result.authority_source = role === "accountant" ? "accountant" : "employee"
     return result
+  }
+
+  // Read-only reports/ledger-style APIs for roles with reports.view (e.g. manager).
+  // authority_source must not be "employee" — that would allow bootstrap RPCs managers cannot run.
+  if (accessLevel === "read" && role) {
+    const { data: buRow } = await supabase
+      .from("business_users")
+      .select("custom_permissions")
+      .eq("business_id", businessId)
+      .eq("user_id", userId)
+      .maybeSingle()
+    const customPermissions = (buRow?.custom_permissions as CustomPermissions) ?? null
+    if (hasPermission(role, customPermissions, "reports.view")) {
+      result.authorized = true
+      result.authority_source = "report_viewer"
+      return result
+    }
   }
 
   const auth = await getAccountingAuthority({

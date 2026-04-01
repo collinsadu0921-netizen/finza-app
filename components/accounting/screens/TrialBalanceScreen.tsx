@@ -246,7 +246,7 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <ReadinessBanner
             ready={readiness?.ready ?? null}
-            authoritySource={(readiness?.authority_source ?? null) as "accountant" | "owner" | "employee" | null}
+            authoritySource={(readiness?.authority_source ?? null) as "accountant" | "owner" | "employee" | "report_viewer" | null}
             businessId={businessId}
             onInitSuccess={() => window.location.reload()}
           />

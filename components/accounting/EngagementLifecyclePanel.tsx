@@ -31,7 +31,7 @@ function formatDate(s: string | null | undefined): string {
 export interface EngagementLifecyclePanelProps {
   engagement: EngagementRow | null
   evaluatorResult: EngagementStateResult | null
-  authoritySource: "owner" | "employee" | "accountant" | null
+  authoritySource: "owner" | "employee" | "accountant" | "report_viewer" | null
   firmRole: string | null
   clientName: string
   businessName?: string
