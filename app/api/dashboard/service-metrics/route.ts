@@ -4,13 +4,20 @@
  * Read-only. Returns ledger-derived metrics for Service workspace dashboard.
  * Uses existing P&L and Balance Sheet report logic; no schema or posting changes.
  * Optional: period_id, period_start (defaults to current period).
+ *
+ * QuickBooks-style split: when period_id / period_start is explicitly set, Revenue,
+ * Expenses, Net profit, and Cash collected follow that period; Cash balance, AR, and AP
+ * use the balance sheet as of today so position cards stay “live” while browsing history.
  */
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
-import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
+import {
+  getBalanceSheetReport,
+  type BalanceSheetReportResponse,
+} from "@/lib/accounting/reports/getBalanceSheetReport"
 
 const CASH_CODES = ["1000", "1010", "1020", "1030"] as const
 const CASH_CODE_SET = new Set<string>(CASH_CODES)
@@ -80,6 +87,8 @@ export async function GET(request: NextRequest) {
 
     const periodId = searchParams.get("period_id") ?? undefined
     const periodStart = searchParams.get("period_start") ?? undefined
+    const explicitPeriod =
+      Boolean(periodId?.trim()) || Boolean(periodStart?.trim())
 
     const { data: pnl, error: pnlError } = await getProfitAndLossReport(supabase, {
       businessId,
@@ -94,15 +103,40 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: bs, error: bsError } = await getBalanceSheetReport(supabase, {
-      businessId,
-      period_id: periodId,
-      period_start: periodStart,
-    })
+    /** Position metrics: live as-of today when user picked a historical report period. */
+    const todayUtc = new Date().toISOString().slice(0, 10)
+    let bsPositions: BalanceSheetReportResponse | null = null
+    let bsError = ""
 
-    if (bsError || !bs) {
+    if (explicitPeriod) {
+      const live = await getBalanceSheetReport(supabase, {
+        businessId,
+        as_of_date: todayUtc,
+      })
+      bsPositions = live.data
+      bsError = live.error
+      if (!bsPositions) {
+        const fallback = await getBalanceSheetReport(supabase, {
+          businessId,
+          period_id: periodId,
+          period_start: periodStart,
+        })
+        bsPositions = fallback.data
+        bsError = fallback.error
+      }
+    } else {
+      const aligned = await getBalanceSheetReport(supabase, {
+        businessId,
+        period_id: periodId,
+        period_start: periodStart,
+      })
+      bsPositions = aligned.data
+      bsError = aligned.error
+    }
+
+    if (bsError || !bsPositions) {
       return NextResponse.json(
-        { error: bsError ?? "Could not fetch balance sheet" },
+        { error: bsError || "Could not fetch balance sheet" },
         { status: 500 }
       )
     }
@@ -118,9 +152,9 @@ export async function GET(request: NextRequest) {
     const revenue = Math.round(incomeSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
     const expenses = Math.round(expenseSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
     const netProfit = pnl.totals?.net_profit ?? revenue - expenses
-    const cashBalance = extractCash(bs)
-    const ar = extractAR(bs)
-    const ap = extractAP(bs)
+    const cashBalance = extractCash(bsPositions)
+    const ar = extractAR(bsPositions)
+    const ap = extractAP(bsPositions)
 
     // ── Cash Collected: sum of debits to cash accounts in the period ──────────
     // This represents actual cash received (payments), distinct from accrual revenue.
@@ -167,14 +201,18 @@ export async function GET(request: NextRequest) {
       accountsReceivable: ar,
       accountsPayable: ap,
       cashBalance,
+      /** True when AR/AP/cash balance are from BS as-of today, not the selected P&L period. */
+      positionBalancesAsOfToday: explicitPeriod,
+      /** ISO date (YYYY-MM-DD) used for live position BS when positionBalancesAsOfToday. */
+      positionAsOfDate: explicitPeriod ? todayUtc : null,
       previousPeriod: null as {
         revenue: number
         expenses: number
         netProfit: number
         cashCollected: number
-        accountsReceivable: number
-        accountsPayable: number
-        cashBalance: number
+        accountsReceivable: number | null
+        accountsPayable: number | null
+        cashBalance: number | null
       } | null,
     }
 
@@ -210,9 +248,10 @@ export async function GET(request: NextRequest) {
           expenses: expPrev,
           netProfit: pnlPrev.totals?.net_profit ?? revPrev - expPrev,
           cashCollected: 0, // previous-period cash collected not needed for trend arrows
-          accountsReceivable: extractAR(bsPrev),
-          accountsPayable: extractAP(bsPrev),
-          cashBalance: extractCash(bsPrev),
+          // No period-over-period % on position cards when those values are "live" (QB-style).
+          accountsReceivable: explicitPeriod ? null : extractAR(bsPrev),
+          accountsPayable: explicitPeriod ? null : extractAP(bsPrev),
+          cashBalance: explicitPeriod ? null : extractCash(bsPrev),
         }
       }
     }

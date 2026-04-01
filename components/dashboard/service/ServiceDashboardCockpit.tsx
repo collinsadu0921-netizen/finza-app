@@ -33,14 +33,17 @@ type Metrics = {
   accountsReceivable: number
   accountsPayable: number
   cashBalance: number
+  /** When true, cash/AR/AP are balance-sheet as-of today while period above is P&L only. */
+  positionBalancesAsOfToday?: boolean
+  positionAsOfDate?: string | null
   previousPeriod?: {
     revenue: number
     expenses: number
     netProfit: number
     cashCollected: number
-    accountsReceivable: number
-    accountsPayable: number
-    cashBalance: number
+    accountsReceivable: number | null
+    accountsPayable: number | null
+    cashBalance: number | null
   } | null
 }
 
@@ -72,6 +75,11 @@ function formatPeriodLabel(start: string, end: string): string {
     return s.toLocaleDateString(undefined, opts)
   }
   return `${s.toLocaleDateString(undefined, opts)} – ${e.toLocaleDateString(undefined, opts)}`
+}
+
+function formatShortIsoDate(iso: string): string {
+  const d = new Date(iso + "T12:00:00")
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 }
 
 /** Service workspace dashboard card → route. */
@@ -296,6 +304,14 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
       ? Math.round((metrics.cashCollected / metrics.revenue) * 1000) / 10
       : null
 
+  const livePositions =
+    metrics?.positionBalancesAsOfToday &&
+    metrics?.positionAsOfDate &&
+    metrics.positionAsOfDate.length >= 10
+  const positionAsOfPrefix = livePositions
+    ? `As of ${formatShortIsoDate(metrics.positionAsOfDate!)} · `
+    : ""
+
   if (loading && !metrics) {
     return <ServiceDashboardSkeleton />
   }
@@ -364,11 +380,11 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
         <MetricCard
           title="Cash Balance"
           value={metrics?.cashBalance ?? 0}
-          previousValue={prev?.cashBalance}
+          previousValue={prev?.cashBalance ?? undefined}
           sparklineColor="#6366f1"
           reportHref={routes.cashBalance}
           currencyCode={currencyCode}
-          subtitle="bank account balance"
+          subtitle={`${positionAsOfPrefix}bank account balance`}
           variant={(metrics?.cashBalance ?? 0) < 0 ? "negative" : "default"}
         />
       </div>
@@ -378,18 +394,18 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
         <MetricCard
           title="Accounts Receivable"
           value={metrics?.accountsReceivable ?? 0}
-          previousValue={prev?.accountsReceivable}
+          previousValue={prev?.accountsReceivable ?? undefined}
           reportHref={routes.accountsReceivable}
           currencyCode={currencyCode}
-          subtitle="outstanding from clients"
+          subtitle={`${positionAsOfPrefix}outstanding from clients`}
         />
         <MetricCard
           title="Accounts Payable"
           value={metrics?.accountsPayable ?? 0}
-          previousValue={prev?.accountsPayable}
+          previousValue={prev?.accountsPayable ?? undefined}
           reportHref={routes.accountsPayable}
           currencyCode={currencyCode}
-          subtitle="owed to suppliers"
+          subtitle={`${positionAsOfPrefix}owed to suppliers`}
         />
         <MetricCard
           title="Cash Collected"
