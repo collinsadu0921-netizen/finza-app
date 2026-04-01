@@ -42,7 +42,7 @@ export default function TierGate({ minTier, children }: TierGateProps) {
     effectiveTier,
     tier: rawTier,
     trialExpired,
-    loading,
+    entitlementResolved,
     isTrialing,
     inGracePeriod,
     periodExpired,
@@ -50,12 +50,9 @@ export default function TierGate({ minTier, children }: TierGateProps) {
     subscriptionLocked,
   } = useServiceSubscription()
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
-      </div>
-    )
+  // Avoid upgrade-wall flash while default starter entitlement is still stale; server routes must enforce access.
+  if (!entitlementResolved) {
+    return <>{children}</>
   }
 
   // --- 1. Payment locked (MoMo grace period expired) ---

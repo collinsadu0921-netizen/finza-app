@@ -32,6 +32,11 @@ export type ServiceSubscriptionContextValue = {
   status: ServiceSubscriptionStatus
   businessId: string | null
   loading: boolean
+  /**
+   * False until the first subscription fetch for the current service scope finishes.
+   * Tier checks stay permissive until then (avoids Upgrade UI flashing on default starter).
+   */
+  entitlementResolved: boolean
 
   /** True when effectiveTier satisfies the required tier. */
   canAccessTier: (required: ServiceSubscriptionTier) => boolean
@@ -65,6 +70,7 @@ const defaultValue: ServiceSubscriptionContextValue = {
   status: "active",
   businessId: null,
   loading: false,
+  entitlementResolved: false,
   canAccessTier: () => true,
   isTrialing: false,
   trialExpired: false,
@@ -120,14 +126,19 @@ export function ServiceSubscriptionProvider({
     resolveServiceEntitlement({})
   )
   const [businessId, setBusinessId] = useState<string | null>(null)
-  const [loading, setLoading]       = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [entitlementResolved, setEntitlementResolved] = useState(false)
 
   const urlBusinessId = searchParams.get("business_id")?.trim() || null
 
   useEffect(() => {
-    if (!isService) return
+    if (!isService) {
+      setEntitlementResolved(false)
+      return
+    }
 
     let cancelled = false
+    setEntitlementResolved(false)
     ;(async () => {
       setLoading(true)
       try {
@@ -158,17 +169,22 @@ export function ServiceSubscriptionProvider({
         setBusinessId((b as any)?.id ?? null)
         setEntitlement(rowToEntitlement(b as Record<string, unknown> | null))
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setEntitlementResolved(true)
+        setLoading(false)
       }
     })()
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [isService, urlBusinessId, pathname])
 
   const canAccessTier = useCallback(
-    (required: ServiceSubscriptionTier) =>
-      tierIncludes(entitlement.effectiveTier, required),
-    [entitlement.effectiveTier]
+    (required: ServiceSubscriptionTier) => {
+      if (!entitlementResolved) return true
+      return tierIncludes(entitlement.effectiveTier, required)
+    },
+    [entitlement.effectiveTier, entitlementResolved]
   )
 
   const value = useMemo<ServiceSubscriptionContextValue>(
@@ -178,6 +194,7 @@ export function ServiceSubscriptionProvider({
       status:             entitlement.status,
       businessId,
       loading,
+      entitlementResolved,
       canAccessTier,
       isTrialing:         entitlement.isTrialing,
       trialExpired:       entitlement.trialExpired,
@@ -191,7 +208,7 @@ export function ServiceSubscriptionProvider({
       graceEndsAt:        entitlement.graceEndsAt,
       subscriptionLocked: entitlement.isSubscriptionLocked,
     }),
-    [entitlement, businessId, loading, canAccessTier]
+    [entitlement, businessId, loading, entitlementResolved, canAccessTier]
   )
 
   if (!isService) return <>{children}</>

@@ -89,6 +89,12 @@ export default function Sidebar() {
 
       const isServicePath = path.startsWith("/service/")
 
+      // Service routes without business_id: keep sidebar branding — filled by getCurrentBusiness effect (avoid logo/name flash on refresh).
+      if (isServicePath && !accountingBusinessId) {
+        setBusinessIndustry(getTabIndustryMode())
+        return
+      }
+
       // Accounting or service path with business_id in URL: resolve industry from that business so menu renders immediately.
       if ((isAccountingPath || isServicePath) && accountingBusinessId) {
         const { data: business, error } = await supabase

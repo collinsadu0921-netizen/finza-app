@@ -16,9 +16,9 @@ import { SERVICE_TIER_LABEL } from "@/lib/serviceWorkspace/subscriptionTiers"
  *   "Business trial — Last day · Subscribe now"
  */
 export default function TrialBanner() {
-  const { isTrialing, trialDaysLeft, tier, loading } = useServiceSubscription()
+  const { isTrialing, trialDaysLeft, tier, entitlementResolved } = useServiceSubscription()
 
-  if (loading || !isTrialing) return null
+  if (!entitlementResolved || !isTrialing) return null
 
   const tierLabel = SERVICE_TIER_LABEL[tier]
   const daysText =
