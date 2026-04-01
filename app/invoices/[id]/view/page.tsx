@@ -251,14 +251,14 @@ export default function InvoiceViewPage() {
     }
 
     const receiptUrl = `${window.location.origin}/receipt-public/${payment.public_token}`
-    const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0)
-    const totalCredits = creditNotes
-      .filter((cn) => cn.status === "applied")
-      .reduce((sum, cn) => sum + Number(cn.total), 0)
-    const remainingBalance = Number(invoice.total) - totalPaid - totalCredits
+    const message = `Hello ${invoice.customers.name},
 
-    const currencyDisplay = resolveCurrencyDisplay(invoice)
-    const message = `Hello ${invoice.customers.name}, we've received your payment of ${currencyDisplay}${Number(payment.amount).toFixed(2)} for Invoice ${invoice.invoice_number}.\n\nHere is your receipt: ${receiptUrl}\n\nRemaining balance: ${currencyDisplay}${remainingBalance.toFixed(2)}.\n\nThank you.`
+We've recorded a payment on Invoice ${invoice.invoice_number}.
+
+View receipt:
+${receiptUrl}
+
+Thank you.`
 
     const result = buildWhatsAppLink(phone, message)
     if (!result.ok) {

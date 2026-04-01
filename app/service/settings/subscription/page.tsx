@@ -77,7 +77,7 @@ const TIER_FEATURES: Record<ServiceSubscriptionTier, TierConfig> = {
           "Business profile management",
           "Invoice configuration (numbering, structure)",
           "Payment setup and preferences",
-          "WhatsApp communication integration",
+          "Send by email or WhatsApp (wa.me link)",
         ],
       },
     ],

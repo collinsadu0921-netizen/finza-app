@@ -1,9 +1,6 @@
 /**
- * Order confirmation email HTML template.
- * Same structure as invoice: business name, order number, line items table, total, contact note.
+ * Order confirmation email HTML — notification only (no amounts or line items).
  */
-
-import { formatMoney } from "@/lib/money"
 
 function escapeHtml(text: string): string {
   const map: Record<string, string> = {
@@ -30,67 +27,32 @@ export interface OrderForEmail {
   order_items?: OrderEmailItem[] | null
 }
 
-export function buildOrderEmailHtml(order: OrderForEmail, businessName: string): string {
-  const items = order.order_items ?? []
-  const currencyCode = order.currency_code ?? null
-  const formatAmount = (amount: number) => formatMoney(amount, currencyCode)
-  const total = Number(order.total_amount ?? 0)
-  const orderNumber = order.id ? `ORD-${order.id.substring(0, 8).toUpperCase()}` : "Order"
+export interface OrderEmailOptions {
+  publicViewUrl?: string
+}
 
-  const rows = items
-    .map(
-      (item) => `
-        <tr>
-          <td style="padding:10px;border-bottom:1px solid #ddd;font-size:14px;color:#333;">${escapeHtml(String(item.description ?? "Item"))}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;font-size:14px;text-align:center;">${Number(item.quantity ?? 0)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;font-size:14px;text-align:right;">${formatAmount(Number(item.unit_price ?? 0))}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;font-size:14px;text-align:right;font-weight:500;">${formatAmount(Number(item.line_total ?? 0))}</td>
-        </tr>
-      `
-    )
-    .join("")
+export function buildOrderEmailHtml(
+  order: OrderForEmail,
+  businessName: string,
+  options: OrderEmailOptions = {}
+): string {
+  const { publicViewUrl } = options
+  const orderNumber = order.id ? `ORD-${order.id.substring(0, 8).toUpperCase()}` : "Order"
 
   return `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .doc-info { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background: #f5f5f5; font-weight: bold; }
-    td:last-child, th:last-child { text-align: right; }
-    .total-row { border-top: 2px solid #333; padding-top: 10px; margin-top: 10px; font-size: 18px; font-weight: bold; }
-    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; text-align: center; }
-  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Order ${escapeHtml(orderNumber)} from ${escapeHtml(businessName)}</title>
 </head>
-<body>
-  <div class="header">
-    <h1>${escapeHtml(businessName)}</h1>
-    <p>Order confirmation ${escapeHtml(orderNumber)}</p>
-  </div>
-  <div class="doc-info">
-    <p><strong>Order:</strong> ${escapeHtml(orderNumber)}</p>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>Item</th>
-        <th style="text-align:center;">Qty</th>
-        <th style="text-align:right;">Unit price</th>
-        <th style="text-align:right;">Total</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <p class="total-row" style="text-align:right;">Total: ${formatAmount(total)}</p>
-  <div class="footer">
-    <p>Please contact ${escapeHtml(businessName)} with any questions about this order.</p>
-  </div>
+<body style="margin:0;padding:24px;font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin-left:auto;margin-right:auto;">
+  <p style="margin:0 0 8px;font-size:15px;">Hello,</p>
+  <p style="margin:0 0 16px;font-size:15px;">Your order <strong>${escapeHtml(orderNumber)}</strong> from <strong>${escapeHtml(businessName)}</strong> is ready.</p>
+  ${publicViewUrl ? `<p style="margin:0 0 16px;"><a href="${escapeHtml(publicViewUrl)}" style="display:inline-block;padding:12px 24px;background:#1d4ed8;color:#fff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;">View order</a></p>` : ""}
+  <p style="margin:0;font-size:15px;">Thank you,<br />${escapeHtml(businessName)}</p>
+  <p style="margin:24px 0 0;font-size:12px;color:#666;">Please contact ${escapeHtml(businessName)} with any questions about this order.</p>
 </body>
 </html>
   `.trim()

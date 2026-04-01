@@ -201,7 +201,7 @@ export default function OnboardingPage() {
         { id: "industry_confirmation", label: "Industry", route: "" },
         { id: "tax_awareness", label: "Tax", route: "" },
         { id: "payment_channels", label: "Payment Channels", route: "/settings/payments" },
-        { id: "communication_channels", label: "Communication", route: "/settings/integrations/whatsapp" },
+        { id: "communication_channels", label: "Communication", route: "" },
         { id: "accounting_readiness", label: "Accounting", route: "" },
         { id: "create_invoice", label: "First Invoice", route: "/invoices/new" },
       ]
@@ -388,23 +388,19 @@ export default function OnboardingPage() {
             {currentStep === "communication_channels" && (
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                  Step 5: Communication Channels
+                  Step 5: Communication
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400 mb-6">
-                  Send invoices and reminders via WhatsApp or email. Connect WhatsApp in Settings to reach customers where they are.
+                  You can send invoices and documents by <strong>email</strong> or open a prefilled{" "}
+                  <strong>WhatsApp</strong> chat (<code className="text-sm bg-gray-100 dark:bg-gray-700 px-1 rounded">wa.me</code>
+                  ) in your browser—no separate integration required. Add customer email and phone numbers so both options work.
                 </p>
                 <div className="flex gap-4">
                   <button
-                    onClick={() => router.push("/settings/integrations/whatsapp")}
+                    onClick={() => handleStepComplete("accounting_readiness")}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium"
                   >
-                    Go to WhatsApp Settings
-                  </button>
-                  <button
-                    onClick={() => handleStepComplete("accounting_readiness")}
-                    className="border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 px-6 py-3 rounded-lg font-medium"
-                  >
-                    Skip for Now
+                    Continue
                   </button>
                 </div>
               </div>
@@ -619,7 +615,7 @@ export default function OnboardingPage() {
                   {business?.industry === "service" ? "Step 7: Create Your First Invoice" : "Step 4: Create Your First Invoice"}
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400 mb-6">
-                  Create your first invoice to get started. You can send it to your customer via WhatsApp or email.
+                  Create your first invoice to get started. You can send it by email or open WhatsApp with a prefilled message (wa.me).
                 </p>
                 <div className="flex gap-4">
                   <button

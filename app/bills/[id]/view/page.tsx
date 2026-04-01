@@ -181,16 +181,13 @@ export default function BillViewPage() {
       return
     }
 
-    const outstandingLabel =
-      bill.wht_applicable && Number(bill.wht_amount) > 0
-        ? "Outstanding (net to you after WHT)"
-        : "Outstanding"
-    const homeDisp = resolveCurrencyDisplay({
-      currency_symbol: currencySymbol,
-      currency_code: currencyCode,
-    })
-    const docDisp = billAmountCurrencyDisplay(bill, currencyCode, homeDisp)
-    const message = `Hello, here is our record of your bill ${bill.bill_number}.\n\nTotal: ${docDisp}${bill.total.toFixed(2)}.\n${outstandingLabel}: ${docDisp}${balance.toFixed(2)}.\n\nFor confirmation or clarifications, please reply here.`
+    const message = `Hello,
+
+Our record for bill ${bill.bill_number} is ready for your review.
+
+For confirmation or clarifications, please reply here.
+
+Thank you.`
     const result = buildWhatsAppLink(bill.supplier_phone, message)
     if (!result.ok) {
       toast.showToast(result.error, "error")

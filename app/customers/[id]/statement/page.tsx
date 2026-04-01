@@ -109,7 +109,14 @@ export default function CustomerStatementPage() {
     }
 
     const statementUrl = `${window.location.origin}/customers/${customerId}/statement?start_date=${startDate || ""}&end_date=${endDate || ""}`
-    const message = `Hello ${customer.name}, here is your latest Statement of Account from ${"Business"}:\n\n${statementUrl}\n\nTotal Outstanding: ${currencySymbol || ""}${summary?.totalOutstanding.toFixed(2) || "0.00"}.`
+    const message = `Hello ${customer.name},
+
+Your statement of account is ready.
+
+View statement:
+${statementUrl}
+
+Thank you.`
 
     const result = buildWhatsAppLink(phone, message)
     if (!result.ok) {

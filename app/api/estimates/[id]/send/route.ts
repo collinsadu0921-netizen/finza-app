@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { getCurrencySymbol } from "@/lib/currency"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { getBusinessWhatsAppTemplate } from "@/lib/communication/getBusinessWhatsAppTemplate"
 import { renderWhatsAppTemplate } from "@/lib/communication/renderWhatsAppTemplate"
@@ -126,20 +125,23 @@ export async function POST(
       }
 
       const businessName = estimate.businesses?.trading_name || estimate.businesses?.legal_name || "Our Business"
-      const estimateNumber = estimate.estimate_number || estimate.id.substring(0, 8)
-      const totalAmount = Number(estimate.total_amount || 0).toFixed(2)
-      const currencySymbol = (estimate as { currency_code?: string }).currency_code
-        ? getCurrencySymbol((estimate as { currency_code: string }).currency_code)
-        : "₵"
-      const currencyDisplay = currencySymbol || (estimate as { currency_code?: string }).currency_code || ""
+      const estimateNumber = estimate.estimate_number
+        ? `#${estimate.estimate_number}`
+        : estimate.id.substring(0, 8)
 
       const template = await getBusinessWhatsAppTemplate(supabase, estimate.business_id, "estimate")
       const message = renderWhatsAppTemplate(template, {
         customer_name: customer?.name || "Valued Customer",
         estimate_number: estimateNumber,
-        total: totalAmount,
-        currency: currencyDisplay,
-        valid_until: estimate.expiry_date ? new Date(estimate.expiry_date).toLocaleDateString() : "N/A",
+        total: "",
+        currency: "",
+        valid_until: estimate.expiry_date
+          ? new Date(estimate.expiry_date).toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })
+          : "",
         public_url: publicEstimateUrl || "",
         business_name: businessName,
       })

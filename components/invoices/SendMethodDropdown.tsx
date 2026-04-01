@@ -8,14 +8,12 @@ interface SendMethodDropdownProps {
   value: SendMethod
   onChange: (method: SendMethod) => void
   className?: string
-  whatsappConnected?: boolean
 }
 
 export default function SendMethodDropdown({
   value,
   onChange,
   className = "",
-  whatsappConnected = false,
 }: SendMethodDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
 

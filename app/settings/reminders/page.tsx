@@ -255,14 +255,14 @@ export default function ReminderSettingsPage() {
                           Email Reminder Template
                         </label>
                         <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
-                          Customize the email sent to customers. Use placeholders: {"{{customer_name}}"}, {"{{invoice_number}}"}, {"{{outstanding_amount}}"}, {"{{due_date}}"}, {"{{invoice_url}}"}
+                          Customize the email sent to customers. Recommended placeholders: {"{{customer_name}}"}, {"{{invoice_number}}"}, {"{{business_name}}"}, {"{{invoice_url}}"}. (Amount-related placeholders are left blank for privacy.)
                         </p>
                         <textarea
                           value={formData.email_reminder_template}
                           onChange={(e) => setFormData({ ...formData, email_reminder_template: e.target.value })}
                           rows={8}
                           className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white font-mono text-sm"
-                          placeholder={`Dear {{customer_name}},\n\nThis is a reminder that invoice {{invoice_number}} is overdue.\n\nOutstanding Amount: ${currencySymbol || "{{currency_symbol}}"}{{outstanding_amount}}\nDue Date: {{due_date}}\n\nPlease make payment at your earliest convenience.\n\nView Invoice: {{invoice_url}}\n\nThank you for your business.`}
+                          placeholder={`Hello {{customer_name}},\n\nThis is a reminder regarding invoice {{invoice_number}} from {{business_name}}.\n\nView invoice:\n{{invoice_url}}\n\nThank you,\n{{business_name}}`}
                         />
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                           Leave empty to use default template
@@ -276,14 +276,14 @@ export default function ReminderSettingsPage() {
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
                   <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">WhatsApp Message Template</h2>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Customize the WhatsApp message sent to customers. Use placeholders: [CustomerName], [InvoiceNumber], [Amount], [Link]
+                    Customize the WhatsApp reminder. Placeholders: [CustomerName], [InvoiceNumber], [BusinessName], [Link]. ([Amount] and [CurrencySymbol] are left blank for privacy.)
                   </p>
                   <textarea
                     value={formData.reminder_message_template}
                     onChange={(e) => setFormData({ ...formData, reminder_message_template: e.target.value })}
                     rows={6}
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                    placeholder={`Hello [CustomerName], Invoice [InvoiceNumber] is overdue.&#10;&#10;Amount due: ${currencySymbol || "[CurrencySymbol]"}[Amount].&#10;&#10;Please make payment at your earliest convenience.&#10;&#10;Link: [Link]`}
+                    placeholder={`Hello [CustomerName],&#10;&#10;This is a reminder regarding invoice [InvoiceNumber] from [BusinessName].&#10;&#10;View invoice:&#10;[Link]&#10;&#10;Thank you,&#10;[BusinessName]`}
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                     Leave empty to use default template

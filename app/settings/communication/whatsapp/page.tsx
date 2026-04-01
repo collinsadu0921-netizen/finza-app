@@ -21,29 +21,29 @@ const SAMPLE_VARIABLES: Record<WhatsAppTemplateType, Record<string, string>> = {
   invoice: {
     customer_name: "Valued Customer",
     invoice_number: "#INV-001",
-    total: "1,250.00",
-    currency: "₵",
-    due_date: "Due on receipt",
+    due_date: "15 March 2026",
     public_url: "https://app.example.com/invoice-public/abc123",
     pay_url: "https://app.example.com/pay/inv-uuid",
     business_name: "Our Business",
+    total: "",
+    currency: "",
   },
   estimate: {
     customer_name: "Valued Customer",
-    estimate_number: "EST-001",
-    total: "1,250.00",
-    currency: "₵",
-    valid_until: "12/31/2025",
+    estimate_number: "#EST-001",
     public_url: "https://app.example.com/estimate-public/xyz",
     business_name: "Our Business",
+    total: "",
+    currency: "",
+    valid_until: "",
   },
   order: {
     customer_name: "Valued Customer",
     order_number: "ORD-ABC12345",
-    total: "1,250.00",
-    currency: "₵",
     public_url: "https://app.example.com/order-public/def",
     business_name: "Our Business",
+    total: "",
+    currency: "",
   },
 }
 
@@ -123,7 +123,7 @@ export default function WhatsAppTemplatesPage() {
               WhatsApp Message Templates
             </h1>
             <p className="text-gray-600 dark:text-gray-400 text-lg">
-              Customise the message sent when sharing an invoice, estimate, or order via WhatsApp.
+              Prefilled text for <strong className="font-semibold text-gray-700 dark:text-gray-300">wa.me</strong> when you send from Finza. No WhatsApp Business API connection required.
             </p>
           </div>
 

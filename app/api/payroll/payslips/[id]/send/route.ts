@@ -155,19 +155,11 @@ export async function POST(
         )
       }
 
-      const netSalary = Number(entry?.net_salary ?? 0).toFixed(2)
-      const grossSalary = Number(entry?.gross_salary ?? 0).toFixed(2)
-      const paye = Number(entry?.paye ?? 0).toFixed(2)
-      const ssnit = Number(entry?.ssnit_employee ?? 0).toFixed(2)
-
       const message =
         `Hello ${staff.name},\n\n` +
         `Your payslip for *${payrollMonth}* from *${businessName}* is ready.\n\n` +
-        `💰 Gross Pay: ${currencySymbol}${grossSalary}\n` +
-        `📋 PAYE Tax: ${currencySymbol}${paye}\n` +
-        `📋 SSNIT: ${currencySymbol}${ssnit}\n` +
-        `✅ Net Pay: *${currencySymbol}${netSalary}*\n\n` +
-        `View your full payslip here:\n${publicUrl}`
+        `View your full payslip here:\n${publicUrl}\n\n` +
+        `Thank you,\n${businessName}`
 
       const linkResult = buildWhatsAppLink(phone, message)
       if (!linkResult.ok) {

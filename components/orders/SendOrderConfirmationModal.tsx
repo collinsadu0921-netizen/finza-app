@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import SendMethodDropdown, { SendMethod } from "../invoices/SendMethodDropdown"
 
 type Order = {
@@ -30,29 +30,6 @@ export default function SendOrderConfirmationModal({
   const [error, setError] = useState("")
   const [email, setEmail] = useState(order.customers?.email || "")
   const [sendMethod, setSendMethod] = useState<SendMethod>(defaultMethod)
-  const [whatsappConnected, setWhatsappConnected] = useState(false)
-  const [checkingWhatsApp, setCheckingWhatsApp] = useState(true)
-
-  useEffect(() => {
-    // Check WhatsApp connection status
-    const checkWhatsAppStatus = async () => {
-      try {
-        const response = await fetch("/api/whatsapp/status")
-        if (response.ok) {
-          const data = await response.json()
-          setWhatsappConnected(data.connected || false)
-        }
-      } catch (error) {
-        console.error("Error checking WhatsApp status:", error)
-        // Default to false if check fails
-        setWhatsappConnected(false)
-      } finally {
-        setCheckingWhatsApp(false)
-      }
-    }
-
-    checkWhatsAppStatus()
-  }, [])
 
   const publicOrderUrl = order.public_token
     ? `${window.location.origin}/order-public/${order.public_token}`
@@ -272,11 +249,10 @@ export default function SendOrderConfirmationModal({
               value={sendMethod}
               onChange={setSendMethod}
               className="flex-1"
-              whatsappConnected={whatsappConnected}
             />
             <button
               onClick={handleSendOrderConfirmation}
-              disabled={loading || checkingWhatsApp}
+              disabled={loading}
               className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
               {loading ? "Sending..." : "Send"}

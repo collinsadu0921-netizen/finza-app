@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createAuditLog } from "@/lib/auditLog"
-import { getCurrencySymbol } from "@/lib/currency"
 
 // Note: This endpoint should be called by a cron job or scheduled task
 // Example cron job setup:
@@ -51,7 +50,9 @@ export async function POST(request: NextRequest) {
         *,
         businesses (
           id,
-          name
+          name,
+          legal_name,
+          trading_name
         )
       `
       )
@@ -224,11 +225,14 @@ export async function POST(request: NextRequest) {
             }
 
             // Send email reminder
+            const biz = setting.businesses as { trading_name?: string; legal_name?: string; name?: string } | null
+            const businessName = biz?.trading_name || biz?.legal_name || biz?.name || "Your supplier"
+
             const emailSent = await sendReminderEmail({
               invoice,
               customerEmail,
-              outstandingAmount,
               setting,
+              businessName,
             })
 
             if (emailSent) {
@@ -309,45 +313,39 @@ export async function POST(request: NextRequest) {
 async function sendReminderEmail({
   invoice,
   customerEmail,
-  outstandingAmount,
   setting,
+  businessName,
 }: {
   invoice: any
   customerEmail: string
-  outstandingAmount: number
   setting: any
+  businessName: string
 }): Promise<boolean> {
   try {
-    // Generate email content
+    // Generate email content (no monetary amounts in body — details on public invoice page)
     const publicUrl = invoice.public_token
       ? `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoice-public/${invoice.public_token}`
       : ""
 
     const template = setting.email_reminder_template ||
-      `Dear {{customer_name}},
+      `Hello {{customer_name}},
 
-This is a reminder that invoice {{invoice_number}} is overdue.
+This is a reminder regarding invoice {{invoice_number}} from {{business_name}}.
 
-Outstanding Amount: {{currency_symbol}}{{outstanding_amount}}
-Due Date: {{due_date}}
+View invoice:
+{{invoice_url}}
 
-Please make payment at your earliest convenience.
-
-View Invoice: {{invoice_url}}
-
-Thank you for your business.`
+Thank you,
+{{business_name}}`
 
     const emailBody = template
       .replace(/{{customer_name}}/g, invoice.customers?.name || "Customer")
       .replace(/{{invoice_number}}/g, invoice.invoice_number || "")
-      .replace(/{{outstanding_amount}}/g, outstandingAmount.toFixed(2))
-      .replace(/{{due_date}}/g, new Date(invoice.due_date).toLocaleDateString())
+      .replace(/{{outstanding_amount}}/g, "")
+      .replace(/{{due_date}}/g, invoice.due_date ? new Date(invoice.due_date).toLocaleDateString() : "")
       .replace(/{{invoice_url}}/g, publicUrl)
-      .replace(/{{currency_symbol}}/g, (() => {
-        // Get currency symbol from invoice currency_code (no hardcoded fallback)
-        const symbol = invoice.currency_code ? getCurrencySymbol(invoice.currency_code) : null
-        return symbol || "" // Empty string if currency not available
-      })())
+      .replace(/{{currency_symbol}}/g, "")
+      .replace(/{{business_name}}/g, businessName)
 
     const emailSubject = `Payment Reminder: Invoice ${invoice.invoice_number} is Overdue`
 

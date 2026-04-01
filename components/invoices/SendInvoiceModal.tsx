@@ -31,31 +31,8 @@ export default function SendInvoiceModal({
   const [error, setError] = useState("")
   const [email, setEmail] = useState(invoice.customers?.email || "")
   const [sendMethod, setSendMethod] = useState<SendMethod>(defaultMethod)
-  const [whatsappConnected, setWhatsappConnected] = useState(false)
-  const [checkingWhatsApp, setCheckingWhatsApp] = useState(true)
   /** When pop-ups are blocked, we keep the modal open with a real &lt;a href&gt; to wa.me (user click always works). */
   const [waOpenLinkUrl, setWaOpenLinkUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Check WhatsApp connection status
-    const checkWhatsAppStatus = async () => {
-      try {
-        const response = await fetch("/api/whatsapp/status")
-        if (response.ok) {
-          const data = await response.json()
-          setWhatsappConnected(data.connected || false)
-        }
-      } catch (error) {
-        console.error("Error checking WhatsApp status:", error)
-        // Default to false if check fails
-        setWhatsappConnected(false)
-      } finally {
-        setCheckingWhatsApp(false)
-      }
-    }
-
-    checkWhatsAppStatus()
-  }, [])
 
   useEffect(() => {
     setWaOpenLinkUrl(null)
@@ -385,7 +362,6 @@ export default function SendInvoiceModal({
               value={sendMethod}
               onChange={setSendMethod}
               className="flex-1"
-              whatsappConnected={whatsappConnected}
             />
             <button
               onClick={handleSendInvoice}
@@ -420,27 +396,7 @@ export default function SendInvoiceModal({
             </div>
           )}
 
-          {/* Info for WhatsApp - Not Connected (link still opens for manual send) */}
-          {!checkingWhatsApp && !whatsappConnected && (sendMethod === "whatsapp" || sendMethod === "both") && (
-            <div className="bg-blue-50 border-l-4 border-blue-400 text-blue-700 px-4 py-3 rounded text-sm">
-              <p className="font-medium mb-1">WhatsApp integration is not connected</p>
-              <p className="text-xs">
-                We&apos;ll open <strong>wa.me</strong> with the message ready — you tap Send in WhatsApp. Cloud API is optional. To connect for automated sending, go to{" "}
-                <a
-                  href="/settings/integrations/whatsapp"
-                  className="underline font-medium"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    window.open("/settings/integrations/whatsapp", "_blank")
-                  }}
-                >
-                  Settings → Integrations → WhatsApp
-                </a>
-              </p>
-            </div>
-          )}
-
-          {/* Info for WhatsApp - No Phone (wa.me needs a number — Cloud API optional) */}
+          {/* Info for WhatsApp - No Phone */}
           {sendMethod === "whatsapp" && !invoice.customers?.phone && !invoice.customers?.whatsapp_phone && (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 px-4 py-3 rounded text-sm">
               Customer phone number is not available. Please add a phone number to the customer profile.

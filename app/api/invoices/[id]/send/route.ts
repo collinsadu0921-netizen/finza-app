@@ -3,7 +3,6 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog, getIpAddress, getUserAgent } from "@/lib/auditLog"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
-import { getCurrencySymbol } from "@/lib/currency"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { getBusinessWhatsAppTemplate } from "@/lib/communication/getBusinessWhatsAppTemplate"
 import { renderWhatsAppTemplate } from "@/lib/communication/renderWhatsAppTemplate"
@@ -68,6 +67,18 @@ async function performSendTransition(
     return { data: res.data, error: res.error ? { message: res.error.message } : null }
   }
   return { data, error: error ? { message: error.message } : null }
+}
+
+function formatDueDateForWhatsApp(dueDate: string | null | undefined, paymentTerms: string | null | undefined): string {
+  if (dueDate) {
+    try {
+      return new Date(dueDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    } catch {
+      return dueDate
+    }
+  }
+  const terms = paymentTerms?.trim()
+  return terms || "—"
 }
 
 export async function POST(
@@ -226,22 +237,6 @@ export async function POST(
         )
       }
 
-      // Get currency symbol from currency code (no hardcoded fallback)
-      const currencySymbol = invoice.currency_code
-        ? getCurrencySymbol(invoice.currency_code)
-        : null
-
-      if (!currencySymbol) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Currency symbol could not be determined. Please ensure invoice has a valid currency code.",
-            message: "Currency symbol missing"
-          },
-          { status: 400 }
-        )
-      }
-
       const payUrl = `${baseUrl}/pay/${invoice.id}`
       const businessName =
         (invoice.businesses as { trading_name?: string; legal_name?: string } | null)?.trading_name ||
@@ -290,9 +285,9 @@ export async function POST(
       const message = renderWhatsAppTemplate(template, {
         customer_name: (customer as any)?.name || "Valued Customer",
         invoice_number: invoiceNumberForMsg ? `#${invoiceNumberForMsg}` : "",
-        total: Number(invoice.total).toFixed(2),
-        currency: currencySymbol,
-        due_date: invoice.payment_terms || "Due on receipt",
+        total: "",
+        currency: "",
+        due_date: formatDueDateForWhatsApp(invoice.due_date, invoice.payment_terms),
         public_url: publicInvoiceUrl,
         pay_url: payUrl,
         business_name: businessName,

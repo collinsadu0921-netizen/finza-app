@@ -37,12 +37,11 @@ const SETTING_GROUPS: SettingsGroup[] = [
     links: [
       { label: "Invoice settings", path: "/service/settings/invoice-settings" },
       { label: "Payment settings", path: "/service/settings/payments" },
+      {
+        label: "WhatsApp message templates",
+        path: "/settings/communication/whatsapp",
+      },
     ],
-  },
-  {
-    title: "Integrations",
-    description: "Connect external tools.",
-    links: [{ label: "WhatsApp", path: "/service/settings/integrations/whatsapp" }],
   },
 ]
 

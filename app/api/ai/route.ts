@@ -82,7 +82,7 @@ const SITEMAP = `Authoritative service sitemap:
 /service/settings/subscription
 /service/settings/staff
 /service/settings/team
-/service/settings/integrations/whatsapp
+/settings/communication/whatsapp
 /service/accounting
 /service/accounting/wht
 /service/accounting/cit

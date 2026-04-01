@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
-import { getCurrencySymbol } from "@/lib/currency"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 
 export async function POST(request: NextRequest) {
@@ -216,11 +215,15 @@ export async function POST(request: NextRequest) {
         if (phone) {
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
           const publicUrl = `${baseUrl}/invoice-public/${publicToken}`
-          const currencySymbol = invoice.currency_code
-            ? getCurrencySymbol(invoice.currency_code)
-            : null
-          const currencyCode = invoice.currency_code || ""
-          const message = `Hello ${customer.name}, your recurring invoice ${invoiceNumber} from ${business.name || "Business"} is ready:\n\n${publicUrl}\n\nTotal: ${currencySymbol || currencyCode}${invoiceTotal.toFixed(2)}.`
+          const message = `Hello ${customer.name},
+
+Your invoice ${invoiceNumber} from ${business.name || "Business"} is ready.
+
+View invoice:
+${publicUrl}
+
+Thank you,
+${business.name || "Business"}`
           const linkResult = buildWhatsAppLink(phone, message)
           if (linkResult.ok) {
             whatsappInfo = {

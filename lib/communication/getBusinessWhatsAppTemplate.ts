@@ -1,58 +1,80 @@
 /**
  * Fetch business WhatsApp template by type. Falls back to system default if none saved.
  * Never returns null.
+ *
+ * Default templates omit monetary amounts; recipients see figures only after opening the link.
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 export type WhatsAppTemplateType = "invoice" | "estimate" | "order"
 
-/** Variable names available per template type (for settings UI) */
+/**
+ * Placeholders substituted when sending. Legacy keys (total, currency, pay_url, valid_until)
+ * remain supported for businesses that saved older templates.
+ */
 export const TEMPLATE_VARIABLES: Record<WhatsAppTemplateType, string[]> = {
-  invoice: ["customer_name", "invoice_number", "total", "currency", "due_date", "public_url", "pay_url", "business_name"],
-  estimate: ["customer_name", "estimate_number", "total", "currency", "valid_until", "public_url", "business_name"],
-  order: ["customer_name", "order_number", "total", "currency", "public_url", "business_name"],
+  invoice: [
+    "customer_name",
+    "invoice_number",
+    "due_date",
+    "public_url",
+    "business_name",
+    "total",
+    "currency",
+    "pay_url",
+  ],
+  estimate: [
+    "customer_name",
+    "estimate_number",
+    "public_url",
+    "business_name",
+    "total",
+    "currency",
+    "valid_until",
+  ],
+  order: [
+    "customer_name",
+    "order_number",
+    "public_url",
+    "business_name",
+    "total",
+    "currency",
+  ],
 }
 
-const DEFAULT_INVOICE_TEMPLATE = `Hi {{customer_name}} 👋,
+const DEFAULT_INVOICE_TEMPLATE = `Hello {{customer_name}},
 
-You have a new invoice from *{{business_name}}*:
+Your invoice {{invoice_number}} from {{business_name}} is ready.
 
-🧾 Invoice {{invoice_number}}
-💰 Amount Due: {{currency}}{{total}}
-📅 Payment Terms: {{due_date}}
+Due date: {{due_date}}
 
-View your invoice here:
+View invoice:
 {{public_url}}
 
-💳 Pay online:
-{{pay_url}}
+Thank you,
+{{business_name}}`
 
-Thank you for your business! Please reach out if you have any questions.`
+const DEFAULT_ESTIMATE_TEMPLATE = `Hello {{customer_name}},
 
-const DEFAULT_ESTIMATE_TEMPLATE = `Hi {{customer_name}} 👋,
+Your estimate {{estimate_number}} from {{business_name}} is ready.
 
-Here is your estimate from *{{business_name}}*:
-
-📋 Estimate {{estimate_number}}
-💰 Total Amount: {{currency}}{{total}}
-📅 Valid Until: {{valid_until}}
-
-View your estimate here:
+View estimate:
 {{public_url}}
 
-Please review and let us know if you'd like to proceed or have any questions. We're happy to help!`
+Please review it and let us know if you would like to proceed.
 
-const DEFAULT_ORDER_TEMPLATE = `Hi {{customer_name}} 👋,
+Thank you,
+{{business_name}}`
 
-Thank you for your order with *{{business_name}}*!
+const DEFAULT_ORDER_TEMPLATE = `Hello {{customer_name}},
 
-📦 Order {{order_number}}
-💰 Total Amount: {{currency}}{{total}}
+Your order {{order_number}} from {{business_name}} is ready.
 
-View your order details here:
+View order:
 {{public_url}}
 
-We'll send your invoice once everything is ready. Thank you for choosing us!`
+Thank you,
+{{business_name}}`
 
 const DEFAULTS: Record<WhatsAppTemplateType, string> = {
   invoice: DEFAULT_INVOICE_TEMPLATE,

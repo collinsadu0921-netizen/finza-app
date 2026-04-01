@@ -244,28 +244,23 @@ export function generateEmailReceipt(data: ReceiptData): string {
  * Generate SMS receipt text (concise format)
  */
 export function generateSMSReceipt(data: ReceiptData): string {
-  const currencySymbol = data.currencyCode ? getCurrencySymbol(data.currencyCode) : ""
-  const formatAmount = (amount: number) => formatMoney(amount, data.currencyCode)
-
   let sms = `${data.businessName}\n`
   sms += `Receipt: ${data.receiptNumber}\n`
   sms += `Date: ${data.date} ${data.time}\n`
-  sms += `Total: ${formatAmount(data.totalPaid)}\n`
-  
+
   if (data.customerName) {
     sms += `Customer: ${data.customerName}\n`
   }
-  
+
   sms += `Payment: ${formatPaymentMethod(data.paymentMethod)}\n`
-  
+
   if (data.isRefunded) {
     sms += `⚠️ REFUNDED\n`
   } else if (data.isVoided) {
     sms += `⚠️ VOIDED\n`
   }
 
-  // Optional: Add link to full receipt if public receipt URL is available
-  // sms += `View full receipt: ${publicReceiptUrl}`
+  sms += `\nAmounts are available in your full receipt or sales record.`
 
   return sms
 }

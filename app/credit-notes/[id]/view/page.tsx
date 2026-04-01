@@ -178,7 +178,14 @@ export default function CreditNoteViewPage() {
       return
     }
     const publicUrl = `${window.location.origin}/credit-public/${publicToken}`
-    const message = `Hello ${customer?.name ?? "there"}, here is your credit note ${creditNote?.credit_number} for Invoice ${inv?.invoice_number ?? ""}:\n\n${publicUrl}\n\nAmount: ${creditAmount.toFixed(2)}.`
+    const message = `Hello ${customer?.name ?? "there"},
+
+Your credit note ${creditNote?.credit_number} (Invoice ${inv?.invoice_number ?? "—"}) is ready.
+
+View credit note:
+${publicUrl}
+
+Thank you.`
     const result = buildWhatsAppLink(phone, message)
     if (!result.ok) {
       toast.showToast(result.error, "error")

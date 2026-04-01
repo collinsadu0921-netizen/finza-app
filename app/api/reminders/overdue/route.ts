@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import { getCurrencySymbol } from "@/lib/currency"
 
 export async function GET(request: NextRequest) {
   try {
@@ -162,14 +161,26 @@ export async function GET(request: NextRequest) {
 
                 const cleanPhone = phone.replace(/\s+/g, "").replace(/^0/, "+233")
                 const publicUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoice-public/${invoice.public_token}`
-                // Get currency symbol from invoice (no hardcoded GHS)
-                const currencySymbol = invoice.currency_code 
-                  ? getCurrencySymbol(invoice.currency_code) 
-                  : null
-                const currencyCode = invoice.currency_code || ""
-                
-                const message = reminderSettings.reminder_message_template ||
-                  `Hello ${customer?.name || "Customer"}, Invoice ${invoice.invoice_number} is overdue.\n\nAmount due: ${currencySymbol || currencyCode}${balance.toFixed(2)}.\n\nPlease make payment at your earliest convenience.\n\nLink: ${publicUrl}`
+                const businessName =
+                  business.trading_name || business.legal_name || business.name || "Your supplier"
+                const rawTemplate = (reminderSettings.reminder_message_template || "").trim()
+                const message = rawTemplate
+                  ? rawTemplate
+                      .replace(/\[CustomerName\]/g, customer?.name || "Customer")
+                      .replace(/\[InvoiceNumber\]/g, String(invoice.invoice_number || ""))
+                      .replace(/\[Link\]/g, publicUrl)
+                      .replace(/\[BusinessName\]/g, businessName)
+                      .replace(/\[Amount\]/g, "")
+                      .replace(/\[CurrencySymbol\]/g, "")
+                  : `Hello ${customer?.name || "Customer"},
+
+This is a reminder regarding invoice ${invoice.invoice_number} from ${businessName}.
+
+View invoice:
+${publicUrl}
+
+Thank you,
+${businessName}`
 
                 reminders.push({
                   invoice_id: invoice.id,

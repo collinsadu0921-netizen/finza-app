@@ -105,10 +105,18 @@ export default function SupplierStatementPage() {
       return
     }
 
-    const billed = formatMoney(summary?.totalBilled ?? 0, currencyCode)
-    const paid = formatMoney(summary?.totalPaid ?? 0, currencyCode)
-    const outstanding = formatMoney(summary?.totalOutstanding ?? 0, currencyCode)
-    const message = `Hello, here is your latest Statement of Account from Business:\n\nTotal Billed: ${billed}\nTotal Paid: ${paid}\nTotal Outstanding: ${outstanding}\n\nFor any clarifications, please reply here.`
+    const statementUrl =
+      typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}${window.location.search}` : ""
+    const message = `Hello,
+
+Your statement of account is ready.
+
+View statement:
+${statementUrl}
+
+For any clarifications, please reply here.
+
+Thank you.`
 
     const result = buildWhatsAppLink(supplier.phone, message)
     if (!result.ok) {

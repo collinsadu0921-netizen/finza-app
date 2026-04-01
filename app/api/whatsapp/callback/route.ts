@@ -16,13 +16,13 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error("OAuth error:", error)
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=${encodeURIComponent(error)}`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=${encodeURIComponent(error)}`
       )
     }
 
     if (!code || !state) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=missing_parameters`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=missing_parameters`
       )
     }
 
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       stateData = JSON.parse(Buffer.from(state, "base64url").toString())
     } catch (e) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=invalid_state`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=invalid_state`
       )
     }
 
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     if (!user || user.id !== stateData.userId) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=unauthorized`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=unauthorized`
       )
     }
 
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     if (!clientId || !clientSecret) {
       console.error("Meta WhatsApp credentials not configured")
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=not_configured`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=not_configured`
       )
     }
 
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       const errorData = await tokenResponse.json().catch(() => ({}))
       console.error("Error exchanging code for token:", errorData)
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=token_exchange_failed`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=token_exchange_failed`
       )
     }
 
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
 
     if (!accessToken) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=no_token`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=no_token`
       )
     }
 
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
     if (!businessAccountsResponse.ok) {
       console.error("Error fetching business accounts")
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=business_accounts_failed`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=business_accounts_failed`
       )
     }
 
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
 
     if (businesses.length === 0) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=no_business_accounts`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=no_business_accounts`
       )
     }
 
@@ -136,7 +136,7 @@ export async function GET(request: NextRequest) {
     if (!phoneNumbersResponse.ok) {
       console.error("Error fetching phone numbers")
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=phone_numbers_failed`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=phone_numbers_failed`
       )
     }
 
@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
 
     if (phoneNumbers.length === 0) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=no_phone_numbers`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=no_phone_numbers`
       )
     }
 
@@ -179,18 +179,18 @@ export async function GET(request: NextRequest) {
     if (updateError) {
       console.error("Error saving WhatsApp connection:", updateError)
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=save_failed`
+        `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=save_failed`
       )
     }
 
     // Redirect to settings page with success message
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?success=connected`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?success=connected`
     )
   } catch (error: any) {
     console.error("Error in WhatsApp callback:", error)
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/integrations/whatsapp?error=${encodeURIComponent(error.message || "unknown_error")}`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/service/settings?error=${encodeURIComponent(error.message || "unknown_error")}`
     )
   }
 }

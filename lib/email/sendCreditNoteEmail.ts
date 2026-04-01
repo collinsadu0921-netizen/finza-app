@@ -17,44 +17,45 @@ export interface SendCreditNoteEmailParams {
   publicUrl: string
 }
 
+function escapeHtmlText(text: string): string {
+  const map: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  }
+  return text.replace(/[&<>"']/g, (m) => map[m])
+}
+
 function buildCreditNoteEmailHtml(params: SendCreditNoteEmailParams): string {
-  const {
-    businessName,
-    creditNumber,
-    invoiceReference,
-    creditAmount,
-    reason,
-    customerName,
-    publicUrl,
-  } = params
-  const amountStr = creditAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const { businessName, creditNumber, invoiceReference, reason, customerName, publicUrl } = params
+  const safeReason = reason ? escapeHtmlText(reason) : ""
   return `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Credit Note ${creditNumber}</title>
+  <title>Credit Note ${escapeHtmlText(creditNumber)}</title>
 </head>
 <body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow:hidden;">
     <div style="padding:24px 24px 16px;border-bottom:1px solid #eee;">
-      <p style="margin:0;font-size:14px;color:#666;">${businessName}</p>
-      <h1 style="margin:8px 0 0;font-size:20px;font-weight:600;color:#111;">Credit Note #${creditNumber}</h1>
+      <p style="margin:0;font-size:14px;color:#666;">${escapeHtmlText(businessName)}</p>
+      <h1 style="margin:8px 0 0;font-size:20px;font-weight:600;color:#111;">Credit Note #${escapeHtmlText(creditNumber)}</h1>
     </div>
     <div style="padding:24px;">
-      <p style="margin:0 0 16px;font-size:15px;color:#333;">Hello ${customerName},</p>
-      <p style="margin:0 0 16px;font-size:15px;color:#333;">Please find your credit note details below.</p>
-      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:8px 0;font-size:14px;color:#666;">Invoice reference</td><td style="padding:8px 0;font-size:14px;text-align:right;font-weight:500;">#${invoiceReference || "—"}</td></tr>
-        <tr><td style="padding:8px 0;font-size:14px;color:#666;">Credit amount</td><td style="padding:8px 0;font-size:14px;text-align:right;color:#b91c1c;font-weight:600;">−${amountStr}</td></tr>
-        ${reason ? `<tr><td style="padding:8px 0;font-size:14px;color:#666;">Reason</td><td style="padding:8px 0;font-size:14px;text-align:right;">${reason}</td></tr>` : ""}
-      </table>
-      <p style="margin:16px 0 0;font-size:13px;color:#666;">This credit reduces the balance on the linked invoice. Any remaining balance is still due.</p>
-      ${publicUrl ? `<p style="margin:20px 0 0;"><a href="${publicUrl}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">View credit note</a></p>` : ""}
+      <p style="margin:0 0 16px;font-size:15px;color:#333;">Hello ${escapeHtmlText(customerName)},</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#333;">Your credit note #${escapeHtmlText(creditNumber)} from ${escapeHtmlText(businessName)} is ready.</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#333;">Invoice reference: <strong>#${escapeHtmlText(invoiceReference || "—")}</strong></p>
+      ${safeReason ? `<p style="margin:0 0 16px;font-size:14px;color:#333;">${safeReason}</p>` : ""}
+      <p style="margin:0 0 16px;font-size:13px;color:#666;">View the link below for full details.</p>
+      ${publicUrl ? `<p style="margin:20px 0 0;"><a href="${publicUrl.replace(/"/g, "&quot;")}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;">View credit note</a></p>` : ""}
+      <p style="margin:20px 0 0;font-size:15px;color:#333;">Thank you,<br />${escapeHtmlText(businessName)}</p>
     </div>
     <div style="padding:16px 24px;background:#f9fafb;font-size:12px;color:#6b7280;">
-      ${businessName} — Credit Note ${creditNumber}
+      ${escapeHtmlText(businessName)} — Credit Note ${escapeHtmlText(creditNumber)}
     </div>
   </div>
 </body>
@@ -63,29 +64,22 @@ function buildCreditNoteEmailHtml(params: SendCreditNoteEmailParams): string {
 }
 
 function buildCreditNoteEmailText(params: SendCreditNoteEmailParams): string {
-  const {
-    businessName,
-    creditNumber,
-    invoiceReference,
-    creditAmount,
-    reason,
-    customerName,
-    publicUrl,
-  } = params
-  const amountStr = creditAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const { businessName, creditNumber, invoiceReference, reason, customerName, publicUrl } = params
   const lines: string[] = [
     `${businessName}`,
     `Credit Note #${creditNumber}`,
     "",
     `Hello ${customerName},`,
-    "Please find your credit note details below.",
+    `Your credit note #${creditNumber} from ${businessName} is ready.`,
     "",
     `Invoice reference: #${invoiceReference || "—"}`,
-    `Credit amount: −${amountStr}`,
-    ...(reason ? [`Reason: ${reason}`] : []),
+    ...(reason ? [`${reason}`] : []),
     "",
-    "This credit reduces the balance on the linked invoice. Any remaining balance is still due.",
-    ...(publicUrl ? ["", `View credit note: ${publicUrl}`] : []),
+    "View the link below for full details.",
+    ...(publicUrl ? [`View credit note: ${publicUrl}`] : []),
+    "",
+    `Thank you,`,
+    `${businessName}`,
     "",
     `${businessName} — Credit Note ${creditNumber}`,
   ]
