@@ -12,6 +12,7 @@ import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptio
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
 import { FinzaLogo } from "@/components/FinzaLogo"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 type MenuSection = {
   title: string
@@ -405,18 +406,34 @@ export default function Sidebar() {
         `}
       >
         <div className="flex flex-col h-full">
-          {/* Sidebar Header */}
+          {/* Sidebar Header — tenant identity primary; Finza secondary */}
           <div className="p-4 border-b border-slate-200">
+            <div className="mb-2 flex justify-start">
+              <FinzaLogo height={18} className="opacity-60" />
+            </div>
             <button
+              type="button"
               onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
-              className="text-left w-full"
+              className="text-left w-full min-w-0 rounded-lg outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
             >
-              <div className="mb-1.5">
-                <FinzaLogo height={26} />
+              <div className="flex items-center gap-3 min-w-0">
+                <BusinessLogoDisplay
+                  logoUrl={businessDisplay.logo_url}
+                  businessName={businessDisplay.name?.trim() || "Workspace"}
+                  size="lg"
+                  rounded="lg"
+                  className="border border-slate-200/80 bg-white dark:border-slate-600 dark:bg-slate-800"
+                />
+                {businessDisplay.name ? (
+                  <p className="min-w-0 flex-1 text-sm font-bold leading-snug text-slate-900 line-clamp-2 dark:text-white">
+                    {businessDisplay.name}
+                  </p>
+                ) : (
+                  <p className="min-w-0 flex-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
+                    Dashboard
+                  </p>
+                )}
               </div>
-              {businessDisplay.name ? (
-                <p className="text-sm font-bold text-slate-900 truncate">{businessDisplay.name}</p>
-              ) : null}
             </button>
           </div>
 
