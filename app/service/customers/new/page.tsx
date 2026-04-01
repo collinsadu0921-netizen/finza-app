@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness } from "@/lib/business"
 
 export default function ServiceNewCustomerPage() {
   const router = useRouter()
@@ -25,10 +27,16 @@ export default function ServiceNewCustomerPage() {
 
     setLoading(true)
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("Not logged in")
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (!business) throw new Error("Business not found")
+
       const response = await fetch("/api/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          business_id: business.id,
           name: name.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,

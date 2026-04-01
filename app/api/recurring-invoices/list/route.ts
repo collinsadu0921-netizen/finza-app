@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,12 +13,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const { searchParams } = new URL(request.url)
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      searchParams.get("business_id") ?? searchParams.get("businessId")
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const business = { id: scope.businessId }
     const status = searchParams.get("status")
 
     let query = supabase

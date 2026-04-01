@@ -54,6 +54,7 @@ export default function ServiceCustomersPage() {
       }
 
       const params = new URLSearchParams()
+      params.append("business_id", business.id)
       if (statusFilter !== "all") params.append("status", statusFilter)
       if (searchQuery) params.append("search", searchQuery)
 

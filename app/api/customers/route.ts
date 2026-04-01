@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 
 // POST /api/customers - Create customer
 export async function POST(request: NextRequest) {
@@ -14,12 +14,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const body = await request.json()
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      typeof body.business_id === "string" ? body.business_id : null
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const business = { id: scope.businessId }
     const { name, phone, email, address, tin, whatsapp_phone } = body
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -116,12 +120,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const { searchParams } = new URL(request.url)
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      searchParams.get("business_id") ?? searchParams.get("businessId")
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const business = { id: scope.businessId }
     const search = searchParams.get("search") || ""
     const status = searchParams.get("status") // Don't default - only filter if explicitly requested
     const limit = parseInt(searchParams.get("limit") || "50")

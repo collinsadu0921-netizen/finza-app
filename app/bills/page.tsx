@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney } from "@/lib/money"
+import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness } from "@/lib/business"
 
 type Bill = {
   id: string
@@ -96,7 +98,40 @@ export default function BillsPage() {
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearching, setIsSearching] = useState(false)
+  const [businessId, setBusinessId] = useState<string | null>(null)
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user || cancelled) {
+          if (!cancelled) {
+            setError("Not logged in")
+            setLoading(false)
+          }
+          return
+        }
+        const b = await getCurrentBusiness(supabase, user.id)
+        if (cancelled) return
+        if (!b) {
+          setError("Business not found")
+          setLoading(false)
+          return
+        }
+        setBusinessId(b.id)
+      } catch {
+        if (!cancelled) {
+          setError("Failed to resolve business")
+          setLoading(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
@@ -108,12 +143,17 @@ export default function BillsPage() {
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current) }
   }, [searchInput])
 
-  useEffect(() => { loadBills() }, [filters, searchQuery])
+  useEffect(() => {
+    if (!businessId) return
+    loadBills()
+  }, [businessId, filters, searchQuery])
 
   const loadBills = async () => {
     try {
+      if (!businessId) return
       setLoading(true)
       const params = new URLSearchParams()
+      params.append("business_id", businessId)
       if (filters.supplier_name) params.append("supplier_name", filters.supplier_name)
       if (filters.status !== "all") params.append("status", filters.status)
       if (filters.start_date) params.append("start_date", filters.start_date)

@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
+import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness } from "@/lib/business"
 
 type RecurringInvoice = {
   id: string
@@ -33,7 +35,13 @@ export default function RecurringInvoicesPage() {
   const loadRecurringInvoices = async () => {
     try {
       setLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("Not logged in")
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (!business) throw new Error("Business not found")
+
       const params = new URLSearchParams()
+      params.append("business_id", business.id)
       if (statusFilter !== "all") {
         params.append("status", statusFilter)
       }

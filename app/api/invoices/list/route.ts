@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
-import { getUserRole } from "@/lib/userRoles"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,33 +14,15 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const requestedBusinessId =
-      (searchParams.get("business_id") ?? searchParams.get("businessId"))?.trim() || null
-
-    let business: { id: string } | null = null
-    if (requestedBusinessId) {
-      const role = await getUserRole(supabase, user.id, requestedBusinessId)
-      if (!role) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-      }
-      const { data: b } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("id", requestedBusinessId)
-        .is("archived_at", null)
-        .maybeSingle()
-      if (!b) {
-        return NextResponse.json({ error: "Business not found" }, { status: 404 })
-      }
-      business = b
-    } else {
-      const resolved = await getCurrentBusiness(supabase, user.id)
-      business = resolved ? { id: resolved.id } : null
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      searchParams.get("business_id") ?? searchParams.get("businessId")
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
-
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
+    const business = { id: scope.businessId }
     const status = searchParams.get("status")
     const customerId = searchParams.get("customer_id")
     const startDate = searchParams.get("start_date")

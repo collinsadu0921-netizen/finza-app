@@ -120,6 +120,7 @@ export default function ServicePaymentsPage() {
       }
 
       const params = new URLSearchParams()
+      params.append("business_id", businessId)
       if (startDate) params.append("start_date", startDate)
       if (endDate) params.append("end_date", endDate)
 

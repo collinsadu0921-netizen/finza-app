@@ -107,6 +107,8 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     "expenses.create",
     "reports.view",
     "settings.view", // managers need invoice settings, payment settings, integrations
+    "team.manage", // resolveAccess: /service/settings/team
+    "staff.manage", // resolveAccess: /service/settings/staff (ORGANIZATION nav)
   ],
 
   accountant: [
@@ -122,6 +124,7 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     "accounting.reconcile",
     "accounting.close_period",
     "payroll.view",
+    "settings.view", // service workspace settings hub; avoids silent redirect to dashboard for firm accountants
   ],
 
   staff: [
@@ -129,6 +132,7 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     "invoices.view",
     "jobs.view",
     "jobs.update",
+    "settings.view", // /service/settings* is guarded by settings.view; staff still lack team.manage / staff.manage / settings.edit
   ],
 
   employee: [
