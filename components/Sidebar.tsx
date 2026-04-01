@@ -11,7 +11,6 @@ import { clearSelectedBusinessId } from "@/lib/business"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
-import { FinzaLogo } from "@/components/FinzaLogo"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 type MenuSection = {
@@ -412,11 +411,8 @@ export default function Sidebar() {
         `}
       >
         <div className="flex flex-col h-full">
-          {/* Sidebar Header — tenant identity primary; Finza secondary */}
+          {/* Sidebar Header — business identity only */}
           <div className="p-4 border-b border-slate-200">
-            <div className="mb-2 flex justify-start">
-              <FinzaLogo height={18} className="opacity-60" />
-            </div>
             <button
               type="button"
               onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
