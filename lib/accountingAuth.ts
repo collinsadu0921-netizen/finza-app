@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { getUserRole } from "@/lib/userRoles"
 import { isUserAccountantReadonly } from "@/lib/userRoles"
 import { getAccountingAuthority } from "@/lib/accountingAuthorityEngine"
+import { hasPermission, type CustomPermissions } from "@/lib/permissions"
 
 export type AccountingAuthorityAccess = "read" | "write"
 
@@ -44,6 +45,23 @@ export async function checkAccountingAuthority(
     result.authorized = true
     result.authority_source = role === "accountant" ? "accountant" : "employee"
     return result
+  }
+
+  // Read-only ledger/report-style data for team roles that have reports.view (e.g. manager).
+  // Dashboard APIs use checkAccountingAuthority("read"); write paths stay restricted above.
+  if (accessLevel === "read" && role) {
+    const { data: buRow } = await supabase
+      .from("business_users")
+      .select("custom_permissions")
+      .eq("business_id", businessId)
+      .eq("user_id", userId)
+      .maybeSingle()
+    const customPermissions = (buRow?.custom_permissions as CustomPermissions) ?? null
+    if (hasPermission(role, customPermissions, "reports.view")) {
+      result.authorized = true
+      result.authority_source = "employee"
+      return result
+    }
   }
 
   const auth = await getAccountingAuthority({
