@@ -147,6 +147,9 @@ function InvoicesPageContent() {
       setBusinessId(business.id)
 
       const params = new URLSearchParams()
+      // Server getCurrentBusiness() cannot read localStorage workspace; pass explicit scope
+      // so the list matches client-side totals (payments, etc.) for the selected business.
+      params.append("business_id", business.id)
       if (statusFilter !== "all") params.append("status", statusFilter)
       if (customerFilter !== "all") params.append("customer_id", customerFilter)
       if (startDate) params.append("start_date", startDate)
