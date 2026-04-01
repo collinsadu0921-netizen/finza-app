@@ -16,8 +16,6 @@ const CASH_CODES = ["1000", "1010", "1020", "1030"] as const
 const CASH_CODE_SET = new Set<string>(CASH_CODES)
 /** Accounts Receivable control account. Use 1100 (service/standard); 1200 is Inventory in retail. */
 const AR_CODE = "1100"
-/** Accounts Payable control account (standard COA); supplier bills post here — not VAT/PAYE payables. */
-const AP_CODE = "2000"
 
 function extractCash(bs: any): number {
   let sum = 0
@@ -45,13 +43,11 @@ function extractAR(bs: any): number {
 function extractAP(bs: any): number {
   const liab = bs?.sections?.find((s: any) => s.key === "liabilities")
   if (!liab) return 0
+  let sum = 0
   for (const g of liab.groups || []) {
-    for (const line of g.lines || []) {
-      if (String(line.account_code).trim() === AP_CODE)
-        return Math.round(Number(line.amount ?? 0) * 100) / 100
-    }
+    if (g.key === "current_liabilities") sum += Number(g.subtotal ?? 0)
   }
-  return 0
+  return Math.round(sum * 100) / 100
 }
 
 export async function GET(request: NextRequest) {
