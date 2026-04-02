@@ -182,6 +182,7 @@ export default function PublicCreditNotePage() {
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Description</th>
                   <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700">Qty</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Price</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Discount</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Total</th>
                 </tr>
               </thead>
@@ -191,6 +192,9 @@ export default function PublicCreditNotePage() {
                     <td className="px-4 py-2 text-sm text-gray-900">{item.description}</td>
                     <td className="px-4 py-2 text-sm text-center text-gray-700">{Number(item.qty)}</td>
                     <td className="px-4 py-2 text-sm text-right text-gray-700">₵{Number(item.unit_price).toFixed(2)}</td>
+                    <td className="px-4 py-2 text-sm text-right text-gray-700">
+                      {Number(item.discount_amount) > 0 ? `₵${Number(item.discount_amount).toFixed(2)}` : "—"}
+                    </td>
                     <td className="px-4 py-2 text-sm text-right font-medium text-red-600">-₵{Number(item.line_subtotal).toFixed(2)}</td>
                   </tr>
                 ))}

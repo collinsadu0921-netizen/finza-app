@@ -225,17 +225,18 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     }
   }
 
-  // Format items for display
+  // Format items for display (discount column + correct net line total)
   const formattedItems = items.map((item) => {
     const qty = item.qty || item.quantity || 0
     const unitPrice = item.unit_price || item.price || 0
-    const discount = item.discount_amount || 0
+    const discount = Number(item.discount_amount) || 0
     const lineTotal = item.line_subtotal || item.line_total || item.total || qty * unitPrice - discount
     return {
       description: item.description || "Item",
       qty,
       unitPrice,
-      lineTotal,
+      discount: Math.round(discount * 100) / 100,
+      lineTotal: Math.round(Number(lineTotal) * 100) / 100,
     }
   })
 
@@ -488,16 +489,18 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
 
       <table>
         <colgroup>
-          <col style="width:52%" />
-          <col style="width:10%" />
-          <col style="width:19%" />
-          <col style="width:19%" />
+          <col style="width:44%" />
+          <col style="width:9%" />
+          <col style="width:15%" />
+          <col style="width:14%" />
+          <col style="width:18%" />
         </colgroup>
         <thead>
           <tr>
             <th>Description</th>
             <th class="text-right">Qty</th>
             <th class="text-right">Unit Price</th>
+            <th class="text-right">Discount</th>
             <th class="text-right">Total</th>
           </tr>
         </thead>
@@ -509,6 +512,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
               <td class="desc-col">${item.description}</td>
               <td class="text-right">${item.qty}</td>
               <td class="text-right">${currency_symbol} ${item.unitPrice.toFixed(2)}</td>
+              <td class="text-right">${item.discount > 0 ? `${currency_symbol} ${item.discount.toFixed(2)}` : "—"}</td>
               <td class="text-right">${currency_symbol} ${item.lineTotal.toFixed(2)}</td>
             </tr>
           `

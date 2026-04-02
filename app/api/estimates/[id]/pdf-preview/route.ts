@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireBusinessScopeForUser } from "@/lib/business"
 import { generateFinancialDocumentHTML, type BusinessInfo, type CustomerInfo, type DocumentItem, type DocumentMeta, type DocumentTotals } from "@/components/documents/FinancialDocument"
+import { estimateLineItemDiscount } from "@/lib/documents/estimateLineItemDiscount"
 
 export async function GET(
   request: NextRequest,
@@ -51,13 +52,7 @@ export async function GET(
           registration_number,
           default_currency
         ),
-        estimate_items (
-          id,
-          description,
-          quantity,
-          price,
-          total
-        )
+        estimate_items (*)
       `)
       .eq("id", estimateId)
       .eq("business_id", scopedBusinessId)
@@ -108,16 +103,19 @@ export async function GET(
           name: "Customer",
         }
 
-    const documentItems: DocumentItem[] = (estimate.estimate_items || []).map((item: any) => ({
-      id: item.id,
-      description: item.description || "Item",
-      quantity: item.quantity || 0,
-      price: item.price || 0,
-      total: item.total || 0,
-      qty: item.quantity || 0,
-      unit_price: item.price || 0,
-      line_subtotal: item.total || 0,
-    }))
+    const documentItems: DocumentItem[] = (estimate.estimate_items || []).map((item: any) => {
+      const qty = Number(item.quantity ?? item.qty ?? 0)
+      const unitPrice = Number(item.price ?? item.unit_price ?? 0)
+      const lineNet = Number(item.total ?? item.line_total ?? 0)
+      return {
+        id: item.id,
+        description: item.description || "Item",
+        qty,
+        unit_price: unitPrice,
+        discount_amount: estimateLineItemDiscount(item),
+        line_subtotal: lineNet,
+      }
+    })
 
     const documentTotals: DocumentTotals = {
       subtotal: Number(estimate.subtotal || 0),

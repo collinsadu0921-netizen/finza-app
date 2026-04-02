@@ -330,8 +330,11 @@ export default function ProformaPublicPage() {
                     <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-16">
                       Qty
                     </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
+                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-24">
                       Unit Price
+                    </th>
+                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-24">
+                      Discount
                     </th>
                     <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
                       Total
@@ -344,6 +347,9 @@ export default function ProformaPublicPage() {
                       <td className="py-3 text-gray-800 font-medium">{item.description}</td>
                       <td className="py-3 text-right text-gray-600 tabular-nums">{item.qty}</td>
                       <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.unit_price)}</td>
+                      <td className="py-3 text-right text-gray-600 tabular-nums">
+                        {Number(item.discount_amount) > 0 ? fmt(sym, item.discount_amount) : "—"}
+                      </td>
                       <td className="py-3 text-right text-gray-800 font-medium tabular-nums">
                         {fmt(sym, item.line_subtotal)}
                       </td>

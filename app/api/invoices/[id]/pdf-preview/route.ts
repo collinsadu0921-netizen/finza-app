@@ -92,6 +92,7 @@ export async function GET(
       description: item.description || "Item",
       qty: item.qty || 0,
       unit_price: item.unit_price || 0,
+      discount_amount: Number(item.discount_amount) || 0,
       line_subtotal: item.line_subtotal || 0,
     }))
 

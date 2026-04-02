@@ -427,6 +427,7 @@ Thank you.`
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Description</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">Qty</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit Price</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Discount</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Total</th>
                   </tr>
                 </thead>
@@ -437,6 +438,11 @@ Thank you.`
                       <td className="px-4 py-3 text-center text-slate-600">{safeNumber(item.qty)}</td>
                       <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                         {safeNumber(item.unit_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
+                        {safeNumber(item.discount_amount) > 0
+                          ? safeNumber(item.discount_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                          : "—"}
                       </td>
                       <td className="px-4 py-3 text-right font-medium text-rose-600 tabular-nums">
                         −{safeNumber(item.line_subtotal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

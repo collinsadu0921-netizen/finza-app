@@ -372,6 +372,7 @@ export async function PUT(
           quantity: item.quantity || item.qty || 0,
           price: item.price || item.unit_price || 0,
           total: item.total || item.line_total || 0,
+          discount_amount: Number(item.discount_amount) || 0,
         }))
 
         await supabase.from("estimate_items").insert(newItems)
@@ -412,6 +413,7 @@ export async function PUT(
         quantity: qty,
         price: price,
         total: total,
+        discount_amount: discount,
       }
     })
 

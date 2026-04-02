@@ -541,9 +541,10 @@ Thank you.`
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 dark:bg-gray-900/50 text-slate-500">
                       <tr>
-                        <th className="px-6 py-3 text-left font-medium w-1/2">Description</th>
+                        <th className="px-6 py-3 text-left font-medium w-2/5">Description</th>
                         <th className="px-6 py-3 text-center font-medium">Qty</th>
                         <th className="px-6 py-3 text-right font-medium">Unit Price</th>
+                        <th className="px-6 py-3 text-right font-medium">Discount</th>
                         <th className="px-6 py-3 text-right font-medium">Total</th>
                       </tr>
                     </thead>
@@ -559,6 +560,11 @@ Thank you.`
                           <td className="px-6 py-4 text-center text-slate-600 dark:text-gray-400 tabular-nums">{item.qty}</td>
                           <td className="px-6 py-4 text-right text-slate-600 dark:text-gray-400">
                             {formatMoney(Number(item.unit_price), invoice.currency_code)}
+                          </td>
+                          <td className="px-6 py-4 text-right text-slate-600 dark:text-gray-400 tabular-nums">
+                            {Number(item.discount_amount) > 0
+                              ? formatMoney(Number(item.discount_amount), invoice.currency_code)
+                              : "—"}
                           </td>
                           <td className="px-6 py-4 text-right font-medium text-slate-900 dark:text-white">
                             {formatMoney(Number(item.line_subtotal ?? item.qty * item.unit_price), invoice.currency_code)}
@@ -588,21 +594,21 @@ Thank you.`
                         return (
                           <>
                             <tr className="border-t border-slate-200 dark:border-slate-700">
-                              <td colSpan={3} className="px-6 pt-4 text-right text-slate-500 text-xs uppercase font-medium">Subtotal</td>
+                              <td colSpan={4} className="px-6 pt-4 text-right text-slate-500 text-xs uppercase font-medium">Subtotal</td>
                               <td className="px-6 pt-4 text-right font-medium text-slate-900 dark:text-white">
                                 {formatMoney(Number(invoice.subtotal ?? invoice.total), invoice.currency_code)}
                               </td>
                             </tr>
                             {toShow.map(tax => (
                               <tr key={tax.code}>
-                                <td colSpan={3} className="px-6 py-1 text-right text-slate-400 text-xs uppercase font-medium">{tax.code}</td>
+                                <td colSpan={4} className="px-6 py-1 text-right text-slate-400 text-xs uppercase font-medium">{tax.code}</td>
                                 <td className="px-6 py-1 text-right text-slate-600 dark:text-slate-400 text-sm">
                                   {formatMoney(Number(tax.amount), invoice.currency_code)}
                                 </td>
                               </tr>
                             ))}
                             <tr>
-                              <td colSpan={3} className="px-6 py-4 text-right text-slate-900 dark:text-white font-bold text-sm uppercase">Total</td>
+                              <td colSpan={4} className="px-6 py-4 text-right text-slate-900 dark:text-white font-bold text-sm uppercase">Total</td>
                               <td className="px-6 py-4 text-right text-lg font-bold border-t border-slate-200 dark:border-slate-700 mt-2">
                                 {formatMoney(Number(invoice.total), invoice.currency_code)}
                               </td>
@@ -614,7 +620,7 @@ Thank you.`
                       {/* If No Taxes, just total */}
                       {!invoice.apply_taxes && (
                         <tr className="border-t border-slate-200 dark:border-slate-700">
-                          <td colSpan={3} className="px-6 py-4 text-right text-slate-900 dark:text-white font-bold uppercase">Total</td>
+                          <td colSpan={4} className="px-6 py-4 text-right text-slate-900 dark:text-white font-bold uppercase">Total</td>
                           <td className="px-6 py-4 text-right font-bold text-lg">
                             {formatMoney(Number(invoice.total), invoice.currency_code)}
                           </td>

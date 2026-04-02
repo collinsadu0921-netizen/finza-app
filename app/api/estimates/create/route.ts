@@ -328,6 +328,7 @@ export async function POST(request: NextRequest) {
         quantity: qty,
         price: price,
         total: total,
+        discount_amount: discount,
       }
       
       // Note: product_id and product_service_id columns will remain NULL

@@ -9,6 +9,7 @@ import {
   type DocumentTotals,
 } from "@/components/documents/FinancialDocument"
 import { getCurrencySymbol } from "@/lib/currency"
+import { estimateLineItemDiscount } from "@/lib/documents/estimateLineItemDiscount"
 
 export const dynamic = "force-dynamic"
 
@@ -58,7 +59,7 @@ export async function GET(
         .single(),
       supabase
         .from("estimate_items")
-        .select("id, description, quantity, price, total")
+        .select("*")
         .eq("estimate_id", estimate.id)
         .order("created_at", { ascending: true }),
     ])
@@ -92,13 +93,19 @@ export async function GET(
         }
       : { name: "Customer" }
 
-    const documentItems: DocumentItem[] = (items || []).map((item: any) => ({
-      id: item.id,
-      description: item.description || "Item",
-      qty: Number(item.quantity || 0),
-      unit_price: Number(item.price || 0),
-      line_subtotal: Number(item.total || 0),
-    }))
+    const documentItems: DocumentItem[] = (items || []).map((item: any) => {
+      const qty = Number(item.quantity ?? item.qty ?? 0)
+      const unitPrice = Number(item.price ?? item.unit_price ?? 0)
+      const lineNet = Number(item.total ?? item.line_total ?? 0)
+      return {
+        id: item.id,
+        description: item.description || "Item",
+        qty,
+        unit_price: unitPrice,
+        discount_amount: estimateLineItemDiscount(item),
+        line_subtotal: lineNet,
+      }
+    })
 
     const totals: DocumentTotals = {
       subtotal: Number(estimate.subtotal || 0),
