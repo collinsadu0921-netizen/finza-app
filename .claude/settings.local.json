@@ -174,7 +174,13 @@
       "Bash(grep -n \"invoice_id\\\\|proforma_invoice\" /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
       "Bash(grep -n \"TODO\\\\|FIXME\\\\|BUG\\\\|XXX\\\\|HACK\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
       "Bash(grep -E \"fetch\\\\\\(|\\\\.from\\\\\\(\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
-      "Bash(ls -la /c/projects/finza-web/finza-web/app/api/estimates/[id]/)"
+      "Bash(ls -la /c/projects/finza-web/finza-web/app/api/estimates/[id]/)",
+      "Bash(grep -r \"CREATE TABLE.*estimates\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -l \"estimates\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -A 3 \"\\\\.from\\\\\\(\"\"businesses\"\"\\\\\\)\" /c/projects/finza-web/finza-web/app/api/public/quote/[token]/route.ts)",
+      "Bash(grep -n \"finza_user_can_access_business\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -B 5 -A 15 \"CREATE FUNCTION.*finza_user_can_access_business\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)",
+      "Bash(grep -A 5 \"CREATE TABLE.*businesses\" /c/projects/finza-web/finza-web/supabase/migrations/*.sql)"
     ]
   }
 }
