@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
+import { logAudit } from "@/lib/auditLog"
 
 const ALLOWED_STATUSES = ["allocated", "consumed", "returned"] as const
 
@@ -22,13 +23,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const body = await request.json().catch(() => ({}))
-    const { status } = body as { status?: string }
+    const { status, business_id: bodyBusinessId } = body as {
+      status?: string
+      business_id?: string
+    }
 
     if (!status || !ALLOWED_STATUSES.includes(status as (typeof ALLOWED_STATUSES)[number])) {
       return NextResponse.json(
@@ -37,11 +36,17 @@ export async function PATCH(
       )
     }
 
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, bodyBusinessId ?? null)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const businessId = scope.businessId
+
     const { data: existing, error: fetchErr } = await supabase
       .from("service_job_material_usage")
       .select("id, business_id, status")
       .eq("id", usageId)
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
       .single()
 
     if (fetchErr || !existing) {
@@ -66,12 +71,29 @@ export async function PATCH(
       .from("service_job_material_usage")
       .update({ status })
       .eq("id", usageId)
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
 
     if (updateErr) {
       console.error("Usage status update error:", updateErr)
       return NextResponse.json({ error: "Failed to update status" }, { status: 500 })
     }
+
+    await logAudit({
+      businessId,
+      userId: user.id,
+      actionType:
+        status === "consumed"
+          ? "service_job.material_consumed"
+          : status === "returned"
+            ? "service_job.material_returned"
+            : "service_job.material_usage_updated",
+      entityType: "service_job_material_usage",
+      entityId: usageId,
+      oldValues: { status: currentStatus },
+      newValues: { status },
+      description: `Service job material usage set to ${status}`,
+      request,
+    })
 
     return NextResponse.json({ success: true, status })
   } catch (err: unknown) {

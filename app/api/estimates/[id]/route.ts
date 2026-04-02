@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { requireBusinessScopeForUser } from "@/lib/business"
+import { createAuditLog } from "@/lib/auditLog"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
@@ -23,12 +24,26 @@ export async function GET(
     }
 
     const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // Fetch estimate
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const scope = await requireBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const scopedBusinessId = scope.businessId
+
+    // Fetch estimate (id + tenant)
     const { data: estimateRow, error: estimateError } = await supabase
       .from("estimates")
       .select("*")
       .eq("id", estimateId)
+      .eq("business_id", scopedBusinessId)
       .is("deleted_at", null)
       .single()
 
@@ -110,13 +125,9 @@ export async function PUT(
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const body = await request.json()
     const {
+      business_id: bodyBusinessId,
       customer_id,
       estimate_number,
       issue_date,
@@ -126,11 +137,17 @@ export async function PUT(
       apply_taxes = true,
     } = body
 
+    const scope = await requireBusinessScopeForUser(supabase, user.id, bodyBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const scopedBusinessId = scope.businessId
+
     const { data: existingEstimate, error: checkError } = await supabase
       .from("estimates")
       .select("id, status, business_id, revision_number, estimate_number")
       .eq("id", estimateId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .single()
 
     if (checkError || !existingEstimate) {
@@ -303,6 +320,7 @@ export async function PUT(
         .from("estimates")
         .select("*")
         .eq("id", estimateId)
+        .eq("business_id", scopedBusinessId)
         .single()
 
       if (origError || !originalEstimate) {
@@ -364,6 +382,7 @@ export async function PUT(
         .from("estimates")
         .update(estimateData)
         .eq("id", estimateId)
+        .eq("business_id", scopedBusinessId)
         .select()
         .single()
 
@@ -407,6 +426,21 @@ export async function PUT(
         { status: 500 }
       )
     }
+
+    await createAuditLog({
+      businessId: finalEstimate.business_id,
+      actionType: "estimate.updated",
+      entityType: "estimates",
+      entityId: finalEstimate.id,
+      newValues: {
+        estimate_number: finalEstimate.estimate_number,
+        revision: shouldCreateNewRevision,
+      },
+      description: shouldCreateNewRevision
+        ? `Created revision for quote ${finalEstimate.estimate_number || finalEstimate.id}`
+        : `Updated quote ${finalEstimate.estimate_number || finalEstimate.id}`,
+      request,
+    })
 
     return NextResponse.json({
       success: true,

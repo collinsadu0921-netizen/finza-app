@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { clearSelectedBusinessId } from "@/lib/business"
@@ -153,6 +153,11 @@ export default function Sidebar() {
       }
 
       const isServicePath = path.startsWith("/service/")
+      const isReportishPath =
+        path.startsWith("/vat-returns") || path.startsWith("/reports/")
+      const resolvedBusinessIdForBranding =
+        accountingBusinessId ||
+        (isReportishPath ? getSelectedBusinessId() : null)
 
       // Service routes without business_id: keep sidebar branding — filled by getCurrentBusiness effect (avoid logo/name flash on refresh).
       if (isServicePath && !accountingBusinessId) {
@@ -160,12 +165,15 @@ export default function Sidebar() {
         return
       }
 
-      // Accounting or service path with business_id in URL: resolve industry from that business so menu renders immediately.
-      if ((isAccountingPath || isServicePath) && accountingBusinessId) {
+      // Accounting, service, or ledger VAT / VAT returns paths with a known business: load name + logo (server cannot read localStorage for APIs; URL or workspace picker supplies id).
+      if (
+        (isAccountingPath || isServicePath || isReportishPath) &&
+        resolvedBusinessIdForBranding
+      ) {
         const { data: business, error } = await supabase
           .from("businesses")
           .select("industry, name, logo_url, trading_name")
-          .eq("id", accountingBusinessId)
+          .eq("id", resolvedBusinessIdForBranding)
           .is("archived_at", null)
           .maybeSingle()
         if (business) {

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
+import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness } from "@/lib/business"
 
 export default function EstimateConvertPage() {
   const router = useRouter()
@@ -24,8 +26,24 @@ export default function EstimateConvertPage() {
     }
     setLoading(true)
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        toast.showToast("Please log in to convert this quote", "error")
+        router.push("/service/estimates")
+        return
+      }
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (!business?.id) {
+        toast.showToast("Select a workspace to convert quotes", "error")
+        router.push("/service/estimates")
+        return
+      }
       const response = await fetch(`/api/estimates/convert/${estimateId}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business_id: business.id }),
       })
 
       const data = await response.json()

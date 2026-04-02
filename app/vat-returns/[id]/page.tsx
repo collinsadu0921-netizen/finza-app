@@ -11,6 +11,7 @@ import Button from "@/components/ui/Button"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import type { LedgerLine } from "@/app/api/vat-returns/monthly/route"
+import { GRA_VAT3_BOXES, isPost2026Period } from "@/lib/gra/vatForm"
 
 type VatReturn = {
   id: string
@@ -51,6 +52,7 @@ export default function VatReturnViewPage() {
   const [vatReturn, setVatReturn] = useState<VatReturn | null>(null)
   const [ledgerEntries, setLedgerEntries] = useState<LedgerLine[]>([])
   const [updating, setUpdating] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   useEffect(() => {
     loadReturn()
@@ -262,6 +264,32 @@ export default function VatReturnViewPage() {
     }
   }
 
+  const handleExportGRAPdf = async () => {
+    if (!vatReturn) return
+    setExportingPdf(true)
+    try {
+      const response = await fetch(`/api/vat-returns/${returnId}/export/pdf`)
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        toast.showToast(errData.error || "Failed to generate GRA VAT 3 PDF", "error")
+        return
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `gra-vat3-${vatReturn.period_start_date}-${vatReturn.period_end_date}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.showToast("Error generating GRA VAT 3 PDF", "error")
+    } finally {
+      setExportingPdf(false)
+    }
+  }
+
   if (loading) {
     return (
       <ProtectedLayout>
@@ -290,6 +318,9 @@ export default function VatReturnViewPage() {
 
   const formatPeriod = (start: string) =>
     new Date(start).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
+
+  // GRA regime flag — determines whether COVID rows and NHIL/GETFund credits apply
+  const isPost2026 = isPost2026Period(vatReturn.period_end_date)
 
   // Compute totals — handle legacy rows where total_output_tax may be 0
   const outputTax =
@@ -383,6 +414,18 @@ export default function VatReturnViewPage() {
                 >
                   Excel
                 </Button>
+                <Button
+                  onClick={handleExportGRAPdf}
+                  variant="outline"
+                  isLoading={exportingPdf}
+                  leftIcon={
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                  }
+                >
+                  GRA VAT 3 (PDF)
+                </Button>
                 {vatReturn.status === "draft" && (
                   <button
                     onClick={() => handleStatusUpdate("submitted")}
@@ -414,23 +457,47 @@ export default function VatReturnViewPage() {
               </h2>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-gray-500">
-                  <span>Taxable Sales (derived)</span>
+                  <span className="flex items-center gap-1.5">
+                    Taxable Sales (derived)
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box2.boxNumber}]</span>
+                  </span>
                   <span className="font-medium text-gray-700">₵{Number(vatReturn.total_taxable_sales).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
-                  <span>NHIL (2.5%)</span>
+                  <span className="flex items-center gap-1.5">
+                    NHIL (2.5%)
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box4.boxNumber}]</span>
+                  </span>
                   <span>₵{Number(vatReturn.total_output_nhil).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
-                  <span>GETFund (2.5%)</span>
+                  <span className="flex items-center gap-1.5">
+                    GETFund (2.5%)
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box5.boxNumber}]</span>
+                  </span>
                   <span>₵{Number(vatReturn.total_output_getfund).toFixed(2)}</span>
                 </div>
+                {(!isPost2026 || Number(vatReturn.total_output_covid) > 0) && (
+                  <div className="flex justify-between text-gray-500">
+                    <span className="flex items-center gap-1.5">
+                      COVID-19 Levy (1%)
+                      <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box6.boxNumber}]</span>
+                    </span>
+                    <span>₵{Number(vatReturn.total_output_covid).toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500">
-                  <span>VAT (15%)</span>
+                  <span className="flex items-center gap-1.5">
+                    VAT (15%)
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box3.boxNumber}]</span>
+                  </span>
                   <span>₵{Number(vatReturn.total_output_vat).toFixed(2)}</span>
                 </div>
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between font-bold text-gray-900 dark:text-white">
-                  <span>Total Output Tax</span>
+                  <span className="flex items-center gap-1.5">
+                    Total Output Tax
+                    <span className="text-xs font-mono text-gray-400 font-normal">[Box {GRA_VAT3_BOXES.box7.boxNumber}]</span>
+                  </span>
                   <span className="text-lg">₵{outputTax.toFixed(2)}</span>
                 </div>
               </div>
@@ -443,23 +510,49 @@ export default function VatReturnViewPage() {
               </h2>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-gray-500">
-                  <span>Taxable Purchases (derived)</span>
+                  <span className="flex items-center gap-1.5">
+                    Taxable Purchases (derived)
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box9.boxNumber}]</span>
+                  </span>
                   <span className="font-medium text-gray-700">₵{Number(vatReturn.total_taxable_purchases).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
-                  <span>NHIL (2.5%)</span>
+                  <span className="flex items-center gap-1.5">
+                    NHIL (2.5%)
+                    {isPost2026 && <span className="text-xs text-green-600 dark:text-green-400">(creditable)</span>}
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box11.boxNumber}]</span>
+                  </span>
                   <span>₵{Number(vatReturn.total_input_nhil).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
-                  <span>GETFund (2.5%)</span>
+                  <span className="flex items-center gap-1.5">
+                    GETFund (2.5%)
+                    {isPost2026 && <span className="text-xs text-green-600 dark:text-green-400">(creditable)</span>}
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box12.boxNumber}]</span>
+                  </span>
                   <span>₵{Number(vatReturn.total_input_getfund).toFixed(2)}</span>
                 </div>
+                {(!isPost2026 || Number(vatReturn.total_input_covid) > 0) && (
+                  <div className="flex justify-between text-gray-500">
+                    <span className="flex items-center gap-1.5">
+                      COVID-19 Levy (1%)
+                      <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box13.boxNumber}]</span>
+                    </span>
+                    <span>₵{Number(vatReturn.total_input_covid).toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500">
-                  <span>VAT (15%)</span>
+                  <span className="flex items-center gap-1.5">
+                    VAT (15%)
+                    <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box10.boxNumber}]</span>
+                  </span>
                   <span>₵{Number(vatReturn.total_input_vat).toFixed(2)}</span>
                 </div>
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between font-bold text-gray-900 dark:text-white">
-                  <span>Total Input Tax</span>
+                  <span className="flex items-center gap-1.5">
+                    Total Input Tax
+                    <span className="text-xs font-mono text-gray-400 font-normal">[Box {GRA_VAT3_BOXES.box14.boxNumber}]</span>
+                  </span>
                   <span className="text-lg">₵{inputTax.toFixed(2)}</span>
                 </div>
               </div>

@@ -251,3 +251,34 @@ export async function resolveBusinessScopeForUser(
   }
   return { ok: true, businessId: business.id }
 }
+
+/**
+ * Like {@link resolveBusinessScopeForUser} but **requires** an explicit `business_id`
+ * from the client (no server-side fallback). Use for APIs that must align with
+ * workspace selection — missing id → 400, no access → 403.
+ */
+export async function requireBusinessScopeForUser(
+  supabase: SupabaseClient,
+  userId: string,
+  requestedBusinessId: string | null | undefined
+): Promise<ResolveBusinessScopeResult> {
+  const trimmed =
+    typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
+  if (!trimmed) {
+    return { ok: false, status: 400, error: "Missing business_id" }
+  }
+  const role = await getUserRole(supabase, userId, trimmed)
+  if (!role) {
+    return { ok: false, status: 403, error: "Forbidden" }
+  }
+  const { data: b } = await supabase
+    .from("businesses")
+    .select("id")
+    .eq("id", trimmed)
+    .is("archived_at", null)
+    .maybeSingle()
+  if (!b) {
+    return { ok: false, status: 404, error: "Business not found" }
+  }
+  return { ok: true, businessId: b.id }
+}

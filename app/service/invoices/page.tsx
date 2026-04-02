@@ -9,6 +9,7 @@ import { exportToCSV, exportToExcel, ExportColumn, formatDate } from "@/lib/expo
 import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
+import { buildServiceRoute } from "@/lib/service/routes"
 
 type Invoice = {
   id: string
@@ -497,7 +498,11 @@ function InvoicesPageContent() {
                     return (
                       <tr
                         key={invoice.id}
-                        onClick={() => router.push(`/invoices/${invoice.id}/view`)}
+                        onClick={() =>
+                          router.push(
+                            buildServiceRoute(`/invoices/${invoice.id}/view`, businessId || undefined)
+                          )
+                        }
                         className={`cursor-pointer transition-colors group ${rowTint}`}
                       >
                         <td className="px-5 py-4">
@@ -534,7 +539,12 @@ function InvoicesPageContent() {
                         </td>
                         <td className="px-5 py-4 text-right">
                           <button
-                            onClick={e => { e.stopPropagation(); router.push(`/invoices/${invoice.id}/view`) }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              router.push(
+                                buildServiceRoute(`/invoices/${invoice.id}/view`, businessId || undefined)
+                              )
+                            }}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                           >
                             View

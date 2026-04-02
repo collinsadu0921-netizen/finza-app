@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
-import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import {
+  canUserInitializeAccounting,
+  ensureAccountingInitialized,
+} from "@/lib/accounting/bootstrap"
+import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 
 /**
  * GET /api/reports/vat-control
@@ -48,9 +53,47 @@ export async function GET(request: NextRequest) {
     }
     const businessId = ctx.businessId
 
-    const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, businessId)
-    if (bootstrapErr) {
-      return NextResponse.json({ error: bootstrapErr }, { status: 500 })
+    const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    if (!auth.authorized) {
+      return NextResponse.json(
+        {
+          error:
+            "Unauthorized. You need reports access (e.g. owner, admin, or reports.view) to view the VAT control report.",
+        },
+        { status: 403 }
+      )
+    }
+
+    if (!canUserInitializeAccounting(auth.authority_source)) {
+      const { ready } = await checkAccountingReadiness(supabase, businessId)
+      if (!ready) {
+        return NextResponse.json(
+          {
+            error: "ACCOUNTING_NOT_READY",
+            business_id: businessId,
+            authority_source: auth.authority_source,
+            message:
+              "Accounting is not initialized for this business. Ask an owner or admin to complete setup.",
+          },
+          { status: 403 }
+        )
+      }
+    } else {
+      const bootstrap = await ensureAccountingInitialized(supabase, businessId)
+      if (bootstrap.error) {
+        const structured = bootstrap.structuredError
+        const status = structured?.error_code === "INIT_DENIED" ? 403 : 500
+        return NextResponse.json(
+          {
+            error: bootstrap.error,
+            ...(structured && {
+              error_code: structured.error_code,
+              business_id: structured.business_id,
+            }),
+          },
+          { status }
+        )
+      }
     }
 
     const startDate = searchParams.get("start_date")
@@ -100,7 +143,9 @@ export async function GET(request: NextRequest) {
 
     let vatAccount = vatAccountFirst
     if (!vatAccount) {
-      await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+      if (canUserInitializeAccounting(auth.authority_source)) {
+        await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+      }
       const { data: retryAccount } = await supabase
         .from("accounts")
         .select("id, code, name")
@@ -110,7 +155,10 @@ export async function GET(request: NextRequest) {
         .maybeSingle()
       if (!retryAccount) {
         return NextResponse.json(
-          { error: "VAT account (code 2100) not found for this business" },
+          {
+            error:
+              "VAT account (code 2100) not found. An owner or admin may need to initialize accounting first.",
+          },
           { status: 404 }
         )
       }

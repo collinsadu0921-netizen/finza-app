@@ -176,7 +176,9 @@ function ProformaCreateForm() {
 
       // Pre-fill from estimate if param provided
       if (fromEstimateId) {
-        const estResponse = await fetch(`/api/estimates/${fromEstimateId}`)
+        const estResponse = await fetch(
+          `/api/estimates/${fromEstimateId}?business_id=${encodeURIComponent(business.id)}`
+        )
         if (estResponse.ok) {
           const estData = await estResponse.json()
           const est = estData.estimate

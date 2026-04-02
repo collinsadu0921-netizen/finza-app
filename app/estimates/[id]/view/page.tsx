@@ -8,9 +8,11 @@ import Toast from "@/components/Toast"
 import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { getCurrentBusiness } from "@/lib/business"
 
 type Estimate = {
   id: string
+  business_id: string
   estimate_number: string
   issue_date: string
   expiry_date: string | null
@@ -93,7 +95,20 @@ export default function EstimateViewPage() {
       setLoading(true)
       setError("")
 
-      const response = await fetch(`/api/estimates/${estimateId}`)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        throw new Error("Please log in to view this quote")
+      }
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (!business?.id) {
+        throw new Error("Select a workspace to load quotes")
+      }
+
+      const response = await fetch(
+        `/api/estimates/${estimateId}?business_id=${encodeURIComponent(business.id)}`
+      )
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
@@ -193,7 +208,10 @@ export default function EstimateViewPage() {
 
   const handleSend = async (action: "whatsapp" | "email" | "link") => {
     try {
-      const body: any = {}
+      if (!estimate?.business_id) {
+        throw new Error("Quote is missing workspace context. Reload the page and try again.")
+      }
+      const body: Record<string, unknown> = { business_id: estimate.business_id }
       if (action === "whatsapp") body.sendWhatsApp = true
       if (action === "email") body.sendEmail = true
       if (action === "link") body.copyLink = true

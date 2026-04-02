@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { requireBusinessScopeForUser } from "@/lib/business"
+import { createAuditLog } from "@/lib/auditLog"
 
 export async function POST(
   request: NextRequest,
@@ -18,10 +19,23 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    console.log("[estimates.convert] resolved current business.id:", business?.id ?? null)
+    let body: Record<string, unknown> = {}
+    try {
+      body = await request.json()
+    } catch {
+      body = {}
+    }
+    const scope = await requireBusinessScopeForUser(
+      supabase,
+      user.id,
+      body.business_id as string | undefined
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const scopedBusinessId = scope.businessId
 
-    // Fetch estimate
+    // Fetch estimate (scoped by tenant)
     const { data: estimate, error: estimateError } = await supabase
       .from("estimates")
       .select(`
@@ -53,6 +67,7 @@ export async function POST(
         supersedes_id
       `)
       .eq("id", id)
+      .eq("business_id", scopedBusinessId)
       .is("deleted_at", null)
       .single()
     console.log("[estimates.convert] estimate query result:", {
@@ -69,45 +84,6 @@ export async function POST(
         estimateBusinessId: (estimate as { business_id?: string } | null)?.business_id ?? null,
         error: (estimateError as { message?: string } | null)?.message ?? null,
       })
-      return NextResponse.json(
-        { error: "Estimate not found" },
-        { status: 404 }
-      )
-    }
-
-    // Permission enforcement after estimate fetch:
-    // user must be business owner or have membership in business_users.
-    const { data: businessRecord, error: businessRecordError } = await supabase
-      .from("businesses")
-      .select("id, owner_id")
-      .eq("id", estimate.business_id)
-      .single()
-
-    if (businessRecordError || !businessRecord) {
-      return NextResponse.json(
-        { error: "Business not found" },
-        { status: 404 }
-      )
-    }
-
-    const isOwner = businessRecord.owner_id === user.id
-    let hasMembership = false
-
-    if (!isOwner) {
-      const { data: membership, error: membershipError } = await supabase
-        .from("business_users")
-        .select("business_id")
-        .eq("business_id", estimate.business_id)
-        .eq("user_id", user.id)
-        .is("deleted_at", null)
-        .maybeSingle()
-
-      if (!membershipError && membership) {
-        hasMembership = true
-      }
-    }
-
-    if (!isOwner && !hasMembership) {
       return NextResponse.json(
         { error: "Estimate not found" },
         { status: 404 }
@@ -246,6 +222,17 @@ export async function POST(
         converted_to: "invoice"
       })
       .eq("id", id)
+      .eq("business_id", scopedBusinessId)
+
+    await createAuditLog({
+      businessId: estimate.business_id,
+      actionType: "estimate.converted_to_invoice",
+      entityType: "estimates",
+      entityId: id,
+      newValues: { invoice_id: invoice.id, converted_to: "invoice" },
+      description: `Converted quote ${estimate.estimate_number || id} to invoice ${invoice.id}`,
+      request,
+    })
 
     return NextResponse.json({
       invoice,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
+import { logAudit } from "@/lib/auditLog"
 
 /**
  * POST /api/service/jobs/use-material
@@ -16,11 +17,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const body = await request.json().catch(() => ({}))
     const { business_id: bodyBusinessId, job_id, material_id, quantity_used } = body as {
       business_id?: string
@@ -32,9 +28,12 @@ export async function POST(request: NextRequest) {
     if (!job_id || !material_id) {
       return NextResponse.json({ error: "job_id and material_id are required" }, { status: 400 })
     }
-    if (bodyBusinessId && bodyBusinessId !== business.id) {
-      return NextResponse.json({ error: "Forbidden: business_id does not match" }, { status: 403 })
+
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, bodyBusinessId ?? null)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+    const businessId = scope.businessId
 
     const qty = Number(quantity_used)
     if (isNaN(qty) || qty <= 0) {
@@ -45,7 +44,7 @@ export async function POST(request: NextRequest) {
       .from("service_material_inventory")
       .select("id, business_id, name, quantity_on_hand, average_cost")
       .eq("id", material_id)
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
       .single()
 
     if (matErr || !material) {
@@ -64,7 +63,7 @@ export async function POST(request: NextRequest) {
       .from("service_jobs")
       .select("id, business_id")
       .eq("id", job_id)
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
       .single()
 
     if (jobErr || !job) {
@@ -82,7 +81,7 @@ export async function POST(request: NextRequest) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", material_id)
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
 
     if (updateErr) {
       console.error("Use material: deduct stock error", updateErr)
@@ -90,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { error: movErr } = await supabase.from("service_material_movements").insert({
-      business_id: business.id,
+      business_id: businessId,
       material_id,
       movement_type: "job_usage",
       quantity: qty,
@@ -104,7 +103,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { error: usageErr } = await supabase.from("service_job_material_usage").insert({
-      business_id: business.id,
+      business_id: businessId,
       job_id,
       material_id,
       quantity_used: qty,
@@ -117,6 +116,22 @@ export async function POST(request: NextRequest) {
       console.error("Use material: usage insert error", usageErr)
       return NextResponse.json({ error: "Failed to record usage" }, { status: 500 })
     }
+
+    await logAudit({
+      businessId,
+      userId: user.id,
+      actionType: "service_job.material_allocated",
+      entityType: "service_job_material_usage",
+      entityId: job_id,
+      newValues: {
+        job_id,
+        material_id,
+        quantity_used: qty,
+        total_cost: qty * Number(material.average_cost ?? 0),
+      },
+      description: "Material allocated to service project",
+      request,
+    })
 
     return NextResponse.json({
       success: true,

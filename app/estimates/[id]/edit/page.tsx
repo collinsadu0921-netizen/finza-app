@@ -124,7 +124,9 @@ export default function EstimateEditPage() {
       setCurrencySymbol(getCurrencySymbol(business.default_currency) || "₵")
 
       // Load estimate data
-      const response = await fetch(`/api/estimates/${estimateId}`)
+      const response = await fetch(
+        `/api/estimates/${estimateId}?business_id=${encodeURIComponent(business.id)}`
+      )
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.error || "Failed to load quote")
@@ -418,6 +420,7 @@ export default function EstimateEditPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          business_id: businessId,
           customer_id: selectedCustomerId || null,
           estimate_number: estimateNumber,
           issue_date: issueDate,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { calculateTaxes, getLegacyTaxAmounts } from "@/lib/taxEngine"
 import { deriveLegacyGhanaTaxAmounts, getTaxEngineCode, taxResultToJSONB } from "@/lib/taxEngine/helpers"
 import { createAuditLog } from "@/lib/auditLog"
@@ -34,16 +34,18 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+    const scopedBusinessId = scope.businessId
 
     const { data: invoiceCheck, error: checkError } = await supabase
       .from("invoices")
       .select("id, business_id, deleted_at")
       .eq("id", invoiceId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .maybeSingle()
 
     if (checkError) {
@@ -89,7 +91,7 @@ export async function GET(
       `
       )
       .eq("id", invoiceId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .is("deleted_at", null)
       .single()
 
@@ -270,12 +272,20 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
     const body = await request.json()
+    const bodyBusinessId =
+      typeof body?.business_id === "string" ? body.business_id.trim() : ""
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      requestedBusinessId || bodyBusinessId || null
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const scopedBusinessId = scope.businessId
+
     const {
       customer_id,
       invoice_number,
@@ -293,7 +303,7 @@ export async function PUT(
       .from("invoices")
       .select("id, business_id, status, sent_at, paid_at, apply_taxes, invoice_number")
       .eq("id", invoiceId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .single()
 
     if (!existingInvoice) {
@@ -663,16 +673,18 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+    const scopedBusinessId = scope.businessId
 
     const { data: existingInvoice } = await supabase
       .from("invoices")
       .select("id, status, business_id")
       .eq("id", invoiceId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .single()
 
     if (!existingInvoice) {
@@ -694,7 +706,7 @@ export async function DELETE(
     const { data: journalEntry, error: journalEntryError } = await supabase
       .from("journal_entries")
       .select("id")
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .eq("reference_type", "invoice")
       .eq("reference_id", invoiceId)
       .limit(1)
@@ -729,12 +741,12 @@ export async function DELETE(
       )
     }
 
-    // Hard delete invoice (scoped to session business).
+    // Hard delete invoice (scoped to resolved business).
     const { error } = await supabase
       .from("invoices")
       .delete()
       .eq("id", invoiceId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
 
     if (error) {
       console.error("Error deleting invoice:", error)
@@ -746,19 +758,17 @@ export async function DELETE(
 
     // Log audit entry
     try {
-      if (business) {
-        await createAuditLog({
-          businessId: business.id,
-          userId: user?.id || null,
-          actionType: "invoice.deleted",
-          entityType: "invoice",
-          entityId: invoiceId,
-          oldValues: existingInvoice,
-          newValues: null,
-          request,
-          description: `Invoice ${invoiceId} deleted`,
-        })
-      }
+      await createAuditLog({
+        businessId: scopedBusinessId,
+        userId: user?.id || null,
+        actionType: "invoice.deleted",
+        entityType: "invoice",
+        entityId: invoiceId,
+        oldValues: existingInvoice,
+        newValues: null,
+        request,
+        description: `Invoice ${invoiceId} deleted`,
+      })
     } catch (auditError) {
       console.error("Error logging audit:", auditError)
     }

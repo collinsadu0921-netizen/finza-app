@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { requireBusinessScopeForUser } from "@/lib/business"
 import { generateFinancialDocumentHTML, type BusinessInfo, type CustomerInfo, type DocumentItem, type DocumentMeta, type DocumentTotals } from "@/components/documents/FinancialDocument"
 
 export async function GET(
@@ -18,6 +19,19 @@ export async function GET(
     }
 
     const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const scope = await requireBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    const scopedBusinessId = scope.businessId
 
     // Fetch estimate
     const { data: estimateRow, error: estimateError } = await supabase
@@ -46,6 +60,7 @@ export async function GET(
         )
       `)
       .eq("id", estimateId)
+      .eq("business_id", scopedBusinessId)
       .single()
 
     if (estimateError || !estimateRow) {

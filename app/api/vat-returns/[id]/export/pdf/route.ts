@@ -1,0 +1,429 @@
+import { NextRequest, NextResponse } from "next/server"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { normalizeCountry } from "@/lib/payments/eligibility"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  GRA_VAT3_BOXES,
+  getBoxesForSection,
+  isPost2026Period,
+  resolveBoxValue,
+  type GraBox,
+  type GraVatReturnData,
+} from "@/lib/gra/vatForm"
+
+/**
+ * GET /api/vat-returns/[id]/export/pdf
+ *
+ * Generates a GRA VAT 3 form-formatted PDF for the given VAT return.
+ * The PDF mirrors the official Ghana Revenue Authority VAT 3 return structure
+ * with all four levies (VAT, NHIL, GETFund, COVID) shown as separate line items,
+ * as required by GRA — they cannot be combined into a single total.
+ *
+ * Auth: same two-step pattern as GET /api/vat-returns/[id]
+ *   1. Fetch vat_returns row (no business check yet — need business_id from row)
+ *   2. enforceServiceWorkspaceAccess with the row's business_id
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  try {
+    const resolvedParams = await Promise.resolve(params)
+    const returnId = resolvedParams.id
+
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    // Step 1: Fetch the VAT return (business_id needed before access check)
+    const { data: vatReturn, error: fetchError } = await supabase
+      .from("vat_returns")
+      .select("*")
+      .eq("id", returnId)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (fetchError || !vatReturn) {
+      return NextResponse.json({ error: "VAT return not found" }, { status: 404 })
+    }
+
+    // Step 2: Enforce workspace access with the return's business_id
+    const accessDenied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user?.id,
+      businessId: vatReturn.business_id,
+      minTier: "professional",
+    })
+    if (accessDenied) return accessDenied
+
+    // Step 3: Fetch business details (name, TIN, country)
+    const { data: business } = await supabase
+      .from("businesses")
+      .select("name, tax_id, address_country")
+      .eq("id", vatReturn.business_id)
+      .single()
+
+    if (!business?.address_country) {
+      return NextResponse.json(
+        { error: "Business country is required. Please set your business country in Business Profile settings." },
+        { status: 400 }
+      )
+    }
+
+    const countryCode = normalizeCountry(business.address_country)
+    if (countryCode !== "GH") {
+      return NextResponse.json(
+        {
+          error: `GRA VAT 3 PDF is only available for Ghana businesses. This business is registered in ${countryCode}.`,
+          unsupported: true,
+        },
+        { status: 400 }
+      )
+    }
+
+    // ── Derive period flags ───────────────────────────────────────────────────
+    const isPost2026 = isPost2026Period(vatReturn.period_end_date as string)
+    const vatData: GraVatReturnData = {
+      total_taxable_sales: Number(vatReturn.total_taxable_sales || 0),
+      total_output_nhil: Number(vatReturn.total_output_nhil || 0),
+      total_output_getfund: Number(vatReturn.total_output_getfund || 0),
+      total_output_covid: Number(vatReturn.total_output_covid || 0),
+      total_output_vat: Number(vatReturn.total_output_vat || 0),
+      total_output_tax: Number(vatReturn.total_output_tax || 0),
+      total_taxable_purchases: Number(vatReturn.total_taxable_purchases || 0),
+      total_input_nhil: Number(vatReturn.total_input_nhil || 0),
+      total_input_getfund: Number(vatReturn.total_input_getfund || 0),
+      total_input_covid: Number(vatReturn.total_input_covid || 0),
+      total_input_vat: Number(vatReturn.total_input_vat || 0),
+      total_input_tax: Number(vatReturn.total_input_tax || 0),
+      net_vat_payable: Number(vatReturn.net_vat_payable || 0),
+      net_vat_refund: Number(vatReturn.net_vat_refund || 0),
+    }
+
+    // ── Generate PDF ─────────────────────────────────────────────────────────
+    const PDFDocument = (await import("pdfkit")).default
+    const doc = new PDFDocument({ size: "A4", margin: 50 })
+    const chunks: Buffer[] = []
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk))
+
+    // Column layout: A4 usable width = 595 - 100 (margins) = 495pt
+    // Box No. | Description | Rate | Amount (GHS)
+    const COL_BOX = 50     // x start
+    const W_BOX = 55
+    const W_DESC = 255
+    const W_RATE = 55
+    const W_AMOUNT = 130
+    const ROW_H = 22
+    const PAGE_BOTTOM = doc.page.height - 50
+
+    // ── Utility helpers ───────────────────────────────────────────────────────
+
+    const fmt = (n: number) => `GHS ${n.toFixed(2)}`
+
+    const drawFooter = () => {
+      const ph = doc.page.height
+      const pw = doc.page.width
+      doc.fontSize(7).font("Helvetica").fillColor("#888888")
+      doc.text(
+        `Generated by Finza on ${new Date().toISOString()}`,
+        50,
+        ph - 28,
+        { align: "left", width: pw / 2 - 50 }
+      )
+      doc.text(
+        "Ghana Revenue Authority — VAT 3 Return (GRA Form)",
+        pw / 2,
+        ph - 28,
+        { align: "right", width: pw / 2 - 50 }
+      )
+      doc.fillColor("#000000")
+    }
+
+    // Apply footer to subsequent pages automatically
+    doc.on("pageAdded", drawFooter)
+
+    // ── HEADER ────────────────────────────────────────────────────────────────
+    doc
+      .fontSize(18)
+      .font("Helvetica-Bold")
+      .fillColor("#1a1a2e")
+      .text("VAT 3 — Value Added Tax Return", { align: "center" })
+    doc.moveDown(0.3)
+
+    doc
+      .fontSize(12)
+      .font("Helvetica-Bold")
+      .fillColor("#333333")
+      .text(business.name || "Business", { align: "center" })
+    doc.moveDown(0.2)
+
+    doc
+      .fontSize(9)
+      .font("Helvetica")
+      .fillColor("#555555")
+      .text(`TIN: ${business.tax_id?.trim() || "(not provided — update in Business Profile)"}`, { align: "center" })
+    doc.moveDown(0.15)
+
+    doc
+      .fontSize(9)
+      .font("Helvetica")
+      .text(
+        `Filing Period: ${vatReturn.period_start_date} to ${vatReturn.period_end_date}`,
+        { align: "center" }
+      )
+    doc.moveDown(0.15)
+
+    const statusLabel = String(vatReturn.status || "draft").toUpperCase()
+    doc
+      .fontSize(8)
+      .font("Helvetica-Bold")
+      .fillColor(vatReturn.status === "paid" ? "#16a34a" : vatReturn.status === "submitted" ? "#2563eb" : "#b45309")
+      .text(`Status: ${statusLabel}`, { align: "center" })
+    doc.moveDown(0.4)
+    doc.fillColor("#000000")
+
+    // Horizontal divider
+    doc
+      .moveTo(50, doc.y)
+      .lineTo(doc.page.width - 50, doc.y)
+      .strokeColor("#cccccc")
+      .lineWidth(1)
+      .stroke()
+      .strokeColor("#000000")
+    doc.moveDown(0.6)
+
+    // ── TABLE HELPERS ─────────────────────────────────────────────────────────
+
+    const drawTableHeader = (y: number): number => {
+      const headers = ["Box No.", "Description", "Rate", "Amount (GHS)"]
+      const widths = [W_BOX, W_DESC, W_RATE, W_AMOUNT]
+      let x = COL_BOX
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#ffffff")
+      doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#374151")
+      headers.forEach((h, i) => {
+        doc.text(h, x + 4, y + 6, {
+          width: widths[i] - 8,
+          align: i === 3 ? "right" : "left",
+        })
+        x += widths[i]
+      })
+      doc.fillColor("#000000")
+      return y + ROW_H
+    }
+
+    const drawRow = (
+      box: GraBox,
+      value: number,
+      y: number,
+      isTotal: boolean,
+      isCovid: boolean,
+      noteText: string | null
+    ): number => {
+      if (y + ROW_H > PAGE_BOTTOM) {
+        doc.addPage()
+        y = 50
+      }
+
+      const bgColor = isTotal ? "#f3f4f6" : isCovid ? "#f9fafb" : "#ffffff"
+      const textColor = isCovid ? "#9ca3af" : "#111827"
+      const totalWidth = W_BOX + W_DESC + W_RATE + W_AMOUNT
+
+      doc.rect(COL_BOX, y, totalWidth, ROW_H).fill(bgColor).stroke("#e5e7eb")
+
+      // Box number
+      doc
+        .fontSize(isTotal ? 8 : 7.5)
+        .font(isTotal ? "Helvetica-Bold" : "Helvetica")
+        .fillColor(textColor)
+        .text(`Box ${box.boxNumber}`, COL_BOX + 4, y + 7, { width: W_BOX - 8 })
+
+      // Description + optional note
+      let descText = box.label
+      if (noteText) descText += `  (${noteText})`
+      doc
+        .fontSize(isTotal ? 8 : 7.5)
+        .font(isTotal ? "Helvetica-Bold" : "Helvetica")
+        .fillColor(textColor)
+        .text(descText, COL_BOX + W_BOX + 4, y + 7, { width: W_DESC - 8 })
+
+      // Rate
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor(textColor)
+        .text(box.rate ?? "—", COL_BOX + W_BOX + W_DESC + 4, y + 7, { width: W_RATE - 8 })
+
+      // Amount
+      const amountX = COL_BOX + W_BOX + W_DESC + W_RATE
+      doc
+        .fontSize(isTotal ? 8.5 : 8)
+        .font(isTotal ? "Helvetica-Bold" : "Helvetica")
+        .fillColor(isTotal ? "#111827" : textColor)
+        .text(fmt(value), amountX + 4, y + 7, { width: W_AMOUNT - 8, align: "right" })
+
+      doc.fillColor("#000000")
+      return y + ROW_H
+    }
+
+    const drawSectionHeader = (title: string, y: number): number => {
+      if (y + 28 > PAGE_BOTTOM) {
+        doc.addPage()
+        y = 50
+      }
+      doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, 24).fill("#dbeafe").stroke("#93c5fd")
+      doc
+        .fontSize(10)
+        .font("Helvetica-Bold")
+        .fillColor("#1e40af")
+        .text(title, COL_BOX + 8, y + 6, { width: W_BOX + W_DESC + W_RATE + W_AMOUNT - 16 })
+      doc.fillColor("#000000")
+      return y + 24
+    }
+
+    // ── SECTION A: Output Tax (Sales) ─────────────────────────────────────────
+    let y = doc.y
+    y = drawSectionHeader("Section A: Output Tax (Sales)", y)
+    y = drawTableHeader(y)
+
+    for (const box of getBoxesForSection("A")) {
+      const value = resolveBoxValue(box, vatData, isPost2026)
+      const isTotal = box.boxNumber === 7
+      const isCovid = box.isCovidBox && isPost2026
+      const note = isCovid ? "removed from 2026 — Act 1151" : null
+      y = drawRow(box, value, y, isTotal, isCovid, note)
+    }
+
+    doc.moveDown(0.8)
+    y = doc.y
+
+    // ── SECTION B: Input Tax (Purchases) ─────────────────────────────────────
+    y = drawSectionHeader("Section B: Input Tax (Purchases)", y)
+    y = drawTableHeader(y)
+
+    for (const box of getBoxesForSection("B")) {
+      const value = resolveBoxValue(box, vatData, isPost2026)
+      const isTotal = box.boxNumber === 14
+      const isCovid = box.isCovidBox && isPost2026
+
+      let note: string | null = null
+      if (isCovid) {
+        note = "removed from 2026 — not claimable"
+      } else if (box.isCreditableNote && isPost2026) {
+        note = box.isCreditableNote
+      } else if (box.isCreditableNote && !isPost2026) {
+        // Pre-2026: NHIL/GETFund are NOT claimable yet — make this clear
+        note = "not claimable pre-2026"
+      }
+
+      y = drawRow(box, value, y, isTotal, isCovid, note)
+    }
+
+    doc.moveDown(0.8)
+    y = doc.y
+
+    // ── SECTION C: Net VAT ────────────────────────────────────────────────────
+    y = drawSectionHeader("Section C: Net VAT", y)
+
+    if (y + ROW_H * 2 + 10 > PAGE_BOTTOM) {
+      doc.addPage()
+      y = 50
+    }
+
+    const netPayable = resolveBoxValue(GRA_VAT3_BOXES.box15, vatData, isPost2026)
+    const netRefund = resolveBoxValue(GRA_VAT3_BOXES.box16, vatData, isPost2026)
+
+    // Box 15 — Net VAT Payable
+    const box15 = GRA_VAT3_BOXES.box15
+    const payableColor = netPayable > 0 ? "#dc2626" : "#6b7280"
+    doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#ffffff").stroke("#e5e7eb")
+    doc.fontSize(8).font("Helvetica").fillColor("#111827")
+      .text(`Box ${box15.boxNumber}`, COL_BOX + 4, y + 7, { width: W_BOX - 8 })
+    doc.text("Net VAT Payable (Box 7 − Box 14)", COL_BOX + W_BOX + 4, y + 7, { width: W_DESC + W_RATE - 8 })
+    doc.fontSize(9).font("Helvetica-Bold").fillColor(payableColor)
+      .text(fmt(netPayable), COL_BOX + W_BOX + W_DESC + W_RATE + 4, y + 6, { width: W_AMOUNT - 8, align: "right" })
+    doc.fillColor("#000000")
+    y += ROW_H
+
+    // Box 16 — Net VAT Refundable
+    const box16 = GRA_VAT3_BOXES.box16
+    const refundColor = netRefund > 0 ? "#16a34a" : "#6b7280"
+    doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#ffffff").stroke("#e5e7eb")
+    doc.fontSize(8).font("Helvetica").fillColor("#111827")
+      .text(`Box ${box16.boxNumber}`, COL_BOX + 4, y + 7, { width: W_BOX - 8 })
+    doc.text("Net VAT Refundable (Box 14 − Box 7)", COL_BOX + W_BOX + 4, y + 7, { width: W_DESC + W_RATE - 8 })
+    doc.fontSize(9).font("Helvetica-Bold").fillColor(refundColor)
+      .text(fmt(netRefund), COL_BOX + W_BOX + W_DESC + W_RATE + 4, y + 6, { width: W_AMOUNT - 8, align: "right" })
+    doc.fillColor("#000000")
+    y += ROW_H + 10
+
+    // ── SUMMARY CALLOUT ───────────────────────────────────────────────────────
+    if (y + 60 > PAGE_BOTTOM) {
+      doc.addPage()
+      y = 50
+    }
+
+    const summaryBg = netPayable > 0 ? "#fef2f2" : netRefund > 0 ? "#f0fdf4" : "#f9fafb"
+    const summaryBorder = netPayable > 0 ? "#fca5a5" : netRefund > 0 ? "#86efac" : "#e5e7eb"
+    const summaryLabel = netPayable > 0 ? "Net VAT Payable to GRA" : netRefund > 0 ? "Net VAT Refund Due" : "Net VAT"
+    const summaryValue = netPayable > 0 ? netPayable : netRefund > 0 ? netRefund : 0
+    const summaryColor = netPayable > 0 ? "#dc2626" : netRefund > 0 ? "#16a34a" : "#6b7280"
+
+    doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, 52).fill(summaryBg).stroke(summaryBorder)
+    doc.fontSize(10).font("Helvetica").fillColor("#374151")
+      .text(summaryLabel, COL_BOX + 12, y + 8)
+    doc.fontSize(20).font("Helvetica-Bold").fillColor(summaryColor)
+      .text(fmt(summaryValue), COL_BOX + 12, y + 24)
+    doc.fillColor("#000000")
+    y += 62
+
+    // ── ADJUSTMENTS NOTE ──────────────────────────────────────────────────────
+    const outAdj = Number(vatReturn.output_adjustment || 0)
+    const inAdj = Number(vatReturn.input_adjustment || 0)
+    if (outAdj !== 0 || inAdj !== 0) {
+      if (y + 40 > PAGE_BOTTOM) {
+        doc.addPage()
+        y = 50
+      }
+      doc.moveDown(0.5)
+      y = doc.y
+      doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, 36).fill("#fffbeb").stroke("#fcd34d")
+      doc.fontSize(7.5).font("Helvetica-Bold").fillColor("#92400e")
+        .text("Note: Manual adjustments applied", COL_BOX + 8, y + 5)
+      const adjText = `Output: ${outAdj >= 0 ? "+" : ""}${outAdj.toFixed(2)}  |  Input: ${inAdj >= 0 ? "+" : ""}${inAdj.toFixed(2)}${vatReturn.adjustment_reason ? `  |  Reason: ${vatReturn.adjustment_reason}` : ""}`
+      doc.fontSize(7.5).font("Helvetica").fillColor("#78350f")
+        .text(adjText, COL_BOX + 8, y + 18, { width: W_BOX + W_DESC + W_RATE + W_AMOUNT - 16 })
+      doc.fillColor("#000000")
+    }
+
+    // ── FOOTER on first page ──────────────────────────────────────────────────
+    drawFooter()
+
+    // ── Finalize ──────────────────────────────────────────────────────────────
+    doc.end()
+    await new Promise<void>((resolve) => doc.on("end", resolve))
+
+    const pdfBuffer = Buffer.concat(chunks)
+    const filename = `gra-vat3-${vatReturn.period_start_date}-${vatReturn.period_end_date}.pdf`
+
+    return new NextResponse(pdfBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    })
+  } catch (error: any) {
+    console.error("Error generating GRA VAT 3 PDF:", error)
+    if (error.message?.includes("Cannot find module")) {
+      return NextResponse.json(
+        { error: "PDF generation requires 'pdfkit' package. Please install it with: npm install pdfkit @types/pdfkit" },
+        { status: 500 }
+      )
+    }
+    return NextResponse.json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    )
+  }
+}

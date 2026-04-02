@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { requireBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { getBusinessWhatsAppTemplate } from "@/lib/communication/getBusinessWhatsAppTemplate"
@@ -31,13 +31,25 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    let body: Record<string, unknown> = {}
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON body", message: "Invalid JSON body" },
+        { status: 400 }
+      )
     }
+    const { sendEmail, sendWhatsApp, copyLink, business_id: bodyBusinessId } = body
 
-    const body = await request.json()
-    const { sendEmail, sendWhatsApp, copyLink } = body
+    const scope = await requireBusinessScopeForUser(supabase, user.id, bodyBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json(
+        { success: false, error: scope.error, message: scope.error },
+        { status: scope.status }
+      )
+    }
+    const scopedBusinessId = scope.businessId
 
     const { data: estimateRow, error: estimateError } = await supabase
       .from("estimates")
@@ -60,7 +72,7 @@ export async function POST(
         )
       `)
       .eq("id", estimateId)
-      .eq("business_id", business.id)
+      .eq("business_id", scopedBusinessId)
       .single()
 
     if (estimateError || !estimateRow) {
@@ -171,6 +183,7 @@ export async function POST(
           .from("estimates")
           .update({ status: "sent" })
           .eq("id", estimateId)
+          .eq("business_id", scopedBusinessId)
       }
       // If resending (status is already "sent"), don't change status
 
@@ -223,6 +236,7 @@ export async function POST(
           .from("estimates")
           .update({ status: "sent" })
           .eq("id", estimateId)
+          .eq("business_id", scopedBusinessId)
       }
       // If resending (status is already "sent"), don't change status
 
@@ -270,6 +284,7 @@ export async function POST(
           .from("estimates")
           .update({ public_token: publicToken })
           .eq("id", estimateId)
+          .eq("business_id", scopedBusinessId)
 
         publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/quote-public/${publicToken}`
       }
@@ -290,8 +305,22 @@ export async function POST(
           .from("estimates")
           .update({ status: "sent" })
           .eq("id", estimateId)
+          .eq("business_id", scopedBusinessId)
       }
       // If resending (status is already "sent"), don't change status
+
+      const estimateNumberLabel = estimate.estimate_number
+        ? `#${estimate.estimate_number}`
+        : estimate.id.substring(0, 8)
+      await createAuditLog({
+        businessId: estimate.business_id,
+        actionType: isResend ? "estimate.resent_public_link" : "estimate.sent_public_link",
+        entityType: "estimates",
+        entityId: estimateId,
+        newValues: isSend ? { status: "sent", sent_via: "public_link" } : { sent_via: "public_link" },
+        description: `${isResend ? "Re-copied" : "Copied"} public link for estimate ${estimateNumberLabel}`,
+        request,
+      })
 
       return NextResponse.json({
         success: true,

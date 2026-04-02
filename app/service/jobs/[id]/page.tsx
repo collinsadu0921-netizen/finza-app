@@ -287,13 +287,14 @@ export default function ServiceJobDetailPage() {
 
   // --- Confirm consumption ---
   const handleConfirmConsumption = async (usageId: string) => {
+    if (!businessId) return
     setConsumingId(usageId)
     setError("")
     try {
       const res = await fetch(`/api/service/jobs/usage/${usageId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "consumed" }),
+        body: JSON.stringify({ business_id: businessId, status: "consumed" }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to confirm consumption")
@@ -311,13 +312,14 @@ export default function ServiceJobDetailPage() {
       title: "Return Material",
       description: `Return "${materialName}" to stock? This will mark the allocation as returned and restore the quantity on hand.`,
       onConfirm: async () => {
+        if (!businessId) return
         setReturningId(usageId)
         setError("")
         try {
           const res = await fetch(`/api/service/jobs/usage/${usageId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "returned" }),
+            body: JSON.stringify({ business_id: businessId, status: "returned" }),
           })
           const data = await res.json()
           if (!res.ok) throw new Error(data.error || "Failed to return material")
@@ -361,7 +363,8 @@ export default function ServiceJobDetailPage() {
         setCancelling(true)
         setError("")
         try {
-          const res = await fetch(`/api/service/jobs/${jobId}/cancel`, { method: "POST" })
+          const q = businessId ? `?business_id=${encodeURIComponent(businessId)}` : ""
+          const res = await fetch(`/api/service/jobs/${jobId}/cancel${q}`, { method: "POST" })
           const data = await res.json()
           if (!res.ok) throw new Error(data.error || "Failed to cancel project")
           load()

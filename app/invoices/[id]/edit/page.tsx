@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useParams, usePathname } from "next/navigation"
+import { useRouter, useParams, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
+import { buildServiceRoute } from "@/lib/service/routes"
 import { calculateTaxes, getLegacyTaxAmounts } from "@/lib/taxEngine"
 import SendInvoiceModal from "@/components/invoices/SendInvoiceModal"
 import SendMethodDropdown, { SendMethod } from "@/components/invoices/SendMethodDropdown"
@@ -83,9 +84,17 @@ export default function InvoiceEditPage() {
   const router = useRouter()
   const params = useParams()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const businessIdFromUrl =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
+  const [resolvedBusinessId, setResolvedBusinessId] = useState<string | null>(businessIdFromUrl)
   const invoiceId = (params?.id as string) || ""
   const isUnderService = pathname?.startsWith("/service") ?? false
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
+
+  useEffect(() => {
+    setResolvedBusinessId(businessIdFromUrl ?? getSelectedBusinessId())
+  }, [businessIdFromUrl])
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
@@ -125,7 +134,7 @@ export default function InvoiceEditPage() {
       setError("Invoice ID is missing")
       setLoading(false)
     }
-  }, [invoiceId])
+  }, [invoiceId, resolvedBusinessId])
 
   const loadData = async () => {
     try {
@@ -142,20 +151,23 @@ export default function InvoiceEditPage() {
         return
       }
 
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
+      let activeBusinessId = resolvedBusinessId
+      const business = activeBusinessId
+        ? { id: activeBusinessId }
+        : await getCurrentBusiness(supabase, user.id)
+      if (!business?.id) {
         setError("Business not found")
         setLoading(false)
         return
       }
-
-      setBusinessId(business.id)
+      activeBusinessId = business.id
+      setBusinessId(activeBusinessId)
       
       // Load business country and currency for tax calculation
       const { data: businessDetails } = await supabase
         .from("businesses")
         .select("address_country, default_currency")
-        .eq("id", business.id)
+        .eq("id", activeBusinessId)
         .single()
       setBusinessCountry(businessDetails?.address_country || null)
       
@@ -174,7 +186,9 @@ export default function InvoiceEditPage() {
       }
 
       // Load invoice data
-      const response = await fetch(`/api/invoices/${invoiceId}`)
+      const response = await fetch(
+        `/api/invoices/${invoiceId}?business_id=${encodeURIComponent(activeBusinessId)}`
+      )
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.error || "Failed to load invoice")
@@ -192,7 +206,7 @@ export default function InvoiceEditPage() {
         setLoading(false)
         // Redirect to view page after a short delay
         setTimeout(() => {
-          router.push(`/service/invoices/${invoiceId}/view`)
+          router.push(buildServiceRoute(`/service/invoices/${invoiceId}/view`, activeBusinessId))
         }, 3000)
         return
       }
@@ -212,7 +226,7 @@ export default function InvoiceEditPage() {
       const { data: productsData, error: psError } = await supabase
         .from("products_services")
         .select("id, name, unit_price")
-        .eq("business_id", business.id)
+        .eq("business_id", activeBusinessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
 
@@ -222,7 +236,7 @@ export default function InvoiceEditPage() {
         const { data: fallbackProducts } = await supabase
           .from("products")
           .select("id, name, price")
-          .eq("business_id", business.id)
+          .eq("business_id", activeBusinessId)
           .order("name", { ascending: true })
 
         if (fallbackProducts) {
@@ -247,7 +261,7 @@ export default function InvoiceEditPage() {
         const { data: canonicalItemsRows } = await supabase
           .from("items")
           .select("id, business_id, name, type, source_table, source_id")
-          .eq("business_id", business.id)
+          .eq("business_id", activeBusinessId)
           .eq("source_table", "products_services")
         const canonicalBySourceId = new Map(
           (canonicalItemsRows ?? []).map((r: any) => [r.source_id, r])
@@ -257,7 +271,7 @@ export default function InvoiceEditPage() {
           console.warn("[items shadow] Count mismatch:", {
             legacy: mappedProducts.length,
             canonical: canonicalItemsRows?.length ?? 0,
-            business_id: business.id,
+            business_id: activeBusinessId,
           })
         }
         for (const p of mappedProducts) {
@@ -279,7 +293,7 @@ export default function InvoiceEditPage() {
       const { data: customersData } = await supabase
         .from("customers")
         .select("id, name")
-        .eq("business_id", business.id)
+        .eq("business_id", activeBusinessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
 
@@ -609,7 +623,11 @@ export default function InvoiceEditPage() {
       console.log("[invoice update] PUT request payload:", putPayload)
 
       // Use API route for invoice update
-      const response = await fetch(`/api/invoices/${invoiceId}`, {
+      const putUrl =
+        businessId.trim().length > 0
+          ? `/api/invoices/${invoiceId}?business_id=${encodeURIComponent(businessId)}`
+          : `/api/invoices/${invoiceId}`
+      const response = await fetch(putUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(putPayload),
@@ -633,7 +651,7 @@ export default function InvoiceEditPage() {
       const data = await response.json()
 
       // Redirect to the invoice view page
-      router.push(`/service/invoices/${invoiceId}/view`)
+      router.push(buildServiceRoute(`/service/invoices/${invoiceId}/view`, businessId || undefined))
     } catch (err: any) {
       const errorMessage = err?.message ?? "Failed to update invoice"
       const errorData = err != null && typeof err === "object" ? { message: err.message, ...err } : err

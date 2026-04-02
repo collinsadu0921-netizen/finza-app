@@ -7,6 +7,7 @@ import LoadingScreen from "@/components/ui/LoadingScreen"
 import PageHeader from "@/components/ui/PageHeader"
 import EmptyState from "@/components/ui/EmptyState"
 import { formatTimestamp } from "@/lib/formatTimestamp"
+import { getSelectedBusinessId } from "@/lib/business"
 
 type AuditLog = {
   id: string
@@ -74,6 +75,8 @@ export default function AuditLogPage() {
     try {
       setLoading(true)
       const params = new URLSearchParams()
+      const workspaceId = getSelectedBusinessId()
+      if (workspaceId) params.append("business_id", workspaceId)
       if (filters.start_date) params.append("start_date", filters.start_date)
       if (filters.end_date) params.append("end_date", filters.end_date)
       if (filters.user_id) params.append("user_id", filters.user_id)

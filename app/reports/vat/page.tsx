@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { getSelectedBusinessId } from "@/lib/business"
 
 type VatControlReport = {
   opening_balance: number
@@ -57,11 +58,17 @@ function getPeriodPresets() {
 export default function VatControlReportPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const businessId = searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
+  const businessIdFromUrl =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
+  const [businessId, setBusinessId] = useState<string | null>(businessIdFromUrl)
   const { format } = useBusinessCurrency()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [reportData, setReportData] = useState<VatControlReport | null>(null)
+
+  useEffect(() => {
+    setBusinessId(businessIdFromUrl ?? getSelectedBusinessId())
+  }, [businessIdFromUrl])
 
   const now = new Date()
   const [startDate, setStartDate] = useState(
@@ -88,13 +95,25 @@ export default function VatControlReportPage() {
         return
       }
 
+      if (!businessId) {
+        setError(
+          "No business selected. Open VAT Report from the service sidebar or pick your workspace in settings."
+        )
+        setLoading(false)
+        return
+      }
+
       const params = new URLSearchParams({ start_date: startDate, end_date: endDate })
-      if (businessId) params.set("business_id", businessId)
+      params.set("business_id", businessId)
       const response = await fetch(`/api/reports/vat-control?${params.toString()}`)
 
       if (!response.ok) {
         const errorData = await response.json()
-        setError(errorData.error || "Failed to load VAT Control Report")
+        setError(
+          errorData.message ||
+            errorData.error ||
+            "Failed to load VAT Control Report"
+        )
         setReportData(null)
         setLoading(false)
         return

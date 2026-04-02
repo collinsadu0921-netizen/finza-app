@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useRouter, useParams, usePathname } from "next/navigation"
+import { useRouter, useParams, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
@@ -20,7 +20,7 @@ import { formatMoney } from "@/lib/money"
 
 // FINZA Design System Components
 import { StatusBadge } from "@/components/ui/StatusBadge"
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 
 type Invoice = {
@@ -98,10 +98,22 @@ type CreditNote = {
 export default function InvoiceViewPage() {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const businessIdFromUrl =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
+  const [resolvedBusinessId, setResolvedBusinessId] = useState<string | null>(businessIdFromUrl)
   const isUnderService = pathname?.startsWith("/service") ?? false
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
   const params = useParams()
   const invoiceId = (params?.id as string) || ""
+
+  useEffect(() => {
+    setResolvedBusinessId(businessIdFromUrl ?? getSelectedBusinessId())
+  }, [businessIdFromUrl])
+
+  const invoiceApiSuffix = resolvedBusinessId
+    ? `?business_id=${encodeURIComponent(resolvedBusinessId)}`
+    : ""
   const { openConfirm } = useConfirm()
 
   const [loading, setLoading] = useState(true)
@@ -135,7 +147,7 @@ export default function InvoiceViewPage() {
         throw new Error("Invoice ID is missing")
       }
 
-      const response = await fetch(`/api/invoices/${invoiceId}`)
+      const response = await fetch(`/api/invoices/${invoiceId}${invoiceApiSuffix}`)
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
@@ -201,7 +213,7 @@ export default function InvoiceViewPage() {
       setError(err.message || "We couldn't load this invoice. Please refresh or check your connection.")
       setLoading(false)
     }
-  }, [invoiceId])
+  }, [invoiceId, invoiceApiSuffix])
 
   useEffect(() => {
     if (invoiceId) {
@@ -282,7 +294,7 @@ Thank you.`
       description: "Are you sure you want to delete this draft invoice? This cannot be undone.",
       onConfirm: async () => {
         try {
-          const response = await fetch(`/api/invoices/${invoiceId}`, { method: "DELETE" })
+          const response = await fetch(`/api/invoices/${invoiceId}${invoiceApiSuffix}`, { method: "DELETE" })
           const data = await response.json().catch(() => ({}))
           if (!response.ok) {
             throw new Error(data.error || "Failed to delete invoice")

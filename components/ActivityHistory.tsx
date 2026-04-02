@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { formatTimestamp } from "@/lib/formatTimestamp"
+import { getSelectedBusinessId } from "@/lib/business"
 
 type AuditLog = {
   id: string
@@ -44,7 +45,13 @@ export default function ActivityHistory({ entityType, entityId }: ActivityHistor
         return
       }
 
-      const response = await fetch(`/api/audit-logs/list?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
+      const q = new URLSearchParams({
+        entity_type: entityType,
+        entity_id: entityId,
+      })
+      const workspaceId = getSelectedBusinessId()
+      if (workspaceId) q.set("business_id", workspaceId)
+      const response = await fetch(`/api/audit-logs/list?${q.toString()}`)
       
       if (!response.ok) {
         let errorData: any = {}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { requireBusinessScopeForUser } from "@/lib/business"
+import { createAuditLog } from "@/lib/auditLog"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const {
+      business_id: bodyBusinessId,
       customer_id,
       estimate_number,
       issue_date,
@@ -32,6 +34,15 @@ export async function POST(request: NextRequest) {
       currency_code, // FX currency for this document (e.g. "USD"). Defaults to business home currency.
       fx_rate,       // Exchange rate: 1 unit of currency_code = fx_rate units of home currency
     } = body
+
+    const scope = await requireBusinessScopeForUser(supabase, user.id, bodyBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json(
+        { success: false, error: scope.error, message: scope.error },
+        { status: scope.status }
+      )
+    }
+    const businessId = scope.businessId
 
     // Validate required fields
     if (!issue_date || !items || items.length === 0) {
@@ -44,12 +55,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-    const businessId = business.id
 
     // Generate quote number (QUO-XXXX) if not provided. Existing EST- records unchanged.
     const QUOTE_PREFIX = "QUO-"
@@ -366,6 +371,16 @@ export async function POST(request: NextRequest) {
 
     console.log("Successfully inserted estimate items:", JSON.stringify(insertedItems, null, 2))
     console.log("Number of items inserted:", insertedItems?.length || 0)
+
+    await createAuditLog({
+      businessId: estimate.business_id,
+      actionType: "estimate.created",
+      entityType: "estimates",
+      entityId: estimate.id,
+      newValues: { estimate_number: estimate.estimate_number, status: estimate.status },
+      description: `Created quote ${estimate.estimate_number || estimate.id}`,
+      request,
+    })
 
     return NextResponse.json({ 
       success: true,

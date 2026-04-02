@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { getEffectivePermissions } from "@/lib/userPermissions"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
@@ -15,29 +15,40 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const { searchParams } = new URL(request.url)
+    const requestedBusinessId = searchParams.get("business_id")
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+    const businessId = scope.businessId
 
-    // Only owner, admin, and users with accounting.view permission can see audit logs
-    const isOwner = business.owner_id === user.id
+    const { data: businessRow } = await supabase
+      .from("businesses")
+      .select("owner_id")
+      .eq("id", businessId)
+      .maybeSingle()
+
+    // Owner always; team members need operational or accounting visibility
+    const isOwner = businessRow?.owner_id === user.id
     if (!isOwner) {
-      const effective = await getEffectivePermissions(supabase, user.id, business.id)
-      if (!effective.has("accounting.view")) {
-        return NextResponse.json({ error: "Forbidden: requires accounting.view permission" }, { status: 403 })
+      const effective = await getEffectivePermissions(supabase, user.id, businessId)
+      if (!effective.has("accounting.view") && !effective.has("reports.view")) {
+        return NextResponse.json(
+          { error: "Forbidden: requires reports.view or accounting.view permission" },
+          { status: 403 }
+        )
       }
     }
 
     const tierDenied = await enforceServiceWorkspaceAccess({
       supabase,
       userId: user.id,
-      businessId: business.id,
+      businessId,
       minTier: "business",
     })
     if (tierDenied) return tierDenied
 
-    const { searchParams } = new URL(request.url)
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
     const userId = searchParams.get("user_id")
@@ -54,7 +65,7 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("audit_logs")
       .select("*")
-      .eq("business_id", business.id)
+      .eq("business_id", businessId)
       .order("created_at", { ascending: false })
       .limit(1000) // Limit to prevent performance issues
 

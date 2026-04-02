@@ -79,11 +79,75 @@ jest.mock('@/lib/taxEngine/serialize', () => ({
   })),
 }))
 
+jest.mock('@/lib/business', () => ({
+  requireBusinessScopeForUser: jest.fn(() =>
+    Promise.resolve({ ok: true, businessId: 'test-business' })
+  ),
+}))
+
+jest.mock('@/lib/auditLog', () => ({
+  createAuditLog: jest.fn(() => Promise.resolve()),
+}))
+
+jest.mock('@/lib/archivedBusiness', () => ({
+  assertBusinessNotArchived: jest.fn(() => Promise.resolve()),
+}))
+
 describe('POST /api/estimates/create - Canonical Tax Engine', () => {
   let mockSupabase: any
+  let estimatesTableMock: any
 
   beforeEach(() => {
     jest.clearAllMocks()
+
+    const quoteNumberChain: any = {
+      eq: jest.fn(function (this: any) {
+        return this
+      }),
+      like: jest.fn(function (this: any) {
+        return this
+      }),
+      is: jest.fn(function (this: any) {
+        return this
+      }),
+      order: jest.fn(function (this: any) {
+        return this
+      }),
+      limit: jest.fn(function (this: any) {
+        return this
+      }),
+      maybeSingle: jest.fn(() => Promise.resolve({ data: null, error: null })),
+    }
+
+    estimatesTableMock = {
+      select: jest.fn(() => quoteNumberChain),
+      insert: jest.fn(() => ({
+        select: jest.fn(() => ({
+          single: jest.fn(() =>
+            Promise.resolve({
+              data: {
+                id: 'new-estimate-id',
+                business_id: 'test-business',
+                estimate_number: 'QUO-0001',
+                subtotal: 100.0,
+                total_tax_amount: 21.9,
+                total_amount: 121.9,
+                status: 'draft',
+                tax_lines: {
+                  lines: [],
+                  meta: {},
+                  pricing_mode: 'inclusive',
+                },
+              },
+              error: null,
+            })
+          ),
+        })),
+      })),
+      delete: jest.fn(() => ({
+        eq: jest.fn(() => Promise.resolve({ error: null })),
+      })),
+    }
 
     // Setup Supabase mock
     mockSupabase = {
@@ -96,7 +160,11 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
             select: jest.fn(() => ({
               eq: jest.fn(() => ({
                 single: jest.fn(() => Promise.resolve({
-                  data: { id: 'test-business', address_country: 'GH' },
+                  data: {
+                    id: 'test-business',
+                    address_country: 'GH',
+                    default_currency: 'GHS',
+                  },
                   error: null,
                 })),
               })),
@@ -104,26 +172,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
           }
         }
         if (table === 'estimates') {
-          return {
-            insert: jest.fn(() => ({
-              select: jest.fn(() => ({
-                single: jest.fn(() => Promise.resolve({
-                  data: {
-                    id: 'new-estimate-id',
-                    subtotal: 100.00,
-                    total_tax_amount: 21.90,
-                    total_amount: 121.90,
-                    tax_lines: {
-                      lines: [],
-                      meta: {},
-                      pricing_mode: 'inclusive',
-                    },
-                  },
-                  error: null,
-                })),
-              })),
-            })),
-          }
+          return estimatesTableMock
         }
         if (table === 'estimate_items') {
           return {
@@ -162,7 +211,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     expect(insertCall).toHaveBeenCalled()
     const estimateData = insertCall.mock.calls[0][0]
 
@@ -195,7 +244,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     expect(insertCall).toHaveBeenCalled()
     const estimateData = insertCall.mock.calls[0][0]
 
@@ -230,7 +279,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     const estimateData = insertCall.mock.calls[0][0]
 
     // Verify tax_lines is stored
@@ -269,7 +318,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     const estimateData = insertCall.mock.calls[0][0]
 
     // Verify legacy columns match tax_lines (derived, not hardcoded)
@@ -306,7 +355,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     const estimateData = insertCall.mock.calls[0][0]
 
     // Verify canonical values match TaxResult exactly (rounded to 2dp)
@@ -342,7 +391,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     const estimateData = insertCall.mock.calls[0][0]
 
     // Verify canonical values match TaxResult exactly (no COVID)
@@ -378,7 +427,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('estimates').insert as jest.Mock
+    const insertCall = estimatesTableMock.insert as jest.Mock
     const estimateData = insertCall.mock.calls[0][0]
 
     // Verify effective date is issue_date
@@ -392,5 +441,28 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
     expect(configCall.effectiveDate).toBe(issueDate)
     expect(configCall.jurisdiction).toBe('GH')
     expect(configCall.taxInclusive).toBe(true)
+  })
+
+  it('returns 400 when business_id is missing', async () => {
+    const { requireBusinessScopeForUser } = require('@/lib/business')
+    ;(requireBusinessScopeForUser as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      error: 'Missing business_id',
+    })
+
+    const request = new NextRequest('http://localhost/api/estimates/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        issue_date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 121.9, description: 'Item 1' }],
+        apply_taxes: true,
+      }),
+    })
+
+    const res = await POST(request)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toBe('Missing business_id')
   })
 })
