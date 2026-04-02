@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
+import { taxLinesFromEstimateRow } from "@/lib/documents/estimateTaxLinesForDocument"
 
 // Lazy-load signature pad (canvas — SSR-incompatible)
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
@@ -91,6 +92,7 @@ export default function QuotePublicPage() {
   const [business, setBusiness] = useState<Business | null>(null)
   const [brand, setBrand] = useState("#0f172a")
   const [quoteTerms, setQuoteTerms] = useState<string | null>(null)
+  const [logoFailed, setLogoFailed] = useState(false)
 
   // Accept modal
   const [showAccept, setShowAccept] = useState(false)
@@ -143,6 +145,11 @@ export default function QuotePublicPage() {
     })()
     return () => { cancelled = true }
   }, [token, router])
+
+  const logoSrc = business?.logo_url?.trim() || null
+  useEffect(() => {
+    setLogoFailed(false)
+  }, [logoSrc])
 
   const sym = estimate?.currency_symbol ?? "₵"
   const quoteTokenEnc = token ? encodeURIComponent(token) : ""
@@ -239,28 +246,11 @@ export default function QuotePublicPage() {
   const hasDiscounts = items.some(item => Number(item.discount_amount || 0) > 0)
   const totalDiscount = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
 
-  // Build tax lines: prefer new tax_lines JSONB, fall back to legacy fields
-  const taxLinesToShow: { key: string; label: string; amount: number }[] = []
-  if (estimate.apply_taxes && estimate.total_tax_amount > 0) {
-    const parsedLines = Array.isArray(estimate.tax_lines)
-      ? estimate.tax_lines
-      : typeof estimate.tax_lines === "string"
-      ? (() => { try { return JSON.parse(estimate.tax_lines) } catch { return null } })()
-      : null
-
-    if (parsedLines && parsedLines.length > 0) {
-      parsedLines
-        .filter((l: any) => Number(l.amount) > 0 && String(l.code).toUpperCase() !== "COVID")
-        .forEach((l: any) =>
-          taxLinesToShow.push({ key: l.code, label: l.name || l.code, amount: Number(l.amount) })
-        )
-    } else {
-      if (estimate.nhil_amount > 0) taxLinesToShow.push({ key: "nhil", label: "NHIL (2.5%)", amount: estimate.nhil_amount })
-      if (estimate.getfund_amount > 0) taxLinesToShow.push({ key: "getfund", label: "GETFund (2.5%)", amount: estimate.getfund_amount })
-      if (estimate.covid_amount > 0) taxLinesToShow.push({ key: "covid", label: "COVID Levy (1%)", amount: estimate.covid_amount })
-      if (estimate.vat_amount > 0) taxLinesToShow.push({ key: "vat", label: "VAT (15%)", amount: estimate.vat_amount })
-    }
-  }
+  const taxLinesToShow = taxLinesFromEstimateRow(estimate).map((l, i) => ({
+    key: l.code || `tax-${i}`,
+    label: l.name || l.code || "Tax",
+    amount: l.amount,
+  }))
 
   return (
     <>
@@ -273,8 +263,13 @@ export default function QuotePublicPage() {
       <div className="no-print sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            {business?.logo_url ? (
-              <img src={business.logo_url} alt="" className="h-8 w-auto rounded-md shrink-0 object-contain" />
+            {logoSrc && !logoFailed ? (
+              <img
+                src={logoSrc}
+                alt=""
+                className="h-8 w-auto rounded-md shrink-0 object-contain"
+                onError={() => setLogoFailed(true)}
+              />
             ) : (
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
@@ -363,8 +358,15 @@ export default function QuotePublicPage() {
               <div className="flex items-start justify-between gap-6">
                 {/* Business identity */}
                 <div className="flex-1 min-w-0">
-                  {business?.logo_url ? (
-                    <img src={business.logo_url} alt="" className="h-12 w-auto mb-4 rounded-md object-contain" style={{ filter: "brightness(0) invert(1)" }} />
+                  {logoSrc && !logoFailed ? (
+                    <div className="mb-4 inline-flex max-w-[220px] rounded-xl bg-white p-2 shadow-sm">
+                      <img
+                        src={logoSrc}
+                        alt=""
+                        className="h-11 w-auto max-h-11 object-contain object-left"
+                        onError={() => setLogoFailed(true)}
+                      />
+                    </div>
                   ) : (
                     <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white text-xl font-bold mb-4">
                       {bizName.charAt(0).toUpperCase()}

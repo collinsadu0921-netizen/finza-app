@@ -185,26 +185,26 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   const totalTax = totals.total_tax || totals.total_tax_amount || 0
   const total = totals.total || totals.total_amount || 0
 
-  // Get tax lines: use provided tax_lines, or calculate from totals
+  // Tax lines: prefer stored tax_lines (e.g. quotes with apply_taxes false but persisted JSONB),
+  // else compute when apply_taxes is true.
   let taxLines: TaxLine[] = []
   let baseAmount = subtotal
   let calculatedTotalTax = totalTax
 
-  if (apply_taxes && total > 0) {
-    // Priority 1: Use provided tax_lines prop (preferred - from stored data)
-    if (props.tax_lines && props.tax_lines.length > 0) {
-      taxLines = props.tax_lines.filter(
+  const hasStoredTaxLines = !!(props.tax_lines && props.tax_lines.length > 0)
+
+  if (total > 0) {
+    if (hasStoredTaxLines) {
+      taxLines = props.tax_lines!.filter(
         (line) => Number(line.amount) !== 0 && line.code.toUpperCase() !== "COVID"
       )
-      calculatedTotalTax = taxLines.reduce((sum, line) => sum + line.amount, 0)
-      // Calculate base amount from total (reverse calculation)
+      calculatedTotalTax = taxLines.reduce((sum, line) => sum + Number(line.amount), 0)
       baseAmount = total - calculatedTotalTax
-    } else {
-      // Priority 2: Calculate tax breakdown on-the-fly using tax engine
+    } else if (apply_taxes) {
       try {
-        const effectiveDate = meta.issue_date || new Date().toISOString().split('T')[0]
-        const country = props.business_country || 'GH' // Default to Ghana if not provided
-        
+        const effectiveDate = meta.issue_date || new Date().toISOString().split("T")[0]
+        const country = props.business_country || "GH"
+
         const taxCalculationResult = calculateTaxesFromAmount(
           total,
           country,
@@ -219,11 +219,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         calculatedTotalTax = taxCalculationResult.tax_total
       } catch (error) {
         console.error("Error calculating tax breakdown:", error)
-        // Fallback: empty tax lines (taxes will not be displayed)
         taxLines = []
       }
     }
   }
+
+  const showTaxBreakdown = taxLines.length > 0
 
   // Format items for display (discount column + correct net line total)
   const formattedItems = items.map((item) => {
@@ -524,15 +525,15 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       <div class="totals-wrap">
         <div class="total-row">
           <span>Subtotal</span>
-          <span>${currency_symbol} ${apply_taxes && taxLines.length > 0 ? total.toFixed(2) : subtotal.toFixed(2)}</span>
+          <span>${currency_symbol} ${showTaxBreakdown ? baseAmount.toFixed(2) : subtotal.toFixed(2)}</span>
         </div>
-        ${apply_taxes && taxLines.length > 0
+        ${showTaxBreakdown
           ? taxLines
               .map(
                 (line) => `
         <div class="total-row">
-          <span>${line.name}</span>
-          <span>${currency_symbol} ${line.amount.toFixed(2)}</span>
+          <span>${line.name || line.code}</span>
+          <span>${currency_symbol} ${Number(line.amount).toFixed(2)}</span>
         </div>
         `
               )

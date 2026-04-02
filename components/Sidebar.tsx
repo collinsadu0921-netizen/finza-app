@@ -16,6 +16,15 @@ import { getUserRole } from "@/lib/userRoles"
 import type { CustomPermissions } from "@/lib/permissions"
 import { filterServiceNavSections } from "@/lib/nav/filterServiceNavSections"
 
+/** Match service dashboard + public documents — not `name` first (legal entity vs trading name). */
+function sidebarBusinessLabel(row: {
+  trading_name?: string | null
+  legal_name?: string | null
+  name?: string | null
+}): string | null {
+  return row.trading_name?.trim() || row.legal_name?.trim() || row.name?.trim() || null
+}
+
 type MenuSection = {
   title: string
   items: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>
@@ -128,10 +137,14 @@ export default function Sidebar() {
         const business = await getCurrentBusiness(supabase, user.id)
         if (!cancelled) {
           setServiceBusinessId(business?.id ?? null)
-          setBusinessDisplay(business ? {
-            name: business.name ?? (business as any).trading_name ?? null,
-            logo_url: (business as any).logo_url ?? null,
-          } : { name: null, logo_url: null })
+          setBusinessDisplay(
+            business
+              ? {
+                  name: sidebarBusinessLabel(business as any),
+                  logo_url: (business as any).logo_url ?? null,
+                }
+              : { name: null, logo_url: null }
+          )
         }
       } catch {
         if (!cancelled) setServiceBusinessId(null)
@@ -155,9 +168,17 @@ export default function Sidebar() {
       const isServicePath = path.startsWith("/service/")
       const isReportishPath =
         path.startsWith("/vat-returns") || path.startsWith("/reports/")
+      const billingScopedPath =
+        path.startsWith("/invoices") ||
+        path.startsWith("/estimates") ||
+        path.startsWith("/credit-notes") ||
+        path.startsWith("/payments") ||
+        path.startsWith("/customers") ||
+        path.startsWith("/projects")
       const resolvedBusinessIdForBranding =
         accountingBusinessId ||
-        (isReportishPath ? getSelectedBusinessId() : null)
+        (isReportishPath ? getSelectedBusinessId() : null) ||
+        (billingScopedPath ? getSelectedBusinessId() : null)
 
       // Service routes without business_id: keep sidebar branding — filled by getCurrentBusiness effect (avoid logo/name flash on refresh).
       if (isServicePath && !accountingBusinessId) {
@@ -165,21 +186,19 @@ export default function Sidebar() {
         return
       }
 
-      // Accounting, service, or ledger VAT / VAT returns paths with a known business: load name + logo (server cannot read localStorage for APIs; URL or workspace picker supplies id).
-      if (
-        (isAccountingPath || isServicePath || isReportishPath) &&
-        resolvedBusinessIdForBranding
-      ) {
+      // Any path with an explicit workspace id (URL, reports picker, or billing pages + selected business): load sidebar name/logo.
+      // Without this, /invoices/...?business_id= cleared branding and showed generic "Dashboard" / "Workspace".
+      if (resolvedBusinessIdForBranding) {
         const { data: business, error } = await supabase
           .from("businesses")
-          .select("industry, name, logo_url, trading_name")
+          .select("industry, name, logo_url, trading_name, legal_name")
           .eq("id", resolvedBusinessIdForBranding)
           .is("archived_at", null)
           .maybeSingle()
         if (business) {
           setBusinessIndustry(business.industry ?? null)
           setBusinessDisplay({
-            name: business.name ?? business.trading_name ?? null,
+            name: sidebarBusinessLabel(business),
             logo_url: business.logo_url ?? null,
           })
           return
@@ -190,7 +209,7 @@ export default function Sidebar() {
         return
       }
 
-      // Non-accounting, non-service path: use industry from sessionStorage only (set by dashboard/layout).
+      // No workspace hint: use industry from sessionStorage only (set by dashboard/layout).
       setBusinessIndustry(getTabIndustryMode())
       setBusinessDisplay({ name: null, logo_url: null })
     } catch (err) {

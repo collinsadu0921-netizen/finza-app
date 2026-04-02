@@ -10,6 +10,7 @@ import {
 } from "@/components/documents/FinancialDocument"
 import { getCurrencySymbol } from "@/lib/currency"
 import { estimateLineItemDiscount } from "@/lib/documents/estimateLineItemDiscount"
+import { taxLinesFromEstimateRow } from "@/lib/documents/estimateTaxLinesForDocument"
 
 export const dynamic = "force-dynamic"
 
@@ -122,12 +123,15 @@ export async function GET(
         ? `\n\nAccepted by ${estimate.client_name_signed}${estimate.signed_at ? ` on ${new Date(estimate.signed_at).toLocaleDateString("en-GB")}` : ""}.`
         : ""
 
+    const parsedTaxLines = taxLinesFromEstimateRow(estimate as Record<string, unknown>)
+
     const html = generateFinancialDocumentHTML({
       documentType: "estimate",
       business: businessInfo,
       customer: customerInfo,
       items: documentItems,
       totals,
+      tax_lines: parsedTaxLines.length > 0 ? parsedTaxLines : undefined,
       meta: {
         document_number: estimate.estimate_number || "QUOTE",
         issue_date: estimate.issue_date,
