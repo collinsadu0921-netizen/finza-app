@@ -6,6 +6,7 @@ import { normalizePhoneForWaMe } from "@/lib/communication/whatsappLink"
 
 type Invoice = {
   id: string
+  business_id?: string | null
   public_token?: string | null
   customers?: {
     email?: string
@@ -14,15 +15,30 @@ type Invoice = {
   } | null
 }
 
+function sendPayload(
+  businessId: string | null | undefined,
+  extra: Record<string, unknown>
+): string {
+  const bid =
+    typeof businessId === "string" && businessId.trim().length > 0 ? businessId.trim() : ""
+  return JSON.stringify({
+    ...extra,
+    ...(bid ? { business_id: bid } : {}),
+  })
+}
+
 export default function SendInvoiceModal({
   invoice,
   invoiceId,
+  businessId,
   onClose,
   onSuccess,
   defaultMethod = "whatsapp",
 }: {
   invoice: Invoice
   invoiceId: string
+  /** Workspace that owns the invoice — required on server (no localStorage). Omit only for legacy single-tenant. */
+  businessId?: string | null
   onClose: () => void
   onSuccess: () => void
   defaultMethod?: SendMethod
@@ -33,6 +49,8 @@ export default function SendInvoiceModal({
   const [sendMethod, setSendMethod] = useState<SendMethod>(defaultMethod)
   /** When pop-ups are blocked, we keep the modal open with a real &lt;a href&gt; to wa.me (user click always works). */
   const [waOpenLinkUrl, setWaOpenLinkUrl] = useState<string | null>(null)
+
+  const resolvedBusinessId = businessId ?? invoice.business_id ?? null
 
   useEffect(() => {
     setWaOpenLinkUrl(null)
@@ -81,7 +99,7 @@ export default function SendInvoiceModal({
         response = await fetch(`/api/invoices/${invoiceId}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: sendPayload(resolvedBusinessId, {
             sendWhatsApp: true,
             sendMethod: sendMethod,
           }),
@@ -162,7 +180,7 @@ export default function SendInvoiceModal({
         response = await fetch(`/api/invoices/${invoiceId}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: sendPayload(resolvedBusinessId, {
             sendEmail: true,
             email: email,
             sendMethod: sendMethod,
@@ -199,7 +217,7 @@ export default function SendInvoiceModal({
         const response = await fetch(`/api/invoices/${invoiceId}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: sendPayload(resolvedBusinessId, {
             copyLink: true,
             sendMethod: sendMethod,
           }),

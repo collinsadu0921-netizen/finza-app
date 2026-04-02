@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react"
 import { useParams } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
-import { PublicBillToBlock, PublicDocumentMetaRow } from "@/components/documents/PublicBillToBlock"
 
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
 
@@ -188,8 +187,8 @@ export default function ProformaPublicPage() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-violet-600 mx-auto" />
-          <p className="mt-3 text-slate-500 text-sm">Loading proforma…</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-slate-200 border-t-slate-600 mx-auto" />
+          <p className="mt-3 text-slate-400 text-sm font-medium">Loading proforma…</p>
         </div>
       </div>
     )
@@ -197,8 +196,16 @@ export default function ProformaPublicPage() {
 
   if (error || !proforma) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <p className="text-rose-600">{error || "Proforma not found"}</p>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="text-slate-700 font-semibold">{error || "Proforma not found"}</p>
+          <p className="text-slate-400 text-sm mt-1">This link may be invalid or the proforma has been removed.</p>
+        </div>
       </div>
     )
   }
@@ -209,148 +216,266 @@ export default function ProformaPublicPage() {
   const isRejected = status === "rejected"
   const isConverted = status === "converted"
   const bizName = business?.trading_name ?? business?.legal_name ?? "Business"
+  const bizAddress = [business?.address_street, business?.address_city, business?.address_region]
+    .filter(Boolean).join(", ")
+
+  const hasDiscounts = items.some(item => Number(item.discount_amount || 0) > 0)
+
+  // Build tax lines: prefer new tax_lines JSONB, fall back to legacy fields
+  const taxLinesToShow: { key: string; label: string; amount: number }[] = []
+  if (proforma.apply_taxes && proforma.total_tax > 0) {
+    const parsedLines = Array.isArray(proforma.tax_lines)
+      ? proforma.tax_lines
+      : typeof proforma.tax_lines === "string"
+      ? (() => { try { return JSON.parse(proforma.tax_lines) } catch { return null } })()
+      : null
+
+    if (parsedLines && parsedLines.length > 0) {
+      parsedLines
+        .filter((l: any) => Number(l.amount) > 0 && String(l.code).toUpperCase() !== "COVID")
+        .forEach((l: any) =>
+          taxLinesToShow.push({ key: l.code, label: l.name || l.code, amount: Number(l.amount) })
+        )
+    } else {
+      if (proforma.nhil > 0) taxLinesToShow.push({ key: "nhil", label: "NHIL (2.5%)", amount: proforma.nhil })
+      if (proforma.getfund > 0) taxLinesToShow.push({ key: "getfund", label: "GETFund (2.5%)", amount: proforma.getfund })
+      if (proforma.covid > 0) taxLinesToShow.push({ key: "covid", label: "COVID Levy (1%)", amount: proforma.covid })
+      if (proforma.vat > 0) taxLinesToShow.push({ key: "vat", label: "VAT (15%)", amount: proforma.vat })
+    }
+  }
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: `@media print { .no-print { display: none !important; } }` }} />
+      <style dangerouslySetInnerHTML={{ __html: `@media print { .no-print { display: none !important; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }` }} />
 
-      <div className="min-h-screen bg-slate-100 py-8 px-4">
-        <div className="max-w-3xl mx-auto space-y-5">
+      {/* Brand accent bar */}
+      <div className="h-1 w-full no-print" style={{ backgroundColor: brand }} />
 
-          {/* Status banners */}
+      {/* Top navigation bar */}
+      <div className="no-print sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            {business?.logo_url ? (
+              <img src={business.logo_url} alt="" className="h-8 w-auto rounded-md shrink-0 object-contain" />
+            ) : (
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
+                style={{ backgroundColor: brand }}
+              >
+                {bizName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
+              <p className="text-xs text-slate-400 truncate">
+                Proforma Invoice · {proforma.proforma_number ?? "PRF"}
+              </p>
+            </div>
+          </div>
+          <a
+            href={`/api/public/proforma/${tokenEnc}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-all"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+            </svg>
+            Download PDF
+          </a>
+        </div>
+      </div>
+
+      <div className="min-h-screen bg-slate-50 py-8 px-4">
+        <div className="max-w-2xl mx-auto space-y-4">
+
+          {/* ── Status banners ───────────────────────────────────────── */}
+          {isOpen && (
+            <div className="no-print bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${brand}18` }}>
+                <svg className="w-4.5 h-4.5" style={{ color: brand }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800">Proforma awaiting your review</p>
+                <p className="text-xs text-slate-500 mt-0.5">Please review the details below and accept or decline.</p>
+              </div>
+            </div>
+          )}
+
           {isAccepted && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
                 <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <div className="flex-1">
-                <p className="font-bold text-emerald-800">You have accepted this proforma</p>
-                <p className="text-sm text-emerald-700 mt-0.5">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-emerald-800 text-sm">Proforma accepted</p>
+                <p className="text-xs text-emerald-700 mt-0.5">
                   Signed by <strong>{proforma.client_name_signed}</strong> · {formatDate(proforma.signed_at)}
                 </p>
               </div>
             </div>
           )}
+
           {isRejected && (
             <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
                 <svg className="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
               <div>
-                <p className="font-bold text-rose-800">You have declined this proforma</p>
+                <p className="font-semibold text-rose-800 text-sm">Proforma declined</p>
                 {proforma.rejected_reason && (
-                  <p className="text-sm text-rose-700 mt-0.5">{proforma.rejected_reason}</p>
+                  <p className="text-xs text-rose-700 mt-0.5">{proforma.rejected_reason}</p>
                 )}
               </div>
             </div>
           )}
+
           {isConverted && (
             <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
                 <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <p className="font-semibold text-violet-800">This proforma has been converted to an invoice.</p>
+              <p className="font-semibold text-violet-800 text-sm">This proforma has been converted to an invoice.</p>
             </div>
           )}
 
-          {/* Document card */}
+          {/* ── Document card ───────────────────────────────────────── */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {/* Header — brand colour */}
-            <div className="px-6 py-5 text-white" style={{ backgroundColor: brand }}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
+
+            {/* Document header — brand colour */}
+            <div className="px-8 py-8 text-white" style={{ backgroundColor: brand }}>
+              <div className="flex items-start justify-between gap-6">
+                {/* Business identity */}
+                <div className="flex-1 min-w-0">
                   {business?.logo_url ? (
-                    <img src={business.logo_url} alt="" className="h-10 w-auto mb-3 rounded" />
+                    <img src={business.logo_url} alt="" className="h-12 w-auto mb-4 rounded-md object-contain" style={{ filter: "brightness(0) invert(1)" }} />
                   ) : (
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-bold text-lg mb-3">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white text-xl font-bold mb-4">
                       {bizName.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <h1 className="text-xl font-bold">{bizName}</h1>
-                  <p className="text-white/70 text-sm mt-0.5">
-                    {[business?.address_street, business?.address_city, business?.address_region].filter(Boolean).join(", ")}
-                  </p>
-                  {business?.phone && <p className="text-white/70 text-sm">{business.phone}</p>}
-                  {business?.email && <p className="text-white/70 text-sm">{business.email}</p>}
+                  <h1 className="text-lg font-bold text-white leading-tight">{bizName}</h1>
+                  {bizAddress && <p className="text-white/60 text-xs mt-1">{bizAddress}</p>}
+                  {business?.phone && <p className="text-white/60 text-xs mt-0.5">{business.phone}</p>}
+                  {business?.email && <p className="text-white/60 text-xs mt-0.5">{business.email}</p>}
+                  {business?.tin && <p className="text-white/50 text-xs mt-1.5">TIN: {business.tin}</p>}
                 </div>
+
+                {/* Document identity */}
                 <div className="text-right shrink-0">
-                  <p className="text-white/70 text-xs uppercase tracking-wider font-medium">Proforma Invoice</p>
-                  <p className="text-2xl font-bold mt-1">{proforma.proforma_number ?? "PRF"}</p>
-                  {/* Show a client-friendly status — never show internal "sent" label */}
+                  <p className="text-white/50 text-xs uppercase tracking-widest font-semibold mb-1.5">Proforma Invoice</p>
+                  <p className="text-3xl font-bold text-white tabular-nums">{proforma.proforma_number ?? "PRF"}</p>
+                  {/* Only show badge for terminal states — never "Sent" to the client */}
                   {isAccepted && (
-                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-400/30 text-emerald-100">
+                    <span className="mt-3 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-400/25 text-emerald-100">
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
                       Accepted
                     </span>
                   )}
                   {isRejected && (
-                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-400/30 text-rose-100">
+                    <span className="mt-3 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-rose-400/25 text-rose-100">
                       Declined
                     </span>
                   )}
                   {isConverted && (
-                    <span className="mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-white/80">
+                    <span className="mt-3 inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-white/15 text-white/80">
                       Converted
                     </span>
                   )}
-                  {/* "sent" → awaiting review; no label for draft/cancelled */}
                 </div>
               </div>
             </div>
 
-            <PublicDocumentMetaRow
-              cells={[
-                { label: "Issue Date", value: formatDate(proforma.issue_date) },
-                { label: "Valid Until", value: formatDate(proforma.validity_date) },
-                { label: "Payment Terms", value: proforma.payment_terms?.trim() || "—" },
-                {
-                  label: "Currency",
-                  value:
-                    proforma.currency_code && proforma.currency_symbol
-                      ? `${proforma.currency_code} (${proforma.currency_symbol})`
-                      : (proforma.currency_code ?? proforma.currency_symbol ?? "—"),
-                },
-              ]}
-            />
-            <PublicBillToBlock customer={proforma.customers} />
+            {/* Meta strip */}
+            <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/60">
+              <div className="px-6 py-4">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Issue Date</p>
+                <p className="text-sm font-semibold text-slate-800">{formatDate(proforma.issue_date)}</p>
+              </div>
+              <div className="px-6 py-4">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Valid Until</p>
+                <p className="text-sm font-semibold text-slate-800">{formatDate(proforma.validity_date)}</p>
+              </div>
+              <div className="px-6 py-4">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Currency</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {proforma.currency_code && proforma.currency_symbol
+                    ? `${proforma.currency_code} (${proforma.currency_symbol})`
+                    : proforma.currency_code ?? proforma.currency_symbol ?? "—"}
+                </p>
+              </div>
+            </div>
 
-            {/* Line items — aligned with public invoice table */}
-            <div className="px-8 py-5 border-b border-gray-100">
+            {/* Prepared for */}
+            <div className="px-8 py-5 border-b border-slate-100">
+              <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">Prepared For</p>
+              {proforma.customers ? (
+                <div className="text-sm space-y-0.5">
+                  <p className="text-base font-bold text-slate-900">{proforma.customers.name}</p>
+                  {proforma.customers.address && (
+                    <p className="text-slate-500 whitespace-pre-line">{proforma.customers.address}</p>
+                  )}
+                  {proforma.customers.email && <p className="text-slate-500">{proforma.customers.email}</p>}
+                  {proforma.customers.phone && <p className="text-slate-500">{proforma.customers.phone}</p>}
+                  {proforma.customers.whatsapp_phone &&
+                    proforma.customers.whatsapp_phone.trim() !== (proforma.customers.phone ?? "").trim() && (
+                      <p className="text-slate-500">WhatsApp: {proforma.customers.whatsapp_phone}</p>
+                    )}
+                  {proforma.customers.tin && (
+                    <p className="text-slate-400 text-xs pt-0.5">TIN: {proforma.customers.tin}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic">No customer specified</p>
+              )}
+            </div>
+
+            {/* Line items */}
+            <div className="px-8 py-5 border-b border-slate-100">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3">
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
                       Description
                     </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-16">
+                    <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-14">
                       Qty
                     </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-24">
+                    <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-28">
                       Unit Price
                     </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-24">
-                      Discount
-                    </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
-                      Total
+                    {hasDiscounts && (
+                      <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-24">
+                        Discount
+                      </th>
+                    )}
+                    <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-28">
+                      Amount
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-slate-50">
                   {items.map((item) => (
                     <tr key={item.id}>
-                      <td className="py-3 text-gray-800 font-medium">{item.description}</td>
-                      <td className="py-3 text-right text-gray-600 tabular-nums">{item.qty}</td>
-                      <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.unit_price)}</td>
-                      <td className="py-3 text-right text-gray-600 tabular-nums">
-                        {Number(item.discount_amount) > 0 ? fmt(sym, item.discount_amount) : "—"}
-                      </td>
-                      <td className="py-3 text-right text-gray-800 font-medium tabular-nums">
+                      <td className="py-3.5 text-slate-800 font-medium leading-snug">{item.description}</td>
+                      <td className="py-3.5 text-right text-slate-500 tabular-nums">{item.qty}</td>
+                      <td className="py-3.5 text-right text-slate-500 tabular-nums">{fmt(sym, item.unit_price)}</td>
+                      {hasDiscounts && (
+                        <td className="py-3.5 text-right tabular-nums text-rose-500">
+                          {Number(item.discount_amount) > 0
+                            ? `−${fmt(sym, item.discount_amount)}`
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                      )}
+                      <td className="py-3.5 text-right text-slate-800 font-semibold tabular-nums">
                         {fmt(sym, item.line_subtotal)}
                       </td>
                     </tr>
@@ -360,103 +485,78 @@ export default function ProformaPublicPage() {
             </div>
 
             {/* Totals */}
-            <div className="px-8 py-5 border-b border-gray-100">
-              <div className="max-w-xs ml-auto space-y-1.5 text-sm">
-                <div className="flex justify-between text-gray-600">
+            <div className="px-8 py-5 border-b border-slate-100 bg-slate-50/40">
+              <div className="max-w-xs ml-auto space-y-2 text-sm">
+                <div className="flex justify-between text-slate-500">
                   <span>Subtotal</span>
-                  <span className="tabular-nums font-medium">{fmt(sym, proforma.subtotal)}</span>
+                  <span className="tabular-nums font-medium text-slate-700">{fmt(sym, proforma.subtotal)}</span>
                 </div>
-                {proforma.apply_taxes && proforma.total_tax > 0 && (
-                  <>
-                    {proforma.nhil > 0 && (
-                      <div className="flex justify-between text-gray-500">
-                        <span>NHIL (2.5%)</span>
-                        <span className="tabular-nums">{fmt(sym, proforma.nhil)}</span>
-                      </div>
-                    )}
-                    {proforma.getfund > 0 && (
-                      <div className="flex justify-between text-gray-500">
-                        <span>GETFund (2.5%)</span>
-                        <span className="tabular-nums">{fmt(sym, proforma.getfund)}</span>
-                      </div>
-                    )}
-                    {proforma.covid > 0 && (
-                      <div className="flex justify-between text-gray-500">
-                        <span>COVID Levy (1%)</span>
-                        <span className="tabular-nums">{fmt(sym, proforma.covid)}</span>
-                      </div>
-                    )}
-                    {proforma.vat > 0 && (
-                      <div className="flex justify-between text-gray-500">
-                        <span>VAT (15%)</span>
-                        <span className="tabular-nums">{fmt(sym, proforma.vat)}</span>
-                      </div>
-                    )}
-                  </>
+                {taxLinesToShow.map((line) => (
+                  <div key={line.key} className="flex justify-between text-slate-500">
+                    <span>{line.label}</span>
+                    <span className="tabular-nums">{fmt(sym, line.amount)}</span>
+                  </div>
+                ))}
+                {taxLinesToShow.length > 1 && (
+                  <div className="flex justify-between text-slate-500">
+                    <span>Total Tax</span>
+                    <span className="tabular-nums">{fmt(sym, proforma.total_tax)}</span>
+                  </div>
                 )}
-                <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
-                  <span className="font-bold text-gray-900 text-base">Total</span>
-                  <span className="font-bold text-gray-900 text-lg tabular-nums">{fmt(sym, proforma.total)}</span>
+                <div className="flex justify-between items-center pt-3 mt-1 border-t-2 border-slate-900">
+                  <span className="font-bold text-slate-900 text-base">Total</span>
+                  <span className="font-bold text-slate-900 text-xl tabular-nums">{fmt(sym, proforma.total)}</span>
                 </div>
               </div>
             </div>
 
             {/* Notes */}
             {proforma.notes && (
-              <div className="px-8 py-5 border-b border-gray-100 text-sm text-gray-600">
-                <p className="font-medium text-gray-800 mb-1">Notes</p>
-                <p className="whitespace-pre-line">{proforma.notes}</p>
+              <div className="px-8 py-5 border-b border-slate-100">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">Notes</p>
+                <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{proforma.notes}</p>
               </div>
             )}
 
             {/* Footer message */}
             {proforma.footer_message && (
-              <div className="px-8 py-5 border-b border-gray-100 text-sm text-gray-500 italic">
-                {proforma.footer_message}
+              <div className="px-8 py-4 border-b border-slate-100">
+                <p className="text-xs text-slate-400 italic leading-relaxed">{proforma.footer_message}</p>
               </div>
             )}
 
+            {/* Accepted signature block */}
             {isAccepted && proforma.client_signature && (
-              <div className="px-8 py-5 border-b border-gray-100">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
-                  Accepted &amp; Signed By
+              <div className="px-8 py-6">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">
+                  Accepted &amp; Signed
                 </p>
-                <div className="border border-gray-200 rounded-lg p-3 inline-block bg-gray-50">
-                  <img src={proforma.client_signature} alt="Signature" className="h-16 w-auto" />
+                <div className="flex items-start gap-5">
+                  <div className="border border-slate-200 rounded-xl p-3 bg-white shadow-sm inline-block">
+                    <img src={proforma.client_signature} alt="Signature" className="h-16 w-auto" />
+                  </div>
+                  <div className="pt-1">
+                    <p className="font-semibold text-slate-800">{proforma.client_name_signed}</p>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      {ID_TYPES.find(t => t.value === proforma.client_id_type)?.label}: {proforma.client_id_number}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">{formatDate(proforma.signed_at)}</p>
+                  </div>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">
-                  {proforma.client_name_signed} ·{" "}
-                  {ID_TYPES.find((t) => t.value === proforma.client_id_type)?.label}: {proforma.client_id_number}
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">{formatDate(proforma.signed_at)}</p>
               </div>
             )}
           </div>
 
-          <div className="no-print flex justify-end">
-            <a
-              href={`/api/public/proforma/${tokenEnc}/pdf`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm hover:bg-slate-50"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
-              </svg>
-              Download / Print PDF
-            </a>
-          </div>
-
-          {/* Action buttons — only shown when awaiting client response */}
+          {/* ── Action buttons ──────────────────────────────────────── */}
           {isOpen && (
-            <div className="no-print">
-              <p className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                Please review the proforma above and choose an option
+            <div className="no-print space-y-3">
+              <p className="text-center text-xs font-semibold text-slate-400 uppercase tracking-widest">
+                Your response
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={() => setShowAccept(true)}
-                  className="flex-1 flex items-center justify-center gap-2 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition-opacity hover:opacity-90 text-base"
+                  className="flex-1 flex items-center justify-center gap-2.5 text-white font-bold py-4 px-8 rounded-2xl shadow-sm transition-opacity hover:opacity-90 text-base"
                   style={{ backgroundColor: brand }}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -466,10 +566,10 @@ export default function ProformaPublicPage() {
                 </button>
                 <button
                   onClick={() => setShowReject(true)}
-                  className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-rose-50 border-2 border-rose-200 text-rose-600 font-semibold py-4 px-6 rounded-2xl shadow-sm transition-colors text-base"
+                  className="sm:w-auto flex items-center justify-center gap-2 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 font-medium py-4 px-6 rounded-2xl transition-colors text-sm"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                   Decline
                 </button>
@@ -477,22 +577,29 @@ export default function ProformaPublicPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-center gap-1.5 pb-4">
+          {/* Footer */}
+          <div className="flex items-center justify-center gap-1.5 pb-6 pt-2">
             <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
-            <p className="text-xs text-slate-400">Powered by <span className="font-semibold text-slate-500">Finza</span></p>
+            <p className="text-xs text-slate-400">
+              Powered by <span className="font-semibold text-slate-500">Finza</span>
+            </p>
           </div>
+
         </div>
       </div>
 
       {/* ── ACCEPT MODAL ─────────────────────────────────────────── */}
       {showAccept && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800">Accept &amp; Sign Proforma</h2>
-              <button onClick={() => setShowAccept(false)} className="text-slate-400 hover:text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-4 pb-4 sm:pb-0">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Accept &amp; Sign Proforma</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Your signature confirms acceptance of this proforma</p>
+              </div>
+              <button onClick={() => setShowAccept(false)} className="text-slate-400 hover:text-slate-600 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -503,7 +610,7 @@ export default function ProformaPublicPage() {
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Draw your signature <span className="text-rose-500">*</span>
                 </label>
-                <div className="border-2 border-dashed border-slate-300 rounded-xl overflow-hidden bg-slate-50">
+                <div className="border-2 border-dashed border-slate-200 rounded-xl overflow-hidden bg-slate-50 hover:border-slate-300 transition-colors">
                   <SignaturePad
                     ref={sigRef}
                     height={150}
@@ -514,7 +621,7 @@ export default function ProformaPublicPage() {
                 <button
                   type="button"
                   onClick={() => { sigRef.current?.clear(); setSigEmpty(true) }}
-                  className="mt-1.5 text-xs text-slate-500 hover:text-slate-700 underline"
+                  className="mt-1.5 text-xs text-slate-400 hover:text-slate-600 underline"
                 >
                   Clear signature
                 </button>
@@ -522,14 +629,14 @@ export default function ProformaPublicPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Full name <span className="text-rose-500">*</span>
+                  Full legal name <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={fullName}
                   onChange={e => setFullName(e.target.value)}
                   placeholder="Enter your full legal name"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-shadow"
                 />
               </div>
 
@@ -540,7 +647,7 @@ export default function ProformaPublicPage() {
                 <select
                   value={idType}
                   onChange={e => setIdType(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent bg-white transition-shadow"
                 >
                   <option value="">Select ID type…</option>
                   {ID_TYPES.map(t => (
@@ -558,31 +665,31 @@ export default function ProformaPublicPage() {
                   value={idNumber}
                   onChange={e => setIdNumber(e.target.value)}
                   placeholder="e.g. GHA-000000000-0"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-shadow"
                 />
               </div>
 
               {acceptError && (
-                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
                   {acceptError}
                 </p>
               )}
 
-              <p className="text-xs text-slate-500">
-                By clicking "Confirm acceptance" you agree to this proforma invoice and confirm that the identity details provided are accurate.
+              <p className="text-xs text-slate-400 leading-relaxed">
+                By clicking "Confirm acceptance" you agree to this proforma invoice and confirm that the identity details provided are accurate and belong to you.
               </p>
 
               <div className="flex gap-3 pt-1">
                 <button
                   onClick={() => setShowAccept(false)}
-                  className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAccept}
                   disabled={accepting}
-                  className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
                 >
                   {accepting ? "Saving…" : "Confirm acceptance"}
                 </button>
@@ -594,11 +701,14 @@ export default function ProformaPublicPage() {
 
       {/* ── REJECT MODAL ─────────────────────────────────────────── */}
       {showReject && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-4 pb-4 sm:pb-0">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800">Decline this proforma</h2>
-              <button onClick={() => setShowReject(false)} className="text-slate-400 hover:text-slate-600">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Decline this proforma</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Let the sender know why you're declining</p>
+              </div>
+              <button onClick={() => setShowReject(false)} className="text-slate-400 hover:text-slate-600 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -607,32 +717,32 @@ export default function ProformaPublicPage() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Reason (optional)
+                  Reason <span className="text-slate-400 font-normal">(optional)</span>
                 </label>
                 <textarea
                   value={rejectReason}
                   onChange={e => setRejectReason(e.target.value)}
                   rows={3}
-                  placeholder="Tell us why you're declining…"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none"
+                  placeholder="Let the sender know why you're declining…"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent resize-none"
                 />
               </div>
               {rejectError && (
-                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
                   {rejectError}
                 </p>
               )}
-              <div className="flex gap-3">
+              <div className="flex gap-3 pt-1">
                 <button
                   onClick={() => setShowReject(false)}
-                  className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleReject}
                   disabled={rejecting}
-                  className="flex-1 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
                 >
                   {rejecting ? "Saving…" : "Confirm decline"}
                 </button>

@@ -1,14 +1,14 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import Toast from "@/components/Toast"
 import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 
 type Estimate = {
   id: string
@@ -50,7 +50,10 @@ type EstimateItem = {
 export default function EstimateViewPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const estimateId = (params?.id as string) || ""
+  const businessIdFromUrl =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
   const { currencySymbol } = useBusinessCurrency()
   const { openConfirm } = useConfirm()
 
@@ -76,7 +79,7 @@ export default function EstimateViewPage() {
     if (estimateId) {
       loadEstimate()
     }
-  }, [estimateId])
+  }, [estimateId, businessIdFromUrl])
 
   useEffect(() => {
     if (typeof window !== "undefined" && estimate && estimate.status === "draft") {
@@ -102,12 +105,17 @@ export default function EstimateViewPage() {
         throw new Error("Please log in to view this quote")
       }
       const business = await getCurrentBusiness(supabase, user.id)
-      if (!business?.id) {
+      const resolvedBusinessId =
+        businessIdFromUrl?.trim() ||
+        getSelectedBusinessId()?.trim() ||
+        business?.id ||
+        null
+      if (!resolvedBusinessId) {
         throw new Error("Select a workspace to load quotes")
       }
 
       const response = await fetch(
-        `/api/estimates/${estimateId}?business_id=${encodeURIComponent(business.id)}`
+        `/api/estimates/${estimateId}?business_id=${encodeURIComponent(resolvedBusinessId)}`
       )
 
       if (!response.ok) {

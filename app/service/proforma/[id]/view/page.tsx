@@ -1,15 +1,17 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, useSearchParams } from "next/navigation"
 import Toast from "@/components/Toast"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 
 type ProformaInvoice = {
   id: string
+  business_id: string
   proforma_number: string | null
   issue_date: string
   validity_date: string | null
@@ -68,7 +70,10 @@ const STATUS_STYLES: Record<string, string> = {
 export default function ProformaViewPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const proformaId = (params?.id as string) || ""
+  const businessIdFromUrl =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
   const { openConfirm } = useConfirm()
 
   const [loading, setLoading] = useState(true)
@@ -85,13 +90,25 @@ export default function ProformaViewPage() {
 
   useEffect(() => {
     if (proformaId) loadProforma()
-  }, [proformaId])
+  }, [proformaId, businessIdFromUrl])
 
   const loadProforma = async () => {
     try {
       setLoading(true)
       setError("")
-      const response = await fetch(`/api/proforma/${proformaId}`)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      const business = user ? await getCurrentBusiness(supabase, user.id) : null
+      const resolvedBusinessId =
+        businessIdFromUrl?.trim() ||
+        getSelectedBusinessId()?.trim() ||
+        business?.id ||
+        null
+      const qs = resolvedBusinessId
+        ? `?business_id=${encodeURIComponent(resolvedBusinessId)}`
+        : ""
+      const response = await fetch(`/api/proforma/${proformaId}${qs}`)
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
         if (response.status === 404) throw new Error("Proforma invoice not found.")
@@ -135,7 +152,7 @@ export default function ProformaViewPage() {
     const response = await fetch(`/api/proforma/${proformaId}/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ business_id: proforma.business_id }),
     })
     const data = await response.json()
     if (!response.ok) throw new Error(data.error || "Failed to send proforma")
@@ -224,6 +241,7 @@ export default function ProformaViewPage() {
           const response = await fetch(`/api/proforma/${proformaId}/accept`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ business_id: proforma.business_id }),
           })
           const data = await response.json()
           if (!response.ok) throw new Error(data.error || "Failed to accept proforma")
@@ -297,6 +315,7 @@ export default function ProformaViewPage() {
           const response = await fetch(`/api/proforma/${proformaId}/convert-to-invoice`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ business_id: proforma.business_id }),
           })
           const data = await response.json()
           if (!response.ok) throw new Error(data.error || "Failed to convert proforma to invoice")

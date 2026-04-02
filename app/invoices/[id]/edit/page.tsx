@@ -1354,6 +1354,7 @@ export default function InvoiceEditPage() {
         {/* Send Invoice Modal */}
         {showSendModal && invoice && (
           <SendInvoiceModal
+            businessId={businessId}
             invoice={{
               id: invoice.id,
               public_token: invoice.public_token || "",

@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
-import { PublicBillToBlock, PublicDocumentMetaRow } from "@/components/documents/PublicBillToBlock"
 
 // Lazy-load signature pad (canvas — SSR-incompatible)
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
@@ -65,7 +64,14 @@ type Business = {
   logo_url: string | null
 }
 
-type Item = { id: string; description: string; quantity: number; price: number; total: number; discount_amount?: number }
+type Item = {
+  id: string
+  description: string
+  quantity: number
+  price: number
+  total: number
+  discount_amount?: number
+}
 
 const fmt = (sym: string, n: number) =>
   `${sym}${Number(n ?? 0).toFixed(2)}`
@@ -123,7 +129,6 @@ export default function QuotePublicPage() {
           if (d.settings?.quote_terms_and_conditions) setQuoteTerms(d.settings.quote_terms_and_conditions)
           return
         }
-        // Same opaque token may be a proforma (client links use /proforma-public/…)
         const proformaRes = await fetch(`/api/public/proforma/${enc}`, { cache: "no-store" })
         if (proformaRes.ok && !cancelled) {
           router.replace(`/proforma-public/${enc}`)
@@ -136,9 +141,7 @@ export default function QuotePublicPage() {
         if (!cancelled) setLoading(false)
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [token, router])
 
   const sym = estimate?.currency_symbol ?? "₵"
@@ -166,8 +169,7 @@ export default function QuotePublicPage() {
       const data = await res.json()
       if (!res.ok) { setAcceptError(data.error ?? "Failed to accept"); return }
       setShowAccept(false)
-      // Reload
-      const r2 = await fetch(`/api/public/quote/${token}`)
+      const r2 = await fetch(`/api/public/quote/${quoteTokenEnc}`)
       const d2 = await r2.json()
       setEstimate(d2.estimate)
     } catch {
@@ -203,8 +205,8 @@ export default function QuotePublicPage() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto" />
-          <p className="mt-3 text-slate-500 text-sm">Loading quote…</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-slate-200 border-t-slate-600 mx-auto" />
+          <p className="mt-3 text-slate-400 text-sm font-medium">Loading quotation…</p>
         </div>
       </div>
     )
@@ -212,8 +214,16 @@ export default function QuotePublicPage() {
 
   if (error || !estimate) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <p className="text-rose-600">{error || "Quote not found"}</p>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="text-slate-700 font-semibold">{error || "Quote not found"}</p>
+          <p className="text-slate-400 text-sm mt-1">This link may be invalid or the quotation has been removed.</p>
+        </div>
       </div>
     )
   }
@@ -223,25 +233,103 @@ export default function QuotePublicPage() {
   const isAccepted = status === "accepted"
   const isRejected = status === "rejected"
   const bizName = business?.trading_name ?? business?.legal_name ?? "Business"
+  const bizAddress = [business?.address_street, business?.address_city, business?.address_region]
+    .filter(Boolean).join(", ")
+
+  const hasDiscounts = items.some(item => Number(item.discount_amount || 0) > 0)
+  const totalDiscount = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
+
+  // Build tax lines: prefer new tax_lines JSONB, fall back to legacy fields
+  const taxLinesToShow: { key: string; label: string; amount: number }[] = []
+  if (estimate.apply_taxes && estimate.total_tax_amount > 0) {
+    const parsedLines = Array.isArray(estimate.tax_lines)
+      ? estimate.tax_lines
+      : typeof estimate.tax_lines === "string"
+      ? (() => { try { return JSON.parse(estimate.tax_lines) } catch { return null } })()
+      : null
+
+    if (parsedLines && parsedLines.length > 0) {
+      parsedLines
+        .filter((l: any) => Number(l.amount) > 0 && String(l.code).toUpperCase() !== "COVID")
+        .forEach((l: any) =>
+          taxLinesToShow.push({ key: l.code, label: l.name || l.code, amount: Number(l.amount) })
+        )
+    } else {
+      if (estimate.nhil_amount > 0) taxLinesToShow.push({ key: "nhil", label: "NHIL (2.5%)", amount: estimate.nhil_amount })
+      if (estimate.getfund_amount > 0) taxLinesToShow.push({ key: "getfund", label: "GETFund (2.5%)", amount: estimate.getfund_amount })
+      if (estimate.covid_amount > 0) taxLinesToShow.push({ key: "covid", label: "COVID Levy (1%)", amount: estimate.covid_amount })
+      if (estimate.vat_amount > 0) taxLinesToShow.push({ key: "vat", label: "VAT (15%)", amount: estimate.vat_amount })
+    }
+  }
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: `@media print { .no-print { display: none !important; } }` }} />
+      <style dangerouslySetInnerHTML={{ __html: `@media print { .no-print { display: none !important; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }` }} />
 
-      <div className="min-h-screen bg-slate-100 py-8 px-4">
-        <div className="max-w-3xl mx-auto space-y-5">
+      {/* Brand accent bar */}
+      <div className="h-1 w-full no-print" style={{ backgroundColor: brand }} />
 
-          {/* Status banner */}
+      {/* Top navigation bar */}
+      <div className="no-print sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            {business?.logo_url ? (
+              <img src={business.logo_url} alt="" className="h-8 w-auto rounded-md shrink-0 object-contain" />
+            ) : (
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
+                style={{ backgroundColor: brand }}
+              >
+                {bizName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
+              <p className="text-xs text-slate-400 truncate">Quotation · {estimate.estimate_number}</p>
+            </div>
+          </div>
+          <a
+            href={`/api/public/quote/${quoteTokenEnc}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="no-print shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-all"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+            </svg>
+            Download PDF
+          </a>
+        </div>
+      </div>
+
+      <div className="min-h-screen bg-slate-50 py-8 px-4">
+        <div className="max-w-2xl mx-auto space-y-4">
+
+          {/* ── Contextual status banner ────────────────────────────── */}
+          {isOpen && (
+            <div className="no-print bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${brand}18` }}>
+                <svg className="w-4.5 h-4.5" style={{ color: brand }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800">Quotation awaiting your review</p>
+                <p className="text-xs text-slate-500 mt-0.5">Please review the details below and accept or decline this quote.</p>
+              </div>
+            </div>
+          )}
+
           {isAccepted && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <div>
-                <p className="font-semibold text-emerald-800">Quote accepted</p>
-                <p className="text-sm text-emerald-700 mt-0.5">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-emerald-800 text-sm">Quote accepted</p>
+                <p className="text-xs text-emerald-700 mt-0.5">
                   Signed by <strong>{estimate.client_name_signed}</strong> on {formatDate(estimate.signed_at)}
                   {estimate.client_id_type && (
                     <> · {ID_TYPES.find(t => t.value === estimate.client_id_type)?.label}: <strong>{estimate.client_id_number}</strong></>
@@ -250,291 +338,299 @@ export default function QuotePublicPage() {
               </div>
             </div>
           )}
+
           {isRejected && (
-            <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
-                <svg className="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
               <div>
-                <p className="font-semibold text-rose-800">Quote declined</p>
+                <p className="font-semibold text-rose-800 text-sm">Quote declined</p>
                 {estimate.rejected_reason && (
-                  <p className="text-sm text-rose-700 mt-0.5">Reason: {estimate.rejected_reason}</p>
+                  <p className="text-xs text-rose-700 mt-0.5">Reason: {estimate.rejected_reason}</p>
                 )}
               </div>
             </div>
           )}
 
-          {/* Document card */}
+          {/* ── Document card ───────────────────────────────────────── */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {/* Header — brand colour */}
-            <div className="px-6 py-5 text-white" style={{ backgroundColor: brand }}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
+
+            {/* Document header — brand colour */}
+            <div className="px-8 py-8 text-white" style={{ backgroundColor: brand }}>
+              <div className="flex items-start justify-between gap-6">
+                {/* Business identity */}
+                <div className="flex-1 min-w-0">
                   {business?.logo_url ? (
-                    <img src={business.logo_url} alt="" className="h-10 w-auto mb-3 rounded" />
+                    <img src={business.logo_url} alt="" className="h-12 w-auto mb-4 rounded-md object-contain" style={{ filter: "brightness(0) invert(1)" }} />
                   ) : (
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-bold text-lg mb-3">
+                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white text-xl font-bold mb-4">
                       {bizName.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <h1 className="text-xl font-bold">{bizName}</h1>
-                  <p className="text-white/70 text-sm mt-0.5">
-                    {[business?.address_street, business?.address_city, business?.address_region].filter(Boolean).join(", ")}
-                  </p>
-                  {business?.phone && <p className="text-white/70 text-sm">{business.phone}</p>}
-                  {business?.email && <p className="text-white/70 text-sm">{business.email}</p>}
+                  <h1 className="text-lg font-bold text-white leading-tight">{bizName}</h1>
+                  {bizAddress && <p className="text-white/60 text-xs mt-1">{bizAddress}</p>}
+                  {business?.phone && <p className="text-white/60 text-xs mt-0.5">{business.phone}</p>}
+                  {business?.email && <p className="text-white/60 text-xs mt-0.5">{business.email}</p>}
+                  {business?.tin && <p className="text-white/50 text-xs mt-1.5">TIN: {business.tin}</p>}
                 </div>
+
+                {/* Document identity */}
                 <div className="text-right shrink-0">
-                  <p className="text-white/70 text-xs uppercase tracking-wider font-medium">Quotation</p>
-                  <p className="text-2xl font-bold mt-1">{estimate.estimate_number ?? "DRAFT"}</p>
-                  <span className={`mt-2 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    isAccepted ? "bg-emerald-400/30 text-emerald-100" :
-                    isRejected ? "bg-rose-400/30 text-rose-100" :
-                    isOpen ? "bg-white/20 text-white" : "bg-white/10 text-white/70"
-                  }`}>
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </span>
+                  <p className="text-white/50 text-xs uppercase tracking-widest font-semibold mb-1.5">Quotation</p>
+                  <p className="text-3xl font-bold text-white tabular-nums">{estimate.estimate_number ?? "—"}</p>
+                  {/* Only show badge for terminal states — never show "Sent" to clients */}
+                  {isAccepted && (
+                    <span className="mt-3 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-400/25 text-emerald-100">
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                      Accepted
+                    </span>
+                  )}
+                  {isRejected && (
+                    <span className="mt-3 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-rose-400/25 text-rose-100">
+                      Declined
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            <PublicDocumentMetaRow
-              cells={[
-                { label: "Issue Date", value: formatDate(estimate.issue_date) },
-                { label: "Valid Until", value: formatDate(estimate.expiry_date) },
-                { label: "Payment Terms", value: "—" },
-                {
-                  label: "Currency",
-                  value: estimate.currency_code && estimate.currency_symbol
+            {/* Meta strip */}
+            <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/60">
+              <div className="px-6 py-4">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Issue Date</p>
+                <p className="text-sm font-semibold text-slate-800">{formatDate(estimate.issue_date)}</p>
+              </div>
+              <div className="px-6 py-4">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Valid Until</p>
+                <p className="text-sm font-semibold text-slate-800">{formatDate(estimate.expiry_date)}</p>
+              </div>
+              <div className="px-6 py-4">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Currency</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {estimate.currency_code && estimate.currency_symbol
                     ? `${estimate.currency_code} (${estimate.currency_symbol})`
-                    : (estimate.currency_code ?? estimate.currency_symbol ?? "—"),
-                },
-              ]}
-            />
-            <PublicBillToBlock customer={estimate.customers} />
+                    : estimate.currency_code ?? estimate.currency_symbol ?? "—"}
+                </p>
+              </div>
+            </div>
 
-            {/* Line items — table styling aligned with public invoice view */}
-            {(() => {
-              const hasDiscounts = items.some(item => Number(item.discount_amount || 0) > 0)
-              return (
-                <div className="px-8 py-5 border-b border-gray-100">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3">
-                          Description
-                        </th>
-                        <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-16">
-                          Qty
-                        </th>
-                        <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
-                          Unit Price
-                        </th>
-                        {hasDiscounts && (
-                          <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-24">
-                            Discount
-                          </th>
-                        )}
-                        <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
-                          Total
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {items.map((item) => (
-                        <tr key={item.id}>
-                          <td className="py-3 text-gray-800 font-medium break-words">{item.description}</td>
-                          <td className="py-3 text-right text-gray-600 tabular-nums">{item.quantity}</td>
-                          <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.price)}</td>
-                          {hasDiscounts && (
-                            <td className="py-3 text-right tabular-nums text-rose-500">
-                              {Number(item.discount_amount || 0) > 0 ? `−${fmt(sym, item.discount_amount!)}` : "—"}
-                            </td>
-                          )}
-                          <td className="py-3 text-right text-gray-800 font-medium tabular-nums">{fmt(sym, item.total)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            })()}
-
-            {/* Totals */}
-            {(() => {
-              const totalDiscount = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
-
-              // Build tax lines to display: prefer tax_lines (new engine), fall back to legacy fields
-              const taxLinesToShow: { key: string; label: string; amount: number }[] = []
-              if (estimate.apply_taxes && estimate.total_tax_amount > 0) {
-                const parsedLines = Array.isArray(estimate.tax_lines)
-                  ? estimate.tax_lines
-                  : typeof estimate.tax_lines === "string"
-                  ? (() => { try { return JSON.parse(estimate.tax_lines) } catch { return null } })()
-                  : null
-
-                if (parsedLines && parsedLines.length > 0) {
-                  // New tax engine — use tax_lines, skip COVID
-                  parsedLines
-                    .filter((l: any) => Number(l.amount) > 0 && String(l.code).toUpperCase() !== "COVID")
-                    .forEach((l: any) =>
-                      taxLinesToShow.push({ key: l.code, label: l.name || l.code, amount: Number(l.amount) })
-                    )
-                } else {
-                  // Legacy individual fields
-                  if (estimate.nhil_amount > 0) taxLinesToShow.push({ key: "nhil", label: "NHIL (2.5%)", amount: estimate.nhil_amount })
-                  if (estimate.getfund_amount > 0) taxLinesToShow.push({ key: "getfund", label: "GETFund (2.5%)", amount: estimate.getfund_amount })
-                  if (estimate.covid_amount > 0) taxLinesToShow.push({ key: "covid", label: "COVID Levy (1%)", amount: estimate.covid_amount })
-                  if (estimate.vat_amount > 0) taxLinesToShow.push({ key: "vat", label: "VAT (15%)", amount: estimate.vat_amount })
-                }
-              }
-
-              return (
-                <div className="px-8 py-5 border-b border-gray-100">
-                  <div className="max-w-xs ml-auto space-y-1.5 text-sm">
-                    <div className="flex justify-between text-gray-600">
-                      <span>Subtotal</span>
-                      <span className="tabular-nums font-medium">{fmt(sym, estimate.subtotal)}</span>
-                    </div>
-                    {totalDiscount > 0 && (
-                      <div className="flex justify-between text-rose-600">
-                        <span>Discount</span>
-                        <span className="tabular-nums">−{fmt(sym, totalDiscount)}</span>
-                      </div>
+            {/* Prepared for */}
+            <div className="px-8 py-5 border-b border-slate-100">
+              <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">Prepared For</p>
+              {estimate.customers ? (
+                <div className="text-sm space-y-0.5">
+                  <p className="text-base font-bold text-slate-900">{estimate.customers.name}</p>
+                  {estimate.customers.address && (
+                    <p className="text-slate-500 whitespace-pre-line">{estimate.customers.address}</p>
+                  )}
+                  {estimate.customers.email && <p className="text-slate-500">{estimate.customers.email}</p>}
+                  {estimate.customers.phone && <p className="text-slate-500">{estimate.customers.phone}</p>}
+                  {estimate.customers.whatsapp_phone &&
+                    estimate.customers.whatsapp_phone.trim() !== (estimate.customers.phone ?? "").trim() && (
+                      <p className="text-slate-500">WhatsApp: {estimate.customers.whatsapp_phone}</p>
                     )}
-                    {taxLinesToShow.map((line) => (
-                      <div key={line.key} className="flex justify-between text-gray-500">
-                        <span>{line.label}</span>
-                        <span className="tabular-nums">{fmt(sym, line.amount)}</span>
-                      </div>
-                    ))}
-                    {taxLinesToShow.length > 1 && (
-                      <div className="flex justify-between text-gray-500">
-                        <span>Total Tax</span>
-                        <span className="tabular-nums">{fmt(sym, estimate.total_tax_amount)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
-                      <span className="font-bold text-gray-900 text-base">Total</span>
-                      <span className="font-bold text-gray-900 text-lg tabular-nums">{fmt(sym, estimate.total_amount)}</span>
-                    </div>
-                  </div>
-                </div>
-              )
-            })()}
-
-              {/* Notes */}
-              {estimate.notes && (
-                <div className="px-8 py-5 border-b border-gray-100 text-sm text-gray-600">
-                  <p className="font-medium text-gray-800 mb-1">Notes</p>
-                  <p className="whitespace-pre-line">{estimate.notes}</p>
-                </div>
-              )}
-
-              {/* Terms & Conditions — from invoice settings, auto-applied to every quote */}
-              {quoteTerms && (
-                <div className="px-8 py-5 border-b border-gray-100">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-                    Terms &amp; Conditions
-                  </p>
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-xs text-gray-600 whitespace-pre-line leading-relaxed max-h-48 overflow-y-auto">
-                    {quoteTerms}
-                  </div>
-                  {isOpen && (
-                    <p className="text-xs text-gray-400 mt-2 italic">
-                      By accepting this quote, you agree to the terms and conditions above.
-                    </p>
+                  {estimate.customers.tin && (
+                    <p className="text-slate-400 text-xs pt-0.5">TIN: {estimate.customers.tin}</p>
                   )}
                 </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic">No customer specified</p>
               )}
+            </div>
 
-              {/* Accepted signature block */}
-              {isAccepted && estimate.client_signature && (
-                <div className="px-8 py-5 border-b border-gray-100">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
-                    Accepted &amp; Signed By
+            {/* Line items */}
+            <div className="px-8 py-5 border-b border-slate-100">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Description
+                    </th>
+                    <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-14">
+                      Qty
+                    </th>
+                    <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-28">
+                      Unit Price
+                    </th>
+                    {hasDiscounts && (
+                      <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-24">
+                        Discount
+                      </th>
+                    )}
+                    <th className="text-right py-2 pb-3 text-xs font-semibold uppercase tracking-wider text-slate-400 w-28">
+                      Amount
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {items.map((item) => (
+                    <tr key={item.id}>
+                      <td className="py-3.5 text-slate-800 font-medium leading-snug">{item.description}</td>
+                      <td className="py-3.5 text-right text-slate-500 tabular-nums">{item.quantity}</td>
+                      <td className="py-3.5 text-right text-slate-500 tabular-nums">{fmt(sym, item.price)}</td>
+                      {hasDiscounts && (
+                        <td className="py-3.5 text-right tabular-nums text-rose-500">
+                          {Number(item.discount_amount || 0) > 0
+                            ? `−${fmt(sym, item.discount_amount!)}`
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                      )}
+                      <td className="py-3.5 text-right text-slate-800 font-semibold tabular-nums">
+                        {fmt(sym, item.total)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Totals */}
+            <div className="px-8 py-5 border-b border-slate-100 bg-slate-50/40">
+              <div className="max-w-xs ml-auto space-y-2 text-sm">
+                <div className="flex justify-between text-slate-500">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums font-medium text-slate-700">{fmt(sym, estimate.subtotal)}</span>
+                </div>
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between text-rose-500">
+                    <span>Discount</span>
+                    <span className="tabular-nums">−{fmt(sym, totalDiscount)}</span>
+                  </div>
+                )}
+                {taxLinesToShow.map((line) => (
+                  <div key={line.key} className="flex justify-between text-slate-500">
+                    <span>{line.label}</span>
+                    <span className="tabular-nums">{fmt(sym, line.amount)}</span>
+                  </div>
+                ))}
+                {taxLinesToShow.length > 1 && (
+                  <div className="flex justify-between text-slate-500">
+                    <span>Total Tax</span>
+                    <span className="tabular-nums">{fmt(sym, estimate.total_tax_amount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-3 mt-1 border-t-2 border-slate-900">
+                  <span className="font-bold text-slate-900 text-base">Total</span>
+                  <span className="font-bold text-slate-900 text-xl tabular-nums">{fmt(sym, estimate.total_amount)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes */}
+            {estimate.notes && (
+              <div className="px-8 py-5 border-b border-slate-100">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">Notes</p>
+                <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{estimate.notes}</p>
+              </div>
+            )}
+
+            {/* Terms & Conditions */}
+            {quoteTerms && (
+              <div className="px-8 py-5 border-b border-slate-100">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">
+                  Terms &amp; Conditions
+                </p>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-xs text-slate-600 whitespace-pre-line leading-relaxed max-h-40 overflow-y-auto">
+                  {quoteTerms}
+                </div>
+                {isOpen && (
+                  <p className="text-xs text-slate-400 mt-2 italic">
+                    By accepting this quote, you agree to the terms and conditions above.
                   </p>
-                  <div className="border border-gray-200 rounded-lg p-3 inline-block bg-gray-50">
+                )}
+              </div>
+            )}
+
+            {/* Accepted signature block */}
+            {isAccepted && estimate.client_signature && (
+              <div className="px-8 py-6">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">
+                  Accepted &amp; Signed
+                </p>
+                <div className="flex items-start gap-5">
+                  <div className="border border-slate-200 rounded-xl p-3 bg-white shadow-sm inline-block">
                     <img src={estimate.client_signature} alt="Signature" className="h-16 w-auto" />
                   </div>
-                  <p className="text-sm text-gray-600 mt-1">
-                    {estimate.client_name_signed} ·{" "}
-                    {ID_TYPES.find((t) => t.value === estimate.client_id_type)?.label}: {estimate.client_id_number}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">{formatDate(estimate.signed_at)}</p>
+                  <div className="pt-1">
+                    <p className="font-semibold text-slate-800">{estimate.client_name_signed}</p>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      {ID_TYPES.find(t => t.value === estimate.client_id_type)?.label}: {estimate.client_id_number}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">{formatDate(estimate.signed_at)}</p>
+                  </div>
                 </div>
-              )}
+              </div>
+            )}
           </div>
 
-          <div className="no-print flex justify-end">
-            <a
-              href={`/api/public/quote/${quoteTokenEnc}/pdf`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm hover:bg-slate-50"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
-              </svg>
-              Download / Print PDF
-            </a>
-          </div>
-
-          {/* Action buttons — only when status is 'sent' */}
+          {/* ── Action buttons ──────────────────────────────────────── */}
           {isOpen && (
-            <div className="no-print flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={() => setShowAccept(true)}
-                className="flex-1 flex items-center justify-center gap-2 text-white font-semibold py-3.5 px-6 rounded-xl shadow-sm transition-opacity hover:opacity-90"
-                style={{ backgroundColor: brand }}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Accept &amp; Sign
-              </button>
-              <button
-                onClick={() => setShowReject(true)}
-                className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-rose-50 border border-rose-300 text-rose-600 font-semibold py-3.5 px-6 rounded-xl shadow-sm transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Decline
-              </button>
+            <div className="no-print space-y-3">
+              <p className="text-center text-xs font-semibold text-slate-400 uppercase tracking-widest">
+                Your response
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => setShowAccept(true)}
+                  className="flex-1 flex items-center justify-center gap-2.5 text-white font-bold py-4 px-8 rounded-2xl shadow-sm transition-opacity hover:opacity-90 text-base"
+                  style={{ backgroundColor: brand }}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Accept &amp; Sign
+                </button>
+                <button
+                  onClick={() => setShowReject(true)}
+                  className="sm:w-auto flex items-center justify-center gap-2 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 font-medium py-4 px-6 rounded-2xl transition-colors text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Decline
+                </button>
+              </div>
             </div>
           )}
 
-          <div className="flex items-center justify-center gap-1.5 pb-4">
+          {/* Footer */}
+          <div className="flex items-center justify-center gap-1.5 pb-6 pt-2">
             <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
-            <p className="text-xs text-slate-400">Powered by <span className="font-semibold text-slate-500">Finza</span></p>
+            <p className="text-xs text-slate-400">
+              Powered by <span className="font-semibold text-slate-500">Finza</span>
+            </p>
           </div>
+
         </div>
       </div>
 
       {/* ── ACCEPT MODAL ─────────────────────────────────────────── */}
       {showAccept && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800">Accept &amp; Sign Quote</h2>
-              <button onClick={() => setShowAccept(false)} className="text-slate-400 hover:text-slate-600">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-4 pb-4 sm:pb-0">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Accept &amp; Sign Quotation</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Your signature confirms acceptance of this quote</p>
+              </div>
+              <button onClick={() => setShowAccept(false)} className="text-slate-400 hover:text-slate-600 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
             <div className="p-6 space-y-5">
-              {/* Signature canvas */}
+              {/* Signature */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Draw your signature <span className="text-rose-500">*</span>
                 </label>
-                <div className="border-2 border-dashed border-slate-300 rounded-xl overflow-hidden bg-slate-50">
+                <div className="border-2 border-dashed border-slate-200 rounded-xl overflow-hidden bg-slate-50 hover:border-slate-300 transition-colors">
                   <SignaturePad
                     ref={sigRef}
                     height={150}
@@ -545,7 +641,7 @@ export default function QuotePublicPage() {
                 <button
                   type="button"
                   onClick={() => { sigRef.current?.clear(); setSigEmpty(true) }}
-                  className="mt-1.5 text-xs text-slate-500 hover:text-slate-700 underline"
+                  className="mt-1.5 text-xs text-slate-400 hover:text-slate-600 underline"
                 >
                   Clear signature
                 </button>
@@ -554,14 +650,15 @@ export default function QuotePublicPage() {
               {/* Full name */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Full name <span className="text-rose-500">*</span>
+                  Full legal name <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={fullName}
                   onChange={e => setFullName(e.target.value)}
                   placeholder="Enter your full legal name"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-offset-0 focus:border-transparent transition-shadow"
+                  style={{ "--tw-ring-color": brand } as any}
                 />
               </div>
 
@@ -573,7 +670,8 @@ export default function QuotePublicPage() {
                 <select
                   value={idType}
                   onChange={e => setIdType(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:border-transparent bg-white transition-shadow"
+                  style={{ "--tw-ring-color": brand } as any}
                 >
                   <option value="">Select ID type…</option>
                   {ID_TYPES.map(t => (
@@ -592,31 +690,33 @@ export default function QuotePublicPage() {
                   value={idNumber}
                   onChange={e => setIdNumber(e.target.value)}
                   placeholder="e.g. GHA-000000000-0"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow"
+                  style={{ "--tw-ring-color": brand } as any}
                 />
               </div>
 
               {acceptError && (
-                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
                   {acceptError}
                 </p>
               )}
 
-              <p className="text-xs text-slate-500">
-                By clicking "Confirm acceptance" you agree to this quote and confirm that the identity details provided are accurate.
+              <p className="text-xs text-slate-400 leading-relaxed">
+                By clicking "Confirm acceptance" you agree to this quotation and confirm that the identity details provided are accurate and belong to you.
               </p>
 
               <div className="flex gap-3 pt-1">
                 <button
                   onClick={() => setShowAccept(false)}
-                  className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAccept}
                   disabled={accepting}
-                  className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold transition-opacity disabled:opacity-60 hover:opacity-90"
+                  style={{ backgroundColor: "#059669" }}
                 >
                   {accepting ? "Saving…" : "Confirm acceptance"}
                 </button>
@@ -628,11 +728,14 @@ export default function QuotePublicPage() {
 
       {/* ── REJECT MODAL ─────────────────────────────────────────── */}
       {showReject && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-4 pb-4 sm:pb-0">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800">Decline this quote</h2>
-              <button onClick={() => setShowReject(false)} className="text-slate-400 hover:text-slate-600">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Decline this quotation</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Let the sender know why you're declining</p>
+              </div>
+              <button onClick={() => setShowReject(false)} className="text-slate-400 hover:text-slate-600 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -641,32 +744,32 @@ export default function QuotePublicPage() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Reason (optional)
+                  Reason <span className="text-slate-400 font-normal">(optional)</span>
                 </label>
                 <textarea
                   value={rejectReason}
                   onChange={e => setRejectReason(e.target.value)}
                   rows={3}
-                  placeholder="Tell us why you're declining…"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 resize-none"
+                  placeholder="Let the sender know why you're declining…"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent resize-none"
                 />
               </div>
               {rejectError && (
-                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                <p className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-2.5">
                   {rejectError}
                 </p>
               )}
-              <div className="flex gap-3">
+              <div className="flex gap-3 pt-1">
                 <button
                   onClick={() => setShowReject(false)}
-                  className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleReject}
                   disabled={rejecting}
-                  className="flex-1 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
                 >
                   {rejecting ? "Saving…" : "Confirm decline"}
                 </button>

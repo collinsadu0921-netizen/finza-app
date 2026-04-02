@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { createAuditLog } from "@/lib/auditLog"
@@ -31,9 +31,10 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
     const { data: proforma, error: proformaError } = await supabase
@@ -52,7 +53,7 @@ export async function GET(
       `
       )
       .eq("id", proformaId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .is("deleted_at", null)
       .single()
 
@@ -120,16 +121,21 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const body = await request.json()
+    const requestedBusinessId =
+      (typeof body.business_id === "string" && body.business_id.trim()) ||
+      new URL(request.url).searchParams.get("business_id") ||
+      undefined
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
     const { data: existingProforma } = await supabase
       .from("proforma_invoices")
       .select("id, business_id, status, apply_taxes")
       .eq("id", proformaId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .single()
 
     if (!existingProforma) {
@@ -146,8 +152,8 @@ export async function PATCH(
       )
     }
 
-    const body = await request.json()
     const {
+      business_id: _bodyBusinessId,
       customer_id,
       issue_date,
       validity_date,
@@ -162,7 +168,7 @@ export async function PATCH(
     const { data: businessProfile } = await supabase
       .from("businesses")
       .select("address_country, default_currency")
-      .eq("id", business.id)
+      .eq("id", scope.businessId)
       .single()
 
     const shouldApplyTaxes =
@@ -323,7 +329,7 @@ export async function PATCH(
 
     // Log audit entry
     await createAuditLog({
-      businessId: business.id,
+      businessId: scope.businessId,
       userId: user?.id || null,
       actionType: "proforma.updated",
       entityType: "proforma_invoice",

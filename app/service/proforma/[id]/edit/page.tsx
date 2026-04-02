@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import type { TaxResult } from "@/lib/taxEngine/types"
@@ -48,7 +48,10 @@ const getLineTotal = (item: Pick<LineItem, "qty" | "unit_price" | "discount_type
 export default function ProformaEditPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const proformaId = (params?.id as string) || ""
+  const businessIdFromUrl =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
@@ -78,7 +81,7 @@ export default function ProformaEditPage() {
 
   useEffect(() => {
     if (proformaId) loadData()
-  }, [proformaId])
+  }, [proformaId, businessIdFromUrl])
 
   const loadData = async () => {
     try {
@@ -95,26 +98,33 @@ export default function ProformaEditPage() {
       }
 
       const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
+      const resolvedForFetch =
+        businessIdFromUrl?.trim() ||
+        getSelectedBusinessId()?.trim() ||
+        business?.id ||
+        null
+      if (!resolvedForFetch) {
         setError("Business not found")
         setLoading(false)
         return
       }
 
-      setBusinessId(business.id)
-      const industry = (business as any).industry ?? null
-      setBusinessIndustry(industry)
+      setBusinessId(resolvedForFetch)
 
-      // Get currency
+      // Get currency + industry for resolved workspace
       const { data: biz } = await supabase
         .from("businesses")
-        .select("default_currency, currency_symbol")
-        .eq("id", business.id)
+        .select("default_currency, currency_symbol, industry")
+        .eq("id", resolvedForFetch)
         .single()
+      const industryResolved = (biz as { industry?: string | null } | null)?.industry ?? null
+      setBusinessIndustry(industryResolved)
       setCurrencyDisplay(resolveCurrencyDisplay(biz))
 
       // Load proforma data
-      const response = await fetch(`/api/proforma/${proformaId}`)
+      const response = await fetch(
+        `/api/proforma/${proformaId}?business_id=${encodeURIComponent(resolvedForFetch)}`
+      )
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
         throw new Error(errorData.error || "Failed to load proforma invoice")
@@ -125,6 +135,8 @@ export default function ProformaEditPage() {
       const proformaItems = responseData.items || []
 
       if (!proformaData) throw new Error("Proforma invoice not found")
+
+      setBusinessId(proformaData.business_id)
 
       // Only allow editing draft proformas
       if (proformaData.status !== "draft") {
@@ -161,17 +173,17 @@ export default function ProformaEditPage() {
       const { data: customersData } = await supabase
         .from("customers")
         .select("id, name")
-        .eq("business_id", business.id)
+        .eq("business_id", resolvedForFetch)
         .is("deleted_at", null)
         .order("name", { ascending: true })
       setCustomers(customersData || [])
 
       // Load products/services
-      if (industry === "service") {
+      if (industryResolved === "service") {
         const { data: catalogData } = await supabase
           .from("service_catalog")
           .select("*")
-          .eq("business_id", business.id)
+          .eq("business_id", resolvedForFetch)
           .eq("is_active", true)
           .order("name", { ascending: true })
         setProducts(
@@ -185,7 +197,7 @@ export default function ProformaEditPage() {
         const { data: productsData } = await supabase
           .from("products_services")
           .select("id, name, unit_price")
-          .eq("business_id", business.id)
+          .eq("business_id", resolvedForFetch)
           .is("deleted_at", null)
           .order("name", { ascending: true })
         setProducts(
@@ -367,6 +379,7 @@ export default function ProformaEditPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          business_id: businessId,
           customer_id: selectedCustomerId || null,
           issue_date: issueDate,
           validity_date: validityDate || null,

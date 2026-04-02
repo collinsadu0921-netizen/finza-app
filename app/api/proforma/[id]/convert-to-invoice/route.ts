@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { createAuditLog } from "@/lib/auditLog"
@@ -34,12 +34,14 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json(
-        { error: "Business not found. Please ensure you have a business set up." },
-        { status: 404 }
-      )
+    const body = await request.json().catch(() => ({}))
+    const requestedBusinessId =
+      (typeof body.business_id === "string" && body.business_id.trim()) ||
+      new URL(request.url).searchParams.get("business_id") ||
+      undefined
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
     // Fetch proforma and verify ownership
@@ -47,7 +49,7 @@ export async function POST(
       .from("proforma_invoices")
       .select("*")
       .eq("id", proformaId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .is("deleted_at", null)
       .single()
 
@@ -80,7 +82,7 @@ export async function POST(
       )
     }
 
-    const business_id = business.id
+    const business_id = scope.businessId
 
     // Get business profile for currency/country
     const { data: businessProfile } = await supabase

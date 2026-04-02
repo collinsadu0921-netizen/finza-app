@@ -25,6 +25,7 @@ import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 
 type Invoice = {
   id: string
+  business_id: string
   invoice_number: string
   issue_date: string
   due_date: string | null
@@ -792,6 +793,7 @@ Thank you.`
 
       {showSendModal && invoice && (
         <SendInvoiceModal
+          businessId={invoice.business_id}
           invoice={{
             ...invoice,
             public_token: invoice.public_token || "",

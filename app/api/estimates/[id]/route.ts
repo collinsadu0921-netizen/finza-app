@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { requireBusinessScopeForUser } from "@/lib/business"
+import { requireBusinessScopeForUser, resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
@@ -32,7 +32,7 @@ export async function GET(
     }
 
     const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
-    const scope = await requireBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }

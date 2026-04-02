@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog, getIpAddress, getUserAgent } from "@/lib/auditLog"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
@@ -106,15 +106,23 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 403 })
-    }
-
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
     const { email, sendEmail, sendWhatsApp, copyLink, sendMethod } = body
 
-    // Verify invoice exists and belongs to session business only
+    const requestedBusinessId =
+      (typeof body.business_id === "string" && body.business_id.trim()) ||
+      new URL(request.url).searchParams.get("business_id") ||
+      undefined
+
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json(
+        { success: false, error: scope.error, message: scope.error },
+        { status: scope.status }
+      )
+    }
+
+    // Verify invoice exists and belongs to resolved workspace (server cannot read localStorage)
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
       .select(
@@ -145,7 +153,7 @@ export async function POST(
       `
       )
       .eq("id", invoiceId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .single()
 
     if (invoiceError || !invoice) {

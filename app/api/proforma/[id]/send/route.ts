@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 
 export async function POST(
@@ -27,17 +27,22 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const body = await request.json().catch(() => ({}))
+    const requestedBusinessId =
+      (typeof body.business_id === "string" && body.business_id.trim()) ||
+      new URL(request.url).searchParams.get("business_id") ||
+      undefined
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
-    // Fetch proforma and verify it belongs to this business
+    // Fetch proforma and verify it belongs to resolved workspace
     const { data: proforma, error: proformaError } = await supabase
       .from("proforma_invoices")
       .select("*")
       .eq("id", proformaId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .is("deleted_at", null)
       .single()
 
@@ -59,7 +64,7 @@ export async function POST(
     let proformaNumber = proforma.proforma_number
     if (!proformaNumber) {
       const { data: proformaNumData } = await supabase.rpc("generate_proforma_number", {
-        p_business_id: business.id,
+        p_business_id: scope.businessId,
       })
       proformaNumber = proformaNumData || null
       if (!proformaNumber) {
@@ -123,7 +128,7 @@ export async function POST(
 
     // Log audit entry
     await createAuditLog({
-      businessId: business.id,
+      businessId: scope.businessId,
       userId: user?.id || null,
       actionType: "proforma.sent",
       entityType: "proforma_invoice",
