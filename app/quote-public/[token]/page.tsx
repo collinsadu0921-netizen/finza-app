@@ -65,7 +65,7 @@ type Business = {
   logo_url: string | null
 }
 
-type Item = { id: string; description: string; quantity: number; price: number; total: number }
+type Item = { id: string; description: string; quantity: number; price: number; total: number; discount_amount?: number }
 
 const fmt = (sym: string, n: number) =>
   `${sym}${Number(n ?? 0).toFixed(2)}`
@@ -316,78 +316,114 @@ export default function QuotePublicPage() {
             <PublicBillToBlock customer={estimate.customers} />
 
             {/* Line items — table styling aligned with public invoice view */}
-            <div className="px-8 py-5 border-b border-gray-100">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3">
-                      Description
-                    </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-16">
-                      Qty
-                    </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
-                      Unit Price
-                    </th>
-                    <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="py-3 text-gray-800 font-medium">{item.description}</td>
-                      <td className="py-3 text-right text-gray-600 tabular-nums">{item.quantity}</td>
-                      <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.price)}</td>
-                      <td className="py-3 text-right text-gray-800 font-medium tabular-nums">{fmt(sym, item.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {(() => {
+              const hasDiscounts = items.some(item => Number(item.discount_amount || 0) > 0)
+              return (
+                <div className="px-8 py-5 border-b border-gray-100">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3">
+                          Description
+                        </th>
+                        <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-16">
+                          Qty
+                        </th>
+                        <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
+                          Unit Price
+                        </th>
+                        {hasDiscounts && (
+                          <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-24">
+                            Discount
+                          </th>
+                        )}
+                        <th className="text-right py-2 text-xs font-semibold uppercase tracking-wide text-gray-400 pb-3 w-28">
+                          Total
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {items.map((item) => (
+                        <tr key={item.id}>
+                          <td className="py-3 text-gray-800 font-medium break-words">{item.description}</td>
+                          <td className="py-3 text-right text-gray-600 tabular-nums">{item.quantity}</td>
+                          <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.price)}</td>
+                          {hasDiscounts && (
+                            <td className="py-3 text-right tabular-nums text-rose-500">
+                              {Number(item.discount_amount || 0) > 0 ? `−${fmt(sym, item.discount_amount!)}` : "—"}
+                            </td>
+                          )}
+                          <td className="py-3 text-right text-gray-800 font-medium tabular-nums">{fmt(sym, item.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
 
             {/* Totals */}
-            <div className="px-8 py-5 border-b border-gray-100">
-              <div className="max-w-xs ml-auto space-y-1.5 text-sm">
-                  <div className="flex justify-between text-gray-600">
-                    <span>Subtotal</span>
-                    <span className="tabular-nums font-medium">{fmt(sym, estimate.subtotal)}</span>
-                  </div>
-                  {estimate.apply_taxes && estimate.total_tax_amount > 0 && (
-                    <>
-                      {estimate.nhil_amount > 0 && (
-                        <div className="flex justify-between text-gray-500">
-                          <span>NHIL (2.5%)</span>
-                          <span className="tabular-nums">{fmt(sym, estimate.nhil_amount)}</span>
-                        </div>
-                      )}
-                      {estimate.getfund_amount > 0 && (
-                        <div className="flex justify-between text-gray-500">
-                          <span>GETFund (2.5%)</span>
-                          <span className="tabular-nums">{fmt(sym, estimate.getfund_amount)}</span>
-                        </div>
-                      )}
-                      {estimate.covid_amount > 0 && (
-                        <div className="flex justify-between text-gray-500">
-                          <span>COVID Levy (1%)</span>
-                          <span className="tabular-nums">{fmt(sym, estimate.covid_amount)}</span>
-                        </div>
-                      )}
-                      {estimate.vat_amount > 0 && (
-                        <div className="flex justify-between text-gray-500">
-                          <span>VAT (15%)</span>
-                          <span className="tabular-nums">{fmt(sym, estimate.vat_amount)}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
-                    <span className="font-bold text-gray-900 text-base">Total</span>
-                    <span className="font-bold text-gray-900 text-lg tabular-nums">{fmt(sym, estimate.total_amount)}</span>
+            {(() => {
+              const totalDiscount = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
+
+              // Build tax lines to display: prefer tax_lines (new engine), fall back to legacy fields
+              const taxLinesToShow: { key: string; label: string; amount: number }[] = []
+              if (estimate.apply_taxes && estimate.total_tax_amount > 0) {
+                const parsedLines = Array.isArray(estimate.tax_lines)
+                  ? estimate.tax_lines
+                  : typeof estimate.tax_lines === "string"
+                  ? (() => { try { return JSON.parse(estimate.tax_lines) } catch { return null } })()
+                  : null
+
+                if (parsedLines && parsedLines.length > 0) {
+                  // New tax engine — use tax_lines, skip COVID
+                  parsedLines
+                    .filter((l: any) => Number(l.amount) > 0 && String(l.code).toUpperCase() !== "COVID")
+                    .forEach((l: any) =>
+                      taxLinesToShow.push({ key: l.code, label: l.name || l.code, amount: Number(l.amount) })
+                    )
+                } else {
+                  // Legacy individual fields
+                  if (estimate.nhil_amount > 0) taxLinesToShow.push({ key: "nhil", label: "NHIL (2.5%)", amount: estimate.nhil_amount })
+                  if (estimate.getfund_amount > 0) taxLinesToShow.push({ key: "getfund", label: "GETFund (2.5%)", amount: estimate.getfund_amount })
+                  if (estimate.covid_amount > 0) taxLinesToShow.push({ key: "covid", label: "COVID Levy (1%)", amount: estimate.covid_amount })
+                  if (estimate.vat_amount > 0) taxLinesToShow.push({ key: "vat", label: "VAT (15%)", amount: estimate.vat_amount })
+                }
+              }
+
+              return (
+                <div className="px-8 py-5 border-b border-gray-100">
+                  <div className="max-w-xs ml-auto space-y-1.5 text-sm">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Subtotal</span>
+                      <span className="tabular-nums font-medium">{fmt(sym, estimate.subtotal)}</span>
+                    </div>
+                    {totalDiscount > 0 && (
+                      <div className="flex justify-between text-rose-600">
+                        <span>Discount</span>
+                        <span className="tabular-nums">−{fmt(sym, totalDiscount)}</span>
+                      </div>
+                    )}
+                    {taxLinesToShow.map((line) => (
+                      <div key={line.key} className="flex justify-between text-gray-500">
+                        <span>{line.label}</span>
+                        <span className="tabular-nums">{fmt(sym, line.amount)}</span>
+                      </div>
+                    ))}
+                    {taxLinesToShow.length > 1 && (
+                      <div className="flex justify-between text-gray-500">
+                        <span>Total Tax</span>
+                        <span className="tabular-nums">{fmt(sym, estimate.total_tax_amount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
+                      <span className="font-bold text-gray-900 text-base">Total</span>
+                      <span className="font-bold text-gray-900 text-lg tabular-nums">{fmt(sym, estimate.total_amount)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )
+            })()}
 
               {/* Notes */}
               {estimate.notes && (
