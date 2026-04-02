@@ -173,7 +173,8 @@
       "Bash(find /c/projects/finza-web/finza-web -name *migrations* -o -name *schema* -o -name supabase.json)",
       "Bash(grep -n \"invoice_id\\\\|proforma_invoice\" /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
       "Bash(grep -n \"TODO\\\\|FIXME\\\\|BUG\\\\|XXX\\\\|HACK\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
-      "Bash(grep -E \"fetch\\\\\\(|\\\\.from\\\\\\(\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)"
+      "Bash(grep -E \"fetch\\\\\\(|\\\\.from\\\\\\(\" /c/projects/finza-web/finza-web/app/service/jobs/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/new/page.tsx /c/projects/finza-web/finza-web/app/service/jobs/[id]/page.tsx)",
+      "Bash(ls -la /c/projects/finza-web/finza-web/app/api/estimates/[id]/)"
     ]
   }
 }

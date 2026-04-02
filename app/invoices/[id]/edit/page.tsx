@@ -160,14 +160,14 @@ export default function InvoiceEditPage() {
         setLoading(false)
         return
       }
-      activeBusinessId = business.id
-      setBusinessId(activeBusinessId)
-      
+      const tenantBusinessId = business.id
+      setBusinessId(tenantBusinessId)
+
       // Load business country and currency for tax calculation
       const { data: businessDetails } = await supabase
         .from("businesses")
         .select("address_country, default_currency")
-        .eq("id", activeBusinessId)
+        .eq("id", tenantBusinessId)
         .single()
       setBusinessCountry(businessDetails?.address_country || null)
       
@@ -187,7 +187,7 @@ export default function InvoiceEditPage() {
 
       // Load invoice data
       const response = await fetch(
-        `/api/invoices/${invoiceId}?business_id=${encodeURIComponent(activeBusinessId)}`
+        `/api/invoices/${invoiceId}?business_id=${encodeURIComponent(tenantBusinessId)}`
       )
       if (!response.ok) {
         const errorData = await response.json()
@@ -206,7 +206,7 @@ export default function InvoiceEditPage() {
         setLoading(false)
         // Redirect to view page after a short delay
         setTimeout(() => {
-          router.push(buildServiceRoute(`/service/invoices/${invoiceId}/view`, activeBusinessId))
+          router.push(buildServiceRoute(`/service/invoices/${invoiceId}/view`, tenantBusinessId))
         }, 3000)
         return
       }
@@ -226,7 +226,7 @@ export default function InvoiceEditPage() {
       const { data: productsData, error: psError } = await supabase
         .from("products_services")
         .select("id, name, unit_price")
-        .eq("business_id", activeBusinessId)
+        .eq("business_id", tenantBusinessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
 
@@ -236,7 +236,7 @@ export default function InvoiceEditPage() {
         const { data: fallbackProducts } = await supabase
           .from("products")
           .select("id, name, price")
-          .eq("business_id", activeBusinessId)
+          .eq("business_id", tenantBusinessId)
           .order("name", { ascending: true })
 
         if (fallbackProducts) {
@@ -261,7 +261,7 @@ export default function InvoiceEditPage() {
         const { data: canonicalItemsRows } = await supabase
           .from("items")
           .select("id, business_id, name, type, source_table, source_id")
-          .eq("business_id", activeBusinessId)
+          .eq("business_id", tenantBusinessId)
           .eq("source_table", "products_services")
         const canonicalBySourceId = new Map(
           (canonicalItemsRows ?? []).map((r: any) => [r.source_id, r])
@@ -271,7 +271,7 @@ export default function InvoiceEditPage() {
           console.warn("[items shadow] Count mismatch:", {
             legacy: mappedProducts.length,
             canonical: canonicalItemsRows?.length ?? 0,
-            business_id: activeBusinessId,
+            business_id: tenantBusinessId,
           })
         }
         for (const p of mappedProducts) {
@@ -293,7 +293,7 @@ export default function InvoiceEditPage() {
       const { data: customersData } = await supabase
         .from("customers")
         .select("id, name")
-        .eq("business_id", activeBusinessId)
+        .eq("business_id", tenantBusinessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
 

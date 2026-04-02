@@ -40,7 +40,11 @@ export async function POST(
         { status: 400 }
       )
     }
-    const { sendEmail, sendWhatsApp, copyLink, business_id: bodyBusinessId } = body
+    const bodyBusinessId =
+      typeof body.business_id === "string" ? body.business_id : undefined
+    const sendWhatsApp = body.sendWhatsApp === true
+    const sendEmail = body.sendEmail === true
+    const copyLink = body.copyLink === true
 
     const scope = await requireBusinessScopeForUser(supabase, user.id, bodyBusinessId)
     if (!scope.ok) {

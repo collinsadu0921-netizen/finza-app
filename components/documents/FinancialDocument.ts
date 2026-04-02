@@ -310,7 +310,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         border-bottom: 1px solid #e2e8f0;
       }
       .header-brand { flex-shrink: 0; }
-      .header-info { flex: 1; }
+      .header-info { flex: 1; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
       .header-doc { text-align: right; flex-shrink: 0; }
       .logo {
         max-width: 200px;
@@ -391,8 +391,11 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         border-bottom: 1px solid #f1f5f9;
         font-size: 14px;
         color: #334155;
+        word-break: break-word;
+        overflow-wrap: break-word;
       }
       td.text-right { text-align: right; }
+      td.desc-col { max-width: 0; } /* forces break-word to kick in within colgroup width */
       .totals-wrap {
         margin-left: auto;
         width: 320px;
@@ -484,6 +487,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       </div>
 
       <table>
+        <colgroup>
+          <col style="width:52%" />
+          <col style="width:10%" />
+          <col style="width:19%" />
+          <col style="width:19%" />
+        </colgroup>
         <thead>
           <tr>
             <th>Description</th>
@@ -497,7 +506,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
             .map(
               (item) => `
             <tr>
-              <td>${item.description}</td>
+              <td class="desc-col">${item.description}</td>
               <td class="text-right">${item.qty}</td>
               <td class="text-right">${currency_symbol} ${item.unitPrice.toFixed(2)}</td>
               <td class="text-right">${currency_symbol} ${item.lineTotal.toFixed(2)}</td>

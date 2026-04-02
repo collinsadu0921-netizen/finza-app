@@ -137,7 +137,14 @@ export async function GET(
       home_currency_total: estimate.home_currency_total ?? null,
     })
 
-    return new NextResponse(html, {
+    // Inject auto-print script so the browser's Print / Save as PDF dialog fires
+    // immediately when the tab opens — this is what makes "Download / Print PDF" work.
+    const printableHtml = html.replace(
+      "</body>",
+      `<script>window.onload = function() { window.print(); }</script></body>`
+    )
+
+    return new NextResponse(printableHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Content-Disposition": `inline; filename="quote-${estimate.estimate_number || estimate.id}.html"`,
