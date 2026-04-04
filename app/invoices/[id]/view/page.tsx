@@ -22,6 +22,7 @@ import { formatMoney } from "@/lib/money"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
+import { downloadInvoiceHtmlDocument } from "@/lib/invoices/downloadInvoiceHtmlClient"
 
 type Invoice = {
   id: string
@@ -128,6 +129,7 @@ export default function InvoiceViewPage() {
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
   const [showSendModal, setShowSendModal] = useState(false)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
+  const [downloadDocLoading, setDownloadDocLoading] = useState(false)
   const [sendMethod, setSendMethod] = useState<SendMethod>("whatsapp")
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [hasCheckedSendParam, setHasCheckedSendParam] = useState(false)
@@ -379,6 +381,25 @@ Thank you.`
     .reduce((sum, cn) => sum + Number(cn.total), 0)
   const remainingBalance = Number(invoice?.total || 0) - totalPaid - totalCredits
 
+  const handleDownloadInvoiceDocument = useCallback(async () => {
+    if (!invoice) return
+    try {
+      setDownloadDocLoading(true)
+      await downloadInvoiceHtmlDocument(
+        invoiceId,
+        invoice.invoice_number,
+        resolvedBusinessId
+      )
+    } catch (err: any) {
+      setToast({
+        message: err?.message || "Could not download invoice document.",
+        type: "error",
+      })
+    } finally {
+      setDownloadDocLoading(false)
+    }
+  }, [invoice, invoiceId, resolvedBusinessId])
+
   return (
     <Wrapper>
       <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 pb-20">
@@ -404,7 +425,7 @@ Thank you.`
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
-                  Invoice #{invoice.invoice_number}
+                  Invoice #{invoice.invoice_number || "Draft"}
                 </h1>
                 <StatusBadge status={invoice.status} className="text-sm px-3 py-1" />
               </div>
@@ -433,11 +454,24 @@ Thank you.`
               )}
 
               <button
+                type="button"
                 onClick={() => setShowPreviewModal(true)}
                 className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2"
               >
                 <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                 View PDF
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadInvoiceDocument}
+                disabled={downloadDocLoading}
+                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                {downloadDocLoading ? "Downloading…" : "Download"}
               </button>
 
               {/* Conditional Primary Action */}
@@ -786,6 +820,8 @@ Thank you.`
       {showPreviewModal && invoice && (
         <InvoicePreviewModal
           invoiceId={invoiceId}
+          invoiceNumber={invoice.invoice_number}
+          businessId={resolvedBusinessId}
           isOpen={showPreviewModal}
           onClose={() => setShowPreviewModal(false)}
         />

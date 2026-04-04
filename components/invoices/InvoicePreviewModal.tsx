@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { downloadInvoiceHtmlDocument } from "@/lib/invoices/downloadInvoiceHtmlClient"
 
 interface InvoicePreviewModalProps {
   invoiceId: string
@@ -8,6 +9,9 @@ interface InvoicePreviewModalProps {
   onClose: () => void
   onError?: (message: string) => void
   previewData?: any // Optional preview data for unsaved invoices
+  /** For download filename; optional when invoice has no number yet (draft). */
+  invoiceNumber?: string | null
+  businessId?: string | null
 }
 
 export default function InvoicePreviewModal({
@@ -16,12 +20,16 @@ export default function InvoicePreviewModal({
   onClose,
   onError,
   previewData,
+  invoiceNumber,
+  businessId,
 }: InvoicePreviewModalProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [previewUrl, setPreviewUrl] = useState<string>("")
+  const [downloadLoading, setDownloadLoading] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const isDraftPreview = Boolean(previewData || invoiceId === "preview")
+  const canDownloadSaved = !isDraftPreview && Boolean(invoiceId) && invoiceId !== "preview"
 
   useEffect(() => {
     if (!isOpen) return
@@ -147,6 +155,20 @@ export default function InvoicePreviewModal({
     }
   }
 
+  const handleDownload = async () => {
+    if (!canDownloadSaved) return
+    try {
+      setDownloadLoading(true)
+      await downloadInvoiceHtmlDocument(invoiceId, invoiceNumber ?? null, businessId)
+    } catch (e: any) {
+      const msg = e?.message || "Download failed"
+      setError(msg)
+      if (onError) onError(msg)
+    } finally {
+      setDownloadLoading(false)
+    }
+  }
+
   if (!isOpen) return null
 
   if (error && error.includes("not found")) {
@@ -238,9 +260,20 @@ export default function InvoicePreviewModal({
           )}
         </div>
 
-        {/* Footer - Close Button Only */}
-        <div className="flex items-center justify-end p-6 border-t border-gray-200 bg-gray-50">
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+          {canDownloadSaved && (
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={downloadLoading || Boolean(error)}
+              className="px-6 py-2 bg-white border border-gray-300 text-gray-800 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {downloadLoading ? "Downloading…" : "Download"}
+            </button>
+          )}
           <button
+            type="button"
             onClick={onClose}
             className="px-6 py-2 bg-gray-600 text-white rounded-lg font-medium hover:bg-gray-700 transition-colors"
           >

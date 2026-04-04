@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { generateFinancialDocumentHTML, type BusinessInfo, type CustomerInfo, type DocumentItem, type DocumentMeta, type DocumentTotals } from "@/components/documents/FinancialDocument"
 import { jsonbToTaxResult } from "@/lib/taxEngine/helpers"
+import { buildInvoiceHtmlAttachmentDisposition } from "@/lib/invoices/invoiceDocumentAttachment"
+
+function wantsDownloadAttachment(request: NextRequest): boolean {
+  const v = request.nextUrl.searchParams.get("download")
+  return v === "1" || v === "true" || v === "yes"
+}
 
 export async function GET(
   request: NextRequest,
@@ -125,7 +131,7 @@ export async function GET(
     }
 
     const documentMeta: DocumentMeta = {
-      document_number: invoice.invoice_number,
+      document_number: invoice.invoice_number || "DRAFT",
       issue_date: invoice.issue_date,
       due_date: invoice.due_date || null,
       status: invoice.status || null,
@@ -168,13 +174,20 @@ export async function GET(
       home_currency_total: invoice.home_currency_total ?? null,
     })
 
-    // Return HTML for preview
-    // TODO: In the future, this should generate actual PDF and return as application/pdf with inline disposition
-    return new NextResponse(htmlPreview, {
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-      },
-    })
+    const headers: Record<string, string> = {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    }
+
+    if (wantsDownloadAttachment(request)) {
+      const { contentDisposition } = buildInvoiceHtmlAttachmentDisposition(
+        invoice.invoice_number,
+        invoice.id
+      )
+      headers["Content-Disposition"] = contentDisposition
+    }
+
+    return new NextResponse(htmlPreview, { headers })
   } catch (error: any) {
     console.error("Error generating preview:", error)
     return NextResponse.json(
