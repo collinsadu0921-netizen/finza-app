@@ -1226,6 +1226,7 @@ export default function InvoiceEditPage() {
                 <SendMethodDropdown
                   value={sendMethod}
                   onChange={setSendMethod}
+                  showIssueAndDownloadOption
                 />
                 <button
                   type="button"
@@ -1370,7 +1371,6 @@ export default function InvoiceEditPage() {
             onClose={() => setShowSendModal(false)}
             onSuccess={() => {
               setShowSendModal(false)
-              // Reload invoice to get updated status
               loadData()
             }}
           />

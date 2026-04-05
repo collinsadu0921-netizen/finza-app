@@ -212,6 +212,10 @@ export default function SendOrderConfirmationModal({
         case "link":
           await handleCopyLink()
           return // handleCopyLink already calls onSuccess/onClose
+        case "download":
+          // Not offered in order UI; fallback for type safety
+          await handleSendWhatsApp()
+          break
         default:
           await handleSendWhatsApp()
       }

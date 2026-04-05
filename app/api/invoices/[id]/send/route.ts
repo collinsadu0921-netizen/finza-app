@@ -108,6 +108,7 @@ export async function POST(
 
     const body = await request.json().catch(() => ({}))
     const { email, sendEmail, sendWhatsApp, copyLink, sendMethod } = body
+    const issueAndDownload = body.issueAndDownload === true
 
     const requestedBusinessId =
       (typeof body.business_id === "string" && body.business_id.trim()) ||
@@ -187,7 +188,7 @@ export async function POST(
 
     // Ensure public_token when needed (avoid /invoice-public/undefined)
     let effectivePublicToken = invoice.public_token ?? null
-    if ((sendWhatsApp || copyLink || sendEmail) && !effectivePublicToken) {
+    if ((sendWhatsApp || copyLink || sendEmail || issueAndDownload) && !effectivePublicToken) {
       // Prefer DB token generator, but fall back to local token to avoid blocking send/link.
       let tokenData: string | null = null
       try {
@@ -459,6 +460,83 @@ export async function POST(
         success: true,
         invoice: updatedInvoice,
         message: "Invoice sent via email",
+      })
+    }
+
+    /** Issue invoice (sent + number + ledger) so the user can download an official document — same transition as email/WhatsApp. */
+    if (issueAndDownload) {
+      if (invoice.status !== "draft") {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "This invoice is already issued. Use Download on the invoice page to save a copy.",
+            message: "Already issued",
+          },
+          { status: 400 }
+        )
+      }
+
+      const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
+      if (bootstrapErr) {
+        return NextResponse.json(
+          { success: false, error: bootstrapErr, message: bootstrapErr },
+          { status: 500 }
+        )
+      }
+      const { ready: accountingReady } = await checkAccountingReadiness(supabase, invoice.business_id)
+      if (!accountingReady) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "Accounting is not set up for this business. Please complete accounting setup before sending invoices.",
+            message: "Accounting not ready",
+          },
+          { status: 400 }
+        )
+      }
+
+      const { data: updatedInvoice, error: transitionError } = await performSendTransition(
+        supabase,
+        invoiceId,
+        invoice,
+        sendMethod || "download"
+      )
+      if (transitionError || !updatedInvoice) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: transitionError?.message ?? "We couldn't issue the invoice. Please try again.",
+            message: transitionError?.message ?? "Update failed",
+          },
+          { status: 500 }
+        )
+      }
+
+      try {
+        await createAuditLog({
+          businessId: invoice.business_id || "00000000-0000-0000-0000-000000000000",
+          userId: user?.id || "00000000-0000-0000-0000-000000000000",
+          actionType: "invoice.issued_download",
+          entityType: "invoice",
+          entityId: invoiceId,
+          newValues: {
+            invoice_number: updatedInvoice.invoice_number ?? invoice.invoice_number,
+            sent_via_method: sendMethod || "download",
+          },
+          ipAddress: getIpAddress(request),
+          userAgent: getUserAgent(request),
+          description: "Invoice issued via Issue & download (marked sent, invoice number assigned)",
+        })
+      } catch (auditError) {
+        console.error("Error logging audit:", auditError)
+      }
+
+      return NextResponse.json({
+        success: true,
+        invoice: updatedInvoice,
+        message: "Invoice issued",
       })
     }
 

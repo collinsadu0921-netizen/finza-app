@@ -226,12 +226,21 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
 
   const showTaxBreakdown = taxLines.length > 0
 
-  // Format items for display (discount column + correct net line total)
+  // Format items for display (discount column + correct net line total).
+  // Use nullish coalescing so line_subtotal of 0 (fully discounted line) is preserved.
   const formattedItems = items.map((item) => {
     const qty = item.qty || item.quantity || 0
     const unitPrice = item.unit_price || item.price || 0
     const discount = Number(item.discount_amount) || 0
-    const lineTotal = item.line_subtotal || item.line_total || item.total || qty * unitPrice - discount
+    const computedNet = qty * unitPrice - discount
+    const lineTotal =
+      item.line_subtotal != null && item.line_subtotal !== ""
+        ? Number(item.line_subtotal)
+        : item.line_total != null && item.line_total !== ""
+          ? Number(item.line_total)
+          : item.total != null && item.total !== ""
+            ? Number(item.total)
+            : computedNet
     return {
       description: item.description || "Item",
       qty,
@@ -254,30 +263,8 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   const customerName = customer.name || "Customer"
 
   // Slate palette (matches create invoice page): slate-50 #f8fafc, slate-100 #f1f5f9, slate-200 #e2e8f0, slate-500 #64748b, slate-600 #475569, slate-700 #334155, slate-900 #0f172a
-  const statusBadgeHtml =
-    documentType === "invoice" && meta.status
-      ? (() => {
-          const s = (meta.status || "").toLowerCase()
-          const label = s === "paid" ? "Paid" : s === "overdue" ? "Overdue" : s === "sent" ? "Sent" : "Unpaid"
-          const bg =
-            s === "paid"
-              ? "#d1fae9"
-              : s === "overdue"
-                ? "#ffe4e6"
-                : s === "sent"
-                  ? "#dbeafe"
-                  : "#fef3c7"
-          const text =
-            s === "paid"
-              ? "#065f46"
-              : s === "overdue"
-                ? "#9f1239"
-                : s === "sent"
-                  ? "#1e40af"
-                  : "#92400e"
-          return `<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:12px;font-weight:600;background:${bg};color:${text}">${label}</span>`
-        })()
-      : ""
+  // Invoice PDFs omit workflow status (Sent/Paid/etc.); the app UI shows payment state.
+  const statusBadgeHtml = ""
 
   return `
 <!DOCTYPE html>

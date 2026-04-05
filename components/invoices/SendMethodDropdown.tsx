@@ -2,18 +2,21 @@
 
 import { useState } from "react"
 
-export type SendMethod = "whatsapp" | "email" | "both" | "link"
+export type SendMethod = "whatsapp" | "email" | "both" | "link" | "download"
 
 interface SendMethodDropdownProps {
   value: SendMethod
   onChange: (method: SendMethod) => void
   className?: string
+  /** When true, adds "Issue & download" (invoice only — issues document then saves file). */
+  showIssueAndDownloadOption?: boolean
 }
 
 export default function SendMethodDropdown({
   value,
   onChange,
   className = "",
+  showIssueAndDownloadOption = false,
 }: SendMethodDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -27,12 +30,14 @@ export default function SendMethodDropdown({
         return "Both"
       case "link":
         return "Link Only"
+      case "download":
+        return "Issue & download"
       default:
         return "WhatsApp"
     }
   }
 
-  const methods: { value: SendMethod; label: string; icon: JSX.Element }[] = [
+  const baseMethods: { value: SendMethod; label: string; icon: JSX.Element }[] = [
     {
       value: "whatsapp",
       label: "WhatsApp",
@@ -70,6 +75,26 @@ export default function SendMethodDropdown({
       ),
     },
   ]
+
+  const methods = showIssueAndDownloadOption
+    ? [
+        ...baseMethods,
+        {
+          value: "download" as const,
+          label: "Issue & download",
+          icon: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+          ),
+        },
+      ]
+    : baseMethods
 
   return (
     <div className={`relative ${className}`}>

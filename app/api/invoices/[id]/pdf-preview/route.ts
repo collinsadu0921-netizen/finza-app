@@ -93,14 +93,23 @@ export async function GET(
       address: invoice.customers?.address,
     }
 
-    const documentItems: DocumentItem[] = (invoice.invoice_items || []).map((item: any) => ({
-      id: item.id,
-      description: item.description || "Item",
-      qty: item.qty || 0,
-      unit_price: item.unit_price || 0,
-      discount_amount: Number(item.discount_amount) || 0,
-      line_subtotal: item.line_subtotal || 0,
-    }))
+    const documentItems: DocumentItem[] = (invoice.invoice_items || []).map((item: any) => {
+      const qty = Number(item.qty) || 0
+      const unitPrice = Number(item.unit_price) || 0
+      const discount = Number(item.discount_amount) || 0
+      const stored =
+        item.line_subtotal != null && item.line_subtotal !== ""
+          ? Number(item.line_subtotal)
+          : undefined
+      return {
+        id: item.id,
+        description: item.description || "Item",
+        qty,
+        unit_price: unitPrice,
+        discount_amount: discount,
+        ...(stored !== undefined ? { line_subtotal: stored } : {}),
+      }
+    })
 
     // Parse tax_lines from stored JSONB if available (preferred source of truth)
     const storedTaxResult = invoice.tax_lines ? jsonbToTaxResult(invoice.tax_lines) : null
@@ -134,7 +143,6 @@ export async function GET(
       document_number: invoice.invoice_number || "DRAFT",
       issue_date: invoice.issue_date,
       due_date: invoice.due_date || null,
-      status: invoice.status || null,
       public_token: invoice.public_token || null,
     }
 

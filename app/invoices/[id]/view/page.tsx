@@ -372,17 +372,15 @@ Thank you.`
     )
   }
 
-  if (!invoice) return null
-
-  // Derived financials
+  // Derived financials (invoice is defined: error/loading paths returned above)
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0)
   const totalCredits = creditNotes
     .filter((cn) => cn.status === "applied")
     .reduce((sum, cn) => sum + Number(cn.total), 0)
-  const remainingBalance = Number(invoice?.total || 0) - totalPaid - totalCredits
+  const remainingBalance = Number(invoice.total || 0) - totalPaid - totalCredits
 
-  const handleDownloadInvoiceDocument = useCallback(async () => {
-    if (!invoice) return
+  // Not useCallback: hooks must not run after conditional returns above.
+  const handleDownloadInvoiceDocument = async () => {
     try {
       setDownloadDocLoading(true)
       await downloadInvoiceHtmlDocument(
@@ -398,7 +396,7 @@ Thank you.`
     } finally {
       setDownloadDocLoading(false)
     }
-  }, [invoice, invoiceId, resolvedBusinessId])
+  }
 
   return (
     <Wrapper>
@@ -462,17 +460,19 @@ Thank you.`
                 View PDF
               </button>
 
-              <button
-                type="button"
-                onClick={handleDownloadInvoiceDocument}
-                disabled={downloadDocLoading}
-                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                {downloadDocLoading ? "Downloading…" : "Download"}
-              </button>
+              {invoice.status !== "draft" && (
+                <button
+                  type="button"
+                  onClick={handleDownloadInvoiceDocument}
+                  disabled={downloadDocLoading}
+                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {downloadDocLoading ? "Downloading…" : "Download"}
+                </button>
+              )}
 
               {/* Conditional Primary Action */}
               {invoice.status === "draft" ? (
@@ -482,6 +482,7 @@ Thank you.`
                     value={sendMethod}
                     onChange={setSendMethod}
                     className="rounded-r-none border-r-0"
+                    showIssueAndDownloadOption
                   />
                   <button
                     onClick={() => setShowSendModal(true)}
@@ -602,7 +603,12 @@ Thank you.`
                               : "—"}
                           </td>
                           <td className="px-6 py-4 text-right font-medium text-slate-900 dark:text-white">
-                            {formatMoney(Number(item.line_subtotal ?? item.qty * item.unit_price), invoice.currency_code)}
+                            {formatMoney(
+                              item.line_subtotal != null && item.line_subtotal !== ""
+                                ? Number(item.line_subtotal)
+                                : Number(item.qty) * Number(item.unit_price) - Number(item.discount_amount || 0),
+                              invoice.currency_code
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -822,6 +828,7 @@ Thank you.`
           invoiceId={invoiceId}
           invoiceNumber={invoice.invoice_number}
           businessId={resolvedBusinessId}
+          invoiceStatus={invoice.status}
           isOpen={showPreviewModal}
           onClose={() => setShowPreviewModal(false)}
         />
@@ -843,9 +850,14 @@ Thank you.`
           invoiceId={invoiceId}
           defaultMethod={sendMethod}
           onClose={() => setShowSendModal(false)}
-          onSuccess={() => {
+          onSuccess={(opts) => {
             setShowSendModal(false)
-            setToast({ message: "Invoice sent successfully!", type: "success" })
+            setToast({
+              message: opts?.issuedViaDownload
+                ? "Invoice issued — document downloaded."
+                : "Invoice sent successfully!",
+              type: "success",
+            })
             setTimeout(() => {
               loadInvoice()
             }, 500)

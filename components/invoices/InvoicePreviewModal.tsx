@@ -12,6 +12,8 @@ interface InvoicePreviewModalProps {
   /** For download filename; optional when invoice has no number yet (draft). */
   invoiceNumber?: string | null
   businessId?: string | null
+  /** When "draft", file download is only available after Issue & download from Send — not from preview. */
+  invoiceStatus?: string | null
 }
 
 export default function InvoicePreviewModal({
@@ -22,6 +24,7 @@ export default function InvoicePreviewModal({
   previewData,
   invoiceNumber,
   businessId,
+  invoiceStatus,
 }: InvoicePreviewModalProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -29,7 +32,11 @@ export default function InvoicePreviewModal({
   const [downloadLoading, setDownloadLoading] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const isDraftPreview = Boolean(previewData || invoiceId === "preview")
-  const canDownloadSaved = !isDraftPreview && Boolean(invoiceId) && invoiceId !== "preview"
+  const canDownloadSaved =
+    !isDraftPreview &&
+    Boolean(invoiceId) &&
+    invoiceId !== "preview" &&
+    invoiceStatus !== "draft"
 
   useEffect(() => {
     if (!isOpen) return

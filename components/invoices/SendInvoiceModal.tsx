@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import SendMethodDropdown, { SendMethod } from "./SendMethodDropdown"
 import { normalizePhoneForWaMe } from "@/lib/communication/whatsappLink"
+import { downloadInvoiceHtmlDocument } from "@/lib/invoices/downloadInvoiceHtmlClient"
 
 type Invoice = {
   id: string
@@ -40,7 +41,7 @@ export default function SendInvoiceModal({
   /** Workspace that owns the invoice — required on server (no localStorage). Omit only for legacy single-tenant. */
   businessId?: string | null
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (opts?: { issuedViaDownload?: boolean }) => void
   defaultMethod?: SendMethod
 }) {
   const [loading, setLoading] = useState(false)
@@ -209,6 +210,39 @@ export default function SendInvoiceModal({
     }
   }
 
+  /** Marks invoice sent (number + ledger), then downloads the HTML document — draft-only on server. */
+  const handleIssueAndDownload = async () => {
+    setError("")
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/invoices/${invoiceId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: sendPayload(resolvedBusinessId, {
+          issueAndDownload: true,
+          sendMethod: "download",
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.message || "Could not issue the invoice. Check accounting setup and try again."
+        )
+      }
+      const inv = data.invoice
+      await downloadInvoiceHtmlDocument(
+        invoiceId,
+        inv?.invoice_number ?? null,
+        resolvedBusinessId
+      )
+      onSuccess({ issuedViaDownload: true })
+    } catch (err: any) {
+      setError(err.message || "Could not issue and download the invoice.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(publicInvoiceUrl)
@@ -255,6 +289,11 @@ export default function SendInvoiceModal({
 
       if (sendMethod === "link") {
         await handleCopyLink()
+        return
+      }
+
+      if (sendMethod === "download") {
+        await handleIssueAndDownload()
         return
       }
 
@@ -380,17 +419,27 @@ export default function SendInvoiceModal({
               value={sendMethod}
               onChange={setSendMethod}
               className="flex-1"
+              showIssueAndDownloadOption
             />
             <button
               onClick={handleSendInvoice}
               disabled={
                 !!waOpenLinkUrl ||
                 loading ||
-                (sendMethod !== "link" && sendMethod !== "whatsapp" && !email)
+                (sendMethod !== "link" &&
+                  sendMethod !== "whatsapp" &&
+                  sendMethod !== "download" &&
+                  !email)
               }
               className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 font-medium shadow-lg transition-all"
             >
-              {loading ? "Sending..." : "Send Invoice"}
+              {loading
+                ? sendMethod === "download"
+                  ? "Issuing…"
+                  : "Sending..."
+                : sendMethod === "download"
+                  ? "Issue & download"
+                  : "Send Invoice"}
             </button>
           </div>
 
@@ -425,6 +474,13 @@ export default function SendInvoiceModal({
           {sendMethod === "both" && !invoice.customers?.phone && !invoice.customers?.whatsapp_phone && (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 px-4 py-3 rounded text-sm">
               Customer phone number is not available for WhatsApp. Email will still be sent.
+            </div>
+          )}
+
+          {sendMethod === "download" && (
+            <div className="bg-slate-50 border border-slate-200 text-slate-700 px-4 py-3 rounded-lg text-sm">
+              This will <strong>issue the invoice</strong> (assign an invoice number, mark as sent, and post to your
+              books like other send methods), then download the document to share with your client.
             </div>
           )}
 

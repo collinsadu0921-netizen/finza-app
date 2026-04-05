@@ -92,14 +92,23 @@ export async function GET(
         }
       : { name: "Customer" }
 
-    const documentItems: DocumentItem[] = (items || []).map((item: any) => ({
-      id: item.id,
-      description: item.description || "Item",
-      qty: Number(item.qty || 0),
-      unit_price: Number(item.unit_price || 0),
-      discount_amount: Number(item.discount_amount) || 0,
-      line_subtotal: Number(item.line_subtotal || 0),
-    }))
+    const documentItems: DocumentItem[] = (items || []).map((item: any) => {
+      const qty = Number(item.qty) || 0
+      const unitPrice = Number(item.unit_price) || 0
+      const discount = Number(item.discount_amount) || 0
+      const stored =
+        item.line_subtotal != null && item.line_subtotal !== ""
+          ? Number(item.line_subtotal)
+          : undefined
+      return {
+        id: item.id,
+        description: item.description || "Item",
+        qty,
+        unit_price: unitPrice,
+        discount_amount: discount,
+        ...(stored !== undefined ? { line_subtotal: stored } : {}),
+      }
+    })
 
     const totals: DocumentTotals = {
       subtotal: Number(proforma.subtotal || 0),

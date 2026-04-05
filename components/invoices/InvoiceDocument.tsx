@@ -242,7 +242,13 @@ export function InvoiceDocument({
                       : "—"}
                   </td>
                   <td className="px-6 py-2.5 text-right font-medium text-slate-900 tabular-nums">
-                    {formatMoney(Number(item.line_subtotal ?? 0), invoice.currency_symbol)}
+                    {formatMoney(
+                      item.line_subtotal != null && item.line_subtotal !== ""
+                        ? Number(item.line_subtotal)
+                        : Number(item.qty ?? 0) * Number(item.unit_price ?? 0) -
+                            Number(item.discount_amount ?? 0),
+                      invoice.currency_symbol
+                    )}
                   </td>
                 </tr>
               ))
