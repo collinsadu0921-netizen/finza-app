@@ -604,7 +604,7 @@ Thank you.`
                           </td>
                           <td className="px-6 py-4 text-right font-medium text-slate-900 dark:text-white">
                             {formatMoney(
-                              item.line_subtotal != null && item.line_subtotal !== ""
+                              item.line_subtotal != null
                                 ? Number(item.line_subtotal)
                                 : Number(item.qty) * Number(item.unit_price) - Number(item.discount_amount || 0),
                               invoice.currency_code

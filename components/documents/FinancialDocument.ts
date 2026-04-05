@@ -234,11 +234,11 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     const discount = Number(item.discount_amount) || 0
     const computedNet = qty * unitPrice - discount
     const lineTotal =
-      item.line_subtotal != null && item.line_subtotal !== ""
+      item.line_subtotal != null
         ? Number(item.line_subtotal)
-        : item.line_total != null && item.line_total !== ""
+        : item.line_total != null
           ? Number(item.line_total)
-          : item.total != null && item.total !== ""
+          : item.total != null
             ? Number(item.total)
             : computedNet
     return {

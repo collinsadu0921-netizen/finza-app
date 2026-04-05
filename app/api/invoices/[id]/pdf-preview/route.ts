@@ -98,9 +98,7 @@ export async function GET(
       const unitPrice = Number(item.unit_price) || 0
       const discount = Number(item.discount_amount) || 0
       const stored =
-        item.line_subtotal != null && item.line_subtotal !== ""
-          ? Number(item.line_subtotal)
-          : undefined
+        item.line_subtotal != null ? Number(item.line_subtotal) : undefined
       return {
         id: item.id,
         description: item.description || "Item",
