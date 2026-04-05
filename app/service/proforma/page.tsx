@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 
 type ProformaInvoice = {
@@ -199,19 +199,19 @@ export default function ProformaListPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <NativeSelect
+          <MenuSelect
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            wrapperClassName="w-auto shrink-0"
-            className="min-w-[10.5rem]"
-          >
-            <option value="all">All Status</option>
-            <option value="draft">Draft</option>
-            <option value="sent">Sent</option>
-            <option value="accepted">Accepted</option>
-            <option value="converted">Converted</option>
-            <option value="cancelled">Cancelled</option>
-          </NativeSelect>
+            onValueChange={setStatusFilter}
+            wrapperClassName="w-auto shrink-0 min-w-[10.5rem]"
+            options={[
+              { value: "all", label: "All Status" },
+              { value: "draft", label: "Draft" },
+              { value: "sent", label: "Sent" },
+              { value: "accepted", label: "Accepted" },
+              { value: "converted", label: "Converted" },
+              { value: "cancelled", label: "Cancelled" },
+            ]}
+          />
           {(search || statusFilter !== "all") && (
             <button
               onClick={() => { setSearch(""); setStatusFilter("all") }}

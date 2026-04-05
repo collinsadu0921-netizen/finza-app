@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { performReceiptOcr } from "@/lib/receipt/performReceiptOcr"
 import type { DocumentType } from "@/lib/receipt/receiptOcr"
+import { gateAccountingReportRead } from "@/lib/ai/finzaAssistAccountingGate"
+import { getProfitAndLossReport, type PnLReportResponse } from "@/lib/accounting/reports/getProfitAndLossReport"
+import {
+  getBalanceSheetReport,
+  type BalanceSheetReportResponse,
+} from "@/lib/accounting/reports/getBalanceSheetReport"
 
 /** OpenAI-compatible tool specs for Finza Assist (read-only, business-scoped). */
 export const FINZA_ASSIST_TOOL_DEFINITIONS: Array<{
@@ -25,14 +31,17 @@ export const FINZA_ASSIST_TOOL_DEFINITIONS: Array<{
     function: {
       name: "search_invoices",
       description:
-        "Read-only: search invoices by invoice number substring. Returns up to 15 matches with id, number, status, total, due_date.",
+        "Read-only: search invoices by invoice number substring and/or customer name substring. At least one of query or customer_name_contains must be provided. Returns up to 15 matches.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Part of the invoice number to match" },
+          query: { type: "string", description: "Part of the invoice number to match (optional if customer_name_contains set)" },
+          customer_name_contains: {
+            type: "string",
+            description: "Substring to match against customer display name (optional if query set)",
+          },
           limit: { type: "integer", description: "Max results 1–15", minimum: 1, maximum: 15 },
         },
-        required: ["query"],
         additionalProperties: false,
       },
     },
@@ -96,6 +105,107 @@ export const FINZA_ASSIST_TOOL_DEFINITIONS: Array<{
   {
     type: "function",
     function: {
+      name: "get_profit_and_loss_summary",
+      description:
+        "Read-only ledger P&L for the workspace. Use for profit/loss, revenue vs expenses, and period comparisons. Requires accounting report access. Optional period_start, as_of_date, or start_date+end_date (YYYY-MM-DD) like the Reports UI.",
+      parameters: {
+        type: "object",
+        properties: {
+          period_start: { type: "string", description: "Optional accounting period start YYYY-MM-DD" },
+          as_of_date: { type: "string", description: "Optional as-of date YYYY-MM-DD to resolve period" },
+          start_date: { type: "string", description: "Optional range start (use with end_date)" },
+          end_date: { type: "string", description: "Optional range end (use with start_date)" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_balance_sheet_summary",
+      description:
+        "Read-only ledger balance sheet (assets, liabilities, equity). Use for solvency, balances, and whether books balance. Requires accounting report access.",
+      parameters: {
+        type: "object",
+        properties: {
+          period_start: { type: "string", description: "Optional period start YYYY-MM-DD" },
+          as_of_date: { type: "string", description: "Optional as-of date YYYY-MM-DD" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_invoice_detail",
+      description:
+        "Read-only: one invoice by id (UUID) with customer name, line summary, totals, status, dates. Use when context includes invoice id or user pasted id.",
+      parameters: {
+        type: "object",
+        properties: {
+          invoice_id: { type: "string", description: "Invoice UUID" },
+        },
+        required: ["invoice_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_open_invoices",
+      description:
+        "Read-only: unpaid/partial invoices (receivables). Optional overdue_only (past due date, still open). Use for collections, who owes, aging overview.",
+      parameters: {
+        type: "object",
+        properties: {
+          overdue_only: { type: "boolean", description: "If true, only invoices past due_date with open status" },
+          limit: { type: "integer", minimum: 1, maximum: 25, description: "Max rows (default 15)" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_customers",
+      description:
+        "Read-only: search customers by name or email substring. Returns id, name, email, phone if present.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Substring to match name or email" },
+          limit: { type: "integer", minimum: 1, maximum: 20 },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_expense_totals_by_category",
+      description:
+        "Read-only: sum expense totals by category for a calendar month (operational expenses module, not payroll). Default month is current calendar month on server.",
+      parameters: {
+        type: "object",
+        properties: {
+          year_month: {
+            type: "string",
+            description: "YYYY-MM; omit for current month",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "extract_receipt_ocr",
       description:
         "Read-only receipt OCR: extracts suggested supplier, date, totals, taxes, and line items from a receipt image already stored in Finza (storage path under receipts bucket, or an allowed Supabase storage URL). Same engine as Expense/Bill create. Use when the user asks to read, scan, or extract a receipt they uploaded or when a receipt_path is mentioned. Does not create expenses or bills — suggest Go to: /service/expenses/create or /service/bills to record it.",
@@ -129,6 +239,62 @@ function localTodayYmd(): string {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+const ASSIST_PNL_TOP_LINES = 5
+const ASSIST_BS_TOP_LINES = 4
+
+function summarizePnLForAssist(d: PnLReportResponse): Record<string, unknown> {
+  return {
+    tool: "get_profit_and_loss_summary",
+    period: d.period,
+    currency_code: d.currency.code,
+    totals: d.totals,
+    sections: d.sections.map((s) => ({
+      key: s.key,
+      label: s.label,
+      subtotal: s.subtotal,
+      line_count: s.lines.length,
+      largest_amount_lines: [...s.lines]
+        .sort((a, b) => Math.abs(Number(b.amount) || 0) - Math.abs(Number(a.amount) || 0))
+        .slice(0, ASSIST_PNL_TOP_LINES)
+        .map((l) => ({
+          account_code: l.account_code,
+          account_name: l.account_name,
+          amount: l.amount,
+        })),
+    })),
+    navigation_hint: "/service/reports/profit-and-loss",
+  }
+}
+
+function summarizeBSForAssist(d: BalanceSheetReportResponse): Record<string, unknown> {
+  return {
+    tool: "get_balance_sheet_summary",
+    period: d.period,
+    as_of_date: d.as_of_date,
+    currency_code: d.currency.code,
+    totals: d.totals,
+    sections: d.sections.map((sec) => ({
+      key: sec.key,
+      label: sec.label,
+      subtotal: sec.subtotal,
+      groups: sec.groups.map((g) => ({
+        key: g.key,
+        label: g.label,
+        subtotal: g.subtotal,
+        largest_amount_lines: [...g.lines]
+          .sort((a, b) => Math.abs(Number(b.amount) || 0) - Math.abs(Number(a.amount) || 0))
+          .slice(0, ASSIST_BS_TOP_LINES)
+          .map((l) => ({
+            account_code: l.account_code,
+            account_name: l.account_name,
+            amount: l.amount,
+          })),
+      })),
+    })),
+    navigation_hint: "/service/reports/balance-sheet",
+  }
 }
 
 /** Supabase/PostgREST safety: very large businesses still get a bounded response. */
@@ -259,31 +425,88 @@ export async function executeFinzaAssistTool(
       }
 
       case "search_invoices": {
-        const q = String(args.query ?? "").trim().slice(0, 80)
-        if (!q) return { ok: false, error: "query required" }
+        const numQ = String(args.query ?? "").trim().slice(0, 80)
+        const custQ = String(args.customer_name_contains ?? "").trim().slice(0, 80)
+        if (!numQ && !custQ) {
+          return { ok: false, error: "Provide query (invoice number) and/or customer_name_contains" }
+        }
         const limit = Math.min(15, Math.max(1, Number(args.limit) || 10))
-        const { data, error } = await supabase
-          .from("invoices")
-          .select("id, invoice_number, status, total, due_date, customer_id, customers(name)")
-          .eq("business_id", businessId)
-          .is("deleted_at", null)
-          .ilike("invoice_number", `%${q.replace(/%/g, "\\%")}%`)
-          .order("created_at", { ascending: false })
-          .limit(limit)
-        if (error) return { ok: false, error: error.message }
+        const mapRow = (row: Record<string, unknown>) => ({
+          id: row.id,
+          invoice_number: row.invoice_number,
+          status: row.status,
+          total: row.total,
+          due_date: row.due_date,
+          customer: (row.customers as { name?: string } | null)?.name ?? null,
+        })
+        const seen = new Set<string>()
+        const merged: Record<string, unknown>[] = []
+
+        const pushRows = (rows: Record<string, unknown>[] | null) => {
+          for (const row of rows ?? []) {
+            const id = String(row.id ?? "")
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            merged.push(row)
+          }
+        }
+
+        if (numQ) {
+          const esc = numQ.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
+          const { data, error } = await supabase
+            .from("invoices")
+            .select("id, invoice_number, status, total, due_date, customer_id, created_at, customers(name)")
+            .eq("business_id", businessId)
+            .is("deleted_at", null)
+            .ilike("invoice_number", `%${esc}%`)
+            .order("created_at", { ascending: false })
+            .limit(limit)
+          if (error) return { ok: false, error: error.message }
+          pushRows(data as Record<string, unknown>[])
+        }
+
+        if (custQ && merged.length < limit) {
+          const esc = custQ.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
+          const pattern = `%${esc}%`
+          const [{ data: byName, error: eName }, { data: byEmail, error: eEmail }] = await Promise.all([
+            supabase.from("customers").select("id").eq("business_id", businessId).ilike("name", pattern).limit(60),
+            supabase.from("customers").select("id").eq("business_id", businessId).ilike("email", pattern).limit(60),
+          ])
+          if (eName || eEmail) {
+            return { ok: false, error: eName?.message || eEmail?.message || "Customer search failed" }
+          }
+          const custIdSet = new Set<string>()
+          for (const r of [...(byName ?? []), ...(byEmail ?? [])]) {
+            custIdSet.add(String((r as { id: string }).id))
+          }
+          const custIds = [...custIdSet]
+          if (custIds.length > 0) {
+            const { data: invData, error: invErr } = await supabase
+              .from("invoices")
+              .select("id, invoice_number, status, total, due_date, customer_id, created_at, customers(name)")
+              .eq("business_id", businessId)
+              .is("deleted_at", null)
+              .in("customer_id", custIds)
+              .order("created_at", { ascending: false })
+              .limit(limit * 2)
+            if (invErr) return { ok: false, error: invErr.message }
+            pushRows(invData as Record<string, unknown>[])
+          }
+        }
+
+        merged.sort((a, b) => {
+          const ta = new Date(String((a as { created_at?: string }).created_at || 0)).getTime()
+          const tb = new Date(String((b as { created_at?: string }).created_at || 0)).getTime()
+          return tb - ta
+        })
+        const trimmed = merged.slice(0, limit).map(mapRow)
         return {
           ok: true,
           result: JSON.stringify({
             tool: "search_invoices",
-            query: q,
-            results: (data ?? []).map((row: Record<string, unknown>) => ({
-              id: row.id,
-              invoice_number: row.invoice_number,
-              status: row.status,
-              total: row.total,
-              due_date: row.due_date,
-              customer: (row.customers as { name?: string } | null)?.name ?? null,
-            })),
+            query: numQ || null,
+            customer_name_contains: custQ || null,
+            results: trimmed,
           }),
         }
       }
@@ -614,6 +837,287 @@ export async function executeFinzaAssistTool(
         }
       }
 
+      case "get_profit_and_loss_summary": {
+        const gate = await gateAccountingReportRead(supabase, userId, businessId)
+        if (!gate.ok) {
+          return { ok: true, result: JSON.stringify({ tool: "get_profit_and_loss_summary", ok: false, error: gate.error }) }
+        }
+        const period_start = String(args.period_start ?? "").trim() || undefined
+        const as_of_date = String(args.as_of_date ?? "").trim() || undefined
+        const start_date = String(args.start_date ?? "").trim() || undefined
+        const end_date = String(args.end_date ?? "").trim() || undefined
+        const { data, error } = await getProfitAndLossReport(supabase, {
+          businessId,
+          period_start: period_start || null,
+          as_of_date: as_of_date || null,
+          start_date: start_date || null,
+          end_date: end_date || null,
+        })
+        if (error || !data) {
+          return {
+            ok: true,
+            result: JSON.stringify({
+              tool: "get_profit_and_loss_summary",
+              ok: false,
+              error: error || "No P&L data",
+            }),
+          }
+        }
+        return { ok: true, result: JSON.stringify(summarizePnLForAssist(data)) }
+      }
+
+      case "get_balance_sheet_summary": {
+        const gate = await gateAccountingReportRead(supabase, userId, businessId)
+        if (!gate.ok) {
+          return {
+            ok: true,
+            result: JSON.stringify({ tool: "get_balance_sheet_summary", ok: false, error: gate.error }),
+          }
+        }
+        const period_start = String(args.period_start ?? "").trim() || undefined
+        const as_of_date = String(args.as_of_date ?? "").trim() || undefined
+        const { data, error } = await getBalanceSheetReport(supabase, {
+          businessId,
+          period_start: period_start || null,
+          as_of_date: as_of_date || null,
+        })
+        if (error || !data) {
+          return {
+            ok: true,
+            result: JSON.stringify({
+              tool: "get_balance_sheet_summary",
+              ok: false,
+              error: error || "No balance sheet data",
+            }),
+          }
+        }
+        return { ok: true, result: JSON.stringify(summarizeBSForAssist(data)) }
+      }
+
+      case "get_invoice_detail": {
+        const invoiceId = String(args.invoice_id ?? "").trim()
+        if (!invoiceId) return { ok: false, error: "invoice_id required" }
+        const { data: inv, error } = await supabase
+          .from("invoices")
+          .select(
+            `
+            id,
+            invoice_number,
+            status,
+            total,
+            subtotal,
+            issue_date,
+            due_date,
+            notes,
+            customer_id,
+            created_at,
+            customers ( name, email, phone ),
+            invoice_items (
+              description,
+              qty,
+              unit_price,
+              discount_amount,
+              line_subtotal
+            )
+          `
+          )
+          .eq("business_id", businessId)
+          .eq("id", invoiceId)
+          .is("deleted_at", null)
+          .maybeSingle()
+        if (error) return { ok: false, error: error.message }
+        if (!inv) {
+          return {
+            ok: true,
+            result: JSON.stringify({
+              tool: "get_invoice_detail",
+              ok: false,
+              error: "Invoice not found in this workspace",
+            }),
+          }
+        }
+        const row = inv as Record<string, unknown>
+        const items = (row.invoice_items as Record<string, unknown>[] | null) ?? []
+        const lineSummaries = items.slice(0, 40).map((it) => ({
+          description: it.description ?? null,
+          qty: it.qty ?? null,
+          unit_price: it.unit_price ?? null,
+          discount_amount: it.discount_amount ?? null,
+          line_subtotal: it.line_subtotal ?? null,
+        }))
+        return {
+          ok: true,
+          result: JSON.stringify({
+            tool: "get_invoice_detail",
+            ok: true,
+            id: row.id,
+            invoice_number: row.invoice_number,
+            status: row.status,
+            total: row.total,
+            subtotal: row.subtotal ?? null,
+            issue_date: row.issue_date ?? null,
+            due_date: row.due_date ?? null,
+            notes_preview:
+              typeof row.notes === "string" && row.notes ? String(row.notes).slice(0, 400) : null,
+            customer: row.customers
+              ? {
+                  name: (row.customers as { name?: string }).name ?? null,
+                  email: (row.customers as { email?: string }).email ?? null,
+                  phone: (row.customers as { phone?: string }).phone ?? null,
+                }
+              : null,
+            line_items: lineSummaries,
+            line_items_truncated: items.length > 40,
+            navigation_hint: `/service/invoices/${invoiceId}/view`,
+          }),
+        }
+      }
+
+      case "list_open_invoices": {
+        const limit = Math.min(25, Math.max(1, Number(args.limit) || 15))
+        const overdueOnly = Boolean(args.overdue_only)
+        const today = localTodayYmd()
+        const openStatuses = ["sent", "overdue", "partially_paid", "partial", "unpaid"]
+        let q = supabase
+          .from("invoices")
+          .select("id, invoice_number, status, total, due_date, customer_id, created_at, customers(name)")
+          .eq("business_id", businessId)
+          .is("deleted_at", null)
+          .in("status", openStatuses)
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(limit)
+        if (overdueOnly) {
+          q = q.not("due_date", "is", null).lt("due_date", today)
+        }
+        const { data, error } = await q
+        if (error) return { ok: false, error: error.message }
+        return {
+          ok: true,
+          result: JSON.stringify({
+            tool: "list_open_invoices",
+            overdue_only: overdueOnly,
+            count: (data ?? []).length,
+            results: (data ?? []).map((row: Record<string, unknown>) => ({
+              id: row.id,
+              invoice_number: row.invoice_number,
+              status: row.status,
+              total: row.total,
+              open_amount: row.total ?? null,
+              due_date: row.due_date,
+              customer: (row.customers as { name?: string } | null)?.name ?? null,
+            })),
+            navigation_hint: "/service/invoices",
+          }),
+        }
+      }
+
+      case "search_customers": {
+        const q = String(args.query ?? "").trim().slice(0, 80)
+        if (!q) return { ok: false, error: "query required" }
+        const limit = Math.min(20, Math.max(1, Number(args.limit) || 12))
+        const esc = q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
+        const pattern = `%${esc}%`
+        const [{ data: byName, error: eName }, { data: byEmail, error: eEmail }] = await Promise.all([
+          supabase
+            .from("customers")
+            .select("id, name, email, phone")
+            .eq("business_id", businessId)
+            .ilike("name", pattern)
+            .limit(limit),
+          supabase
+            .from("customers")
+            .select("id, name, email, phone")
+            .eq("business_id", businessId)
+            .ilike("email", pattern)
+            .limit(limit),
+        ])
+        if (eName || eEmail) {
+          return { ok: false, error: eName?.message || eEmail?.message || "Customer search failed" }
+        }
+        const seen = new Set<string>()
+        const rows: Record<string, unknown>[] = []
+        for (const r of [...(byName ?? []), ...(byEmail ?? [])]) {
+          const id = String((r as { id: string }).id)
+          if (seen.has(id)) continue
+          seen.add(id)
+          rows.push(r as Record<string, unknown>)
+          if (rows.length >= limit) break
+        }
+        return {
+          ok: true,
+          result: JSON.stringify({
+            tool: "search_customers",
+            query: q,
+            results: rows.map((c) => ({
+              id: c.id,
+              name: c.name ?? null,
+              email: c.email ?? null,
+              phone: c.phone ?? null,
+            })),
+            navigation_hint: "/service/customers",
+          }),
+        }
+      }
+
+      case "get_expense_totals_by_category": {
+        const ymRaw = String(args.year_month ?? "").trim()
+        const now = new Date()
+        let y = now.getFullYear()
+        let m = now.getMonth() + 1
+        if (/^\d{4}-\d{2}$/.test(ymRaw)) {
+          const [ys, ms] = ymRaw.split("-")
+          y = Number(ys)
+          m = Number(ms)
+          if (m < 1 || m > 12) return { ok: false, error: "Invalid year_month" }
+        } else if (ymRaw) {
+          return { ok: false, error: "year_month must be YYYY-MM" }
+        }
+        const start = `${y}-${String(m).padStart(2, "0")}-01`
+        const lastDay = new Date(y, m, 0).getDate()
+        const end = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+        const { data, error } = await supabase
+          .from("expenses")
+          .select("total, category_id, expense_categories ( id, name )")
+          .eq("business_id", businessId)
+          .is("deleted_at", null)
+          .gte("date", start)
+          .lte("date", end)
+        if (error) return { ok: false, error: error.message }
+        const byCat = new Map<string, { name: string; total: number }>()
+        for (const row of data ?? []) {
+          const r = row as {
+            total?: number | null
+            category_id?: string | null
+            expense_categories?: { id?: string; name?: string } | null
+          }
+          const cid = r.category_id ? String(r.category_id) : "uncategorized"
+          const name = r.expense_categories?.name?.trim() || (cid === "uncategorized" ? "Uncategorized" : "Category")
+          const prev = byCat.get(cid) ?? { name, total: 0 }
+          prev.total = round2(prev.total + (Number(r.total) || 0))
+          prev.name = name
+          byCat.set(cid, prev)
+        }
+        const sorted = [...byCat.entries()]
+          .map(([category_id, v]) => ({
+            category_id: category_id === "uncategorized" ? null : category_id,
+            category_name: v.name,
+            total: v.total,
+          }))
+          .sort((a, b) => b.total - a.total)
+        return {
+          ok: true,
+          result: JSON.stringify({
+            tool: "get_expense_totals_by_category",
+            year_month: `${y}-${String(m).padStart(2, "0")}`,
+            period_start: start,
+            period_end: end,
+            categories: sorted,
+            grand_total: round2(sorted.reduce((s, x) => s + x.total, 0)),
+            navigation_hint: "/service/expenses",
+          }),
+        }
+      }
+
       case "extract_receipt_ocr": {
         const receiptPath = String(args.receipt_path ?? "").trim()
         if (!receiptPath) return { ok: false, error: "receipt_path required" }
@@ -646,7 +1150,7 @@ export async function executeFinzaAssistTool(
             ok: true,
             suggestions: ocr.suggestions,
             confidence: ocr.confidence,
-            note: "Figures are read from the receipt image heuristically — not posted to the ledger. To record: Go to: /service/expenses/create or /service/bills",
+            note: "Figures are read from the receipt image heuristically — not posted to the ledger. To record: Go to: /service/expenses/create or /bills/create",
           }),
         }
       }

@@ -17,7 +17,7 @@ import BlockedActionModal from "@/components/accounting/BlockedActionModal"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { Money } from "@/components/ui/Money"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 import { formatMoney } from "@/lib/money"
 import type { ScreenProps } from "./types"
 
@@ -721,22 +721,23 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
                 Type
               </label>
-              <NativeSelect
+              <MenuSelect
                 value={filters.reference_type}
-                onChange={(e) => setFilters({ ...filters, reference_type: e.target.value })}
-              >
-                <option value="">All Types</option>
-                <option value="invoice">Invoice</option>
-                <option value="payment">Payment</option>
-                <option value="expense">Expense</option>
-                <option value="bill">Bill</option>
-                <option value="bill_payment">Bill Payment</option>
-                <option value="credit_note">Credit Note</option>
-                <option value="adjustment_journal">Adjustment</option>
-                <option value="reversal">Reversal</option>
-                <option value="opening_balance">Opening Balance</option>
-                <option value="settlement">Settlement</option>
-              </NativeSelect>
+                onValueChange={(v) => setFilters({ ...filters, reference_type: v })}
+                options={[
+                  { value: "", label: "All Types" },
+                  { value: "invoice", label: "Invoice" },
+                  { value: "payment", label: "Payment" },
+                  { value: "expense", label: "Expense" },
+                  { value: "bill", label: "Bill" },
+                  { value: "bill_payment", label: "Bill Payment" },
+                  { value: "credit_note", label: "Credit Note" },
+                  { value: "adjustment_journal", label: "Adjustment" },
+                  { value: "reversal", label: "Reversal" },
+                  { value: "opening_balance", label: "Opening Balance" },
+                  { value: "settlement", label: "Settlement" },
+                ]}
+              />
             </div>
           </div>
         </div>

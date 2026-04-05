@@ -10,7 +10,7 @@ import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type Invoice = {
   id: string
@@ -422,21 +422,29 @@ function InvoicesPageContent() {
             </div>
 
             {/* Status */}
-            <NativeSelect value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              <option value="all">All Status</option>
-              <option value="draft">Draft</option>
-              <option value="sent">Sent</option>
-              <option value="partially_paid">Partially Paid</option>
-              <option value="paid">Paid</option>
-              <option value="overdue">Overdue</option>
-              <option value="cancelled">Cancelled</option>
-            </NativeSelect>
+            <MenuSelect
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              options={[
+                { value: "all", label: "All Status" },
+                { value: "draft", label: "Draft" },
+                { value: "sent", label: "Sent" },
+                { value: "partially_paid", label: "Partially Paid" },
+                { value: "paid", label: "Paid" },
+                { value: "overdue", label: "Overdue" },
+                { value: "cancelled", label: "Cancelled" },
+              ]}
+            />
 
             {/* Customer */}
-            <NativeSelect value={customerFilter} onChange={e => setCustomerFilter(e.target.value)}>
-              <option value="all">All Customers</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </NativeSelect>
+            <MenuSelect
+              value={customerFilter}
+              onValueChange={setCustomerFilter}
+              options={[
+                { value: "all", label: "All Customers" },
+                ...customers.map((c) => ({ value: c.id, label: c.name })),
+              ]}
+            />
 
             {/* Start date */}
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />

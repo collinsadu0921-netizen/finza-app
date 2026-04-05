@@ -594,15 +594,23 @@ function ProformaCreateForm() {
           {/* 3. Line Items Table */}
           <div className="border-t border-slate-200 dark:border-slate-700">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
+              <table className="w-full min-w-[56rem] table-fixed text-sm text-left">
+                <colgroup>
+                  <col style={{ width: "38%" }} />
+                  <col style={{ width: "5.75rem" }} />
+                  <col style={{ width: "9.5rem" }} />
+                  <col style={{ width: "13.5rem" }} />
+                  <col style={{ width: "9.5rem" }} />
+                  <col style={{ width: "2.75rem" }} />
+                </colgroup>
                 <thead className="bg-slate-50 dark:bg-slate-900/50 text-xs text-slate-500 uppercase border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="px-6 py-3 font-semibold w-1/2">Item Description</th>
-                    <th className="px-4 py-3 font-semibold text-center w-24">Qty</th>
-                    <th className="px-4 py-3 font-semibold text-right w-32">Price</th>
-                    <th className="px-4 py-3 font-semibold text-right w-28">Discount</th>
-                    <th className="px-6 py-3 font-semibold text-right w-32">Total</th>
-                    <th className="w-10"></th>
+                    <th className="min-w-0 px-4 py-3 font-semibold sm:px-6">Item Description</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-center font-semibold sm:px-4">Qty</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold sm:px-4">Price</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold sm:px-4">Discount</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold sm:px-6">Total</th>
+                    <th className="w-10 py-3" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -617,7 +625,7 @@ function ProformaCreateForm() {
         const lineTotal = getLineTotal(item)
                       return (
                         <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
-                          <td className="px-6 py-3 align-top">
+                          <td className="min-w-0 px-4 py-3 align-top sm:px-6">
                             <div className="space-y-1.5">
                               <NativeSelect
                                 value={item.product_service_id || ""}
@@ -650,7 +658,7 @@ function ProformaCreateForm() {
                               />
                             </div>
                           </td>
-                          <td className="px-4 py-3 align-top">
+                          <td className="px-3 py-3 align-top sm:px-4">
                             <input
                               type="number"
                               min="0"
@@ -662,29 +670,30 @@ function ProformaCreateForm() {
                                   updateItem(item.id, "qty", 1)
                                 }
                               }}
-                              className="block w-full text-center text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+                              className="block w-full min-w-[3.5rem] min-h-[2.25rem] text-center text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 px-2 py-2 tabular-nums"
                               required
                             />
                           </td>
-                          <td className="px-4 py-3 align-top">
+                          <td className="px-3 py-3 align-top sm:px-4">
                             <input
                               type="number"
                               min="0"
                               step="0.01"
                               value={item.unit_price != null ? item.unit_price : ""}
                               onChange={(e) => updateItem(item.id, "unit_price", Number(e.target.value))}
-                              className="block w-full text-right text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+                              className="block w-full min-w-[5.5rem] min-h-[2.25rem] text-right text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 px-2 py-2 tabular-nums"
                               required
                             />
                           </td>
-                          <td className="px-4 py-3 align-top">
-                            <div className="flex items-center gap-2">
+                          <td className="px-3 py-3 align-top sm:px-4">
+                            <div className="flex min-w-0 items-stretch gap-2">
                               <NativeSelect
                                 value={item.discount_type}
                                 onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
                                 size="sm"
-                                wrapperClassName="w-20 shrink-0"
+                                wrapperClassName="w-[4.5rem] shrink-0 self-center"
                                 className="text-xs dark:bg-gray-700"
+                                aria-label="Discount type"
                               >
                                 <option value="amount">Amt</option>
                                 <option value="percent">%</option>
@@ -696,11 +705,11 @@ function ProformaCreateForm() {
                                 onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
                                 onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
                                 placeholder={item.discount_type === "percent" ? "0" : "0.00"}
-                                className="block w-full text-right text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 tabular-nums"
+                                className="min-w-0 flex-1 min-h-[2.25rem] text-right text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 px-2 py-2 tabular-nums"
                               />
                             </div>
                           </td>
-                          <td className="px-6 py-3 align-top text-right font-medium text-slate-900 dark:text-white pt-5">
+                          <td className="px-4 py-3 align-top text-right text-sm font-medium tabular-nums text-slate-900 dark:text-white whitespace-nowrap sm:px-6 sm:text-base sm:pt-5">
                             {formatMoney(lineTotal, effectiveCurrencyCode)}
                           </td>
                           <td className="px-2 py-3 align-top pt-4">

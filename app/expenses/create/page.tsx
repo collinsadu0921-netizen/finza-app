@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
@@ -19,6 +19,7 @@ type ExpenseCategory = {
 export default function CreateExpensePage() {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const isUnderService = pathname?.startsWith("/service") ?? false
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
   const [loading, setLoading] = useState(false)
@@ -56,6 +57,17 @@ export default function CreateExpensePage() {
   useEffect(() => {
     loadData()
   }, [])
+
+  useEffect(() => {
+    const ds = searchParams.get("draft_supplier")
+    if (ds) setSupplier(ds)
+    const da = searchParams.get("draft_amount")
+    if (da) setAmount(da)
+    const dn = searchParams.get("draft_notes")
+    if (dn) setNotes(dn)
+    const dd = searchParams.get("draft_date")
+    if (dd && /^\d{4}-\d{2}-\d{2}$/.test(dd)) setDate(dd)
+  }, [searchParams])
 
   const loadData = async () => {
     try {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { buildProformaFinancialDocumentHtmlForPdf } from "@/lib/documents/buildProformaFinancialDocumentHtmlForPdf"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
@@ -8,58 +9,78 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
-function serviceClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  )
-}
-
+/**
+ * GET /api/proforma/[id]/export-pdf?business_id=
+ * Authenticated: binary PDF for staff — same render as public token PDF.
+ */
 export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    const { token: rawToken } = await params
-    const token = decodeURIComponent(rawToken).trim()
-    if (!token) {
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+    const resolvedParams = await Promise.resolve(params)
+    const proformaId = resolvedParams.id
+    if (!proformaId) {
+      return NextResponse.json({ error: "Proforma invoice ID is required" }, { status: 400 })
     }
 
-    const supabase = serviceClient()
-    const { data: proforma, error } = await supabase
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    const { data: proforma, error: proformaError } = await supabase
       .from("proforma_invoices")
       .select("*")
-      .eq("public_token", token)
+      .eq("id", proformaId)
+      .eq("business_id", scope.businessId)
       .is("deleted_at", null)
-      .maybeSingle()
+      .single()
 
-    if (error || !proforma) {
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+    if (proformaError || !proforma) {
+      return NextResponse.json({ error: "Proforma invoice not found" }, { status: 404 })
     }
 
-    const [{ data: customer }, { data: business }, { data: items }] = await Promise.all([
-      proforma.customer_id
-        ? supabase
-            .from("customers")
-            .select("id, name, email, phone, whatsapp_phone, address")
-            .eq("id", proforma.customer_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
+    const [{ data: business }, { data: items }] = await Promise.all([
       supabase
         .from("businesses")
         .select(
           "name, legal_name, trading_name, phone, email, address, logo_url, tax_id, registration_number, default_currency"
         )
-        .eq("id", proforma.business_id)
+        .eq("id", scope.businessId)
         .single(),
       supabase
         .from("proforma_invoice_items")
         .select("id, description, qty, unit_price, discount_amount, line_subtotal, created_at")
-        .eq("proforma_invoice_id", proforma.id)
+        .eq("proforma_invoice_id", proformaId)
         .order("created_at", { ascending: true }),
     ])
+
+    let customer: {
+      id: string
+      name: string
+      email: string | null
+      phone: string | null
+      whatsapp_phone: string | null
+      address: string | null
+    } | null = null
+    if (proforma.customer_id) {
+      const { data: cust } = await supabase
+        .from("customers")
+        .select("id, name, email, phone, whatsapp_phone, address")
+        .eq("id", proforma.customer_id)
+        .maybeSingle()
+      customer = cust ?? null
+    }
 
     let html: string
     try {
@@ -78,7 +99,7 @@ export async function GET(
     try {
       pdfBuffer = await renderHtmlToPdfBuffer(html)
     } catch (err: unknown) {
-      console.error("public proforma PDF (Chromium) failed:", err)
+      console.error("proforma export-pdf (Chromium) failed:", err)
       const message = err instanceof Error ? err.message : "PDF generation failed"
       return NextResponse.json(
         {
@@ -105,8 +126,11 @@ export async function GET(
         "Cache-Control": "no-store",
       },
     })
-  } catch (error: any) {
-    console.error("public proforma pdf error:", error)
-    return NextResponse.json({ error: error.message || "Failed to generate proforma PDF preview" }, { status: 500 })
+  } catch (error: unknown) {
+    console.error("proforma export-pdf error:", error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to export PDF" },
+      { status: 500 }
+    )
   }
 }

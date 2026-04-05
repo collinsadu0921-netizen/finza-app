@@ -576,6 +576,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     )
   }
 
+  const invoiceIdFromPath =
+    pathname?.match(/\/service\/invoices\/([0-9a-f-]{36})\/(?:view|edit)/i)?.[1] ?? null
+
   const cashierAuth = isCashierAuthenticated()
 
   return (
@@ -625,6 +628,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                 context={{
                   ...(aiContext ?? { page_scope: "global", warning: "AI context is still loading." }),
                   current_path: pathname || "/",
+                  ...(invoiceIdFromPath ? { page_invoice_id: invoiceIdFromPath } : {}),
                 }}
               />
             </div>

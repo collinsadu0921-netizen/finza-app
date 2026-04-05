@@ -9,6 +9,7 @@ import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
+import { downloadEstimatePdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
 
 type Estimate = {
   id: string
@@ -65,6 +66,7 @@ export default function EstimateViewPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [convertingToProforma, setConvertingToProforma] = useState(false)
   const [copiedClientLink, setCopiedClientLink] = useState(false)
+  const [pdfDownloading, setPdfDownloading] = useState(false)
 
   const handleCopyClientLink = () => {
     if (!estimate?.public_token) return
@@ -73,6 +75,19 @@ export default function EstimateViewPage() {
       setCopiedClientLink(true)
       setTimeout(() => setCopiedClientLink(false), 2000)
     })
+  }
+
+  const handleDownloadPdf = async () => {
+    if (!estimate?.id || !estimate.business_id) return
+    try {
+      setPdfDownloading(true)
+      await downloadEstimatePdfDocument(estimate.id, estimate.estimate_number, estimate.business_id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not download PDF"
+      setToast({ message, type: "error" })
+    } finally {
+      setPdfDownloading(false)
+    }
   }
 
   useEffect(() => {
@@ -326,6 +341,17 @@ export default function EstimateViewPage() {
                 <p className="text-sm text-slate-500">{estimate.customers?.name || "No Customer"}</p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={pdfDownloading}
+                  onClick={() => void handleDownloadPdf()}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+                  </svg>
+                  {pdfDownloading ? "Preparing…" : "Download PDF"}
+                </button>
                 {/* Edit button */}
                 {!estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
                   <button onClick={() => router.push(`/service/estimates/${estimateId}/edit`)} className="px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors">

@@ -128,6 +128,16 @@ export function InvoiceDocument({
   const showTaxBreakdown =
     invoice.apply_taxes && (settings?.show_tax_breakdown !== false) && totalTax > 0
 
+  const lineItemsGross = items.reduce(
+    (s, item) => s + Number(item.qty ?? 0) * Number(item.unit_price ?? 0),
+    0
+  )
+  const lineItemsDiscountTotal = items.reduce(
+    (s, item) => s + Number(item.discount_amount ?? 0),
+    0
+  )
+  const showLineDiscountSummary = lineItemsDiscountTotal > 0.005
+
   const hasBank = !!(settings?.bank_account_number)
   const hasMomo = !!(settings?.momo_number)
   const hasPaymentDetails = hasBank || hasMomo
@@ -248,15 +258,33 @@ export function InvoiceDocument({
         </table>
       </div>
 
-      {/* Totals — right-aligned */}
+      {/* Totals — right-aligned (gross + discount match staff view / PDF template) */}
       <div className="px-6 py-5 flex justify-end border-b border-slate-100">
         <div className="w-64 space-y-2.5">
-          <div className="flex justify-between items-center text-sm text-slate-500">
-            <span>Subtotal</span>
-            <span className="font-medium text-slate-700">
-              {formatMoney(Number(invoice.subtotal ?? 0), invoice.currency_code)}
-            </span>
-          </div>
+          {showLineDiscountSummary && (
+            <>
+              <div className="flex justify-between items-center text-sm text-slate-500">
+                <span>Gross amount</span>
+                <span className="font-medium text-slate-700 tabular-nums">
+                  {formatMoney(lineItemsGross, invoice.currency_code)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm text-slate-500">
+                <span>Discount</span>
+                <span className="font-medium text-rose-600 tabular-nums">
+                  −{formatMoney(lineItemsDiscountTotal, invoice.currency_code)}
+                </span>
+              </div>
+            </>
+          )}
+          {(!showLineDiscountSummary || showTaxBreakdown) && (
+            <div className="flex justify-between items-center text-sm text-slate-500">
+              <span>{showLineDiscountSummary && showTaxBreakdown ? "Subtotal (excl. tax)" : "Subtotal"}</span>
+              <span className="font-medium text-slate-700 tabular-nums">
+                {formatMoney(Number(invoice.subtotal ?? 0), invoice.currency_code)}
+              </span>
+            </div>
+          )}
           {showTaxBreakdown && (
             <>
               {legacyTaxAmounts.nhil > 0 && (

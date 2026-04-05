@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxes, calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
@@ -54,6 +54,7 @@ type Supplier = {
 
 export default function CreateBillPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
@@ -145,6 +146,30 @@ export default function CreateBillPage() {
       .then((d) => { if (d.materials) setMaterials(d.materials) })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const dsn = searchParams.get("draft_supplier_name")
+    if (dsn) setSupplierName(dsn)
+    const dn = searchParams.get("draft_notes")
+    if (dn) setNotes(dn)
+    const did = searchParams.get("draft_issue_date")
+    if (did && /^\d{4}-\d{2}-\d{2}$/.test(did)) setIssueDate(did)
+    const dld = searchParams.get("draft_line_description")
+    const dlp = searchParams.get("draft_line_unit_price")
+    if (dld || dlp) {
+      setItems((prev) => {
+        if (!prev.length) return prev
+        const first = { ...prev[0] }
+        if (dld) first.description = dld
+        if (dlp) {
+          const p = Number(dlp)
+          if (!Number.isNaN(p) && p >= 0) first.unit_price = p
+        }
+        first.discount_amount = getDiscountAmount(first)
+        return [first, ...prev.slice(1)]
+      })
+    }
+  }, [searchParams])
 
   const handleSupplierSelect = (supplierId: string) => {
     setSelectedSupplierId(supplierId)

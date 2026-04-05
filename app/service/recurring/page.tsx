@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type RecurringInvoice = {
   id: string
@@ -171,15 +171,16 @@ export default function RecurringInvoicesPage() {
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg p-4 mb-6">
             <div className="flex items-center gap-4">
               <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">Status:</label>
-              <NativeSelect
+              <MenuSelect
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onValueChange={setStatusFilter}
                 wrapperClassName="w-auto min-w-[8rem]"
-              >
-                <option value="all">All</option>
-                <option value="active">Active</option>
-                <option value="paused">Paused</option>
-              </NativeSelect>
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "active", label: "Active" },
+                  { value: "paused", label: "Paused" },
+                ]}
+              />
             </div>
           </div>
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type MaterialRow = {
   id: string
@@ -262,26 +262,26 @@ export default function ServiceMaterialsPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <NativeSelect
+          <MenuSelect
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as "all" | "active" | "inactive")}
-            wrapperClassName="w-auto shrink-0"
-            className="min-w-[9rem]"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </NativeSelect>
-          <NativeSelect
+            onValueChange={(v) => setFilterStatus(v as "all" | "active" | "inactive")}
+            wrapperClassName="w-auto shrink-0 min-w-[9rem]"
+            options={[
+              { value: "all", label: "All Status" },
+              { value: "active", label: "Active" },
+              { value: "inactive", label: "Inactive" },
+            ]}
+          />
+          <MenuSelect
             value={filterStock}
-            onChange={(e) => setFilterStock(e.target.value as "all" | "low" | "ok")}
-            wrapperClassName="w-auto shrink-0"
-            className="min-w-[9rem]"
-          >
-            <option value="all">All Stock</option>
-            <option value="low">Low Stock</option>
-            <option value="ok">In Stock</option>
-          </NativeSelect>
+            onValueChange={(v) => setFilterStock(v as "all" | "low" | "ok")}
+            wrapperClassName="w-auto shrink-0 min-w-[9rem]"
+            options={[
+              { value: "all", label: "All Stock" },
+              { value: "low", label: "Low Stock" },
+              { value: "ok", label: "In Stock" },
+            ]}
+          />
           {filtersActive && (
             <button
               onClick={() => { setSearch(""); setSearchQuery(""); setFilterStatus("all"); setFilterStock("all") }}

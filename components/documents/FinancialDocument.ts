@@ -279,6 +279,10 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     }
   })
 
+  const totalDiscountSum = formattedItems.reduce((s, i) => s + i.discount, 0)
+  const grossExtended = formattedItems.reduce((s, i) => s + i.qty * i.unitPrice, 0)
+  const showDiscountSummary = totalDiscountSum >= 0.005
+
   // Format dates
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-GH", {
@@ -471,6 +475,9 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         padding: 6px 0;
         font-size: 14px;
         color: #475569;
+      }
+      .total-row-discount span:last-child {
+        color: #be123c;
       }
       .total-row span:last-child {
         white-space: nowrap;
@@ -793,12 +800,26 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       </table>
 
       <div class="totals-wrap">
+        ${showDiscountSummary
+          ? `
         <div class="total-row">
-          <span>Subtotal</span>
-          <span>${fmtMoney(showTaxBreakdown ? baseAmount : subtotal)}</span>
+          <span>Gross amount</span>
+          <span>${fmtMoney(grossExtended)}</span>
         </div>
+        <div class="total-row total-row-discount">
+          <span>Discount</span>
+          <span>−${fmtMoney(totalDiscountSum)}</span>
+        </div>
+        `
+          : ""}
         ${showTaxBreakdown
-          ? taxLines
+          ? `
+        <div class="total-row">
+          <span>${showDiscountSummary ? "Subtotal (excl. tax)" : "Subtotal"}</span>
+          <span>${fmtMoney(baseAmount)}</span>
+        </div>
+        ` +
+            taxLines
               .map(
                 (line) => `
         <div class="total-row">
@@ -807,13 +828,21 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         </div>
         `
               )
-              .join("") + `
+              .join("") +
+            `
         <div class="total-row">
           <span>Total tax</span>
           <span>${fmtMoney(calculatedTotalTax)}</span>
         </div>
         `
-          : ""}
+          : !showDiscountSummary
+            ? `
+        <div class="total-row">
+          <span>Subtotal</span>
+          <span>${fmtMoney(subtotal)}</span>
+        </div>
+        `
+            : ""}
         <div class="total-row final">
           <span>Total</span>
           <span>${fmtMoney(total)}</span>

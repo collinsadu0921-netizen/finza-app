@@ -7,7 +7,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate } from "@/lib/exportUtils"
 import Button from "@/components/ui/Button"
 import { Money } from "@/components/ui/Money"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 import { formatMoney } from "@/lib/money"
 import { cn } from "@/lib/utils"
 
@@ -287,15 +287,16 @@ export default function ServicePaymentsPage() {
 
           {/* Filters Inline */}
           <div className="flex-1 md:flex-none flex flex-col justify-end gap-2">
-            <NativeSelect
+            <MenuSelect
               value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as DateRange)}
+              onValueChange={(v) => setDateRange(v as DateRange)}
               wrapperClassName="w-full md:w-48 md:max-w-[12rem]"
-            >
-              <option value="this_month">This Month</option>
-              <option value="last_month">Last Month</option>
-              <option value="custom">Custom Range</option>
-            </NativeSelect>
+              options={[
+                { value: "this_month", label: "This Month" },
+                { value: "last_month", label: "Last Month" },
+                { value: "custom", label: "Custom Range" },
+              ]}
+            />
 
             {dateRange === "custom" && (
               <div className="flex gap-2">

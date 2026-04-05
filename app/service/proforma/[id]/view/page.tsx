@@ -8,6 +8,7 @@ import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
 import { formatMoney } from "@/lib/money"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
+import { downloadProformaPdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
 
 type ProformaInvoice = {
   id: string
@@ -87,6 +88,7 @@ export default function ProformaViewPage() {
   const [showSendModal, setShowSendModal] = useState(false)
   const [sending, setSending] = useState(false)
   const [copiedSendLink, setCopiedSendLink] = useState(false)
+  const [pdfDownloading, setPdfDownloading] = useState(false)
 
   useEffect(() => {
     if (proformaId) loadProforma()
@@ -225,6 +227,19 @@ export default function ProformaViewPage() {
       setToast({ message: err.message || "Failed to open email", type: "error" })
     } finally {
       setSending(false)
+    }
+  }
+
+  const handleDownloadPdf = async () => {
+    if (!proforma?.id || !proforma.business_id) return
+    try {
+      setPdfDownloading(true)
+      await downloadProformaPdfDocument(proforma.id, proforma.proforma_number, proforma.business_id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not download PDF"
+      setToast({ message, type: "error" })
+    } finally {
+      setPdfDownloading(false)
     }
   }
 
@@ -408,6 +423,17 @@ export default function ProformaViewPage() {
             </div>
             {/* Action Buttons */}
             <div className="flex gap-2 flex-wrap items-center">
+              <button
+                type="button"
+                disabled={pdfDownloading}
+                onClick={() => void handleDownloadPdf()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+                </svg>
+                {pdfDownloading ? "Preparing…" : "Download PDF"}
+              </button>
               {/* DRAFT */}
               {proforma.status === "draft" && (
                 <>

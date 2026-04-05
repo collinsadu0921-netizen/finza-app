@@ -379,6 +379,10 @@ Thank you.`
     .reduce((sum, cn) => sum + Number(cn.total), 0)
   const remainingBalance = Number(invoice.total || 0) - totalPaid - totalCredits
 
+  const lineItemsGross = items.reduce((s, item) => s + Number(item.qty) * Number(item.unit_price), 0)
+  const lineItemsDiscountTotal = items.reduce((s, item) => s + Number(item.discount_amount || 0), 0)
+  const showLineDiscountSummary = lineItemsDiscountTotal > 0.005
+
   // Not useCallback: hooks must not run after conditional returns above.
   const handleDownloadInvoiceDocument = async () => {
     try {
@@ -404,114 +408,136 @@ Thank you.`
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
 
           {/* Top Navigation */}
-          <div className="mb-6 flex items-center justify-between print-hide">
+          <div className="mb-5 print-hide">
             <button
               onClick={() => router.back()}
-              className="group flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors"
+              className="group inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
             >
-              <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
               Back to Invoices
             </button>
-            {/* Context/Metadata */}
-            <div className="text-xs text-slate-400 font-mono">ID: {invoice.id.substring(0, 8)}</div>
           </div>
 
-          {/* Header Section */}
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-8">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
-                  Invoice #{invoice.invoice_number || "Draft"}
-                </h1>
-                <StatusBadge status={invoice.status} className="text-sm px-3 py-1" />
+          {/* Header — card layout, single-line title, fused actions */}
+          <div className="mb-8 rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/40 print-hide">
+            <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="min-w-0 max-w-full overflow-x-auto sm:overflow-visible">
+                    <h1 className="whitespace-nowrap text-2xl font-semibold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
+                      Invoice #{invoice.invoice_number || "Draft"}
+                    </h1>
+                  </div>
+                  <StatusBadge status={invoice.status} className="shrink-0 px-2.5 py-0.5 text-xs font-medium" />
+                </div>
+                <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                  <span className="text-slate-500 dark:text-slate-500">Issued to </span>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">
+                    {invoice.customers?.name || "Unknown Customer"}
+                  </span>
+                  <span className="text-slate-500 dark:text-slate-500"> · </span>
+                  {new Date(invoice.issue_date).toLocaleDateString("en-GH", { dateStyle: "long" })}
+                  {invoice.sent_at && (
+                    <>
+                      <span className="text-slate-500 dark:text-slate-500"> · </span>
+                      <span className="text-slate-600 dark:text-slate-400">
+                        Sent{" "}
+                        {new Date(invoice.sent_at).toLocaleDateString("en-GH", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </span>
+                    </>
+                  )}
+                </p>
+                <p className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500">
+                  Ref · {invoice.id.substring(0, 8)}…
+                </p>
               </div>
-              <p className="text-slate-500 dark:text-slate-400">
-                Issued to <span className="font-semibold text-slate-700 dark:text-slate-300">{invoice.customers?.name || "Unknown Customer"}</span> on {new Date(invoice.issue_date).toLocaleDateString("en-GH", { dateStyle: "long" })}
-              </p>
-            </div>
 
-            {/* Primary Actions Toolbar */}
-            <div className="flex flex-wrap items-center gap-2 print-hide">
-              {/* Visual Feedback for Sent Status */}
-              {invoice.sent_at && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-blue-50/50 border border-blue-100 rounded text-xs text-blue-700 mr-2">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                  <span>Sent {new Date(invoice.sent_at).toLocaleDateString()}</span>
-                </div>
-              )}
-
-              {invoice.status === "draft" && (
-                <button
-                  onClick={() => router.push(`/service/invoices/${invoiceId}/edit`)}
-                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm"
-                >
-                  Edit Invoice
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setShowPreviewModal(true)}
-                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2"
-              >
-                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                View PDF
-              </button>
-
-              {invoice.status !== "draft" && (
-                <button
-                  type="button"
-                  onClick={handleDownloadInvoiceDocument}
-                  disabled={downloadDocLoading}
-                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  {downloadDocLoading ? "Downloading…" : "Download"}
-                </button>
-              )}
-
-              {/* Conditional Primary Action */}
-              {invoice.status === "draft" ? (
-                /* Draft -> Send */
-                <div className="flex gap-0 rounded shadow-sm">
-                  <SendMethodDropdown
-                    value={sendMethod}
-                    onChange={setSendMethod}
-                    className="rounded-r-none border-r-0"
-                    showIssueAndDownloadOption
-                  />
+              <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-nowrap sm:items-center sm:justify-end">
+                <div className="flex flex-1 flex-row flex-nowrap items-center gap-2 sm:flex-initial sm:justify-end">
+                  {invoice.status === "draft" && (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/service/invoices/${invoiceId}/edit`)}
+                      className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      Edit
+                    </button>
+                  )}
                   <button
-                    onClick={() => setShowSendModal(true)}
-                    className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-r hover:bg-black transition-colors flex items-center gap-2"
+                    type="button"
+                    onClick={() => setShowPreviewModal(true)}
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
-                    Finalize & Send
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                    <svg className="h-4 w-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    Preview
                   </button>
+                  {invoice.status !== "draft" && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadInvoiceDocument}
+                      disabled={downloadDocLoading}
+                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      <svg className="h-4 w-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      {downloadDocLoading ? "…" : "Download"}
+                    </button>
+                  )}
                 </div>
-              ) : remainingBalance > 0.01 ? (
-                /* Issued -> Record Payment */
-                <button
-                  onClick={() => setShowPaymentModal(true)}
-                  className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
-                  Record Payment
-                </button>
-              ) : (
-                /* Paid -> No primary action needed */
-                <div className="px-4 py-2 bg-emerald-50 text-emerald-700 text-sm font-medium rounded border border-emerald-200 cursor-default select-none">
-                  Fully Paid
+
+                <div className="flex w-full shrink-0 sm:w-auto">
+                  {invoice.status === "draft" ? (
+                    <div className="flex w-full overflow-hidden rounded-xl border border-slate-200 shadow-sm dark:border-slate-600 sm:w-auto [&>div>button]:h-10 [&>div>button]:rounded-none [&>div>button]:border-0 [&>div>button]:border-r [&>div>button]:border-slate-200 dark:[&>div>button]:border-slate-600">
+                      <SendMethodDropdown
+                        value={sendMethod}
+                        onChange={setSendMethod}
+                        className="min-w-0 flex-1 sm:min-w-[10rem] sm:flex-initial"
+                        showIssueAndDownloadOption
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSendModal(true)}
+                        className="inline-flex h-10 shrink-0 items-center gap-2 bg-slate-900 px-4 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+                      >
+                        Send
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : remainingBalance > 0.01 ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPaymentModal(true)}
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-500 sm:w-auto"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Record payment
+                    </button>
+                  ) : (
+                    <div className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-emerald-200/80 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 select-none dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 sm:w-auto">
+                      Paid in full
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
 
           {/* Financial Position Bar — dashboard style (formatMoney, sans-serif) */}
-          <div className="mb-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="mb-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-gray-800">
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Total</span>
               <span className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-gray-100">
@@ -634,8 +660,30 @@ Thank you.`
 
                         return (
                           <>
-                            <tr className="border-t border-slate-200 dark:border-slate-700">
-                              <td colSpan={4} className="px-6 pt-4 text-right text-slate-500 text-xs uppercase font-medium">Subtotal</td>
+                            {showLineDiscountSummary && (
+                              <>
+                                <tr className="border-t border-slate-200 dark:border-slate-700">
+                                  <td colSpan={4} className="px-6 pt-4 text-right text-slate-500 text-xs uppercase font-medium">
+                                    Gross amount
+                                  </td>
+                                  <td className="px-6 pt-4 text-right font-medium text-slate-900 dark:text-white tabular-nums">
+                                    {formatMoney(lineItemsGross, invoice.currency_code)}
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td colSpan={4} className="px-6 py-1 text-right text-slate-500 text-xs uppercase font-medium">
+                                    Discount
+                                  </td>
+                                  <td className="px-6 py-1 text-right text-sm font-medium text-rose-600 dark:text-rose-400 tabular-nums">
+                                    −{formatMoney(lineItemsDiscountTotal, invoice.currency_code)}
+                                  </td>
+                                </tr>
+                              </>
+                            )}
+                            <tr className={showLineDiscountSummary ? "" : "border-t border-slate-200 dark:border-slate-700"}>
+                              <td colSpan={4} className="px-6 pt-4 text-right text-slate-500 text-xs uppercase font-medium">
+                                {showLineDiscountSummary ? "Subtotal (excl. tax)" : "Subtotal"}
+                              </td>
                               <td className="px-6 pt-4 text-right font-medium text-slate-900 dark:text-white">
                                 {formatMoney(Number(invoice.subtotal ?? invoice.total), invoice.currency_code)}
                               </td>
@@ -660,12 +708,34 @@ Thank you.`
 
                       {/* If No Taxes, just total */}
                       {!invoice.apply_taxes && (
-                        <tr className="border-t border-slate-200 dark:border-slate-700">
-                          <td colSpan={4} className="px-6 py-4 text-right text-slate-900 dark:text-white font-bold uppercase">Total</td>
-                          <td className="px-6 py-4 text-right font-bold text-lg">
-                            {formatMoney(Number(invoice.total), invoice.currency_code)}
-                          </td>
-                        </tr>
+                        <>
+                          {showLineDiscountSummary && (
+                            <>
+                              <tr className="border-t border-slate-200 dark:border-slate-700">
+                                <td colSpan={4} className="px-6 pt-4 text-right text-slate-500 text-xs uppercase font-medium">
+                                  Gross amount
+                                </td>
+                                <td className="px-6 pt-4 text-right font-medium text-slate-900 dark:text-white tabular-nums">
+                                  {formatMoney(lineItemsGross, invoice.currency_code)}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td colSpan={4} className="px-6 py-1 text-right text-slate-500 text-xs uppercase font-medium">
+                                  Discount
+                                </td>
+                                <td className="px-6 py-1 text-right text-sm font-medium text-rose-600 dark:text-rose-400 tabular-nums">
+                                  −{formatMoney(lineItemsDiscountTotal, invoice.currency_code)}
+                                </td>
+                              </tr>
+                            </>
+                          )}
+                          <tr className="border-t border-slate-200 dark:border-slate-700">
+                            <td colSpan={4} className="px-6 py-4 text-right text-slate-900 dark:text-white font-bold uppercase">Total</td>
+                            <td className="px-6 py-4 text-right font-bold text-lg">
+                              {formatMoney(Number(invoice.total), invoice.currency_code)}
+                            </td>
+                          </tr>
+                        </>
                       )}
                     </tfoot>
                   </table>
@@ -699,9 +769,11 @@ Thank you.`
                     </div>
                   )}
                   {invoice.payment_terms && (
-                    <div className="flex justify-between">
-                      <dt className="text-slate-500">Payment Terms</dt>
-                      <dd className="font-medium text-slate-900 dark:text-white">{invoice.payment_terms}</dd>
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+                      <dt className="shrink-0 text-slate-500">Payment terms</dt>
+                      <dd className="min-w-0 break-words text-sm font-medium text-slate-900 dark:text-white sm:max-w-[min(100%,18rem)] sm:text-right">
+                        {invoice.payment_terms}
+                      </dd>
                     </div>
                   )}
                   {invoice.source_type === "order" && invoice.orders && (

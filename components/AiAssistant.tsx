@@ -24,10 +24,11 @@ const AI_FETCH_TIMEOUT_MS = 180_000
 
 const SUGGESTED_PROMPTS = [
   "What are my totals this month?",
+  "Summarize my profit and loss for the current period",
+  "Who owes me? List overdue invoices",
   "How do I create an invoice?",
-  "Where is payroll?",
   "Explain VAT flat rate vs standard",
-  "I attached a receipt — what does it say?",
+  "Where is payroll?",
 ]
 
 export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) {

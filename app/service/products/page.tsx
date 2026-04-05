@@ -10,7 +10,7 @@ import Toast from "@/components/Toast"
 import ErrorAlert from "@/components/ErrorAlert"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney } from "@/lib/money"
-import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type Product = {
   id: string
@@ -617,17 +617,16 @@ export default function ProductsPage() {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 min-w-[200px] border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
-          <NativeSelect
+          <MenuSelect
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onValueChange={setCategoryFilter}
             size="lg"
             wrapperClassName="w-auto shrink-0 min-w-[10rem]"
-          >
-            <option value="">All categories</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </NativeSelect>
+            options={[
+              { value: "", label: "All categories" },
+              ...categories.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
         </div>
 
         {/* Filter products by search and category */}

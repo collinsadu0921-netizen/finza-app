@@ -529,7 +529,7 @@ function CreateCreditNoteContent() {
                           required
                         />
                       </div>
-                      <div className="col-span-4 md:col-span-2">
+                      <div className="col-span-4 min-w-0 md:col-span-2">
                         <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Qty</label>
                         <input
                           type="number"
@@ -537,11 +537,11 @@ function CreateCreditNoteContent() {
                           onChange={(e) => updateItem(item.id, "qty", Number(e.target.value) || 0)}
                           min="0"
                           step="0.01"
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          className="w-full min-h-[2.25rem] min-w-[3.5rem] border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white tabular-nums text-center"
                           required
                         />
                       </div>
-                      <div className="col-span-4 md:col-span-2">
+                      <div className="col-span-4 min-w-0 md:col-span-2">
                         <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Unit Price</label>
                         <input
                           type="number"
@@ -549,17 +549,18 @@ function CreateCreditNoteContent() {
                           onChange={(e) => updateItem(item.id, "unit_price", Number(e.target.value) || 0)}
                           min="0"
                           step="0.01"
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          className="w-full min-h-[2.25rem] min-w-[5.5rem] border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white tabular-nums text-right"
                           required
                         />
                       </div>
-                      <div className="col-span-4 md:col-span-2">
+                      <div className="col-span-4 min-w-0 md:col-span-2">
                         <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Discount</label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex min-w-0 items-stretch gap-2">
                           <select
                             value={item.discount_type}
                             onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                            className="w-20 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                            aria-label="Discount type"
+                            className="w-[4.5rem] shrink-0 self-center border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                           >
                             <option value="amount">Amt</option>
                             <option value="percent">%</option>
@@ -571,7 +572,7 @@ function CreateCreditNoteContent() {
                             onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
                             onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
                             placeholder={item.discount_type === "percent" ? "0" : "0.00"}
-                            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-right tabular-nums"
+                            className="min-w-0 flex-1 min-h-[2.25rem] border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-right tabular-nums"
                           />
                         </div>
                       </div>
