@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Account = {
   id: string
@@ -29,6 +31,7 @@ function isBankOrCash(acc: Account) {
 
 export default function ServiceContributionPage() {
   const router = useRouter()
+  const { format } = useBusinessCurrency()
   const [loading, setLoading] = useState(true)
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [coaLoaded, setCoaLoaded] = useState(false)
@@ -244,11 +247,10 @@ export default function ServiceContributionPage() {
                 </svg>
               </span>
             </label>
-            <select
+            <NativeSelect
               value={depositToId ?? ""}
               onChange={(e) => setDepositToId(e.target.value || null)}
               disabled={isSubmitting || formDisabled}
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60 disabled:pointer-events-none"
             >
               <option value="">Select account...</option>
               {bankCashAccounts.map((a) => (
@@ -256,23 +258,22 @@ export default function ServiceContributionPage() {
                   {a.code} – {a.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           {!hasSingleEquity && equityAccounts.length > 1 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Equity account</label>
-              <select
+              <NativeSelect
                 value={equityId ?? ""}
                 onChange={(e) => setEquityId(e.target.value || null)}
                 disabled={isSubmitting || formDisabled}
-                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60 disabled:pointer-events-none"
               >
                 {equityAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.code} – {a.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           )}
           <div>
@@ -305,18 +306,18 @@ export default function ServiceContributionPage() {
                 <tbody>
                   <tr className="border-b border-gray-100 dark:border-gray-700/50">
                     <td className="py-2 px-4 text-gray-900 dark:text-gray-100">{selectedBank.code} – {selectedBank.name}</td>
-                    <td className="py-2 px-4 text-right text-gray-700 dark:text-gray-300">{numAmount.toFixed(2)}</td>
+                    <td className="py-2 px-4 text-right text-gray-700 dark:text-gray-300">{format(numAmount)}</td>
                     <td className="py-2 px-4 text-right text-gray-700 dark:text-gray-300"></td>
                   </tr>
                   <tr className="border-b border-gray-100 dark:border-gray-700/50">
                     <td className="py-2 px-4 text-gray-900 dark:text-gray-100">{selectedEquity.code} – {selectedEquity.name}</td>
                     <td className="py-2 px-4 text-right text-gray-700 dark:text-gray-300"></td>
-                    <td className="py-2 px-4 text-right text-gray-700 dark:text-gray-300">{numAmount.toFixed(2)}</td>
+                    <td className="py-2 px-4 text-right text-gray-700 dark:text-gray-300">{format(numAmount)}</td>
                   </tr>
                   <tr className="bg-gray-50 dark:bg-gray-800/50 font-medium">
                     <td className="py-2 px-4 text-gray-900 dark:text-gray-100">Total</td>
-                    <td className="py-2 px-4 text-right text-gray-900 dark:text-gray-100">{numAmount.toFixed(2)}</td>
-                    <td className="py-2 px-4 text-right text-gray-900 dark:text-gray-100">{numAmount.toFixed(2)}</td>
+                    <td className="py-2 px-4 text-right text-gray-900 dark:text-gray-100">{format(numAmount)}</td>
+                    <td className="py-2 px-4 text-right text-gray-900 dark:text-gray-100">{format(numAmount)}</td>
                   </tr>
                 </tbody>
               </table>

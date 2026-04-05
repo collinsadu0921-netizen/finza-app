@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
 import DateInput from "@/components/ui/DateInput"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 export default function ServiceBusinessProfilePage() {
   const router = useRouter()
@@ -232,14 +233,14 @@ export default function ServiceBusinessProfilePage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Legal Entity Type
               </label>
-              <select
+              <NativeSelect
                 value={formData.business_type}
                 onChange={(e) => handleChange("business_type", e.target.value)}
-                className="w-full md:w-1/2 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+                wrapperClassName="w-full md:w-1/2"
               >
                 <option value="limited_company">Limited Company</option>
                 <option value="sole_proprietorship">Sole Proprietorship</option>
-              </select>
+              </NativeSelect>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                 Used to format your Annual Financial Statements correctly (equity section structure).
               </p>
@@ -251,7 +252,7 @@ export default function ServiceBusinessProfilePage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Location</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={formData.address_country} onChange={(e) => handleChange("address_country", e.target.value)} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
+            <NativeSelect value={formData.address_country} onChange={(e) => handleChange("address_country", e.target.value)}>
               <option value="">Select country</option>
               <option value="Ghana">Ghana</option>
               <option value="Nigeria">Nigeria</option>
@@ -264,7 +265,7 @@ export default function ServiceBusinessProfilePage() {
               <option value="Germany">Germany</option>
               <option value="France">France</option>
               <option value="Other">Other</option>
-            </select>
+            </NativeSelect>
             <input value={formData.address_region} onChange={(e) => handleChange("address_region", e.target.value)} placeholder="Region / State" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
             <input value={formData.address_city} onChange={(e) => handleChange("address_city", e.target.value)} placeholder="City" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
             <input value={formData.address_street} onChange={(e) => handleChange("address_street", e.target.value)} placeholder="Street address" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
@@ -287,7 +288,7 @@ export default function ServiceBusinessProfilePage() {
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Financial Settings</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Required to create invoices and generate reports.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={formData.default_currency} onChange={(e) => handleChange("default_currency", e.target.value)} className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white">
+            <NativeSelect value={formData.default_currency} onChange={(e) => handleChange("default_currency", e.target.value)}>
               <option value="">Select currency</option>
               <option value="GHS">GHS — Ghana Cedi (₵)</option>
               <option value="NGN">NGN — Nigerian Naira (₦)</option>
@@ -298,7 +299,7 @@ export default function ServiceBusinessProfilePage() {
               <option value="USD">USD — US Dollar ($)</option>
               <option value="GBP">GBP — British Pound (£)</option>
               <option value="EUR">EUR — Euro (€)</option>
-            </select>
+            </NativeSelect>
           </div>
         </div>
 
@@ -315,10 +316,10 @@ export default function ServiceBusinessProfilePage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 CIT Rate Category
               </label>
-              <select
+              <NativeSelect
                 value={formData.cit_rate_code}
                 onChange={(e) => handleChange("cit_rate_code", e.target.value)}
-                className="w-full md:w-1/2 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+                wrapperClassName="w-full md:w-1/2"
               >
                 <option value="standard_25">Standard Company — 25% of net profit</option>
                 <option value="hotel_22">Hotel Industry — 22% of net profit</option>
@@ -328,7 +329,7 @@ export default function ServiceBusinessProfilePage() {
                 <option value="mining_35">Mining / Upstream Petroleum — 35% of net profit</option>
                 <option value="presumptive_3">Presumptive / Sole Trader — 3% of gross turnover</option>
                 <option value="exempt">Exempt (Free Zone / Tax Holiday) — 0%</option>
-              </select>
+              </NativeSelect>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                 Not sure? Most registered companies use <strong>Standard — 25%</strong>. Consult your accountant if you qualify for a reduced rate.
               </p>
@@ -337,14 +338,14 @@ export default function ServiceBusinessProfilePage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 VAT Registration Status
               </label>
-              <select
+              <NativeSelect
                 value={formData.vat_scheme}
                 onChange={(e) => handleChange("vat_scheme", e.target.value)}
-                className="w-full md:w-1/2 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+                wrapperClassName="w-full md:w-1/2"
               >
                 <option value="standard">VAT Registered — Standard Rate (15% + NHIL + GETFund)</option>
                 <option value="none">Not VAT Registered — turnover below GHS 750,000</option>
-              </select>
+              </NativeSelect>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                 If you have a VAT certificate from GRA, select <strong>VAT Registered</strong>. Businesses with annual turnover below GHS 750,000 are not required to register (VAT Act 2025, Act 1151). The VAT Flat Rate Scheme (VFRS) was abolished effective January 1, 2026.
               </p>

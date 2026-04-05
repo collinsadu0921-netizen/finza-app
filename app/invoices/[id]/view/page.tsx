@@ -22,7 +22,7 @@ import { formatMoney } from "@/lib/money"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
-import { downloadInvoiceHtmlDocument } from "@/lib/invoices/downloadInvoiceHtmlClient"
+import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
 
 type Invoice = {
   id: string
@@ -383,7 +383,7 @@ Thank you.`
   const handleDownloadInvoiceDocument = async () => {
     try {
       setDownloadDocLoading(true)
-      await downloadInvoiceHtmlDocument(
+      await downloadInvoicePdfDocument(
         invoiceId,
         invoice.invoice_number,
         resolvedBusinessId

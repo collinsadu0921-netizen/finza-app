@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Job = {
   id: string
@@ -549,29 +550,21 @@ export default function ServiceJobDetailPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Customer</label>
-                <select
-                  value={editCustomerId}
-                  onChange={(e) => setEditCustomerId(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
-                >
+                <NativeSelect value={editCustomerId} onChange={(e) => setEditCustomerId(e.target.value)}>
                   <option value="">— No customer —</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Status</label>
-                <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
-                >
+                <NativeSelect value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
                   <option value="draft">Draft</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>
-                </select>
+                </NativeSelect>
               </div>
 
               <div>
@@ -692,10 +685,10 @@ export default function ServiceJobDetailPage() {
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <select
+                  <NativeSelect
                     value={selectedProformaId}
                     onChange={(e) => setSelectedProformaId(e.target.value)}
-                    className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+                    wrapperClassName="flex-1 min-w-0"
                   >
                     <option value="">— No proforma linked —</option>
                     {proformas.map((p) => (
@@ -703,7 +696,7 @@ export default function ServiceJobDetailPage() {
                         {p.proforma_number ?? "Draft"}{p.customer_name ? ` — ${p.customer_name}` : ""}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <button
                     onClick={() => handleLinkProforma(selectedProformaId || null)}
                     disabled={linkingProforma || !selectedProformaId}
@@ -732,18 +725,14 @@ export default function ServiceJobDetailPage() {
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Allocate Material</p>
               <div className="flex flex-wrap gap-3 items-end">
                 <div className="flex-1 min-w-[200px]">
-                  <select
-                    value={addMaterialId}
-                    onChange={(e) => setAddMaterialId(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
-                  >
+                  <NativeSelect value={addMaterialId} onChange={(e) => setAddMaterialId(e.target.value)}>
                     <option value="">Select material…</option>
                     {materials.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.name} — {Number(m.quantity_on_hand)} {m.unit} on hand
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   {selectedMaterial && Number(selectedMaterial.quantity_on_hand) === 0 && (
                     <p className="text-xs text-amber-600 mt-1">⚠ No stock available. Adjust via Materials → Adjust Stock.</p>
                   )}

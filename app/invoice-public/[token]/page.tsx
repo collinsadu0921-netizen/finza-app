@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import { InvoiceDocument } from "@/components/invoices/InvoiceDocument"
+import { formatMoney } from "@/lib/money"
 
 type Invoice = {
   id: string
@@ -217,7 +218,7 @@ export default function PublicInvoicePage() {
             <div className="shrink-0 text-right">
               <p className={`text-xs ${bannerTextClass} opacity-60`}>{isPaid ? "Amount paid" : "Amount due"}</p>
               <p className={`text-lg font-bold tabular-nums ${bannerTextClass}`}>
-                {invoice.currency_symbol}{Number(invoice.total).toFixed(2)}
+                {formatMoney(invoice.total, invoice.currency_code)}
               </p>
             </div>
           </div>
@@ -252,7 +253,7 @@ export default function PublicInvoicePage() {
                 <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
                   isOverdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
                 }`}>
-                  {invoice.currency_symbol}{Number(invoice.total).toFixed(2)} due
+                  {formatMoney(invoice.total, invoice.currency_code)} due
                 </span>
               </div>
               <div className="p-5 flex flex-col sm:flex-row items-center gap-6">

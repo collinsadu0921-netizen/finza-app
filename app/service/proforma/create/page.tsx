@@ -5,10 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
-import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
-import { getCurrencySymbol } from "@/lib/currency"
+import { formatMoney } from "@/lib/money"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxResult } from "@/lib/taxEngine/types"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = {
   id: string
@@ -67,7 +67,6 @@ function ProformaCreateForm() {
   const [businessId, setBusinessId] = useState("")
   const [businessIndustry, setBusinessIndustry] = useState<string | null>(null)
   const [applyTaxes, setApplyTaxes] = useState(true)
-  const [currencyDisplay, setCurrencyDisplay] = useState<string>("")
   const [homeCurrencyCode, setHomeCurrencyCode] = useState<string | null>(null)
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
 
@@ -76,10 +75,8 @@ function ProformaCreateForm() {
   const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
   const [fxRate, setFxRate] = useState<string>("")
 
-  // Symbol used for all amount displays — switches to FX symbol when FX is enabled
-  const effectiveCurrencyDisplay = fxEnabled && fxCurrencyCode
-    ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
-    : currencyDisplay
+  const effectiveCurrencyCode =
+    fxEnabled && fxCurrencyCode ? fxCurrencyCode : homeCurrencyCode
 
   // Create customer modal state
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -125,7 +122,6 @@ function ProformaCreateForm() {
         .select("default_currency, currency_symbol, address_country")
         .eq("id", business.id)
         .single()
-      setCurrencyDisplay(resolveCurrencyDisplay(biz))
       setHomeCurrencyCode(biz?.default_currency || null)
       setBusinessCountry(biz?.address_country || null)
 
@@ -485,23 +481,17 @@ function ProformaCreateForm() {
                   New Customer
                 </button>
               </div>
-              <div className="relative">
-                <select
-                  value={selectedCustomerId}
-                  onChange={(e) => setSelectedCustomerId(e.target.value)}
-                  className="w-full appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block p-3 pr-8 transition-colors dark:bg-slate-700 dark:border-slate-600 dark:text-white"
-                >
-                  <option value="">Select a customer...</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
+              <NativeSelect
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                size="lg"
+                className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
+              >
+                <option value="">Select a customer...</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </NativeSelect>
             </div>
 
             {/* Dates & Settings */}
@@ -558,10 +548,10 @@ function ProformaCreateForm() {
                   <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-md border border-blue-100 dark:border-blue-900">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Proforma Currency</label>
-                      <select
+                      <NativeSelect
                         value={fxCurrencyCode}
                         onChange={(e) => setFxCurrencyCode(e.target.value)}
-                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 text-slate-900 dark:text-white text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="bg-white dark:bg-slate-800"
                       >
                         <option value="USD">USD — US Dollar</option>
                         <option value="EUR">EUR — Euro</option>
@@ -569,7 +559,7 @@ function ProformaCreateForm() {
                         <option value="KES">KES — Kenyan Shilling</option>
                         <option value="NGN">NGN — Nigerian Naira</option>
                         <option value="ZAR">ZAR — South African Rand</option>
-                      </select>
+                      </NativeSelect>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
@@ -587,7 +577,12 @@ function ProformaCreateForm() {
                     </div>
                     {fxRate && !isNaN(parseFloat(fxRate)) && parseFloat(fxRate) > 0 && (
                       <p className="col-span-2 text-xs text-blue-700 dark:text-blue-300">
-                        Prices entered in {fxCurrencyCode}. Booked in {homeCurrencyCode} at rate {parseFloat(fxRate).toFixed(4)}.
+                        Prices entered in {fxCurrencyCode}. Booked in {homeCurrencyCode} at rate{" "}
+                        {new Intl.NumberFormat("en-US", {
+                          minimumFractionDigits: 4,
+                          maximumFractionDigits: 6,
+                          useGrouping: true,
+                        }).format(Number(fxRate) || 0)}.
                       </p>
                     )}
                   </div>
@@ -624,7 +619,7 @@ function ProformaCreateForm() {
                         <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
                           <td className="px-6 py-3 align-top">
                             <div className="space-y-1.5">
-                              <select
+                              <NativeSelect
                                 value={item.product_service_id || ""}
                                 onChange={(e) => {
                                   if (e.target.value) {
@@ -635,15 +630,16 @@ function ProformaCreateForm() {
                                     updateItem(item.id, "unit_price", 0)
                                   }
                                 }}
-                                className="block w-full text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                size="sm"
+                                className="dark:bg-gray-700"
                               >
                                 <option value="">{businessIndustry === "service" ? "Select Service" : "Select product/service"}</option>
                                 {products.map((p) => (
                                   <option key={p.id} value={p.id}>
-                                    {p.name} — {currencyDisplay || ""} {Number(p.price || 0).toFixed(2)}
+                                    {p.name} — {formatMoney(p.price, effectiveCurrencyCode)}
                                   </option>
                                 ))}
-                              </select>
+                              </NativeSelect>
                               <input
                                 type="text"
                                 placeholder="Description"
@@ -683,14 +679,16 @@ function ProformaCreateForm() {
                           </td>
                           <td className="px-4 py-3 align-top">
                             <div className="flex items-center gap-2">
-                              <select
+                              <NativeSelect
                                 value={item.discount_type}
                                 onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                                className="w-20 text-xs border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                size="sm"
+                                wrapperClassName="w-20 shrink-0"
+                                className="text-xs dark:bg-gray-700"
                               >
                                 <option value="amount">Amt</option>
                                 <option value="percent">%</option>
-                              </select>
+                              </NativeSelect>
                               <input
                                 type="text"
                                 inputMode="decimal"
@@ -703,7 +701,7 @@ function ProformaCreateForm() {
                             </div>
                           </td>
                           <td className="px-6 py-3 align-top text-right font-medium text-slate-900 dark:text-white pt-5">
-                            {effectiveCurrencyDisplay} {lineTotal.toFixed(2)}
+                            {formatMoney(lineTotal, effectiveCurrencyCode)}
                           </td>
                           <td className="px-2 py-3 align-top pt-4">
                             <button
@@ -783,13 +781,13 @@ function ProformaCreateForm() {
 
               <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                 <span>Subtotal</span>
-                <span className="font-medium">{effectiveCurrencyDisplay} {displaySubtotal.toFixed(2)}</span>
+                <span className="font-medium">{formatMoney(displaySubtotal, effectiveCurrencyCode)}</span>
               </div>
 
               {totalDiscount > 0 && (
                 <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                   <span>Discounts</span>
-                  <span className="font-medium text-rose-600">−{effectiveCurrencyDisplay} {totalDiscount.toFixed(2)}</span>
+                  <span className="font-medium text-rose-600">{formatMoney(-Math.abs(totalDiscount), effectiveCurrencyCode)}</span>
                 </div>
               )}
 
@@ -800,19 +798,19 @@ function ProformaCreateForm() {
                     .map((line) => (
                       <div key={line.code} className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
                         <span>{line.code}</span>
-                        <span>{effectiveCurrencyDisplay} {Number(line.amount).toFixed(2)}</span>
+                        <span>{formatMoney(Number(line.amount), effectiveCurrencyCode)}</span>
                       </div>
                     ))}
                   <div className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400 pt-1">
                     <span>Total Tax</span>
-                    <span className="font-medium">{effectiveCurrencyDisplay} {displayTax.toFixed(2)}</span>
+                    <span className="font-medium">{formatMoney(displayTax, effectiveCurrencyCode)}</span>
                   </div>
                 </div>
               )}
 
               <div className="flex justify-between items-center pt-2">
                 <span className="text-base font-bold text-slate-900 dark:text-white">Total</span>
-                <span className="text-xl font-bold text-slate-900 dark:text-white">{effectiveCurrencyDisplay} {displayTotal.toFixed(2)}</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-white">{formatMoney(displayTotal, effectiveCurrencyCode)}</span>
               </div>
             </div>
           </div>

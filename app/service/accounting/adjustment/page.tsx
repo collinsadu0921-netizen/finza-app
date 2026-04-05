@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Account = {
   id: string
@@ -234,11 +235,10 @@ export default function ServiceWithdrawalPage() {
                 </svg>
               </span>
             </label>
-            <select
+            <NativeSelect
               value={fromAccountId ?? ""}
               onChange={(e) => setFromAccountId(e.target.value || null)}
               disabled={isSubmitting || formDisabled}
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60 disabled:pointer-events-none"
             >
               <option value="">Select account...</option>
               {bankCashAccounts.map((a) => (
@@ -246,15 +246,14 @@ export default function ServiceWithdrawalPage() {
                   {a.code} – {a.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Equity account</label>
-            <select
+            <NativeSelect
               value={equityId ?? ""}
               onChange={(e) => setEquityId(e.target.value || null)}
               disabled={isSubmitting || formDisabled}
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60 disabled:pointer-events-none"
             >
               <option value="">Select account...</option>
               {equityAccounts.map((a) => (
@@ -262,7 +261,7 @@ export default function ServiceWithdrawalPage() {
                   {a.code} – {a.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (optional)</label>

@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import Toast from "@/components/Toast"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
-import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
+import { formatMoney } from "@/lib/money"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 
@@ -124,8 +124,6 @@ export default function ProformaViewPage() {
       setLoading(false)
     }
   }
-
-  const currencyDisplay = resolveCurrencyDisplay(proforma)
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "—"
@@ -571,15 +569,15 @@ export default function ProformaViewPage() {
                         <td className="px-4 py-3 text-slate-800">{item.description || "—"}</td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">{Number(item.qty) || 0}</td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
-                          {currencyDisplay} {Number(item.unit_price || 0).toFixed(2)}
+                          {formatMoney(Number(item.unit_price || 0), proforma.currency_code)}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                           {Number(item.discount_amount || 0) > 0
-                            ? `${currencyDisplay} ${Number(item.discount_amount).toFixed(2)}`
+                            ? formatMoney(Number(item.discount_amount), proforma.currency_code)
                             : "—"}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-800 tabular-nums">
-                          {currencyDisplay} {Number(item.line_subtotal || 0).toFixed(2)}
+                          {formatMoney(Number(item.line_subtotal || 0), proforma.currency_code)}
                         </td>
                       </tr>
                     ))}
@@ -600,14 +598,14 @@ export default function ProformaViewPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Subtotal:</span>
                   <span className="font-medium text-slate-800 tabular-nums">
-                    {currencyDisplay} {Number(proforma.subtotal).toFixed(2)}
+                    {formatMoney(Number(proforma.subtotal), proforma.currency_code)}
                   </span>
                 </div>
                 {totalDiscount > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-500">Discounts:</span>
                     <span className="font-medium text-rose-600 tabular-nums">
-                      −{currencyDisplay} {totalDiscount.toFixed(2)}
+                      {formatMoney(-Math.abs(totalDiscount), proforma.currency_code)}
                     </span>
                   </div>
                 )}
@@ -619,7 +617,7 @@ export default function ProformaViewPage() {
                         .map(([code, amount]) => (
                           <div key={code} className="flex justify-between text-sm text-slate-500">
                             <span>{code}:</span>
-                            <span className="tabular-nums">{currencyDisplay} {Number(amount).toFixed(2)}</span>
+                            <span className="tabular-nums">{formatMoney(Number(amount), proforma.currency_code)}</span>
                           </div>
                         ))
                     ) : (
@@ -627,19 +625,19 @@ export default function ProformaViewPage() {
                         {taxBreakdown.nhil > 0 && (
                           <div className="flex justify-between text-sm text-slate-500">
                             <span>NHIL:</span>
-                            <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.nhil).toFixed(2)}</span>
+                            <span className="tabular-nums">{formatMoney(Number(taxBreakdown.nhil), proforma.currency_code)}</span>
                           </div>
                         )}
                         {taxBreakdown.getfund > 0 && (
                           <div className="flex justify-between text-sm text-slate-500">
                             <span>GETFund:</span>
-                            <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.getfund).toFixed(2)}</span>
+                            <span className="tabular-nums">{formatMoney(Number(taxBreakdown.getfund), proforma.currency_code)}</span>
                           </div>
                         )}
                         {taxBreakdown.vat > 0 && (
                           <div className="flex justify-between text-sm text-slate-500">
                             <span>VAT:</span>
-                            <span className="tabular-nums">{currencyDisplay} {Number(taxBreakdown.vat).toFixed(2)}</span>
+                            <span className="tabular-nums">{formatMoney(Number(taxBreakdown.vat), proforma.currency_code)}</span>
                           </div>
                         )}
                       </>
@@ -647,7 +645,7 @@ export default function ProformaViewPage() {
                     <div className="flex justify-between text-sm pt-1 border-t border-slate-100">
                       <span className="text-slate-500 font-medium">Total Tax:</span>
                       <span className="font-medium text-slate-800 tabular-nums">
-                        {currencyDisplay} {Number(proforma.total_tax).toFixed(2)}
+                        {formatMoney(Number(proforma.total_tax), proforma.currency_code)}
                       </span>
                     </div>
                   </>
@@ -655,7 +653,7 @@ export default function ProformaViewPage() {
                 <div className="flex justify-between text-lg pt-2 border-t-2 border-slate-800">
                   <span className="font-bold text-slate-900">Total:</span>
                   <span className="font-bold text-slate-900 tabular-nums">
-                    {currencyDisplay} {Number(proforma.total).toFixed(2)}
+                    {formatMoney(Number(proforma.total), proforma.currency_code)}
                   </span>
                 </div>
               </div>

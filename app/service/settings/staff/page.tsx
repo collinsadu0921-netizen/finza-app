@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import { getTabIndustryMode } from "@/lib/industryMode"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 // Service business staff (payroll employees)
 type StaffMember = {
@@ -47,6 +49,7 @@ type BusinessUser = {
 export default function ServiceStaffSettingsPage() {
   const router = useRouter()
   const { openConfirm } = useConfirm()
+  const { format: formatSalary } = useBusinessCurrency()
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [businessUsers, setBusinessUsers] = useState<BusinessUser[]>([])
   const [businessId, setBusinessId] = useState("")
@@ -605,7 +608,7 @@ export default function ServiceStaffSettingsPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-white">
-                            ₵{Number(member.basic_salary).toFixed(2)}
+                            {formatSalary(member.basic_salary)}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -740,15 +743,14 @@ export default function ServiceStaffSettingsPage() {
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         Employment Type
                       </label>
-                      <select
+                      <NativeSelect
                         value={formData.employment_type}
                         onChange={(e) => setFormData({ ...formData, employment_type: e.target.value as any })}
-                        className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                       >
                         <option value="full_time">Full Time</option>
                         <option value="part_time">Part Time</option>
                         <option value="casual">Casual</option>
-                      </select>
+                      </NativeSelect>
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -1002,7 +1004,7 @@ export default function ServiceStaffSettingsPage() {
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Role *
                   </label>
-                  <select
+                  <NativeSelect
                     value={systemUserForm.role}
                     onChange={(e) => {
                       const newRole = e.target.value as "admin" | "manager" | "cashier"
@@ -1015,12 +1017,11 @@ export default function ServiceStaffSettingsPage() {
                         store_id: newRole === "cashier" ? systemUserForm.store_id : "",
                       })
                     }}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                   >
                     <option value="cashier">Cashier</option>
                     <option value="manager">Manager</option>
                     <option value="admin">Admin</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 {/* Admin/Manager Fields */}
@@ -1043,10 +1044,9 @@ export default function ServiceStaffSettingsPage() {
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         Store Assignment
                       </label>
-                      <select
+                      <NativeSelect
                         value={systemUserForm.store_id}
                         onChange={(e) => setSystemUserForm({ ...systemUserForm, store_id: e.target.value })}
-                        className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                       >
                         <option value="">No Store (Global Access)</option>
                         {stores.map((store) => (
@@ -1054,7 +1054,7 @@ export default function ServiceStaffSettingsPage() {
                             {store.name}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                     </div>
 
                     <div>
@@ -1105,10 +1105,9 @@ export default function ServiceStaffSettingsPage() {
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         Store Assignment *
                       </label>
-                      <select
+                      <NativeSelect
                         value={systemUserForm.store_id}
                         onChange={(e) => setSystemUserForm({ ...systemUserForm, store_id: e.target.value })}
-                        className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                         required
                       >
                         <option value="">Select a store</option>
@@ -1117,7 +1116,7 @@ export default function ServiceStaffSettingsPage() {
                             {store.name}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                     </div>
 
                     <div>

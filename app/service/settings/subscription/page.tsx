@@ -18,6 +18,7 @@ import {
   type BillingCycle,
 } from "@/lib/serviceWorkspace/subscriptionPricing"
 import { formatMoney } from "@/lib/money"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
 
@@ -379,17 +380,17 @@ function SubscriptionPaystackActions({
             className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
           />
           <label className="block text-xs font-medium text-slate-600">Network</label>
-          <select
+          <NativeSelect
             value={momoProvider}
             onChange={(e) =>
               setMomoProvider(e.target.value as "mtn" | "vodafone" | "airteltigo")
             }
-            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+            size="sm"
           >
             <option value="mtn">MTN</option>
             <option value="vodafone">Vodafone</option>
             <option value="airteltigo">AirtelTigo</option>
-          </select>
+          </NativeSelect>
           <div className="flex gap-2 pt-1">
             <button
               type="button"

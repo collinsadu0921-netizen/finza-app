@@ -17,6 +17,8 @@ import BlockedActionModal from "@/components/accounting/BlockedActionModal"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { Money } from "@/components/ui/Money"
+import { NativeSelect } from "@/components/ui/NativeSelect"
+import { formatMoney } from "@/lib/money"
 import type { ScreenProps } from "./types"
 
 type JournalEntry = {
@@ -112,11 +114,13 @@ function EntryCard({
   reversalStatus,
   canReverseByEngagement,
   onReverse,
+  currencyCode,
 }: {
   entry: JournalEntry
   reversalStatus: { can_reverse: boolean; reason?: string; reversal_je_id?: string } | undefined
   canReverseByEngagement: boolean
   onReverse: (entry: JournalEntry) => void
+  currencyCode: string | null
 }) {
   const canReverse = reversalStatus?.can_reverse ?? false
   const blockReason = reversalStatus?.reason ?? "Cannot reverse"
@@ -234,11 +238,27 @@ function EntryCard({
 
               {/* Debit / Credit amounts */}
               <div className="flex gap-8 shrink-0 ml-4">
-                <span className="w-28 text-right tabular-nums font-mono text-sm text-blue-600 dark:text-blue-400">
-                  {hasDebit ? <Money amount={Number(line.debit)} currency="GHS" /> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
+                  {hasDebit ? (
+                    <Money
+                      amount={Number(line.debit)}
+                      currencyCode={currencyCode}
+                      className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100"
+                    />
+                  ) : (
+                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                  )}
                 </span>
-                <span className="w-28 text-right tabular-nums font-mono text-sm text-emerald-600 dark:text-emerald-400">
-                  {hasCredit ? <Money amount={Number(line.credit)} currency="GHS" /> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
+                  {hasCredit ? (
+                    <Money
+                      amount={Number(line.credit)}
+                      currencyCode={currencyCode}
+                      className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100"
+                    />
+                  ) : (
+                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                  )}
                 </span>
               </div>
             </div>
@@ -250,11 +270,19 @@ function EntryCard({
       <div className="flex items-center justify-between px-4 py-2 border-t border-dashed border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 text-xs">
         <span className="text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Total</span>
         <div className="flex gap-8">
-          <span className="w-28 text-right tabular-nums font-mono font-semibold text-blue-700 dark:text-blue-300">
-            <Money amount={displayDebits} currency="GHS" />
+          <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
+            <Money
+              amount={displayDebits}
+              currencyCode={currencyCode}
+              className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100"
+            />
           </span>
-          <span className="w-28 text-right tabular-nums font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-            <Money amount={displayCredits} currency="GHS" />
+          <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
+            <Money
+              amount={displayCredits}
+              currencyCode={currencyCode}
+              className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100"
+            />
           </span>
         </div>
       </div>
@@ -299,6 +327,26 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
   const [exporting, setExporting] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [exportDates, setExportDates] = useState({ start: "", end: "" })
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!businessId) {
+      setCurrencyCode(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/business/profile?business_id=${encodeURIComponent(businessId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setCurrencyCode(d.business?.default_currency ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setCurrencyCode(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [businessId])
 
   useEffect(() => {
     if (businessId) loadAccounts()
@@ -474,8 +522,8 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
             line.accounts.code,
             line.accounts.name,
             line.description ?? "",
-            Number(line.debit  || 0) > 0 ? Number(line.debit).toFixed(2)  : "",
-            Number(line.credit || 0) > 0 ? Number(line.credit).toFixed(2) : "",
+            Number(line.debit  || 0) > 0 ? formatMoney(Number(line.debit), currencyCode)  : "",
+            Number(line.credit || 0) > 0 ? formatMoney(Number(line.credit), currencyCode) : "",
           ])
         }
       }
@@ -673,10 +721,9 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
                 Type
               </label>
-              <select
+              <NativeSelect
                 value={filters.reference_type}
                 onChange={(e) => setFilters({ ...filters, reference_type: e.target.value })}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
               >
                 <option value="">All Types</option>
                 <option value="invoice">Invoice</option>
@@ -689,7 +736,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
                 <option value="reversal">Reversal</option>
                 <option value="opening_balance">Opening Balance</option>
                 <option value="settlement">Settlement</option>
-              </select>
+              </NativeSelect>
             </div>
           </div>
         </div>
@@ -699,8 +746,8 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
           <div className="flex items-center justify-between px-4 pb-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
             <span>Account</span>
             <div className="flex gap-8">
-              <span className="w-28 text-right text-blue-400 dark:text-blue-500">Debit</span>
-              <span className="w-28 text-right text-emerald-400 dark:text-emerald-500">Credit</span>
+              <span className="w-28 text-right text-slate-500 dark:text-slate-400">Debit</span>
+              <span className="w-28 text-right text-slate-500 dark:text-slate-400">Credit</span>
             </div>
           </div>
         )}
@@ -723,6 +770,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
                 reversalStatus={reversalStatuses[entry.id]}
                 canReverseByEngagement={canReverseByEngagement}
                 onReverse={openReversalModal}
+                currencyCode={currencyCode}
               />
             ))}
           </div>

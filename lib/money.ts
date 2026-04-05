@@ -128,10 +128,18 @@ export function formatMoneyWithCode(
   return `${code} ${formattedNumber}`
 }
 
+export type FormatMoneyWithSymbolOptions = Omit<MoneyFormatOptions, "showCode"> & {
+  /**
+   * Inserted between symbol and digits (e.g. `\u00A0`) so PDF/print engines
+   * do not wrap the symbol onto its own line.
+   */
+  symbolNumberGlue?: string
+}
+
 /**
  * Format money amount with custom symbol
  * Useful for cases where you want to override the default symbol
- * 
+ *
  * @param amount - Numeric amount to format
  * @param symbol - Currency symbol to use
  * @param options - Formatting options
@@ -140,13 +148,14 @@ export function formatMoneyWithCode(
 export function formatMoneyWithSymbol(
   amount: number | null | undefined,
   symbol: string,
-  options: Omit<MoneyFormatOptions, 'showCode'> = {}
+  options: FormatMoneyWithSymbolOptions = {}
 ): string {
   const {
     missingPlaceholder = "—",
     minimumFractionDigits = 2,
     maximumFractionDigits = 2,
     useGrouping = true,
+    symbolNumberGlue = "",
   } = options
 
   if (amount === null || amount === undefined || isNaN(amount)) {
@@ -160,6 +169,9 @@ export function formatMoneyWithSymbol(
     useGrouping,
   }).format(Math.abs(amount))
 
-  return isNegative ? `-${symbol}${formattedNumber}` : `${symbol}${formattedNumber}`
+  const glue = symbolNumberGlue
+  return isNegative
+    ? `-${symbol}${glue}${formattedNumber}`
+    : `${symbol}${glue}${formattedNumber}`
 }
 

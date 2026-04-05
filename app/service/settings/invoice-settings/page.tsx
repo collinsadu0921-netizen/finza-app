@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 export default function ServiceInvoiceSettingsPage() {
   const router = useRouter()
@@ -475,16 +476,16 @@ export default function ServiceInvoiceSettingsPage() {
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Provider
                   </label>
-                  <select
+                  <NativeSelect
                     value={formData.momo_provider}
                     onChange={(e) => setFormData({ ...formData, momo_provider: e.target.value as any })}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    size="lg"
                   >
                     <option value="">Select provider</option>
                     <option value="MTN">MTN</option>
                     <option value="Vodafone">Vodafone</option>
                     <option value="AirtelTigo">AirtelTigo</option>
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">

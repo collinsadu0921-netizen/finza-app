@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type MaterialRow = {
   id: string
@@ -261,24 +262,26 @@ export default function ServiceMaterialsPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <select
+          <NativeSelect
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as "all" | "active" | "inactive")}
-            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+            wrapperClassName="w-auto shrink-0"
+            className="min-w-[9rem]"
           >
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
-          </select>
-          <select
+          </NativeSelect>
+          <NativeSelect
             value={filterStock}
             onChange={(e) => setFilterStock(e.target.value as "all" | "low" | "ok")}
-            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+            wrapperClassName="w-auto shrink-0"
+            className="min-w-[9rem]"
           >
             <option value="all">All Stock</option>
             <option value="low">Low Stock</option>
             <option value="ok">In Stock</option>
-          </select>
+          </NativeSelect>
           {filtersActive && (
             <button
               onClick={() => { setSearch(""); setSearchQuery(""); setFilterStatus("all"); setFilterStock("all") }}

@@ -6,8 +6,9 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate } from "@/lib/exportUtils"
 import Button from "@/components/ui/Button"
-import { getCurrencySymbol } from "@/lib/currency"
 import { Money } from "@/components/ui/Money"
+import { NativeSelect } from "@/components/ui/NativeSelect"
+import { formatMoney } from "@/lib/money"
 import { cn } from "@/lib/utils"
 
 type Payment = {
@@ -36,7 +37,7 @@ export default function ServicePaymentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
-  const [currencySymbol, setCurrencySymbol] = useState<string>("GHS")
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<DateRange>("this_month")
   const [customStartDate, setCustomStartDate] = useState("")
   const [customEndDate, setCustomEndDate] = useState("")
@@ -71,10 +72,7 @@ export default function ServicePaymentsPage() {
       }
 
       setBusinessId(business.id)
-      // Get currency symbol from currency code (no hardcoded fallback)
-      const currencyCode = business.default_currency
-      const symbol = currencyCode ? getCurrencySymbol(currencyCode) : "GHS"
-      setCurrencySymbol(symbol)
+      setCurrencyCode(business.default_currency ?? null)
     } catch (err: any) {
       console.error("Error loading business:", err)
       setError(err.message || "Failed to load business")
@@ -169,7 +167,8 @@ export default function ServicePaymentsPage() {
         {
           header: "Amount",
           accessor: (p) => Number(p.amount || 0),
-          formatter: formatCurrencyRaw,
+          formatter: (val) =>
+            currencyCode ? formatMoney(Number(val), currencyCode) : formatCurrencyRaw(val),
           excelType: "number",
           width: 15,
         },
@@ -204,7 +203,8 @@ export default function ServicePaymentsPage() {
         {
           header: "Amount",
           accessor: (p) => Number(p.amount || 0),
-          formatter: formatCurrencyRaw,
+          formatter: (val) =>
+            currencyCode ? formatMoney(Number(val), currencyCode) : formatCurrencyRaw(val),
           excelType: "number",
           width: 15,
         },
@@ -276,7 +276,7 @@ export default function ServicePaymentsPage() {
           <div className="flex-1">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Collected</p>
             <div className="text-3xl font-bold text-slate-900 dark:text-white">
-              <Money amount={totalCollected} currency={currencySymbol || "GHS"} className="text-3xl" />
+              <Money amount={totalCollected} currencyCode={currencyCode} className="text-3xl" />
             </div>
           </div>
           <div className="w-px bg-slate-100 dark:bg-slate-700 hidden md:block"></div>
@@ -287,15 +287,15 @@ export default function ServicePaymentsPage() {
 
           {/* Filters Inline */}
           <div className="flex-1 md:flex-none flex flex-col justify-end gap-2">
-            <select
+            <NativeSelect
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value as DateRange)}
-              className="w-full md:w-48 text-sm border-slate-200 dark:border-slate-600 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-slate-800"
+              wrapperClassName="w-full md:w-48 md:max-w-[12rem]"
             >
               <option value="this_month">This Month</option>
               <option value="last_month">Last Month</option>
               <option value="custom">Custom Range</option>
-            </select>
+            </NativeSelect>
 
             {dateRange === "custom" && (
               <div className="flex gap-2">
@@ -389,7 +389,7 @@ export default function ServicePaymentsPage() {
                         </span>
                       </td>
                       <td className="px-6 py-3 whitespace-nowrap text-right">
-                        <Money amount={payment.amount} currency={currencySymbol} className="font-bold text-slate-900 dark:text-white" />
+                        <Money amount={payment.amount} currencyCode={currencyCode} className="font-bold text-slate-900 dark:text-white" />
                       </td>
                     </tr>
                   ))}

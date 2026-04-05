@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { mergeInvoiceTermsFooter } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 
 export async function GET(
   request: NextRequest,
@@ -77,8 +78,23 @@ export async function GET(
       console.error("Error fetching invoice items:", itemsError)
     }
 
+    const merged = mergeInvoiceTermsFooter(
+      invoice.payment_terms,
+      invoice.footer_message,
+      {
+        default_payment_terms: settings?.default_payment_terms ?? null,
+        default_footer_message: settings?.default_footer_message ?? null,
+      }
+    )
+
+    const invoiceForClient = {
+      ...invoice,
+      payment_terms: merged.payment_terms,
+      footer_message: merged.footer_message,
+    }
+
     return NextResponse.json({
-      invoice,
+      invoice: invoiceForClient,
       business: business || null,
       settings: settings || null,
       items: items || [],

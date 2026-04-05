@@ -3,12 +3,14 @@
 import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
 
 type Invoice = {
   id: string
   invoice_number: string
   total: number
+  currency_code: string
   currency_symbol: string
   status: string
   customers: { name: string } | null
@@ -202,7 +204,6 @@ export default function PayInvoicePage() {
 
   const totalPaid      = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
   const remaining      = Number(invoice.total) - totalPaid
-  const sym            = invoice.currency_symbol
   const countryCode    = normalizeCountry(businessCountry)
   const isGhana        = countryCode === "GH"
   const canPaystack    = isGhana && !!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY !== false  // always true when deployed
@@ -226,13 +227,13 @@ export default function PayInvoicePage() {
             </div>
             <div className="text-right">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Total</p>
-              <p className="text-2xl font-bold text-gray-900">{sym}{Number(invoice.total).toFixed(2)}</p>
+              <p className="text-2xl font-bold text-gray-900">{formatMoney(invoice.total, invoice.currency_code)}</p>
             </div>
           </div>
 
           {remaining > 0 && remaining < Number(invoice.total) && (
             <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 text-sm text-orange-800">
-              Remaining: <strong>{sym}{remaining.toFixed(2)}</strong>
+              Remaining: <strong>{formatMoney(remaining, invoice.currency_code)}</strong>
             </div>
           )}
 
@@ -384,7 +385,7 @@ export default function PayInvoicePage() {
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                             </svg>
-                            Pay {sym}{remaining.toFixed(2)}
+                            Pay {formatMoney(remaining, invoice.currency_code)}
                           </>
                         )}
                       </button>

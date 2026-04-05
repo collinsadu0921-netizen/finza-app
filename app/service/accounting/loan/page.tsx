@@ -9,6 +9,8 @@ import {
   isBankOrCashSubType,
   isLoanSubType,
 } from "@/lib/service/accounting/intentTypes"
+import { formatMoney } from "@/lib/money"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,10 +37,6 @@ type EquityMode = "contribution" | "withdrawal"
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-function fmt(n: number) {
-  return n.toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 // ─── Mode tab ─────────────────────────────────────────────────────────────────
@@ -78,12 +76,15 @@ function JournalPreview({
   drAccount,
   crAccount,
   amount,
+  currencyCode,
 }: {
   drAccount: Account | undefined
   crAccount: Account | undefined
   amount: number
+  currencyCode: string | null
 }) {
   if (!drAccount || !crAccount || amount <= 0) return null
+  const fmt = (n: number) => formatMoney(n, currencyCode)
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-5">
       <div className="bg-gray-50 dark:bg-gray-800/50 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
@@ -127,6 +128,7 @@ export default function FinancingPage() {
   // ── Business / loading ──────────────────────────────────────────────────────
   const [loading, setLoading]       = useState(true)
   const [businessId, setBusinessId] = useState<string | null>(null)
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null)
   const [coaLoaded, setCoaLoaded]   = useState(false)
 
   // ── Active section ──────────────────────────────────────────────────────────
@@ -174,7 +176,10 @@ export default function FinancingPage() {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) { setLoading(false); return }
         const b = await getCurrentBusiness(supabase, user.id)
-        if (!cancelled && b) setBusinessId(b.id)
+        if (!cancelled && b) {
+          setBusinessId(b.id)
+          setCurrencyCode(b.default_currency ?? null)
+        }
       } catch (_) {
         // ignore
       } finally {
@@ -465,7 +470,7 @@ export default function FinancingPage() {
                           {loan.lender_name ?? <span className="text-gray-400">—</span>}
                         </td>
                         <td className="py-2 px-3 text-right text-gray-700 dark:text-gray-300">
-                          {fmt(loan.principal_amount)}
+                          {formatMoney(loan.principal_amount, currencyCode)}
                         </td>
                         <td className="py-2 px-3 text-right text-gray-700 dark:text-gray-300">
                           {loan.interest_rate_pct != null
@@ -475,7 +480,7 @@ export default function FinancingPage() {
                         <td className={`py-2 px-3 text-right font-semibold ${
                           loan.outstanding > 0 ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"
                         }`}>
-                          {fmt(loan.outstanding)}
+                          {formatMoney(loan.outstanding, currencyCode)}
                         </td>
                         <td className="py-2 px-3 text-gray-500 dark:text-gray-400 text-xs">
                           {loan.loan_account
@@ -522,33 +527,30 @@ export default function FinancingPage() {
             </Field>
 
             <Field label="Bank / Cash Account">
-              <select value={bankId ?? ""} onChange={(e) => setBankId(e.target.value || null)}
-                disabled={isSubmitting || loanFormDisabled}
-                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60">
+              <NativeSelect value={bankId ?? ""} onChange={(e) => setBankId(e.target.value || null)}
+                disabled={isSubmitting || loanFormDisabled}>
                 <option value="">Select account…</option>
                 {bankCashAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-              </select>
+              </NativeSelect>
             </Field>
 
             {loanMode !== "interest" && (
               <Field label="Loan Account" hint="2300 = Short-term · 2310 = Long-term">
-                <select value={loanAccountId ?? ""} onChange={(e) => setLoanAccountId(e.target.value || null)}
-                  disabled={isSubmitting || loanFormDisabled}
-                  className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60">
+                <NativeSelect value={loanAccountId ?? ""} onChange={(e) => setLoanAccountId(e.target.value || null)}
+                  disabled={isSubmitting || loanFormDisabled}>
                   <option value="">Select loan account…</option>
                   {loanAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-                </select>
+                </NativeSelect>
               </Field>
             )}
 
             {loanMode === "interest" && (
               <Field label="Interest Expense Account">
-                <select value={expenseAccountId ?? ""} onChange={(e) => setExpenseAccountId(e.target.value || null)}
-                  disabled={isSubmitting}
-                  className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60">
+                <NativeSelect value={expenseAccountId ?? ""} onChange={(e) => setExpenseAccountId(e.target.value || null)}
+                  disabled={isSubmitting}>
                   <option value="">Select expense account…</option>
                   {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-                </select>
+                </NativeSelect>
               </Field>
             )}
 
@@ -583,7 +585,7 @@ export default function FinancingPage() {
             </Field>
           </div>
 
-          <JournalPreview drAccount={loanDR} crAccount={loanCR} amount={numLoanAmount} />
+          <JournalPreview drAccount={loanDR} crAccount={loanCR} amount={numLoanAmount} currencyCode={currencyCode} />
         </>
       )}
 
@@ -621,21 +623,19 @@ export default function FinancingPage() {
             </Field>
 
             <Field label="Bank / Cash Account">
-              <select value={equityBankId ?? ""} onChange={(e) => setEquityBankId(e.target.value || null)}
-                disabled={isSubmitting || equityFormDisabled}
-                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60">
+              <NativeSelect value={equityBankId ?? ""} onChange={(e) => setEquityBankId(e.target.value || null)}
+                disabled={isSubmitting || equityFormDisabled}>
                 <option value="">Select account…</option>
                 {bankCashAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-              </select>
+              </NativeSelect>
             </Field>
 
             <Field label="Equity Account">
-              <select value={equityAccountId ?? ""} onChange={(e) => setEquityAccountId(e.target.value || null)}
-                disabled={isSubmitting || equityFormDisabled}
-                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60">
+              <NativeSelect value={equityAccountId ?? ""} onChange={(e) => setEquityAccountId(e.target.value || null)}
+                disabled={isSubmitting || equityFormDisabled}>
                 <option value="">Select equity account…</option>
                 {equityAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-              </select>
+              </NativeSelect>
             </Field>
 
             <Field label={<>Description <Optional /></>}>
@@ -646,7 +646,7 @@ export default function FinancingPage() {
             </Field>
           </div>
 
-          <JournalPreview drAccount={equityDR} crAccount={equityCR} amount={numEquityAmount} />
+          <JournalPreview drAccount={equityDR} crAccount={equityCR} amount={numEquityAmount} currencyCode={currencyCode} />
         </>
       )}
 
@@ -676,7 +676,7 @@ export default function FinancingPage() {
                 : "Confirm Owner Withdrawal"}
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">
-              Amount: <strong>{fmt(section === "loans" ? numLoanAmount : numEquityAmount)}</strong>
+              Amount: <strong>{formatMoney(section === "loans" ? numLoanAmount : numEquityAmount, currencyCode)}</strong>
             </p>
             <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
               This will be posted to the ledger and cannot be edited. Continue?

@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { resolveServiceBusinessContext } from "@/lib/serviceBusinessContext"
 import { formatMoney } from "@/lib/money"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type ActivityRow = {
   journal_entry_id: string
@@ -219,17 +220,16 @@ export default function ServiceExpensesActivityPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Source type</label>
-                <select
+                <NativeSelect
                   value={filters.sourceType}
                   onChange={(e) => setFilters((f) => ({ ...f, sourceType: e.target.value }))}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                 >
                   <option value="">All</option>
                   <option value="expense">Manual expense</option>
                   <option value="bill">Bill</option>
                   <option value="adjustment_journal">Adjustment</option>
                   <option value="reconciliation">Reconciliation</option>
-                </select>
+                </NativeSelect>
               </div>
             </div>
           </div>

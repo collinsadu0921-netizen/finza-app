@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { NativeSelect } from "@/components/ui/NativeSelect"
+import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 
 type ProformaInvoice = {
   id: string
@@ -49,6 +51,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function ProformaListPage() {
   const router = useRouter()
+  const { format } = useBusinessCurrency()
   const [proformas, setProformas] = useState<ProformaInvoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -196,10 +199,11 @@ export default function ProformaListPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <select
+          <NativeSelect
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+            wrapperClassName="w-auto shrink-0"
+            className="min-w-[10.5rem]"
           >
             <option value="all">All Status</option>
             <option value="draft">Draft</option>
@@ -207,7 +211,7 @@ export default function ProformaListPage() {
             <option value="accepted">Accepted</option>
             <option value="converted">Converted</option>
             <option value="cancelled">Cancelled</option>
-          </select>
+          </NativeSelect>
           {(search || statusFilter !== "all") && (
             <button
               onClick={() => { setSearch(""); setStatusFilter("all") }}
@@ -277,7 +281,7 @@ export default function ProformaListPage() {
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
                         <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                          {Number(pf.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {format(pf.total)}
                         </span>
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">

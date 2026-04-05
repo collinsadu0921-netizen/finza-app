@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = { id: string; name: string }
 type ProformaOption = { id: string; proforma_number: string | null; customer_name: string | null }
@@ -160,16 +161,15 @@ export default function ServiceJobsNewPage() {
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
               Customer <span className="font-normal text-slate-400">(optional)</span>
             </label>
-            <select
+            <NativeSelect
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
             >
               <option value="">— No customer —</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           {/* Dates */}
@@ -201,15 +201,11 @@ export default function ServiceJobsNewPage() {
           {/* Status */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Initial Status</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
-            >
+            <NativeSelect value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="draft">Draft</option>
               <option value="in_progress">In Progress</option>
               <option value="completed">Completed</option>
-            </select>
+            </NativeSelect>
           </div>
 
           {/* Proforma link */}
@@ -217,18 +213,14 @@ export default function ServiceJobsNewPage() {
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
               Link Proforma Invoice <span className="font-normal text-slate-400">(optional)</span>
             </label>
-            <select
-              value={proformaInvoiceId}
-              onChange={(e) => setProformaInvoiceId(e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
-            >
+            <NativeSelect value={proformaInvoiceId} onChange={(e) => setProformaInvoiceId(e.target.value)}>
               <option value="">— No proforma —</option>
               {proformas.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.proforma_number ?? "Draft"}{p.customer_name ? ` — ${p.customer_name}` : ""}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             <p className="text-xs text-slate-400 mt-1">Only sent or accepted proformas can be linked.</p>
           </div>
 

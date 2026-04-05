@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import { getCurrencySymbol } from "@/lib/currency"
-import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
+import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 function getQuarterDateRange(year: number, quarter: number): { start: string; end: string } {
   const quarterBounds: Record<number, [number, number]> = {
@@ -96,7 +96,6 @@ export default function CITPage() {
   const toast = useToast()
 
   const [businessId, setBusinessId] = useState("")
-  const [currencySymbol, setCurrencySymbol] = useState("")
   const [currencyCode, setCurrencyCode] = useState("")
   const [citRateCode, setCitRateCode] = useState("standard_25")
   const [loading, setLoading] = useState(true)
@@ -144,8 +143,6 @@ export default function CITPage() {
       if (!business) return
 
       setBusinessId(business.id)
-      const sym = getCurrencySymbol(business.default_currency || "GHS")
-      setCurrencySymbol(sym || "")
       setCurrencyCode(business.default_currency || "")
 
       // Load business cit_rate_code from profile
@@ -276,8 +273,6 @@ export default function CITPage() {
     : 0
   const amtApplies    = amtApplicable && amtAmount > standardCit
   const citAmount     = amtApplicable ? Math.max(standardCit, amtAmount) : standardCit
-  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
-
   const handleCreate = async () => {
     if (!periodLabel.trim()) {
       toast.showToast("Please choose a period", "warning")
@@ -309,7 +304,7 @@ export default function CITPage() {
         return
       }
       toast.showToast(
-        `CIT provision ${currency}${citAmount.toFixed(2)} created${autoPost ? " and posted to ledger" : ""}`,
+        `CIT provision ${formatMoney(citAmount, currencyCode || null)} created${autoPost ? " and posted to ledger" : ""}`,
         "success"
       )
       setShowForm(false)
@@ -363,7 +358,7 @@ export default function CITPage() {
         toast.showToast(data.error || "Failed to mark as paid", "error")
         return
       }
-      toast.showToast(`CIT payment of ${currency}${payingProvision.cit_amount.toFixed(2)} posted to ledger`, "success")
+      toast.showToast(`CIT payment of ${formatMoney(payingProvision.cit_amount, currencyCode || null)} posted to ledger`, "success")
       setPayingProvision(null)
       setPayRef("")
       await loadData()
@@ -455,21 +450,24 @@ export default function CITPage() {
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 shadow">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Total Provisions ({currentYear})</p>
                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-                  {currency}{provisions
-                    .filter(p => p.period_label.includes(String(currentYear)))
-                    .reduce((s, p) => s + p.cit_amount, 0).toFixed(2)}
+                  {formatMoney(
+                    provisions
+                      .filter(p => p.period_label.includes(String(currentYear)))
+                      .reduce((s, p) => s + p.cit_amount, 0),
+                    currencyCode || null
+                  )}
                 </p>
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 shadow">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Posted to Ledger</p>
                 <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
-                  {currency}{totalPosted.toFixed(2)}
+                  {formatMoney(totalPosted, currencyCode || null)}
                 </p>
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 shadow">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Paid to GRA</p>
                 <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">
-                  {currency}{totalPaid.toFixed(2)}
+                  {formatMoney(totalPaid, currencyCode || null)}
                 </p>
               </div>
             </div>
@@ -509,13 +507,13 @@ export default function CITPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 capitalize">{prov.provision_type}</td>
                       <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-white">
-                        {currency}{Number(prov.chargeable_income).toFixed(2)}
+                        {formatMoney(Number(prov.chargeable_income), currencyCode || null)}
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-400">
                         {(prov.cit_rate * 100).toFixed(0)}%
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-bold text-blue-600 dark:text-blue-400">
-                        {currency}{Number(prov.cit_amount).toFixed(2)}
+                        {formatMoney(Number(prov.cit_amount), currencyCode || null)}
                       </td>
                       <td className="px-4 py-3">{statusBadge(prov.status)}</td>
                       <td className="px-4 py-3">
@@ -567,38 +565,38 @@ export default function CITPage() {
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Period *</label>
                   {provType === "quarterly" ? (
-                    <select
+                    <NativeSelect
                       value={quarterSelectOptions.some((o) => o.value === periodLabel) ? periodLabel : `Q${currentQ} ${currentYear}`}
                       onChange={(e) => setPeriodLabel(e.target.value)}
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                      size="sm"
                     >
                       {quarterSelectOptions.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   ) : (
-                    <select
+                    <NativeSelect
                       value={
                         /^FY\s+\d{4}$/i.test(periodLabel.trim())
                           ? periodLabel.trim().replace(/^fy\s+/i, "FY ")
                           : `FY ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
                       }
                       onChange={(e) => setPeriodLabel(e.target.value)}
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                      size="sm"
                     >
                       {fySelectOptions.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                  <select
+                  <NativeSelect
                     value={provType}
                     onChange={(e) => {
                       const next = e.target.value as "quarterly" | "annual" | "final"
@@ -611,12 +609,12 @@ export default function CITPage() {
                         setPeriodLabel(`FY ${year}`)
                       }
                     }}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                    size="sm"
                   >
                     <option value="quarterly">Quarterly Provisional</option>
                     <option value="annual">Annual Estimate</option>
                     <option value="final">Final Assessment</option>
-                  </select>
+                  </NativeSelect>
                 </div>
               </div>
 
@@ -634,7 +632,7 @@ export default function CITPage() {
                       ? (periodLabel.trim() || `Q${currentQ} ${currentYear}`)
                       : `full year ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
                     } {isPresumptive ? "gross revenue" : "profit before tax"}
-                    {netProfit != null && ` → ${currency}${netProfit.toFixed(2)}`}
+                    {netProfit != null && ` → ${formatMoney(netProfit, currencyCode || null)}`}
                   </p>
                 </div>
                 <button
@@ -699,18 +697,18 @@ export default function CITPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">CIT Rate</label>
-                <select
+                <NativeSelect
                   value={citRateCode}
                   onChange={e => {
                     setCitRateCode(e.target.value)
                     setCitRate(CIT_RATES[e.target.value]?.rate ?? 0.25)
                   }}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  size="sm"
                 >
                   {Object.entries(CIT_RATES).map(([code, info]) => (
                     <option key={code} value={code}>{info.label}</option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
 
               {/* CIT Preview */}
@@ -722,23 +720,23 @@ export default function CITPage() {
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {amtApplies
-                        ? `0.5% × ${currency}${(Number(grossRevenue) || 0).toFixed(2)} gross revenue`
-                        : `${currency}${(Number(chargeableIncome) || 0).toFixed(2)} × ${(citRate * 100).toFixed(0)}%`}
+                        ? `0.5% × ${formatMoney(Number(grossRevenue) || 0, currencyCode || null)} gross revenue`
+                        : `${formatMoney(Number(chargeableIncome) || 0, currencyCode || null)} × ${(citRate * 100).toFixed(0)}%`}
                     </p>
                   </div>
                   <p className={`text-2xl font-bold ${amtApplies ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"}`}>
-                    {currency}{citAmount.toFixed(2)}
+                    {formatMoney(citAmount, currencyCode || null)}
                   </p>
                 </div>
                 {amtApplies && (
                   <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-700 flex justify-between text-xs text-amber-700 dark:text-amber-400">
                     <span>Standard CIT ({(citRate * 100).toFixed(0)}% × chargeable income)</span>
-                    <span>{currency}{standardCit.toFixed(2)}</span>
+                    <span>{formatMoney(standardCit, currencyCode || null)}</span>
                   </div>
                 )}
                 {amtApplicable && !amtApplies && amtAmount > 0 && (
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                    AMT floor: {currency}{amtAmount.toFixed(2)} — standard CIT is higher ✓
+                    AMT floor: {formatMoney(amtAmount, currencyCode || null)} — standard CIT is higher ✓
                   </p>
                 )}
               </div>
@@ -789,7 +787,7 @@ export default function CITPage() {
                     Saving…
                   </>
                 ) : (
-                  `Create Provision · ${currency}${citAmount.toFixed(2)}`
+                  `Create Provision · ${formatMoney(citAmount, currencyCode || null)}`
                 )}
               </button>
             </div>
@@ -803,7 +801,7 @@ export default function CITPage() {
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Record CIT Payment to GRA</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-              {payingProvision.period_label} · {currency}{payingProvision.cit_amount.toFixed(2)}
+              {payingProvision.period_label} · {formatMoney(payingProvision.cit_amount, currencyCode || null)}
             </p>
 
             <div className="space-y-4">
@@ -819,15 +817,11 @@ export default function CITPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Payment Account</label>
-                <select
-                  value={payAccount}
-                  onChange={e => setPayAccount(e.target.value)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
-                >
+                <NativeSelect value={payAccount} onChange={e => setPayAccount(e.target.value)} size="sm">
                   <option value="1010">Bank Account</option>
                   <option value="1000">Cash</option>
                   <option value="1020">Mobile Money</option>
-                </select>
+                </NativeSelect>
               </div>
 
               <div>
@@ -844,8 +838,8 @@ export default function CITPage() {
               {/* Preview */}
               <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-xs text-green-800 dark:text-green-300 space-y-0.5">
                 <p className="font-semibold">Journal entry will post:</p>
-                <p>Dr CIT Payable (2160) {currency}{payingProvision.cit_amount.toFixed(2)}</p>
-                <p>Cr {payAccount === "1010" ? "Bank" : payAccount === "1020" ? "Mobile Money" : "Cash"} {currency}{payingProvision.cit_amount.toFixed(2)}</p>
+                <p>Dr CIT Payable (2160) {formatMoney(payingProvision.cit_amount, currencyCode || null)}</p>
+                <p>Cr {payAccount === "1010" ? "Bank" : payAccount === "1020" ? "Mobile Money" : "Cash"} {formatMoney(payingProvision.cit_amount, currencyCode || null)}</p>
               </div>
             </div>
 

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { formatMoney } from "@/lib/money"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = {
   id: string
@@ -277,10 +278,10 @@ export default function ServiceCustomerProfilePage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select value={editStatus} onChange={(e) => setEditStatus(e.target.value as "active" | "blocked")} className="w-full border p-2 rounded">
+                <NativeSelect value={editStatus} onChange={(e) => setEditStatus(e.target.value as "active" | "blocked")}>
                   <option value="active">Active</option>
                   <option value="blocked">Blocked</option>
-                </select>
+                </NativeSelect>
               </div>
               <div className="flex gap-2">
                 <button onClick={handleSave} disabled={saving || !editName.trim()} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-300">

@@ -15,10 +15,9 @@ export async function GET(
       )
     }
 
-    // Redirect to PDF preview endpoint that uses the shared document component
-    // TODO: In the future, convert HTML to actual PDF using a library like pdfkit or puppeteer
+    // Binary PDF (Chromium render of the same HTML as pdf-preview)
     return NextResponse.redirect(
-      new URL(`/api/invoices/${invoiceId}/pdf-preview`, request.url)
+      new URL(`/api/invoices/${invoiceId}/export-pdf`, request.url)
     )
   } catch (error: any) {
     console.error("Error generating PDF:", error)

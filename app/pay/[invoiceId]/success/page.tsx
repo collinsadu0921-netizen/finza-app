@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { getCurrencySymbol } from "@/lib/currency"
+import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 
 export default function PaymentSuccessPage() {
   const params = useParams()
@@ -38,12 +38,11 @@ export default function PaymentSuccessPage() {
         </div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
         <p className="text-gray-600 mb-6">
-          Your payment of {invoice ? (() => {
-            const symbol = invoice.currency_code 
-              ? getCurrencySymbol(invoice.currency_code) 
-              : (invoice.currency_symbol || "")
-            return `${symbol}${Number(invoice.total).toFixed(2)}`
-          })() : ""} has been processed successfully.
+          Your payment of {invoice
+            ? invoice.currency_code
+              ? formatMoney(invoice.total, invoice.currency_code)
+              : formatMoneyWithSymbol(invoice.total, invoice.currency_symbol || "")
+            : ""} has been processed successfully.
         </p>
         {invoice && (
           <div className="bg-gray-50 rounded-lg p-4 mb-6 text-left">

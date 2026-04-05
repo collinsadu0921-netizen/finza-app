@@ -4,6 +4,10 @@ import { getCurrentBusiness } from "@/lib/business"
 import { calculateTaxes } from "@/lib/taxEngine"
 import { generateFinancialDocumentHTML, type BusinessInfo, type CustomerInfo, type DocumentItem, type DocumentMeta, type DocumentTotals } from "@/components/documents/FinancialDocument"
 import { getCurrencySymbol } from "@/lib/currency"
+import {
+  loadInvoiceSettingsForDocument,
+  mergeInvoiceTermsFooter,
+} from "@/lib/invoices/loadInvoiceSettingsForDocument"
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,6 +20,7 @@ export async function POST(request: NextRequest) {
       due_date,
       notes,
       footer_message,
+      payment_terms,
       apply_taxes,
       items,
       currency_symbol, // No default - must come from business
@@ -177,6 +182,13 @@ export async function POST(request: NextRequest) {
       due_date: due_date || null,
     }
 
+    const invDocSettings = await loadInvoiceSettingsForDocument(supabase, finalBusinessId)
+    const merged = mergeInvoiceTermsFooter(
+      typeof payment_terms === "string" ? payment_terms : null,
+      typeof footer_message === "string" ? footer_message : null,
+      invDocSettings
+    )
+
     // Generate HTML preview using shared component
     const htmlPreview = generateFinancialDocumentHTML({
       documentType: "invoice",
@@ -186,7 +198,9 @@ export async function POST(request: NextRequest) {
       totals: documentTotals,
       meta: documentMeta,
       notes: notes || null,
-      footer_message: footer_message || null,
+      footer_message: merged.footer_message,
+      payment_terms: merged.payment_terms,
+      payment_details: invDocSettings.payment_details,
       apply_taxes,
       currency_symbol,
       currency_code,

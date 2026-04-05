@@ -10,6 +10,7 @@ import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Invoice = {
   id: string
@@ -421,7 +422,7 @@ function InvoicesPageContent() {
             </div>
 
             {/* Status */}
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+            <NativeSelect value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               <option value="all">All Status</option>
               <option value="draft">Draft</option>
               <option value="sent">Sent</option>
@@ -429,13 +430,13 @@ function InvoicesPageContent() {
               <option value="paid">Paid</option>
               <option value="overdue">Overdue</option>
               <option value="cancelled">Cancelled</option>
-            </select>
+            </NativeSelect>
 
             {/* Customer */}
-            <select value={customerFilter} onChange={e => setCustomerFilter(e.target.value)} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+            <NativeSelect value={customerFilter} onChange={e => setCustomerFilter(e.target.value)}>
               <option value="all">All Customers</option>
               {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </NativeSelect>
 
             {/* Start date */}
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />

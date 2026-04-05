@@ -5,8 +5,9 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
-import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
+import { formatMoney } from "@/lib/money"
 import type { TaxResult } from "@/lib/taxEngine/types"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = {
   id: string
@@ -68,7 +69,7 @@ export default function ProformaEditPage() {
   const [businessId, setBusinessId] = useState("")
   const [businessIndustry, setBusinessIndustry] = useState<string | null>(null)
   const [applyTaxes, setApplyTaxes] = useState(true)
-  const [currencyDisplay, setCurrencyDisplay] = useState<string>("")
+  const [currencyCode, setCurrencyCode] = useState<string | null>(null)
 
   // Create customer modal state
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -119,7 +120,7 @@ export default function ProformaEditPage() {
         .single()
       const industryResolved = (biz as { industry?: string | null } | null)?.industry ?? null
       setBusinessIndustry(industryResolved)
-      setCurrencyDisplay(resolveCurrencyDisplay(biz))
+      setCurrencyCode((biz as { default_currency?: string | null } | null)?.default_currency ?? null)
 
       // Load proforma data
       const response = await fetch(
@@ -492,23 +493,17 @@ export default function ProformaEditPage() {
                     New Customer
                   </button>
                 </div>
-                <div className="relative">
-                  <select
-                    value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="w-full appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block p-3 pr-8 transition-colors dark:bg-slate-700 dark:border-slate-600 dark:text-white"
-                  >
-                    <option value="">Select a customer...</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                </div>
+                <NativeSelect
+                  value={selectedCustomerId}
+                  onChange={(e) => setSelectedCustomerId(e.target.value)}
+                  size="lg"
+                  className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
+                >
+                  <option value="">Select a customer...</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </NativeSelect>
               </div>
 
               {/* Dates & Settings */}
@@ -576,7 +571,7 @@ export default function ProformaEditPage() {
                           <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
                             <td className="px-6 py-3 align-top">
                               <div className="space-y-1.5">
-                                <select
+                                <NativeSelect
                                   value={item.product_service_id || ""}
                                   onChange={(e) => {
                                     if (e.target.value) {
@@ -587,15 +582,16 @@ export default function ProformaEditPage() {
                                       updateItem(item.id, "unit_price", 0)
                                     }
                                   }}
-                                  className="block w-full text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                  size="sm"
+                                  className="dark:bg-gray-700"
                                 >
                                   <option value="">{businessIndustry === "service" ? "Select Service" : "Select product/service"}</option>
                                   {products.map((p) => (
                                     <option key={p.id} value={p.id}>
-                                      {p.name} — {currencyDisplay || ""} {Number(p.price || 0).toFixed(2)}
+                                      {p.name} — {formatMoney(p.price, currencyCode)}
                                     </option>
                                   ))}
-                                </select>
+                                </NativeSelect>
                                 <input
                                   type="text"
                                   placeholder="Description"
@@ -635,14 +631,16 @@ export default function ProformaEditPage() {
                             </td>
                             <td className="px-4 py-3 align-top">
                               <div className="flex items-center gap-2">
-                                <select
+                                <NativeSelect
                                   value={item.discount_type}
                                   onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                                  className="w-20 text-xs border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                  size="sm"
+                                  wrapperClassName="w-20 shrink-0"
+                                  className="text-xs dark:bg-gray-700"
                                 >
                                   <option value="amount">Amt</option>
                                   <option value="percent">%</option>
-                                </select>
+                                </NativeSelect>
                                 <input
                                   type="text"
                                   inputMode="decimal"
@@ -655,7 +653,7 @@ export default function ProformaEditPage() {
                               </div>
                             </td>
                             <td className="px-6 py-3 align-top text-right font-medium text-slate-900 dark:text-white pt-5">
-                              {currencyDisplay} {lineTotal.toFixed(2)}
+                              {formatMoney(lineTotal, currencyCode)}
                             </td>
                             <td className="px-2 py-3 align-top pt-4">
                               <button
@@ -735,13 +733,13 @@ export default function ProformaEditPage() {
 
                 <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                   <span>Subtotal</span>
-                  <span className="font-medium">{currencyDisplay} {displaySubtotal.toFixed(2)}</span>
+                  <span className="font-medium">{formatMoney(displaySubtotal, currencyCode)}</span>
                 </div>
 
                 {totalDiscount > 0 && (
                   <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                     <span>Discounts</span>
-                    <span className="font-medium text-rose-600">−{currencyDisplay} {totalDiscount.toFixed(2)}</span>
+                    <span className="font-medium text-rose-600">{formatMoney(-Math.abs(totalDiscount), currencyCode)}</span>
                   </div>
                 )}
 
@@ -752,19 +750,19 @@ export default function ProformaEditPage() {
                       .map((line) => (
                         <div key={line.code} className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
                           <span>{line.code}</span>
-                          <span>{currencyDisplay} {Number(line.amount).toFixed(2)}</span>
+                          <span>{formatMoney(Number(line.amount), currencyCode)}</span>
                         </div>
                       ))}
                     <div className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400 pt-1">
                       <span>Total Tax</span>
-                      <span className="font-medium">{currencyDisplay} {displayTax.toFixed(2)}</span>
+                      <span className="font-medium">{formatMoney(displayTax, currencyCode)}</span>
                     </div>
                   </div>
                 )}
 
                 <div className="flex justify-between items-center pt-2">
                   <span className="text-base font-bold text-slate-900 dark:text-white">Total</span>
-                  <span className="text-xl font-bold text-slate-900 dark:text-white">{currencyDisplay} {displayTotal.toFixed(2)}</span>
+                  <span className="text-xl font-bold text-slate-900 dark:text-white">{formatMoney(displayTotal, currencyCode)}</span>
                 </div>
               </div>
             </div>

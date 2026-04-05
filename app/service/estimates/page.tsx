@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import { getCurrencySymbol } from "@/lib/currency"
+import { formatMoney } from "@/lib/money"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Estimate = {
   id: string
@@ -50,7 +51,7 @@ export default function EstimatesPage() {
   const [businessId, setBusinessId] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
-  const [listCurrencySymbol, setListCurrencySymbol] = useState("₵")
+  const [listCurrencyCode, setListCurrencyCode] = useState<string | null>(null)
 
   useEffect(() => {
     loadEstimates()
@@ -70,7 +71,7 @@ export default function EstimatesPage() {
       if (!business) { setError("Business not found"); setLoading(false); return }
 
       setBusinessId(business.id)
-      setListCurrencySymbol(getCurrencySymbol(business.default_currency) || "₵")
+      setListCurrencyCode(business.default_currency || null)
 
       let query = supabase
         .from("estimates")
@@ -228,10 +229,11 @@ export default function EstimatesPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <select
+          <NativeSelect
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+            wrapperClassName="w-auto shrink-0"
+            className="min-w-[10.5rem]"
           >
             <option value="all">All Status</option>
             <option value="draft">Draft</option>
@@ -239,7 +241,7 @@ export default function EstimatesPage() {
             <option value="accepted">Accepted</option>
             <option value="rejected">Rejected</option>
             <option value="expired">Expired</option>
-          </select>
+          </NativeSelect>
           {(search || statusFilter !== "all") && (
             <button
               onClick={() => { setSearch(""); setStatusFilter("all") }}
@@ -303,8 +305,7 @@ export default function EstimatesPage() {
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
                         <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                          {listCurrencySymbol}
-                          {estimate.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatMoney(estimate.total_amount, listCurrencyCode)}
                         </span>
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">

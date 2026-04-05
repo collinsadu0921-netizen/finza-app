@@ -9,6 +9,7 @@ import {
   type Permission,
   type CustomPermissions,
 } from "@/lib/permissions"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Member = {
   id: string
@@ -467,16 +468,17 @@ export default function ServiceTeamPage() {
                   </div>
 
                   {/* Role selector */}
-                  <select
+                  <NativeSelect
                     value={m.role}
                     onChange={e => handleRoleChange(m.id, e.target.value)}
                     disabled={changingRole === m.id}
-                    className="text-sm border border-gray-200 dark:border-gray-600 rounded-lg px-2.5 py-1.5 bg-white dark:bg-gray-700 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                    size="sm"
+                    wrapperClassName="w-auto shrink-0 min-w-[8.5rem]"
                   >
                     {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
                       <option key={key} value={key}>{cfg.label}</option>
                     ))}
-                  </select>
+                  </NativeSelect>
 
                   {/* Edit permissions */}
                   <button
@@ -558,15 +560,11 @@ export default function ServiceTeamPage() {
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   Role <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={invRole}
-                  onChange={e => setInvRole(e.target.value)}
-                  className="w-full border border-slate-300 dark:border-gray-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 dark:text-white"
-                >
+                <NativeSelect value={invRole} onChange={e => setInvRole(e.target.value)}>
                   {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
                     <option key={key} value={key}>{cfg.label} — {cfg.desc}</option>
                   ))}
-                </select>
+                </NativeSelect>
                 <p className="text-xs text-slate-400 mt-1">You can customise individual permissions after adding.</p>
               </div>
 

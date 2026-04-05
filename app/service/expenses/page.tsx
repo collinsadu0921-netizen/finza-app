@@ -7,6 +7,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate, formatYesNo } from "@/lib/exportUtils"
 import { formatMoney } from "@/lib/money"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Expense = {
   id: string
@@ -297,16 +298,17 @@ export default function ExpensesPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <select
+          <NativeSelect
             value={filters.category_id}
             onChange={(e) => setFilters({ ...filters, category_id: e.target.value })}
-            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+            wrapperClassName="w-auto shrink-0"
+            className="min-w-[11rem]"
           >
             <option value="">All Categories</option>
             {categories.map((cat) => (
               <option key={cat.id} value={cat.id}>{cat.name}</option>
             ))}
-          </select>
+          </NativeSelect>
           <input
             type="date"
             value={filters.start_date}

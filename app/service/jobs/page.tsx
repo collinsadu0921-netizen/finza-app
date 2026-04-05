@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type JobRow = {
   id: string
@@ -204,17 +205,18 @@ export default function ServiceJobsPage() {
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
-          <select
+          <NativeSelect
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+            wrapperClassName="w-auto shrink-0"
+            className="min-w-[10.5rem]"
           >
             <option value="all">All Status</option>
             <option value="draft">Draft</option>
             <option value="in_progress">In Progress</option>
             <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
-          </select>
+          </NativeSelect>
           {filtersActive && (
             <button
               onClick={() => { setSearch(""); setSearchQuery(""); setFilterStatus("all") }}

@@ -1,50 +1,55 @@
 import React from "react"
 import { cn } from "@/lib/utils"
+import { formatMoney } from "@/lib/money"
 
 interface MoneyProps {
-    amount: number | string
-    currency?: string
-    type?: "in" | "out" | "neutral" | "error"
-    className?: string
-    showSign?: boolean
+  amount: number | string
+  /** ISO currency code (e.g. GHS, USD). Preferred over legacy `currency`. */
+  currencyCode?: string | null
+  /**
+   * @deprecated Use `currencyCode`. If `currencyCode` is unset and this matches a 3-letter ISO code, it is used as the code.
+   */
+  currency?: string
+  type?: "in" | "out" | "neutral" | "error"
+  className?: string
+  showSign?: boolean
 }
 
 export function Money({
-    amount,
-    currency = "GHS",
-    type = "neutral",
-    className,
-    showSign = false
+  amount,
+  currencyCode,
+  currency,
+  type = "neutral",
+  className,
+  showSign = false,
 }: MoneyProps) {
-    const numAmount = Number(amount) || 0
-    const isNegative = numAmount < 0
-    const absAmount = Math.abs(numAmount)
+  const numAmount = Number(amount) || 0
 
-    // Determine color class based on type
-    const colorClass = {
-        in: "text-emerald-600 dark:text-emerald-400", // Money in 
-        out: "text-slate-600 dark:text-slate-400",  // Money out (neutral)
-        error: "text-rose-600 dark:text-rose-400", // Errors/Overdue
-        neutral: "text-slate-900 dark:text-gray-100",
-    }[type]
+  const resolvedCode =
+    currencyCode ??
+    (currency && /^[A-Za-z]{3}$/.test(currency.trim()) ? currency.trim().toUpperCase() : null)
 
-    const formattedAmount = absAmount.toLocaleString('en-GH', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    })
+  const colorClass = {
+    in: "text-emerald-600 dark:text-emerald-400",
+    out: "text-slate-600 dark:text-slate-400",
+    error: "text-rose-600 dark:text-rose-400",
+    neutral: "text-slate-900 dark:text-gray-100",
+  }[type]
 
-    // Handle signs visually only
-    const sign = showSign && type === 'in' ? '+' : (isNegative ? '-' : '')
+  let text = formatMoney(numAmount, resolvedCode)
+  if (showSign && type === "in" && numAmount > 0) {
+    text = `+${text}`
+  }
 
-    return (
-        <span className={cn(
-            "tabular-nums font-medium tracking-tight inline-flex items-baseline",
-            colorClass,
-            className
-        )}>
-            {sign}
-            <span className="text-[0.85em] opacity-70 mr-1 select-none font-sans font-medium">{currency}</span>
-            {formattedAmount}
-        </span>
-    )
+  return (
+    <span
+      className={cn(
+        "tabular-nums font-medium tracking-tight",
+        colorClass,
+        className
+      )}
+    >
+      {text}
+    </span>
+  )
 }

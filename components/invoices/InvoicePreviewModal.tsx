@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { downloadInvoiceHtmlDocument } from "@/lib/invoices/downloadInvoiceHtmlClient"
+import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
 
 interface InvoicePreviewModalProps {
   invoiceId: string
@@ -166,7 +166,7 @@ export default function InvoicePreviewModal({
     if (!canDownloadSaved) return
     try {
       setDownloadLoading(true)
-      await downloadInvoiceHtmlDocument(invoiceId, invoiceNumber ?? null, businessId)
+      await downloadInvoicePdfDocument(invoiceId, invoiceNumber ?? null, businessId)
     } catch (e: any) {
       const msg = e?.message || "Download failed"
       setError(msg)

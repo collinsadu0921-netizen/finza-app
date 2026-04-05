@@ -23,6 +23,10 @@ import {
   type DocumentTotals,
 } from "@/components/documents/FinancialDocument"
 import { getCurrencySymbol } from "@/lib/currency"
+import {
+  loadInvoiceSettingsForDocument,
+  mergeInvoiceTermsFooter,
+} from "@/lib/invoices/loadInvoiceSettingsForDocument"
 
 const DRAFT_BANNER_HTML = `
 <div style="background: #fef3c7; border-bottom: 2px solid #f59e0b; color: #92400e; padding: 10px 20px; font-weight: 600; text-align: center;">
@@ -40,6 +44,7 @@ export async function POST(request: NextRequest) {
       due_date,
       notes,
       footer_message,
+      payment_terms,
       apply_taxes,
       items,
       currency_symbol,
@@ -188,6 +193,13 @@ export async function POST(request: NextRequest) {
       due_date: due_date || null,
     }
 
+    const invDocSettings = await loadInvoiceSettingsForDocument(supabase, finalBusinessId)
+    const merged = mergeInvoiceTermsFooter(
+      typeof payment_terms === "string" ? payment_terms : null,
+      typeof footer_message === "string" ? footer_message : null,
+      invDocSettings
+    )
+
     const htmlBody = generateFinancialDocumentHTML({
       documentType: "invoice",
       business: businessData,
@@ -196,7 +208,9 @@ export async function POST(request: NextRequest) {
       totals: documentTotals,
       meta: documentMeta,
       notes: notes ?? null,
-      footer_message: footer_message ?? null,
+      footer_message: merged.footer_message,
+      payment_terms: merged.payment_terms,
+      payment_details: invDocSettings.payment_details,
       apply_taxes: Boolean(apply_taxes),
       currency_symbol: businessCurrencySymbol,
       currency_code: businessCurrencyCode,

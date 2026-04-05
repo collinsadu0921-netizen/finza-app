@@ -4,10 +4,10 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import { getCurrencySymbol } from "@/lib/currency"
-import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
+import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type WHTBill = {
   id: string
@@ -29,7 +29,6 @@ export default function WHTRegisterPage() {
   const toast = useToast()
 
   const [businessId, setBusinessId] = useState("")
-  const [currencySymbol, setCurrencySymbol] = useState("")
   const [currencyCode, setCurrencyCode] = useState("")
   const [loading, setLoading] = useState(true)
   const [bills, setBills] = useState<WHTBill[]>([])
@@ -58,8 +57,6 @@ export default function WHTRegisterPage() {
       if (!business) return
 
       setBusinessId(business.id)
-      const sym = getCurrencySymbol(business.default_currency || "GHS")
-      setCurrencySymbol(sym || "")
       setCurrencyCode(business.default_currency || "")
 
       const res = await fetch(`/api/wht?business_id=${business.id}`)
@@ -72,8 +69,6 @@ export default function WHTRegisterPage() {
       setLoading(false)
     }
   }
-
-  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode })
 
   const toggleSelect = (id: string) => {
     setSelected(prev => {
@@ -115,7 +110,7 @@ export default function WHTRegisterPage() {
         toast.showToast(data.error || "Failed to record remittance", "error")
         return
       }
-      toast.showToast(`WHT ${currency}${data.total_remitted.toFixed(2)} remitted to GRA`, "success")
+      toast.showToast(`WHT ${formatMoney(data.total_remitted, currencyCode || null)} remitted to GRA`, "success")
       setShowRemitModal(false)
       setSelected(new Set())
       setRemittanceRef("")
@@ -160,7 +155,7 @@ export default function WHTRegisterPage() {
                 <div className="text-right">
                   <p className="text-sm text-gray-500 dark:text-gray-400">Pending remittance</p>
                   <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                    {currency}{totalPending.toFixed(2)}
+                    {formatMoney(totalPending, currencyCode || null)}
                   </p>
                 </div>
               )}
@@ -212,7 +207,7 @@ export default function WHTRegisterPage() {
               {selected.size > 0 && (
                 <div className="flex items-center gap-4">
                   <span className="text-sm text-gray-600 dark:text-gray-400">
-                    {selected.size} selected · {currency}{selectedTotal.toFixed(2)} WHT
+                    {selected.size} selected · {formatMoney(selectedTotal, currencyCode || null)} WHT
                   </span>
                   <button
                     onClick={() => setShowRemitModal(true)}
@@ -284,10 +279,10 @@ export default function WHTRegisterPage() {
                         {new Date(bill.issue_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-white">
-                        {currency}{Number(bill.total).toFixed(2)}
+                        {formatMoney(Number(bill.total), currencyCode || null)}
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-orange-600 dark:text-orange-400">
-                        {currency}{Number(bill.wht_amount).toFixed(2)}
+                        {formatMoney(Number(bill.wht_amount), currencyCode || null)}
                         <span className="text-xs text-gray-400 ml-1">({((bill.wht_rate ?? 0) * 100).toFixed(0)}%)</span>
                       </td>
                       {tab === "remitted" && (
@@ -320,7 +315,7 @@ export default function WHTRegisterPage() {
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-bold text-orange-900 dark:text-orange-300"></td>
                       <td className="px-4 py-3 text-right text-sm font-bold text-orange-600 dark:text-orange-400">
-                        {currency}{totalPending.toFixed(2)}
+                        {formatMoney(totalPending, currencyCode || null)}
                       </td>
                       <td />
                     </tr>
@@ -338,7 +333,7 @@ export default function WHTRegisterPage() {
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Record WHT Remittance</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-              Recording {selected.size} bill{selected.size !== 1 ? "s" : ""} · Total: {currency}{selectedTotal.toFixed(2)}
+              Recording {selected.size} bill{selected.size !== 1 ? "s" : ""} · Total: {formatMoney(selectedTotal, currencyCode || null)}
             </p>
 
             <div className="space-y-4">
@@ -363,15 +358,11 @@ export default function WHTRegisterPage() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Paid from</label>
-                <select
-                  value={paymentAccount}
-                  onChange={e => setPaymentAccount(e.target.value)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 dark:bg-gray-700 dark:text-white"
-                >
+                <NativeSelect value={paymentAccount} onChange={e => setPaymentAccount(e.target.value)} size="sm">
                   <option value="1010">Bank</option>
                   <option value="1000">Cash</option>
                   <option value="1020">Mobile Money</option>
-                </select>
+                </NativeSelect>
               </div>
             </div>
 
@@ -396,7 +387,7 @@ export default function WHTRegisterPage() {
                     Recording…
                   </>
                 ) : (
-                  `Record ${currency}${selectedTotal.toFixed(2)} Remittance`
+                  `Record ${formatMoney(selectedTotal, currencyCode || null)} Remittance`
                 )}
               </button>
             </div>

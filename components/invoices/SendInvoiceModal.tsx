@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import SendMethodDropdown, { SendMethod } from "./SendMethodDropdown"
 import { normalizePhoneForWaMe } from "@/lib/communication/whatsappLink"
-import { downloadInvoiceHtmlDocument } from "@/lib/invoices/downloadInvoiceHtmlClient"
+import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
 
 type Invoice = {
   id: string
@@ -210,7 +210,7 @@ export default function SendInvoiceModal({
     }
   }
 
-  /** Marks invoice sent (number + ledger), then downloads the HTML document — draft-only on server. */
+  /** Marks invoice sent (number + ledger), then downloads the PDF — draft-only on server. */
   const handleIssueAndDownload = async () => {
     setError("")
     setLoading(true)
@@ -230,7 +230,7 @@ export default function SendInvoiceModal({
         )
       }
       const inv = data.invoice
-      await downloadInvoiceHtmlDocument(
+      await downloadInvoicePdfDocument(
         invoiceId,
         inv?.invoice_number ?? null,
         resolvedBusinessId

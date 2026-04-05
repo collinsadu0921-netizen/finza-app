@@ -23,7 +23,7 @@ export default function ServiceCustomerStatementPage() {
   const router = useRouter()
   const params = useParams()
   const customerId = params.id as string
-  const { currencySymbol } = useBusinessCurrency()
+  const { format } = useBusinessCurrency()
   const toast = useToast()
 
   const [loading, setLoading] = useState(true)
@@ -171,10 +171,10 @@ Thank you.`
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Total Invoiced</div><div className="font-bold text-xl">{currencySymbol || ""}{summary.totalInvoiced.toFixed(2)}</div></div>
-            <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Total Paid</div><div className="font-bold text-xl">{currencySymbol || ""}{summary.totalPaid.toFixed(2)}</div></div>
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Outstanding</div><div className="font-bold text-xl">{currencySymbol || ""}{summary.totalOutstanding.toFixed(2)}</div></div>
-            <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Overdue</div><div className="font-bold text-xl">{currencySymbol || ""}{summary.totalOverdue.toFixed(2)}</div></div>
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Total Invoiced</div><div className="font-bold text-xl">{format(summary.totalInvoiced)}</div></div>
+            <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Total Paid</div><div className="font-bold text-xl">{format(summary.totalPaid)}</div></div>
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Outstanding</div><div className="font-bold text-xl">{format(summary.totalOutstanding)}</div></div>
+            <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Overdue</div><div className="font-bold text-xl">{format(summary.totalOverdue)}</div></div>
           </div>
 
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
@@ -217,8 +217,8 @@ Thank you.`
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-semibold text-gray-900 dark:text-white">{currencySymbol || ""}{Number(invoice.total).toFixed(2)}</div>
-                        {balance > 0 && <div className="text-sm text-orange-600 dark:text-orange-400">Balance: {currencySymbol || ""}{balance.toFixed(2)}</div>}
+                        <div className="font-semibold text-gray-900 dark:text-white">{format(invoice.total)}</div>
+                        {balance > 0 && <div className="text-sm text-orange-600 dark:text-orange-400">Balance: {format(balance)}</div>}
                       </div>
                     </div>
                     {invoicePayments.length > 0 && (
@@ -230,7 +230,7 @@ Thank you.`
                               {new Date(payment.date).toLocaleDateString("en-GH")} • {payment.method}
                               {payment.reference && ` • ${payment.reference}`}
                             </span>
-                            <span className="font-medium text-green-600 dark:text-green-400">{currencySymbol || ""}{Number(payment.amount).toFixed(2)}</span>
+                            <span className="font-medium text-green-600 dark:text-green-400">{format(payment.amount)}</span>
                           </div>
                         ))}
                       </div>
@@ -244,7 +244,7 @@ Thank you.`
                               {creditNote.credit_number} • {new Date(creditNote.date).toLocaleDateString("en-GH")}
                               {creditNote.reason && ` • ${creditNote.reason}`}
                             </span>
-                            <span className="font-medium text-red-600 dark:text-red-400">-{currencySymbol || ""}{Number(creditNote.total).toFixed(2)}</span>
+                            <span className="font-medium text-red-600 dark:text-red-400">{format(-Math.abs(Number(creditNote.total)))}</span>
                           </div>
                         ))}
                       </div>

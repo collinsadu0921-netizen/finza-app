@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { formatMoney } from "@/lib/money"
 
 type Business = {
   id: string
@@ -73,10 +74,6 @@ const METHOD_LABELS: Record<string, string> = {
   other: "Other",
 }
 
-function fmt(sym: string, n: number) {
-  return `${sym}${Number(n).toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
 function fmtDate(d: string | null) {
   if (!d) return "—"
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
@@ -141,7 +138,6 @@ export default function InvoiceViewPage() {
     )
   }
 
-  const sym      = invoice.currency_symbol || "₵"
   const business = invoice.businesses
   const customer = invoice.customers
   const isPaid   = invoice.status === "paid"
@@ -194,7 +190,7 @@ export default function InvoiceViewPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
-                Pay {fmt(sym, remaining)}
+                Pay {formatMoney(remaining, invoice.currency_code)}
               </button>
             )}
           </div>
@@ -281,12 +277,12 @@ export default function InvoiceViewPage() {
                   <tr key={item.id}>
                     <td className="py-3 text-gray-800 font-medium">{item.description}</td>
                     <td className="py-3 text-right text-gray-600 tabular-nums">{Number(item.qty)}</td>
-                    <td className="py-3 text-right text-gray-600 tabular-nums">{fmt(sym, item.unit_price)}</td>
+                    <td className="py-3 text-right text-gray-600 tabular-nums">{formatMoney(item.unit_price, invoice.currency_code)}</td>
                     <td className="py-3 text-right text-gray-600 tabular-nums">
-                      {Number(item.discount_amount) > 0 ? fmt(sym, item.discount_amount) : "—"}
+                      {Number(item.discount_amount) > 0 ? formatMoney(item.discount_amount, invoice.currency_code) : "—"}
                     </td>
                     <td className="py-3 text-right text-gray-800 font-medium tabular-nums">
-                      {fmt(sym, item.line_subtotal ?? (item.qty * item.unit_price - (item.discount_amount || 0)))}
+                      {formatMoney(item.line_subtotal ?? (item.qty * item.unit_price - (item.discount_amount || 0)), invoice.currency_code)}
                     </td>
                   </tr>
                 ))}
@@ -299,38 +295,38 @@ export default function InvoiceViewPage() {
             <div className="max-w-xs ml-auto space-y-2 text-sm">
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal</span>
-                <span className="tabular-nums font-medium">{fmt(sym, invoice.subtotal)}</span>
+                <span className="tabular-nums font-medium">{formatMoney(invoice.subtotal, invoice.currency_code)}</span>
               </div>
 
               {taxLines.map((t, i) => (
                 <div key={i} className="flex justify-between text-gray-500">
                   <span>{t.name}</span>
-                  <span className="tabular-nums">{fmt(sym, t.amount)}</span>
+                  <span className="tabular-nums">{formatMoney(t.amount, invoice.currency_code)}</span>
                 </div>
               ))}
 
               {invoice.apply_taxes && Number(invoice.total_tax) > 0 && taxLines.length > 1 && (
                 <div className="flex justify-between text-gray-500 pt-1 border-t border-gray-100">
                   <span className="font-medium">Total Tax</span>
-                  <span className="tabular-nums font-medium">{fmt(sym, invoice.total_tax)}</span>
+                  <span className="tabular-nums font-medium">{formatMoney(invoice.total_tax, invoice.currency_code)}</span>
                 </div>
               )}
 
               <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
                 <span className="font-bold text-gray-900 text-base">Total</span>
-                <span className="font-bold text-gray-900 text-lg tabular-nums">{fmt(sym, invoice.total)}</span>
+                <span className="font-bold text-gray-900 text-lg tabular-nums">{formatMoney(invoice.total, invoice.currency_code)}</span>
               </div>
 
               {totalPaid > 0 && (
                 <>
                   <div className="flex justify-between text-emerald-600">
                     <span>Amount Paid</span>
-                    <span className="tabular-nums font-medium">− {fmt(sym, totalPaid)}</span>
+                    <span className="tabular-nums font-medium">− {formatMoney(totalPaid, invoice.currency_code)}</span>
                   </div>
                   <div className="flex justify-between items-center font-semibold text-gray-900">
                     <span>Balance Due</span>
                     <span className={`tabular-nums ${remaining > 0 ? "text-orange-600" : "text-emerald-600"}`}>
-                      {remaining > 0 ? fmt(sym, remaining) : "Paid in Full"}
+                      {remaining > 0 ? formatMoney(remaining, invoice.currency_code) : "Paid in Full"}
                     </span>
                   </div>
                 </>
@@ -354,7 +350,7 @@ export default function InvoiceViewPage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold text-emerald-600 tabular-nums">{fmt(sym, p.amount)}</p>
+                      <p className="font-semibold text-emerald-600 tabular-nums">{formatMoney(p.amount, invoice.currency_code)}</p>
                       <p className="text-xs text-gray-400">{fmtDate(p.date)}</p>
                     </div>
                   </div>
@@ -390,7 +386,7 @@ export default function InvoiceViewPage() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
-              Pay Now — {fmt(sym, remaining)} Due
+              Pay Now — {formatMoney(remaining, invoice.currency_code)} Due
             </button>
           </div>
         )}

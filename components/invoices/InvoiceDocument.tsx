@@ -8,6 +8,7 @@
 
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { formatMoney } from "@/lib/money"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
 
 export type InvoiceDocumentInvoice = {
@@ -97,10 +98,6 @@ function formatDate(dateString: string) {
     month: "short",
     day: "numeric",
   })
-}
-
-function formatMoney(amount: number, symbol: string) {
-  return `${symbol}${Number(amount).toFixed(2)}`
 }
 
 export function InvoiceDocument({
@@ -200,12 +197,6 @@ export function InvoiceDocument({
               <p className="text-xs text-slate-800">{formatDate(invoice.due_date)}</p>
             </div>
           )}
-          {invoice.payment_terms && (
-            <div className="w-full">
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Payment Terms</label>
-              <p className="text-xs text-slate-700">{invoice.payment_terms}</p>
-            </div>
-          )}
         </div>
       </div>
 
@@ -234,11 +225,11 @@ export function InvoiceDocument({
                   <td className="px-6 py-2.5 text-slate-900 text-sm">{item.description || "—"}</td>
                   <td className="px-4 py-2.5 text-center text-slate-600 tabular-nums">{Number(item.qty ?? 0)}</td>
                   <td className="px-4 py-2.5 text-right text-slate-600 tabular-nums">
-                    {formatMoney(Number(item.unit_price ?? 0), invoice.currency_symbol)}
+                    {formatMoney(Number(item.unit_price ?? 0), invoice.currency_code)}
                   </td>
                   <td className="px-4 py-2.5 text-right text-slate-600 tabular-nums">
                     {Number(item.discount_amount) > 0
-                      ? formatMoney(Number(item.discount_amount), invoice.currency_symbol)
+                      ? formatMoney(Number(item.discount_amount), invoice.currency_code)
                       : "—"}
                   </td>
                   <td className="px-6 py-2.5 text-right font-medium text-slate-900 tabular-nums">
@@ -247,7 +238,7 @@ export function InvoiceDocument({
                         ? Number(item.line_subtotal)
                         : Number(item.qty ?? 0) * Number(item.unit_price ?? 0) -
                             Number(item.discount_amount ?? 0),
-                      invoice.currency_symbol
+                      invoice.currency_code
                     )}
                   </td>
                 </tr>
@@ -263,7 +254,7 @@ export function InvoiceDocument({
           <div className="flex justify-between items-center text-sm text-slate-500">
             <span>Subtotal</span>
             <span className="font-medium text-slate-700">
-              {formatMoney(Number(invoice.subtotal ?? 0), invoice.currency_symbol)}
+              {formatMoney(Number(invoice.subtotal ?? 0), invoice.currency_code)}
             </span>
           </div>
           {showTaxBreakdown && (
@@ -271,40 +262,48 @@ export function InvoiceDocument({
               {legacyTaxAmounts.nhil > 0 && (
                 <div className="flex justify-between items-center text-xs text-slate-400">
                   <span>NHIL (2.5%)</span>
-                  <span>{formatMoney(legacyTaxAmounts.nhil, invoice.currency_symbol)}</span>
+                  <span>{formatMoney(legacyTaxAmounts.nhil, invoice.currency_code)}</span>
                 </div>
               )}
               {legacyTaxAmounts.getfund > 0 && (
                 <div className="flex justify-between items-center text-xs text-slate-400">
                   <span>GETFund (2.5%)</span>
-                  <span>{formatMoney(legacyTaxAmounts.getfund, invoice.currency_symbol)}</span>
+                  <span>{formatMoney(legacyTaxAmounts.getfund, invoice.currency_code)}</span>
                 </div>
               )}
               {legacyTaxAmounts.vat > 0 && (
                 <div className="flex justify-between items-center text-xs text-slate-400">
                   <span>VAT (15%)</span>
-                  <span>{formatMoney(legacyTaxAmounts.vat, invoice.currency_symbol)}</span>
+                  <span>{formatMoney(legacyTaxAmounts.vat, invoice.currency_code)}</span>
                 </div>
               )}
               <div className="flex justify-between items-center text-sm pt-2 border-t border-slate-100">
                 <span className="text-slate-500">Total Tax</span>
-                <span className="font-medium text-slate-700">{formatMoney(totalTax, invoice.currency_symbol)}</span>
+                <span className="font-medium text-slate-700">{formatMoney(totalTax, invoice.currency_code)}</span>
               </div>
             </>
           )}
           <div className="flex justify-between items-center pt-2.5 border-t-2 border-slate-800">
             <span className="text-base font-bold text-slate-900">Total</span>
             <span className="text-xl font-bold text-slate-900">
-              {formatMoney(Number(invoice.total ?? 0), invoice.currency_symbol)}
+              {formatMoney(Number(invoice.total ?? 0), invoice.currency_code)}
             </span>
           </div>
         </div>
       </div>
 
+      {/* Notes — above payment instructions (matches PDF order) */}
+      {invoice.notes?.trim() && (
+        <div className="px-6 py-3 border-b border-slate-100">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Notes</h3>
+          <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">{invoice.notes}</p>
+        </div>
+      )}
+
       {/* Payment Details — full width below totals */}
       {hasPaymentDetails && (
-        <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
             How to Pay
           </h3>
           <div className={`grid gap-4 ${hasBank && hasMomo ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 max-w-xs"}`}>
@@ -357,18 +356,16 @@ export function InvoiceDocument({
         </div>
       )}
 
-      {/* Notes / footer */}
-      {(invoice.notes || invoice.footer_message) && (
-        <div className="px-6 py-4 border-t border-slate-100">
-          {invoice.notes && (
-            <div className="mb-2">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Notes</h3>
-              <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">{invoice.notes}</p>
-            </div>
-          )}
-          {invoice.footer_message && (
-            <p className="text-xs text-slate-400 text-center italic mt-2">{invoice.footer_message}</p>
-          )}
+      {invoice.payment_terms?.trim() && (
+        <div className="px-6 py-3 border-b border-slate-100">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Payment terms</h3>
+          <p className="text-xs text-slate-700 leading-relaxed">{invoice.payment_terms}</p>
+        </div>
+      )}
+
+      {invoice.footer_message?.trim() && (
+        <div className="px-6 py-3 text-center text-[11px] leading-snug text-slate-400">
+          {invoice.footer_message}
         </div>
       )}
     </div>
