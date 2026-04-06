@@ -1,16 +1,13 @@
 /**
- * Mobile Money Payment Service
+ * Mobile Money Payment Service (generic / webhook utilities)
  *
- * Provider-agnostic abstraction for:
- * - Hubtel
- * - Paystack
- * - Flutterwave
+ * **Phase 7:** Live **service invoice** flows use:
+ * - Paystack MoMo → `app/api/payments/paystack/charge` (not this module’s initiate).
+ * - Tenant MTN direct → `mtnInvoiceDirectService` + `/api/payments/momo/tenant/invoice/*`.
  *
- * Flow: Invoice Payment Request → MoMo Initiation → Provider Webhook →
- *       Payment Validation → Invoice Settlement → Ledger Posting → Notification
- *
- * Callers MUST ensure accounting is initialized before creating payment records
- * (ensureAccountingInitialized); otherwise payment INSERT trigger will roll back.
+ * This module’s `initiateMobileMoney` is **not** on those paths (currently unused for initiation).
+ * `validateWebhookSignature` / `settlePaymentFromWebhook` are used by `payments/webhooks/mobile-money`
+ * (Hubtel/Paystack/Flutterwave/MTN generic webhooks — distinct from tenant MTN **callback hint** route).
  */
 
 import { createHmac } from "crypto"
@@ -202,12 +199,13 @@ async function initiateFlutterwave(input: InitiateMoMoInput & { reference: strin
 }
 
 async function initiateMtn(input: InitiateMoMoInput & { reference: string }): Promise<InitiateMoMoResult> {
-  const apiKey = process.env.MTN_MOMO_API_KEY
-  if (!apiKey) {
-    return { success: true, reference: input.reference!, status: "PENDING" }
+  return {
+    success: false,
+    reference: input.reference,
+    status: "FAILED",
+    error:
+      "MTN is not implemented in initiateMobileMoney. Use POST /api/payments/momo/tenant/invoice/initiate (service invoices) or POST /api/payments/momo (retail legacy).",
   }
-  // MTN MoMo request-to-pay: use existing app/api/payments/momo/initiate or delegate here
-  return { success: true, reference: input.reference!, status: "PENDING", providerReference: input.reference }
 }
 
 /**

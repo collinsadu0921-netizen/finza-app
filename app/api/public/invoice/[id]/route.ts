@@ -12,6 +12,8 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { getManualWalletInstructionsForInvoice } from "@/lib/tenantPayments/publicInvoiceManualWallet"
+import { resolvePublicInvoicePaymentFlow } from "@/lib/tenantPayments/publicInvoicePaymentFlow"
 
 export const dynamic = "force-dynamic"
 
@@ -38,7 +40,7 @@ export async function GET(
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
     .select(`
-      id, invoice_number, issue_date, due_date, payment_terms,
+      id, business_id, invoice_number, issue_date, due_date, payment_terms,
       notes, footer_message, currency_code, currency_symbol,
       subtotal, nhil, getfund, covid, vat, total_tax, total,
       apply_taxes, status, public_token, sent_at, tax_lines,
@@ -78,11 +80,24 @@ export async function GET(
   const totalPaid    = (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0)
   const remaining    = Number(invoice.total) - totalPaid
 
+  let invoice_payment_flow: "manual_wallet" | "mtn_momo_direct" | "paystack_momo" | null = null
+  let manual_wallet_payment: Awaited<ReturnType<typeof getManualWalletInstructionsForInvoice>> = null
+
+  if (invoice.status !== "paid" && remaining > 0 && invoice.business_id) {
+    invoice_payment_flow = await resolvePublicInvoicePaymentFlow(supabase, invoice.business_id)
+    manual_wallet_payment =
+      invoice_payment_flow === "manual_wallet"
+        ? await getManualWalletInstructionsForInvoice(supabase, invoiceId, { environment: "live" })
+        : null
+  }
+
   return NextResponse.json({
     invoice,
     items:    items    || [],
     payments: payments || [],
     totalPaid,
     remaining,
+    invoice_payment_flow,
+    manual_wallet_payment,
   })
 }

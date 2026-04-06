@@ -65,6 +65,15 @@ type Payment = {
   reference: string | null
 }
 
+type ManualWalletPayment = {
+  provider_type: "manual_wallet"
+  network: string | null
+  account_name: string | null
+  wallet_number: string | null
+  instructions: string | null
+  display_label: string | null
+}
+
 const METHOD_LABELS: Record<string, string> = {
   cash: "Cash",
   momo: "Mobile Money",
@@ -90,6 +99,7 @@ export default function InvoiceViewPage() {
   const [remaining, setRemaining] = useState(0)
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState("")
+  const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
 
   useEffect(() => {
     if (!invoiceId) return
@@ -106,6 +116,7 @@ export default function InvoiceViewPage() {
         setItems(data.items || [])
         setPayments(data.payments || [])
         setRemaining(data.remaining ?? Number(data.invoice?.total ?? 0))
+        setManualWalletPayment(data.manual_wallet_payment ?? null)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -356,6 +367,45 @@ export default function InvoiceViewPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Manual wallet (tenant default provider) */}
+          {!isPaid && remaining > 0 && manualWalletPayment && (
+            <div className="px-8 py-5 border-b border-gray-100 bg-amber-50/80">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 mb-2">Pay manually</p>
+              <p className="text-sm text-amber-900/90 mb-3">
+                Use the details below to send payment. The business will confirm receipt — this is not an automated card or
+                MoMo checkout.
+              </p>
+              {manualWalletPayment.display_label && (
+                <p className="text-sm font-semibold text-gray-900 mb-2">{manualWalletPayment.display_label}</p>
+              )}
+              <dl className="space-y-1.5 text-sm text-gray-800">
+                {manualWalletPayment.network && (
+                  <div>
+                    <span className="text-gray-500">Network: </span>
+                    {manualWalletPayment.network}
+                  </div>
+                )}
+                {manualWalletPayment.account_name && (
+                  <div>
+                    <span className="text-gray-500">Account name: </span>
+                    {manualWalletPayment.account_name}
+                  </div>
+                )}
+                {manualWalletPayment.wallet_number && (
+                  <div>
+                    <span className="text-gray-500">Wallet: </span>
+                    <span className="font-mono font-semibold">{manualWalletPayment.wallet_number}</span>
+                  </div>
+                )}
+              </dl>
+              {manualWalletPayment.instructions && (
+                <p className="text-sm text-gray-700 mt-3 whitespace-pre-line border-t border-amber-200/80 pt-3">
+                  {manualWalletPayment.instructions}
+                </p>
+              )}
             </div>
           )}
 

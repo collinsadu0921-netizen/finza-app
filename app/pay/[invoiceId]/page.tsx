@@ -17,6 +17,16 @@ type Invoice = {
   businesses?: { id: string; address_country: string | null } | null
 }
 
+/** Customer-facing manual wallet instructions (public invoice API). */
+type ManualWalletPayment = {
+  provider_type: "manual_wallet"
+  network: string | null
+  account_name: string | null
+  wallet_number: string | null
+  instructions: string | null
+  display_label: string | null
+}
+
 type PaymentStatus =
   | "idle"
   | "initiating"
@@ -57,6 +67,8 @@ export default function PayInvoicePage() {
   const [displayText,      setDisplayText]       = useState("")
   const [qrCodeUrl,        setQrCodeUrl]         = useState("")
   const [businessCountry,  setBusinessCountry]   = useState<string | null>(null)
+  const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
+  const [paymentFlow, setPaymentFlow] = useState<"manual_wallet" | "mtn_momo_direct" | "paystack_momo">("paystack_momo")
   const pollRef = useRef<NodeJS.Timeout | null>(null)
 
   // ── Load invoice ─────────────────────────────────────────────────────────────
@@ -84,6 +96,8 @@ export default function PayInvoicePage() {
       if (!data.invoice) throw new Error("Invoice data not available")
       setInvoice(data.invoice)
       setPayments(data.payments || [])
+      setManualWalletPayment(data.manual_wallet_payment ?? null)
+      setPaymentFlow(data.invoice_payment_flow ?? "paystack_momo")
       const country = data.invoice.businesses?.address_country || null
       setBusinessCountry(country)
       const payUrl = `${window.location.origin}/pay/${invoiceId}`
@@ -98,7 +112,24 @@ export default function PayInvoicePage() {
   const pollStatus = async () => {
     if (!paymentRef) return
     try {
-      const res  = await fetch(`/api/payments/paystack/verify?reference=${paymentRef}`)
+      if (paymentRef.startsWith("finza-mtn-")) {
+        const res = await fetch(
+          `/api/payments/momo/tenant/invoice/status?reference=${encodeURIComponent(paymentRef)}&invoice_id=${encodeURIComponent(invoiceId)}`
+        )
+        const data = await res.json()
+        if (data.success && data.status === "success") {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setPaymentStatus("success")
+          setTimeout(loadInvoice, 1000)
+        } else if (data.success && data.status === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setPaymentStatus("failed")
+          setError(data.message || "Payment was not completed")
+        }
+        return
+      }
+
+      const res = await fetch(`/api/payments/paystack/verify?reference=${paymentRef}`)
       const data = await res.json()
       if (data.status === "success") {
         if (pollRef.current) clearInterval(pollRef.current)
@@ -110,6 +141,27 @@ export default function PayInvoicePage() {
         setError(data.gateway_response || "Payment was not completed")
       }
     } catch {}
+  }
+
+  const handlePayMtnDirect = async () => {
+    if (phone.replace(/\D/g, "").length < 10) return
+    setError("")
+    setPaymentStatus("initiating")
+    try {
+      const res = await fetch("/api/payments/momo/tenant/invoice/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoice_id: invoiceId, phone: phone.replace(/\s+/g, "") }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || "Failed to initiate MTN payment")
+      setPaymentRef(data.reference)
+      setDisplayText(data.display_text || "")
+      setPaymentStatus("pending")
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Payment initiation failed")
+      setPaymentStatus("idle")
+    }
   }
 
   // ── Initiate charge ───────────────────────────────────────────────────────
@@ -206,7 +258,6 @@ export default function PayInvoicePage() {
   const remaining      = Number(invoice.total) - totalPaid
   const countryCode    = normalizeCountry(businessCountry)
   const isGhana        = countryCode === "GH"
-  const canPaystack    = isGhana && !!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY !== false  // always true when deployed
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
@@ -289,7 +340,82 @@ export default function PayInvoicePage() {
         {invoice.status !== "paid" && remaining > 0 && paymentStatus !== "success" && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-5">
 
-            {!isGhana ? (
+            {manualWalletPayment ? (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-gray-900 mb-1">Pay manually</h2>
+                <p className="text-sm text-gray-600">
+                  Send your payment using the details below. This invoice will be updated after the business records your
+                  payment — there is no automatic confirmation for manual transfers.
+                </p>
+                {manualWalletPayment.display_label && (
+                  <p className="text-sm font-semibold text-gray-800">{manualWalletPayment.display_label}</p>
+                )}
+                <dl className="space-y-2 text-sm">
+                  {manualWalletPayment.network && (
+                    <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
+                      <dt className="text-gray-500">Network</dt>
+                      <dd className="font-medium text-gray-900 text-right">{manualWalletPayment.network}</dd>
+                    </div>
+                  )}
+                  {manualWalletPayment.account_name && (
+                    <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
+                      <dt className="text-gray-500">Account name</dt>
+                      <dd className="font-medium text-gray-900 text-right">{manualWalletPayment.account_name}</dd>
+                    </div>
+                  )}
+                  {manualWalletPayment.wallet_number && (
+                    <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
+                      <dt className="text-gray-500">Wallet number</dt>
+                      <dd className="font-mono font-semibold text-gray-900 text-right">{manualWalletPayment.wallet_number}</dd>
+                    </div>
+                  )}
+                </dl>
+                {manualWalletPayment.instructions && (
+                  <div className="rounded-lg bg-gray-50 border border-gray-100 p-3 text-sm text-gray-700 whitespace-pre-line">
+                    {manualWalletPayment.instructions}
+                  </div>
+                )}
+                <p className="text-xs text-gray-500">
+                  Amount due: <strong>{formatMoney(remaining, invoice.currency_code)}</strong>
+                </p>
+              </div>
+            ) : paymentFlow === "mtn_momo_direct" ? (
+              <>
+                <h2 className="text-lg font-bold text-gray-900 mb-1">Pay with MTN MoMo (direct)</h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  Payment is processed through this business&apos;s MTN MoMo collection account. Approve the prompt on your
+                  phone; we confirm when MTN reports success.
+                </p>
+                <div className="mb-5">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Mobile money number</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(formatPhone(e.target.value))}
+                    placeholder="0XX XXX XXXX"
+                    maxLength={14}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500"
+                  />
+                </div>
+                {phone.replace(/\D/g, "").length >= 10 && (
+                  <button
+                    type="button"
+                    onClick={handlePayMtnDirect}
+                    disabled={paymentStatus === "initiating"}
+                    className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-white py-4 rounded-xl font-bold text-lg shadow-md hover:from-yellow-600 hover:to-amber-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                  >
+                    {paymentStatus === "initiating" ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                        Processing…
+                      </>
+                    ) : (
+                      <>Pay {formatMoney(remaining, invoice.currency_code)}</>
+                    )}
+                  </button>
+                )}
+              </>
+            ) : !isGhana ? (
               <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
                 Online payment is currently available for Ghana only. Please contact the business for alternative payment options.
               </div>

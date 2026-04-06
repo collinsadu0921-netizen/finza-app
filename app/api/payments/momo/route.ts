@@ -1,3 +1,12 @@
+/**
+ * **Retail / POS — legacy MTN RTP** (Phase 7: preserve until retail reads `business_payment_providers`).
+ *
+ * - Loads **plaintext** `businesses.momo_settings` (kept in sync when saving MTN in tenant payment settings).
+ * - Updates **`sales`** by `reference` (expects sale id in `reference` — existing contract).
+ *
+ * **Not** the canonical **service invoice** flow. For public invoice MTN direct use:
+ * `POST /api/payments/momo/tenant/invoice/initiate` + `GET .../tenant/invoice/status` + canonical `payment_provider_transactions`.
+ */
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
