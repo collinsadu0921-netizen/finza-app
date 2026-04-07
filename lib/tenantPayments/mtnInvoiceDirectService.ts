@@ -31,6 +31,7 @@ import {
 } from "./providers/mtnMomoDirect"
 import { normalizeBusinessPaymentProviderRow } from "./providerConfig"
 import { getDefaultBusinessPaymentProvider } from "./resolveProvider"
+import type { ResolvedMtnMomoDirectConfig } from "./types"
 
 const PROVIDER_TYPE = "mtn_momo_direct" as const
 const ENV = "live" as const
@@ -41,14 +42,7 @@ const MTN_INVOICE_REUSE_WINDOW_MS = 15 * 60 * 1000
 
 const OPEN_TXN_STATUSES = ["initiated", "pending", "requires_action"] as const
 
-function tenantCredsFromResolved(resolved: {
-  kind: string
-  public: { target_environment?: string }
-  secrets: { api_user: string; api_key: string; primary_subscription_key: string }
-}): MtnMomoDirectTenantCredentials {
-  if (resolved.kind !== "mtn_momo_direct") {
-    throw new Error("Not an MTN MoMo direct configuration")
-  }
+function tenantCredsFromResolved(resolved: ResolvedMtnMomoDirectConfig): MtnMomoDirectTenantCredentials {
   const env = resolved.public.target_environment?.trim() || "mtnghana"
   return {
     apiUser: resolved.secrets.api_user,
@@ -71,6 +65,9 @@ async function loadDefaultTenantMtnConfigForInitiate(
     throw new Error("MTN MoMo direct provider is disabled")
   }
   const resolved = normalizeBusinessPaymentProviderRow(defaultRow)
+  if (resolved.kind !== "mtn_momo_direct") {
+    throw new Error("Not an MTN MoMo direct configuration")
+  }
   return { creds: tenantCredsFromResolved(resolved) }
 }
 
@@ -97,6 +94,9 @@ async function loadMtnDirectCredentialsForBusiness(
     throw new Error("MTN MoMo direct provider is disabled")
   }
   const resolved = normalizeBusinessPaymentProviderRow(row)
+  if (resolved.kind !== "mtn_momo_direct") {
+    throw new Error("Not an MTN MoMo direct configuration")
+  }
   return { creds: tenantCredsFromResolved(resolved) }
 }
 

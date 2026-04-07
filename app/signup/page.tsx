@@ -192,7 +192,7 @@ function SignupPageInner() {
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
-            <FinzaLogo height={48} />
+            <FinzaLogo height={72} />
           </div>
           {hasTrial ? (
             <>

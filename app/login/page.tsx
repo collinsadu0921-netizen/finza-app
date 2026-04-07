@@ -54,7 +54,7 @@ export default function LoginPage() {
         {/* Header Section */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
-            <FinzaLogo height={48} />
+            <FinzaLogo height={72} />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h1>
           <p className="text-gray-600 text-sm">
