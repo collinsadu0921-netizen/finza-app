@@ -33,10 +33,10 @@ const SETTING_GROUPS: SettingsGroup[] = [
   },
   {
     title: "Invoices & payments",
-    description: "Defaults for documents and how you get paid.",
+    description: "What customers see on PDFs and emails, versus connections that collect money.",
     links: [
-      { label: "Invoice settings", path: "/service/settings/invoice-settings" },
-      { label: "Payment settings", path: "/service/settings/payments" },
+      { label: "Invoices & quotes (appearance)", path: "/service/settings/invoice-settings" },
+      { label: "Payment integrations", path: "/service/settings/payments" },
       {
         label: "WhatsApp message templates",
         path: "/settings/communication/whatsapp",

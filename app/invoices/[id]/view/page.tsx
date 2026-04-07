@@ -880,7 +880,6 @@ Thank you.`
           homeCurrencyCode={invoice.home_currency_code ?? null}
           invoiceWhtApplicable={invoice.wht_receivable_applicable ?? false}
           invoiceWhtAmount={Number(invoice.wht_receivable_amount ?? 0)}
-          hideViewReceipt={isUnderService}
           onClose={() => setShowPaymentModal(false)}
           onSuccess={handlePaymentAdded}
         />

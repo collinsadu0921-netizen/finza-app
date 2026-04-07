@@ -5,6 +5,8 @@ export type InvoiceSettingsForDocument = {
   payment_details: DocumentPaymentDetails | null
   default_payment_terms: string | null
   default_footer_message: string | null
+  /** Shown on quote / proforma PDFs (invoice_settings.quote_terms_and_conditions). */
+  quote_terms_and_conditions: string | null
 }
 
 /**
@@ -23,6 +25,27 @@ export function mergeInvoiceTermsFooter(
   }
 }
 
+/** Quote / proforma PDFs: payment + footer from row with business defaults, plus global quote T&Cs. */
+export function mergeQuotePdfTerms(
+  settings: InvoiceSettingsForDocument,
+  row?: { payment_terms?: string | null; footer_message?: string | null } | null
+): {
+  payment_terms: string | null
+  footer_message: string | null
+  quote_terms: string | null
+} {
+  const { payment_terms, footer_message } = mergeInvoiceTermsFooter(
+    row?.payment_terms,
+    row?.footer_message,
+    settings
+  )
+  return {
+    payment_terms,
+    footer_message,
+    quote_terms: settings.quote_terms_and_conditions?.trim() || null,
+  }
+}
+
 /**
  * Bank/MoMo plus default payment terms & footer copy for PDFs and public views.
  */
@@ -33,16 +56,20 @@ export async function loadInvoiceSettingsForDocument(
   const { data, error } = await supabase
     .from("invoice_settings")
     .select(
-      "bank_name, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, default_payment_terms, default_footer_message"
+      "bank_name, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, default_payment_terms, default_footer_message, quote_terms_and_conditions"
     )
     .eq("business_id", businessId)
     .maybeSingle()
 
+  if (error) {
+    console.error("[loadInvoiceSettingsForDocument] invoice_settings query failed:", businessId, error.message)
+  }
   if (error || !data) {
     return {
       payment_details: null,
       default_payment_terms: null,
       default_footer_message: null,
+      quote_terms_and_conditions: null,
     }
   }
 
@@ -59,5 +86,6 @@ export async function loadInvoiceSettingsForDocument(
     payment_details,
     default_payment_terms: data.default_payment_terms ?? null,
     default_footer_message: data.default_footer_message ?? null,
+    quote_terms_and_conditions: data.quote_terms_and_conditions ?? null,
   }
 }

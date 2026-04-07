@@ -47,6 +47,7 @@ export async function GET(
           name,
           email,
           phone,
+          whatsapp_phone,
           address,
           tin
         )

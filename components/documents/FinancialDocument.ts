@@ -3,6 +3,7 @@
  * 
  * Renders a unified HTML template for:
  * - Estimates
+ * - Proforma invoices
  * - Orders
  * - Invoices
  * - Credit Notes
@@ -13,13 +14,9 @@
 
 import { calculateTaxesFromAmount } from "@/lib/taxEngine"
 import type { TaxLine } from "@/lib/taxEngine/types"
-import {
-  invoiceFooterSingleLine,
-  invoiceTermsSingleSentence,
-} from "@/lib/invoices/compactInvoiceDocumentText"
 import { formatMoneyWithSymbol } from "@/lib/money"
 
-export type DocumentType = "estimate" | "order" | "invoice" | "credit_note"
+export type DocumentType = "estimate" | "proforma" | "order" | "invoice" | "credit_note"
 
 export interface BusinessInfo {
   name?: string | null
@@ -105,8 +102,10 @@ export interface FinancialDocumentProps {
   meta: DocumentMeta
   notes?: string | null
   footer_message?: string | null
-  /** Shown in the date/meta grid (invoices). */
+  /** Shown below totals (invoices + quotes/proforma). */
   payment_terms?: string | null
+  /** Quote / proforma: business-level terms from invoice_settings (not shown on invoices). */
+  quote_terms?: string | null
   /** Shown after totals when bank account and/or MoMo number exist. */
   payment_details?: DocumentPaymentDetails | null
   apply_taxes?: boolean
@@ -141,6 +140,13 @@ function getDocumentLabels(documentType: DocumentType) {
         numberLabel: "Estimate No.",
         dateLabel: "Issue Date",
         secondaryDateLabel: "Expiry Date",
+      }
+    case "proforma":
+      return {
+        title: "PROFORMA INVOICE",
+        numberLabel: "Proforma No.",
+        dateLabel: "Issue Date",
+        secondaryDateLabel: "Validity Date",
       }
     case "order":
       return {
@@ -180,6 +186,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     notes,
     footer_message,
     payment_terms,
+    quote_terms,
     payment_details,
     apply_taxes = false,
     currency_symbol,
@@ -296,19 +303,27 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   const customerName = customer.name || "Customer"
 
   const termsTrimmed = payment_terms?.trim() ?? ""
-  /** Shown only below How to pay (invoices); not in the date grid above the line table. */
-  const paymentTermsBottom =
-    documentType === "invoice" && termsTrimmed
-      ? invoiceTermsSingleSentence(termsTrimmed)
+  /** Full text (newlines preserved) — not limited to first sentence (matches on-screen copy). */
+  const paymentTermsHtml =
+    (documentType === "invoice" || documentType === "estimate" || documentType === "proforma") &&
+    termsTrimmed
+      ? escapeHtml(termsTrimmed).replace(/\n/g, "<br>")
       : ""
-  const hasPaymentTermsBottom = paymentTermsBottom.length > 0
+  const hasPaymentTermsBottom = paymentTermsHtml.length > 0
+
+  const quoteTermsTrimmed = quote_terms?.trim() ?? ""
+  const quoteTermsHtml =
+    (documentType === "estimate" || documentType === "proforma") && quoteTermsTrimmed
+      ? escapeHtml(quoteTermsTrimmed).replace(/\n/g, "<br>")
+      : ""
+  const hasQuoteTermsBottom = quoteTermsHtml.length > 0
 
   const rawFooter = footer_message?.trim() ?? ""
-  const footerBottomPlain =
+  const footerBottomHtml =
     documentType === "invoice" && rawFooter
-      ? invoiceFooterSingleLine(rawFooter)
+      ? escapeHtml(rawFooter).replace(/\n/g, "<br>")
       : rawFooter
-  const hasFooterBottom = footerBottomPlain.length > 0
+  const hasFooterBottom = footerBottomHtml.length > 0
 
   const pd = payment_details
   const hasBank = Boolean(pd?.bank_account_number && String(pd.bank_account_number).trim())
@@ -692,9 +707,16 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           margin-top: 5px;
           padding-top: 5px;
           font-size: 7.5pt;
+          break-inside: auto;
+          page-break-inside: auto;
         }
         .doc-payment-terms__title { font-size: 7pt; margin-bottom: 2px; }
-        .doc-payment-terms__body { font-size: 7.5pt; line-height: 1.35; }
+        .doc-payment-terms__body {
+          font-size: 7.5pt;
+          line-height: 1.35;
+          break-inside: auto;
+          page-break-inside: auto;
+        }
         .doc-footer-message {
           margin-top: 4px;
           padding-top: 4px;
@@ -754,7 +776,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         <div class="meta-grid">
           <span class="meta-label">${labels.dateLabel}</span>
           <span class="meta-value">${formatDate(meta.issue_date)}</span>
-          ${meta.expiry_date && labels.secondaryDateLabel === "Expiry Date" ? `
+          ${meta.expiry_date && labels.secondaryDateLabel && labels.secondaryDateLabel !== "Due Date" ? `
           <span class="meta-label">${labels.secondaryDateLabel}</span>
           <span class="meta-value">${formatDate(meta.expiry_date)}</span>
           ` : ""}
@@ -902,12 +924,19 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       ${hasPaymentTermsBottom ? `
       <div class="doc-payment-terms">
         <p class="doc-payment-terms__title">Payment terms</p>
-        <p class="doc-payment-terms__body">${escapeHtml(paymentTermsBottom)}</p>
+        <p class="doc-payment-terms__body">${paymentTermsHtml}</p>
+      </div>
+      ` : ""}
+
+      ${hasQuoteTermsBottom ? `
+      <div class="doc-payment-terms">
+        <p class="doc-payment-terms__title">Terms &amp; conditions</p>
+        <p class="doc-payment-terms__body">${quoteTermsHtml}</p>
       </div>
       ` : ""}
 
       ${documentType === "invoice" && hasFooterBottom ? `
-      <div class="doc-footer-message">${escapeHtml(footerBottomPlain)}</div>
+      <div class="doc-footer-message">${footerBottomHtml}</div>
       ` : documentType !== "invoice" && rawFooter ? `
       <div class="footer">
         <p>${escapeHtml(rawFooter).replace(/\n/g, "<br>")}</p>

@@ -40,8 +40,13 @@ export function buildEstimateFinancialDocumentHtmlForPdf(params: {
   business: EstimatePdfBusinessRow | null | undefined
   customer: EstimatePdfCustomerRow | null | undefined
   items: unknown[]
+  /** Merged row + invoice_settings defaults (from mergeQuotePdfTerms). */
+  payment_terms?: string | null
+  footer_message?: string | null
+  quote_terms?: string | null
 }): string {
-  const { estimate, business, customer, items } = params
+  const { estimate, business, customer, items, payment_terms, footer_message, quote_terms } =
+    params
   const est = estimate as Record<string, any>
 
   const currencyCode = est.currency_code || business?.default_currency
@@ -119,6 +124,9 @@ export function buildEstimateFinancialDocumentHtmlForPdf(params: {
       public_token: est.public_token || null,
     } as DocumentMeta,
     notes: `${est.notes || ""}${acceptedNote}`.trim() || null,
+    payment_terms: payment_terms ?? null,
+    footer_message: footer_message ?? null,
+    quote_terms: quote_terms ?? null,
     apply_taxes: Boolean(est.apply_taxes),
     currency_code: currencyCode,
     currency_symbol: currencySymbol,

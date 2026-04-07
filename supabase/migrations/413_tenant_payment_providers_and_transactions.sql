@@ -1,6 +1,8 @@
 -- Phase 1 (tenant payments redesign): canonical provider config + external transaction tracking.
 -- Coexists with businesses.momo_settings / hubtel_settings until legacy cutover (no data migration here).
 
+CREATE EXTENSION IF NOT EXISTS moddatetime WITH SCHEMA extensions;
+
 -- -----------------------------------------------------------------------------
 -- business_payment_providers: tenant-owned payment configuration (one row per business + type + environment)
 -- -----------------------------------------------------------------------------

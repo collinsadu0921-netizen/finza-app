@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { buildProformaFinancialDocumentHtmlForPdf } from "@/lib/documents/buildProformaFinancialDocumentHtmlForPdf"
+import {
+  loadInvoiceSettingsForDocument,
+  mergeQuotePdfTerms,
+} from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
 
@@ -82,6 +86,12 @@ export async function GET(
       customer = cust ?? null
     }
 
+    const invSettings = await loadInvoiceSettingsForDocument(supabase, scope.businessId)
+    const quoteTerms = mergeQuotePdfTerms(invSettings, {
+      payment_terms: proforma.payment_terms,
+      footer_message: proforma.footer_message,
+    })
+
     let html: string
     try {
       html = buildProformaFinancialDocumentHtmlForPdf({
@@ -89,6 +99,9 @@ export async function GET(
         business: business ?? undefined,
         customer: customer ?? undefined,
         items: items || [],
+        payment_terms: quoteTerms.payment_terms,
+        footer_message: quoteTerms.footer_message,
+        quote_terms: quoteTerms.quote_terms,
       })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to build document"

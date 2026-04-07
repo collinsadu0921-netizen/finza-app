@@ -1,11 +1,16 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { buildServiceRoute } from "@/lib/service/routes"
 
 export default function ServiceInvoiceSettingsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const workspaceId = searchParams.get("business_id")?.trim() || null
+  const paymentsHref = buildServiceRoute("/service/settings/payments", workspaceId)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -97,7 +102,7 @@ export default function ServiceInvoiceSettingsPage() {
         throw new Error(errorData.error || "Failed to save invoice settings")
       }
 
-      setSuccess("Invoice settings updated successfully!")
+      setSuccess("Document appearance settings saved.")
       setTimeout(() => setSuccess(""), 3000)
     } catch (err: any) {
       setError(err.message || "Failed to save invoice settings")
@@ -128,11 +133,19 @@ export default function ServiceInvoiceSettingsPage() {
             Back
           </button>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-            Invoice Settings
+            Invoices &amp; quotes (appearance)
           </h1>
           <p className="text-gray-600 dark:text-gray-400 text-lg">
-            Configure default invoice settings and payment details
+            Defaults for invoices, quotes, and proformas — what appears on PDFs and in the customer view (not API credentials).
           </p>
+          <div className="mt-4 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/90 dark:bg-blue-950/35 px-4 py-3 text-sm text-blue-950 dark:text-blue-100">
+            <span className="font-semibold">Collecting payments via MoMo, Hubtel, or similar?</span>{" "}
+            Configure that under{" "}
+            <Link href={paymentsHref} className="underline font-medium hover:no-underline">
+              Payment integrations
+            </Link>
+            .
+          </div>
         </div>
 
         {error && (
@@ -421,9 +434,16 @@ export default function ServiceInvoiceSettingsPage() {
             </div>
           </div>
 
-          {/* Payment Details */}
+          {/* Bank & MoMo shown on documents */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Payment Details (Ghana)</h2>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Bank &amp; MoMo on documents</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Shown on invoice and quote PDFs in the &quot;How to pay&quot; section. Separate from{" "}
+              <Link href={paymentsHref} className="text-blue-600 dark:text-blue-400 font-medium underline hover:no-underline">
+                payment integrations
+              </Link>{" "}
+              (API keys and charging).
+            </p>
 
             {/* Bank Details */}
             <div className="mb-6">

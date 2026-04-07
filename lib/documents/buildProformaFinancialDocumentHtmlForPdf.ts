@@ -7,6 +7,7 @@ import {
   type DocumentTotals,
 } from "@/components/documents/FinancialDocument"
 import { getCurrencySymbol } from "@/lib/currency"
+import { taxLinesFromEstimateRow } from "@/lib/documents/estimateTaxLinesForDocument"
 
 export type ProformaPdfBusinessRow = {
   name?: string | null
@@ -38,8 +39,13 @@ export function buildProformaFinancialDocumentHtmlForPdf(params: {
   business: ProformaPdfBusinessRow | null | undefined
   customer: ProformaPdfCustomerRow | null | undefined
   items: unknown[]
+  /** Merged proforma row + invoice_settings (mergeQuotePdfTerms). */
+  payment_terms?: string | null
+  footer_message?: string | null
+  quote_terms?: string | null
 }): string {
-  const { proforma, business, customer, items } = params
+  const { proforma, business, customer, items, payment_terms, footer_message, quote_terms } =
+    params
   const p = proforma as Record<string, any>
 
   const currencyCode = p.currency_code || business?.default_currency
@@ -101,12 +107,15 @@ export function buildProformaFinancialDocumentHtmlForPdf(params: {
       ? `\n\nAccepted by ${p.client_name_signed}${p.signed_at ? ` on ${new Date(p.signed_at).toLocaleDateString("en-GB")}` : ""}.`
       : ""
 
+  const parsedTaxLines = taxLinesFromEstimateRow(p)
+
   return generateFinancialDocumentHTML({
-    documentType: "estimate",
+    documentType: "proforma",
     business: businessInfo,
     customer: customerInfo,
     items: documentItems,
     totals,
+    tax_lines: parsedTaxLines.length > 0 ? parsedTaxLines : undefined,
     meta: {
       document_number: p.proforma_number || "PROFORMA",
       issue_date: p.issue_date,
@@ -115,7 +124,9 @@ export function buildProformaFinancialDocumentHtmlForPdf(params: {
       public_token: p.public_token || null,
     } as DocumentMeta,
     notes: `${p.notes || ""}${acceptedNote}`.trim() || null,
-    footer_message: p.footer_message || null,
+    payment_terms: payment_terms ?? null,
+    footer_message: footer_message ?? null,
+    quote_terms: quote_terms ?? null,
     apply_taxes: Boolean(p.apply_taxes),
     currency_code: currencyCode,
     currency_symbol: currencySymbol,

@@ -102,7 +102,9 @@ export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
 
   try {
     const page = await browser.newPage()
-    await page.emulateMediaType("print")
+    // Use screen styles for PDF — emulateMediaType("print") applies @media print rules that
+    // can clip or omit blocks (e.g. quote terms below totals) in headless Chromium page.pdf().
+    await page.emulateMediaType("screen")
     await page.setContent(html, { waitUntil: "load", timeout: 45_000 })
     const pdf = await page.pdf({
       format: "A4",

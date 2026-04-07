@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
+import { buildServiceRoute } from "@/lib/service/routes"
 
 type IntegratedSlice = {
   provider_id: string | null
@@ -60,6 +62,11 @@ export default function ServicePaymentSettingsPage() {
   const [hubtelPosKey, setHubtelPosKey] = useState("")
   const [hubtelSecret, setHubtelSecret] = useState("")
   const [hubtelMerchantAccount, setHubtelMerchantAccount] = useState("")
+
+  const invoiceAppearanceHref = useMemo(
+    () => buildServiceRoute("/service/settings/invoice-settings", businessId || null),
+    [businessId]
+  )
 
   useEffect(() => {
     loadSettings()
@@ -282,7 +289,7 @@ export default function ServicePaymentSettingsPage() {
         }
       }
 
-      setSuccess("Payment settings saved successfully!")
+      setSuccess("Payment integrations saved.")
       setTimeout(() => setSuccess(""), 3000)
       await loadSettings()
     } catch (err: unknown) {
@@ -337,9 +344,19 @@ export default function ServicePaymentSettingsPage() {
             Back
           </button>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-            Payment Settings
+            Payment integrations
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 text-lg">Configure Mobile Money and payment gateway credentials</p>
+          <p className="text-gray-600 dark:text-gray-400 text-lg">
+            API credentials and provider defaults so Finza can initiate or record collections (MTN MoMo, Hubtel, manual wallet, etc.).
+          </p>
+          <div className="mt-4 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/90 dark:bg-blue-950/35 px-4 py-3 text-sm text-blue-950 dark:text-blue-100">
+            <span className="font-semibold">Bank account and MoMo numbers on the PDF?</span>{" "}
+            Set those under{" "}
+            <Link href={invoiceAppearanceHref} className="underline font-medium hover:no-underline">
+              Invoices &amp; quotes (appearance)
+            </Link>
+            .
+          </div>
         </div>
 
         {error && (

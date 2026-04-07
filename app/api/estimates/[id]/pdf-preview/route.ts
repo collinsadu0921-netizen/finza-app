@@ -3,6 +3,10 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireBusinessScopeForUser } from "@/lib/business"
 import { generateFinancialDocumentHTML, type BusinessInfo, type CustomerInfo, type DocumentItem, type DocumentMeta, type DocumentTotals } from "@/components/documents/FinancialDocument"
 import { estimateLineItemDiscount } from "@/lib/documents/estimateLineItemDiscount"
+import {
+  loadInvoiceSettingsForDocument,
+  mergeQuotePdfTerms,
+} from "@/lib/invoices/loadInvoiceSettingsForDocument"
 
 export async function GET(
   request: NextRequest,
@@ -151,6 +155,9 @@ export async function GET(
     const { getCurrencySymbol } = await import("@/lib/currency")
     const businessCurrencySymbol = getCurrencySymbol(businessCurrencyCode)
 
+    const invSettings = await loadInvoiceSettingsForDocument(supabase, scopedBusinessId)
+    const quoteTerms = mergeQuotePdfTerms(invSettings, null)
+
     // Generate HTML using shared document component
     const htmlPreview = generateFinancialDocumentHTML({
       documentType: "estimate",
@@ -160,7 +167,9 @@ export async function GET(
       totals: documentTotals,
       meta: documentMeta,
       notes: estimate.notes || null,
-      footer_message: null,
+      payment_terms: quoteTerms.payment_terms,
+      footer_message: quoteTerms.footer_message,
+      quote_terms: quoteTerms.quote_terms,
       apply_taxes: applyTaxes,
       currency_symbol: businessCurrencySymbol,
       currency_code: businessCurrencyCode,

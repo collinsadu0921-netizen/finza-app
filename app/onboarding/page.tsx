@@ -200,7 +200,7 @@ export default function OnboardingPage() {
         { id: "business_profile", label: "Business Profile", route: "/settings/business-profile" },
         { id: "industry_confirmation", label: "Industry", route: "" },
         { id: "tax_awareness", label: "Tax", route: "" },
-        { id: "payment_channels", label: "Payment Channels", route: "/settings/payments" },
+        { id: "payment_channels", label: "Payment integrations", route: "/settings/payments" },
         { id: "communication_channels", label: "Communication", route: "" },
         { id: "accounting_readiness", label: "Accounting", route: "" },
         { id: "create_invoice", label: "First Invoice", route: "/invoices/new" },

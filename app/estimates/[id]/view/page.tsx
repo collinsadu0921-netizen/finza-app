@@ -67,6 +67,7 @@ export default function EstimateViewPage() {
   const [convertingToProforma, setConvertingToProforma] = useState(false)
   const [copiedClientLink, setCopiedClientLink] = useState(false)
   const [pdfDownloading, setPdfDownloading] = useState(false)
+  const [actionLoading, setActionLoading] = useState(false)
 
   const handleCopyClientLink = () => {
     if (!estimate?.public_token) return
@@ -229,6 +230,62 @@ export default function EstimateViewPage() {
     }
   }
 
+  const handleMarkAccepted = async () => {
+    if (!estimate) return
+    openConfirm({
+      title: "Record as Accepted",
+      description:
+        "Mark this quote as accepted on behalf of the client (for example they approved in person or by phone)?",
+      onConfirm: async () => {
+        try {
+          setActionLoading(true)
+          const response = await fetch(`/api/estimates/${estimateId}/accept`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ business_id: estimate.business_id }),
+          })
+          const data = await response.json()
+          if (!response.ok) throw new Error(data.error || "Failed to accept quote")
+          setToast({ message: "Recorded as accepted.", type: "success" })
+          loadEstimate()
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to accept quote"
+          setToast({ message, type: "error" })
+        } finally {
+          setActionLoading(false)
+        }
+      },
+    })
+  }
+
+  const handleMarkRejected = async () => {
+    if (!estimate) return
+    openConfirm({
+      title: "Record as Declined",
+      description:
+        "Mark this quote as declined (for example the client declined in person or by phone)?",
+      onConfirm: async () => {
+        try {
+          setActionLoading(true)
+          const response = await fetch(`/api/estimates/${estimateId}/reject`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ business_id: estimate.business_id }),
+          })
+          const data = await response.json()
+          if (!response.ok) throw new Error(data.error || "Failed to decline quote")
+          setToast({ message: "Recorded as declined.", type: "info" })
+          loadEstimate()
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to decline quote"
+          setToast({ message, type: "error" })
+        } finally {
+          setActionLoading(false)
+        }
+      },
+    })
+  }
+
   const handleSend = async (action: "whatsapp" | "email" | "link") => {
     try {
       if (!estimate?.business_id) {
@@ -383,6 +440,26 @@ export default function EstimateViewPage() {
                     )}
                   </button>
                 )}
+                {!estimate.converted_to && estimate.status === "sent" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleMarkAccepted()}
+                      disabled={actionLoading}
+                      className="px-3 py-2 text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-sm disabled:opacity-50 transition-colors"
+                    >
+                      Mark as Accepted
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleMarkRejected()}
+                      disabled={actionLoading}
+                      className="px-3 py-2 text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-lg text-sm disabled:opacity-50 transition-colors"
+                    >
+                      Mark as Declined
+                    </button>
+                  </>
+                )}
                 {/* Convert to Proforma */}
                 {!estimate.converted_to && (estimate.status === "sent" || estimate.status === "accepted") && (
                   <button onClick={handleConvertToProforma} disabled={convertingToProforma} className="px-3 py-2 text-sm font-medium text-purple-700 border border-purple-200 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50">
@@ -523,6 +600,18 @@ export default function EstimateViewPage() {
             </div>
           )}
 
+          {/* Staff-recorded acceptance (no public signature yet) */}
+          {estimate.status === "accepted" && !(estimate as any).client_name_signed && (
+            <div className="mt-5 pt-5 border-t border-slate-100">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                Acceptance on record
+              </p>
+              <p className="text-sm text-slate-600">
+                This quote was marked as accepted from your workspace. No client signature is on file yet.
+              </p>
+            </div>
+          )}
+
           {/* Client acceptance details */}
           {estimate.status === "accepted" && (estimate as any).client_name_signed && (
             <div className="mt-5 pt-5 border-t border-slate-100">
@@ -555,10 +644,14 @@ export default function EstimateViewPage() {
           )}
 
           {/* Rejection details */}
-          {estimate.status === "rejected" && (estimate as any).rejected_reason && (
+          {estimate.status === "rejected" && (
             <div className="mt-5 pt-5 border-t border-slate-100">
-              <p className="text-xs font-semibold text-red-500 uppercase tracking-wider mb-2">Declined by Client</p>
-              <p className="text-sm text-slate-600">{(estimate as any).rejected_reason}</p>
+              <p className="text-xs font-semibold text-red-500 uppercase tracking-wider mb-2">Declined</p>
+              {(estimate as any).rejected_reason ? (
+                <p className="text-sm text-slate-600">{(estimate as any).rejected_reason}</p>
+              ) : (
+                <p className="text-sm text-slate-500">No reason was recorded.</p>
+              )}
             </div>
           )}
         </div>
