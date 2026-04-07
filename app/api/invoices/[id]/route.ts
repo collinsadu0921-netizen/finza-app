@@ -106,43 +106,22 @@ export async function GET(
     // READ-TIME SAFETY NET: Auto-correct status if out of sync with ledger
     // Ledger reality (payments + credits) is the source of truth
     // Status is DERIVED, never authoritative
-    if (invoice && invoice.status !== 'draft' && invoice.status !== 'paid') {
-      // Calculate actual outstanding amount
-      const { data: payments } = await supabase
-        .from("payments")
-        .select("amount")
-        .eq("invoice_id", invoiceId)
-        .is("deleted_at", null)
+    // Include `paid` in this path: after payment reversal the row can still say "paid"
+    // while payments are gone — the old guard skipped `paid` entirely, so the UI never healed.
+    const skipRecalcStatuses = new Set(["draft", "cancelled", "void"])
+    const paymentDerivedStatuses = new Set(["sent", "partially_paid", "partial", "paid", "overdue"])
+    if (invoice && !skipRecalcStatuses.has(invoice.status) && paymentDerivedStatuses.has(invoice.status)) {
+      await supabase.rpc("recalculate_invoice_status", { p_invoice_id: invoiceId })
 
-      const { data: creditNotes } = await supabase
-        .from("credit_notes")
-        .select("total")
-        .eq("invoice_id", invoiceId)
-        .eq("status", "applied")
-        .is("deleted_at", null)
+      const { data: correctedInvoice } = await supabase
+        .from("invoices")
+        .select("status, paid_at")
+        .eq("id", invoiceId)
+        .single()
 
-      const totalPaid = payments?.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) || 0
-      const totalCredits = creditNotes?.reduce((sum: number, cn: any) => sum + Number(cn.total || 0), 0) || 0
-      const outstandingAmount = Number(invoice.total || 0) - totalPaid - totalCredits
-
-      // If fully paid but status says otherwise, auto-correct via database function
-      if (outstandingAmount <= 0 && invoice.status !== 'paid') {
-        console.log(`[Invoice Status Auto-Correct] Invoice ${invoice.invoice_number}: status ${invoice.status} -> paid (outstanding: ${outstandingAmount})`)
-        
-        // Call database function to recalculate status (ensures consistency)
-        await supabase.rpc('recalculate_invoice_status', { p_invoice_id: invoiceId })
-        
-        // Reload invoice to get updated status
-        const { data: correctedInvoice } = await supabase
-          .from("invoices")
-          .select("*")
-          .eq("id", invoiceId)
-          .single()
-        
-        if (correctedInvoice) {
-          invoice.status = correctedInvoice.status
-          invoice.paid_at = correctedInvoice.paid_at
-        }
+      if (correctedInvoice) {
+        invoice.status = correctedInvoice.status
+        invoice.paid_at = correctedInvoice.paid_at
       }
     }
 
