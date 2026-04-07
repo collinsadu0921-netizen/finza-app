@@ -119,12 +119,11 @@ Routing: prefer /service/* URLs. ${SITEMAP}
 
 ${GUARDRAILS}`
 
-function getClient() {
-  const baseURL = process.env.AI_BASE_URL || "http://localhost:11434/v1"
-  const apiKey = process.env.AI_API_KEY || "ollama"
+const GROQ_OPENAI_BASE_URL = "https://api.groq.com/openai/v1"
 
+function createGroqOpenAIClient(apiKey: string) {
   return new OpenAI({
-    baseURL,
+    baseURL: GROQ_OPENAI_BASE_URL,
     apiKey,
   })
 }
@@ -158,6 +157,11 @@ async function streamTextResponse(text: string): Promise<Response> {
 
 export async function POST(request: NextRequest) {
   try {
+    const groqApiKey = process.env.GROQ_API_KEY?.trim()
+    if (!groqApiKey) {
+      return NextResponse.json({ error: "GROQ_API_KEY not configured" }, { status: 500 })
+    }
+
     const body = await request.json().catch(() => null)
     let message = String(body?.message || "").trim()
     const context = body?.context ?? null
@@ -224,7 +228,7 @@ export async function POST(request: NextRequest) {
     }
 
     const model = process.env.AI_MODEL || "gemma3:12b"
-    const client = getClient()
+    const client = createGroqOpenAIClient(groqApiKey)
 
     const contextNote =
       context == null
