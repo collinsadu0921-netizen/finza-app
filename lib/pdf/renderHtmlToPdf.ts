@@ -1,5 +1,24 @@
 import { existsSync } from "fs"
-import path from "path"
+
+/**
+ * `@sparticuz/chromium` only inflates `al2.tar.br` / `al2023.tar.br` (NSS shared libs) and prepends
+ * `LD_LIBRARY_PATH` when it detects AWS Lambda (`AWS_EXECUTION_ENV`). Vercel does not set that, so
+ * Chromium extracts to `/tmp/chromium` without `libnss3.so` → loader error 127.
+ * Set a Lambda-shaped value before the first dynamic import so the package behaves as upstream expects.
+ */
+function ensureSparticuzChromiumEnvForNonLambdaServerless(): void {
+  if (process.env.AWS_EXECUTION_ENV) {
+    return
+  }
+  const major = Number.parseInt(process.versions.node.split(".")[0] ?? "20", 10)
+  if (major >= 22) {
+    process.env.AWS_EXECUTION_ENV = "AWS_Lambda_nodejs22.x"
+  } else if (major >= 20) {
+    process.env.AWS_EXECUTION_ENV = "AWS_Lambda_nodejs20.x"
+  } else {
+    process.env.AWS_EXECUTION_ENV = "AWS_Lambda_nodejs18.x"
+  }
+}
 
 function localChromeCandidates(): string[] {
   if (process.platform === "win32") {
@@ -55,8 +74,7 @@ function resolveLocalChromiumExecutablePath(): string {
  * Renders full HTML document string to a PDF buffer (A4, print backgrounds).
  * On Vercel, uses @sparticuz/chromium; locally uses system Chrome/Chromium.
  *
- * Vercel/serverless: `@sparticuz/chromium` ships `libnss3` and friends next to the binary under `/tmp`.
- * Without `LD_LIBRARY_PATH`, the loader fails with "libnss3.so: cannot open shared object file".
+ * Vercel: see `ensureSparticuzChromiumEnvForNonLambdaServerless` — required so Sparticuz extracts NSS libs.
  */
 export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
   const puppeteer = (await import("puppeteer-core")).default
@@ -66,15 +84,9 @@ export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
   const browser =
     onVercel || onLambda
       ? await (async () => {
+          ensureSparticuzChromiumEnvForNonLambdaServerless()
           const chromium = (await import("@sparticuz/chromium")).default
           const executablePath = await chromium.executablePath()
-          // Linux serverless only (Vercel/AWS). Required for bundled NSS shared libs — see Sparticuz/Vercel issues.
-          if (process.platform === "linux") {
-            const execDir = path.dirname(executablePath)
-            process.env.LD_LIBRARY_PATH = [execDir, process.env.LD_LIBRARY_PATH]
-              .filter(Boolean)
-              .join(path.delimiter)
-          }
           return puppeteer.launch({
             args: [...chromium.args, "--disable-dev-shm-usage"],
             defaultViewport: chromium.defaultViewport,
