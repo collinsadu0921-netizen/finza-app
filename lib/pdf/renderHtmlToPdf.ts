@@ -1,4 +1,5 @@
 import { existsSync } from "fs"
+import path from "path"
 
 function localChromeCandidates(): string[] {
   if (process.platform === "win32") {
@@ -53,6 +54,9 @@ function resolveLocalChromiumExecutablePath(): string {
 /**
  * Renders full HTML document string to a PDF buffer (A4, print backgrounds).
  * On Vercel, uses @sparticuz/chromium; locally uses system Chrome/Chromium.
+ *
+ * Vercel/serverless: `@sparticuz/chromium` ships `libnss3` and friends next to the binary under `/tmp`.
+ * Without `LD_LIBRARY_PATH`, the loader fails with "libnss3.so: cannot open shared object file".
  */
 export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
   const puppeteer = (await import("puppeteer-core")).default
@@ -63,10 +67,18 @@ export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
     onVercel || onLambda
       ? await (async () => {
           const chromium = (await import("@sparticuz/chromium")).default
+          const executablePath = await chromium.executablePath()
+          // Linux serverless only (Vercel/AWS). Required for bundled NSS shared libs — see Sparticuz/Vercel issues.
+          if (process.platform === "linux") {
+            const execDir = path.dirname(executablePath)
+            process.env.LD_LIBRARY_PATH = [execDir, process.env.LD_LIBRARY_PATH]
+              .filter(Boolean)
+              .join(path.delimiter)
+          }
           return puppeteer.launch({
-            args: chromium.args,
+            args: [...chromium.args, "--disable-dev-shm-usage"],
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
+            executablePath,
             headless: chromium.headless,
           })
         })()
