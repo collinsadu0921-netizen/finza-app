@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
@@ -196,6 +196,7 @@ function SubscriptionCallbackHandler() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const toast = useToast()
+  const { businessId } = useServiceSubscription()
 
   useEffect(() => {
     if (searchParams.get("sub_callback") !== "1") return
@@ -205,11 +206,12 @@ function SubscriptionCallbackHandler() {
       router.replace("/service/settings/subscription")
       return
     }
+    if (!businessId) return
     let alive = true
     ;(async () => {
       for (let i = 0; i < 15; i++) {
         const r = await fetch(
-          `/api/payments/paystack/verify?reference=${encodeURIComponent(ref)}`,
+          `/api/payments/subscription/verify?reference=${encodeURIComponent(ref)}&business_id=${encodeURIComponent(businessId)}`,
           { cache: "no-store" }
         )
         const j = await r.json()
@@ -228,7 +230,7 @@ function SubscriptionCallbackHandler() {
           router.replace("/service/settings/subscription")
           return
         }
-        await new Promise((r) => setTimeout(r, 1500))
+        await new Promise((resolve) => setTimeout(resolve, 1500))
       }
       toast.showToast("Still processing — refresh this page shortly.", "info")
       router.replace("/service/settings/subscription")
@@ -236,10 +238,12 @@ function SubscriptionCallbackHandler() {
     return () => {
       alive = false
     }
-  }, [searchParams, router, toast])
+  }, [searchParams, router, toast, businessId])
 
   return null
 }
+
+type SubscriptionGatewayOption = "paystack" | "mtn_momo_sandbox"
 
 function SubscriptionPaystackActions({
   businessId,
@@ -253,19 +257,57 @@ function SubscriptionPaystackActions({
   disabled: boolean
 }) {
   const toast = useToast()
+  const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [showMomo, setShowMomo] = useState(false)
   const [phone, setPhone] = useState("")
   const [momoProvider, setMomoProvider] = useState<"mtn" | "vodafone" | "airteltigo">("mtn")
+  const [gateways, setGateways] = useState<{ paystack: boolean; mtn_momo_sandbox: boolean } | null>(null)
+  const [gateway, setGateway] = useState<SubscriptionGatewayOption>("paystack")
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    fetch("/api/payments/subscription/options")
+      .then((r) => r.json())
+      .then((o: { paystack?: boolean; mtn_momo_sandbox?: boolean }) => {
+        if (!alive) return
+        const g = { paystack: !!o.paystack, mtn_momo_sandbox: !!o.mtn_momo_sandbox }
+        setGateways(g)
+        if (g.paystack) setGateway("paystack")
+        else if (g.mtn_momo_sandbox) setGateway("mtn_momo_sandbox")
+      })
+      .catch(() => {
+        if (!alive) return
+        setGateways({ paystack: true, mtn_momo_sandbox: false })
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (gateway === "mtn_momo_sandbox") setMomoProvider("mtn")
+  }, [gateway])
 
   const startCard = async () => {
     if (!businessId || disabled) return
     setBusy(true)
     try {
-      const res = await fetch("/api/payments/paystack/subscription/initiate", {
+      const res = await fetch("/api/payments/subscription/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          gateway: "paystack",
           business_id: businessId,
           target_tier: targetTier,
           billing_cycle: cycle,
@@ -292,12 +334,17 @@ function SubscriptionPaystackActions({
       toast.showToast("Enter your Mobile Money number", "error")
       return
     }
+    if (gateway === "mtn_momo_sandbox" && momoProvider !== "mtn") {
+      toast.showToast("MTN sandbox checkout supports MTN MoMo only. Switch gateway to Paystack for other networks.", "error")
+      return
+    }
     setBusy(true)
     try {
-      const res = await fetch("/api/payments/paystack/subscription/initiate", {
+      const res = await fetch("/api/payments/subscription/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          gateway,
           business_id: businessId,
           target_tier: targetTier,
           billing_cycle: cycle,
@@ -311,7 +358,7 @@ function SubscriptionPaystackActions({
 
       let reference = data.reference as string
 
-      if (data.otp_required) {
+      if (gateway === "paystack" && data.otp_required) {
         const otp =
           typeof window !== "undefined"
             ? window.prompt("Enter the OTP sent to your phone (Vodafone Cash)")
@@ -332,6 +379,48 @@ function SubscriptionPaystackActions({
         reference = otpJson.reference || reference
       }
 
+      if (gateway === "mtn_momo_sandbox") {
+        toast.showToast(
+          "Approve the payment on your phone. We will confirm with MTN and update your plan when payment succeeds.",
+          "success"
+        )
+        setShowMomo(false)
+        if (pollRef.current) clearInterval(pollRef.current)
+        let attempts = 0
+        pollRef.current = setInterval(async () => {
+          attempts++
+          if (attempts > 45) {
+            if (pollRef.current) clearInterval(pollRef.current)
+            pollRef.current = null
+            toast.showToast("Payment is still pending — refresh this page or check back shortly.", "info")
+            return
+          }
+          try {
+            const vr = await fetch(
+              `/api/payments/subscription/verify?reference=${encodeURIComponent(reference)}&business_id=${encodeURIComponent(businessId)}&gateway=mtn_momo_sandbox`,
+              { cache: "no-store" }
+            )
+            const vj = await vr.json()
+            if (vj.status === "success") {
+              if (pollRef.current) clearInterval(pollRef.current)
+              pollRef.current = null
+              toast.showToast(
+                "Payment confirmed. Your billing period runs from this payment.",
+                "success"
+              )
+              router.refresh()
+            } else if (vj.status === "failed" || vj.status === "abandoned") {
+              if (pollRef.current) clearInterval(pollRef.current)
+              pollRef.current = null
+              toast.showToast(vj.message || "Payment was not completed.", "error")
+            }
+          } catch {
+            /* next poll */
+          }
+        }, 2000)
+        return
+      }
+
       toast.showToast(
         "Approve the payment on your phone. When it succeeds, your plan updates and a new billing period starts from that time.",
         "success"
@@ -344,6 +433,10 @@ function SubscriptionPaystackActions({
     }
   }
 
+  const showGatewayPicker =
+    gateways && gateways.paystack && gateways.mtn_momo_sandbox
+  const optionsReady = gateways !== null
+
   return (
     <div className="mt-4 space-y-2">
       <p className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600">
@@ -352,18 +445,47 @@ function SubscriptionPaystackActions({
         <span className="font-medium text-slate-700">starts from that date</span> for the full length of the cycle.
         We do not prorate or credit unused time.
       </p>
+      {showGatewayPicker && (
+        <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
+          <p className="mb-1.5 text-[11px] font-medium text-slate-600">Payment gateway</p>
+          <div className="flex flex-wrap gap-3 text-xs text-slate-700">
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                type="radio"
+                name={`sub-gateway-${targetTier}`}
+                checked={gateway === "paystack"}
+                onChange={() => setGateway("paystack")}
+                className="accent-slate-800"
+              />
+              Paystack (card + all MoMo networks)
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                type="radio"
+                name={`sub-gateway-${targetTier}`}
+                checked={gateway === "mtn_momo_sandbox"}
+                onChange={() => setGateway("mtn_momo_sandbox")}
+                className="accent-slate-800"
+              />
+              MTN MoMo (sandbox API)
+            </label>
+          </div>
+        </div>
+      )}
+      {gateways?.paystack && gateway === "paystack" && (
       <button
         type="button"
-        disabled={disabled || busy || !businessId}
+        disabled={disabled || busy || !businessId || !optionsReady}
         onClick={() => void startCard()}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         Pay full amount with card
       </button>
+      )}
       {!showMomo ? (
         <button
           type="button"
-          disabled={disabled || busy || !businessId}
+          disabled={disabled || busy || !businessId || !optionsReady}
           onClick={() => setShowMomo(true)}
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white py-2 text-center text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -386,15 +508,19 @@ function SubscriptionPaystackActions({
               setMomoProvider(e.target.value as "mtn" | "vodafone" | "airteltigo")
             }
             size="sm"
+            disabled={gateway === "mtn_momo_sandbox"}
           >
             <option value="mtn">MTN</option>
             <option value="vodafone">Vodafone</option>
             <option value="airteltigo">AirtelTigo</option>
           </NativeSelect>
+          {gateway === "mtn_momo_sandbox" && (
+            <p className="text-[11px] text-slate-500">Sandbox gateway: MTN wallets only.</p>
+          )}
           <div className="flex gap-2 pt-1">
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || !optionsReady}
               onClick={() => void startMomo()}
               className="flex-1 rounded-lg bg-slate-800 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
             >

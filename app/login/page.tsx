@@ -143,7 +143,7 @@ export default function LoginPage() {
               href="/demo"
               className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
             >
-              Watch demo video
+              How Finza works (video)
             </Link>
           </p>
         </div>

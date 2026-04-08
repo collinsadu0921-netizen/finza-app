@@ -8,6 +8,7 @@ import {
   tryParseServiceSubscriptionTier,
 } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { FinzaLogo } from "@/components/FinzaLogo"
+import { FinzaDemoVideoEmbed } from "@/components/marketing/FinzaDemoVideoEmbed"
 
 /**
  * Valid workspaces that support the trial flow.
@@ -187,25 +188,25 @@ function SignupPageInner() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 px-4 py-8">
-      <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 px-4 py-8">
+      <div className="mx-auto w-full max-w-6xl">
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="flex justify-center mb-6">
+        <div className="mb-8 text-center">
+          <div className="mb-6 flex justify-center">
             <FinzaLogo height={72} />
           </div>
           {hasTrial ? (
             <>
-              <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-100 px-4 py-1.5 text-xs font-semibold text-blue-700 mb-4">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-4 py-1.5 text-xs font-semibold text-blue-700">
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 14-day free trial — no credit card required
               </div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Start your free trial</h1>
-              <p className="text-gray-600 text-sm">
+              <h1 className="mb-2 text-3xl font-bold text-gray-900">Start your free trial</h1>
+              <p className="text-sm text-gray-600">
                 You&apos;re starting a{" "}
-                <span className="font-semibold text-blue-700 capitalize">
+                <span className="font-semibold capitalize text-blue-700">
                   {trialPlan === "starter" ? "Essentials" : trialPlan === "professional" ? "Professional" : "Business"}
                 </span>{" "}
                 trial of the Service workspace.
@@ -213,12 +214,36 @@ function SignupPageInner() {
             </>
           ) : (
             <>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Create your account</h1>
-              <p className="text-gray-600 text-sm">Get started with your free account today</p>
+              <h1 className="mb-2 text-3xl font-bold text-gray-900">Create your account</h1>
+              <p className="text-sm text-gray-600">Get started with your free account today</p>
             </>
           )}
         </div>
 
+        <div className="grid items-start gap-10 lg:grid-cols-2">
+          {/* Video first on small screens; right column on large */}
+          <div className="order-1 lg:order-2">
+            <div className="lg:sticky lg:top-8">
+              <h2 className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500 lg:text-left">
+                How Finza works
+              </h2>
+              <FinzaDemoVideoEmbed title="How Finza works — see the product before you sign up" />
+              <p className="mt-3 text-center text-xs text-gray-500 lg:text-left">
+                Short walkthrough of Finza. You can also{" "}
+                <button
+                  type="button"
+                  onClick={() => router.push("/demo")}
+                  className="font-semibold text-blue-600 hover:text-blue-700 focus:outline-none focus:underline"
+                >
+                  open the full demo page
+                </button>
+                .
+              </p>
+            </div>
+          </div>
+
+          <div className="order-2 lg:order-1">
+            <div className="mx-auto w-full max-w-md rounded-2xl border border-gray-100 bg-white p-10 shadow-xl lg:mx-0 lg:max-w-none">
         {/* Signup intent selector — hidden when arriving from a trial link
             (trial always implies business_owner) */}
         {!hasTrial && (
@@ -361,6 +386,9 @@ function SignupPageInner() {
               Sign in
             </button>
           </p>
+        </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

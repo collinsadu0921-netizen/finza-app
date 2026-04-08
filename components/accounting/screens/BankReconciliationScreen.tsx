@@ -1,8 +1,21 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney } from "@/lib/money"
+import {
+  allPreviewRowsValid,
+  applyColumnMapping,
+  buildPreviewRows,
+  guessColumnMapping,
+  isCompleteMapping,
+  parseBankDelimitedText,
+  rowsToImportPayload,
+  sanitizeImportFilename,
+  type ColumnMapping,
+  type ParsedBankGrid,
+  type PreviewBankRow,
+} from "@/lib/reconciliation/bankStatementCsv"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,14 +54,9 @@ type Balances = {
   difference: number
 }
 
-type ParsedRow = {
-  date: string
-  description: string
-  amount: number
-  reference: string
-}
-
 type FilterMode = "all" | "unreconciled" | "matched" | "ignored"
+
+type ImportPhase = "source" | "mapping" | "review"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -60,21 +68,15 @@ function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-GH", { day: "2-digit", month: "short", year: "numeric" })
 }
 
-function parseCSV(raw: string): ParsedRow[] {
-  const lines = raw.trim().split("\n").filter(l => l.trim())
-  if (lines.length === 0) return []
-  const firstLine = lines[0].toLowerCase()
-  const hasHeader = firstLine.includes("date") || firstLine.includes("description") || firstLine.includes("amount")
-  const dataLines = hasHeader ? lines.slice(1) : lines
-  const rows: ParsedRow[] = []
-  for (const line of dataLines) {
-    const cols = line.includes("\t") ? line.split("\t") : line.split(",")
-    const [rawDate, rawDesc, rawAmount, rawRef] = cols.map(c => c.trim().replace(/^"|"$/g, ""))
-    const amount = parseFloat(rawAmount?.replace(/[^0-9.\-]/g, "") || "0")
-    if (!rawDate || isNaN(amount) || amount === 0) continue
-    rows.push({ date: rawDate, description: rawDesc || "", amount, reference: rawRef || "" })
+function defaultMappingFromFields(fields: string[]): ColumnMapping {
+  const g = guessColumnMapping(fields)
+  if (g) return g
+  return {
+    date: fields[0] ?? "",
+    description: fields[1] ?? fields[0] ?? "",
+    amount: fields[2] ?? fields[1] ?? fields[0] ?? "",
+    reference: fields[3],
   }
-  return rows
 }
 
 // ─── Toast ───────────────────────────────────────────────────────────────────
@@ -139,9 +141,19 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
 
   // Import panel
   const [showImport, setShowImport] = useState(false)
+  const [importPhase, setImportPhase] = useState<ImportPhase>("source")
+  const [importInputMode, setImportInputMode] = useState<"upload" | "paste">("upload")
   const [csvRaw, setCsvRaw] = useState("")
-  const [parsedRows, setParsedRows] = useState<ParsedRow[] | null>(null)
+  const [hasHeaderRow, setHasHeaderRow] = useState(true)
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
+  const [parsedGrid, setParsedGrid] = useState<ParsedBankGrid | null>(null)
+  const [parseError, setParseError] = useState<string | null>(null)
+  const [parseWarnings, setParseWarnings] = useState<string[]>([])
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping | null>(null)
+  const [previewRows, setPreviewRows] = useState<PreviewBankRow[]>([])
   const [importing, setImporting] = useState(false)
+  const [importReviewBackPhase, setImportReviewBackPhase] = useState<"source" | "mapping">("source")
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null)
@@ -185,25 +197,129 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
   }, [selectedAccountId, loadTransactions])
 
   // ── Import ─────────────────────────────────────────────────────────────────
-  function handlePreviewCSV() {
-    const rows = parseCSV(csvRaw)
-    if (rows.length === 0) { showToast("No valid rows found. Check your CSV format.", "error"); return }
-    setParsedRows(rows)
+  function resetImportFlow() {
+    setImportPhase("source")
+    setImportInputMode("upload")
+    setCsvRaw("")
+    setHasHeaderRow(true)
+    setUploadedFileName(null)
+    setParsedGrid(null)
+    setParseError(null)
+    setParseWarnings([])
+    setColumnMapping(null)
+    setPreviewRows([])
+    setImportReviewBackPhase("source")
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  function openImportModal() {
+    setShowImport(true)
+    resetImportFlow()
+  }
+
+  function closeImportModal() {
+    setShowImport(false)
+    resetImportFlow()
+  }
+
+  function advanceParsedGrid(grid: ParsedBankGrid) {
+    setParsedGrid(grid)
+    setParseWarnings(grid.parseWarnings)
+    const guess = guessColumnMapping(grid.fields)
+    if (guess && isCompleteMapping(guess)) {
+      setColumnMapping(guess)
+      const mapped = applyColumnMapping(grid.rows, guess)
+      setPreviewRows(buildPreviewRows(mapped))
+      setImportReviewBackPhase("source")
+      setImportPhase("review")
+    } else {
+      setColumnMapping(defaultMappingFromFields(grid.fields))
+      setImportPhase("mapping")
+    }
+  }
+
+  function processDelimitedText(text: string, filename: string | null) {
+    setParseError(null)
+    const result = parseBankDelimitedText(text, { hasHeaderRow })
+    if ("error" in result) {
+      setParseError(result.error)
+      setParsedGrid(null)
+      setPreviewRows([])
+      showToast(result.error, "error")
+      return
+    }
+    if (filename) {
+      setUploadedFileName(sanitizeImportFilename(filename))
+    } else {
+      setUploadedFileName(null)
+    }
+    advanceParsedGrid(result)
+  }
+
+  function handleBankFileSelected(file: File | null) {
+    if (!file) return
+    const lower = file.name.toLowerCase()
+    if (!lower.endsWith(".csv")) {
+      showToast("Please choose a .csv file.", "error")
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : ""
+      processDelimitedText(text, file.name)
+    }
+    reader.onerror = () => {
+      showToast("Could not read the file.", "error")
+    }
+    reader.readAsText(file, "UTF-8")
+  }
+
+  function handlePasteContinue() {
+    processDelimitedText(csvRaw, null)
+  }
+
+  function handleApplyMapping() {
+    if (!parsedGrid || !columnMapping || !isCompleteMapping(columnMapping)) {
+      showToast("Select date, description, and amount columns.", "error")
+      return
+    }
+    const { date, description, amount } = columnMapping
+    if (!parsedGrid.fields.includes(date) || !parsedGrid.fields.includes(description) || !parsedGrid.fields.includes(amount)) {
+      showToast("Each mapped column must exist in the file.", "error")
+      return
+    }
+    const mapped = applyColumnMapping(parsedGrid.rows, columnMapping)
+    setPreviewRows(buildPreviewRows(mapped))
+    setImportReviewBackPhase("mapping")
+    setImportPhase("review")
   }
 
   async function handleConfirmImport() {
-    if (!parsedRows || parsedRows.length === 0 || !selectedAccountId) return
+    if (!selectedAccountId || !allPreviewRowsValid(previewRows)) return
     setImporting(true)
     try {
+      const rows = rowsToImportPayload(previewRows)
       const res = await fetch(`/api/reconciliation/${selectedAccountId}/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: parsedRows }),
+        body: JSON.stringify({
+          rows,
+          meta: {
+            source: uploadedFileName ? "file" : "paste",
+            filename: uploadedFileName,
+          },
+        }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Import failed")
+      if (!res.ok) {
+        const extra =
+          Array.isArray(data.rowErrors) && data.rowErrors.length > 0
+            ? ` Row ${data.rowErrors[0].rowIndex}: ${data.rowErrors[0].errors?.join("; ")}`
+            : ""
+        throw new Error((data.error || "Import failed") + extra)
+      }
       showToast(`Imported ${data.count} transactions`)
-      setShowImport(false); setCsvRaw(""); setParsedRows(null)
+      closeImportModal()
       loadTransactions()
     } catch (e: any) {
       showToast(e.message || "Import failed", "error")
@@ -350,7 +466,8 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <button
-            onClick={() => { setShowImport(true); setParsedRows(null); setCsvRaw("") }}
+            type="button"
+            onClick={openImportModal}
             className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
@@ -662,69 +779,284 @@ export default function BankReconciliationScreen({ mode, businessId }: Props) {
       {/* Import Modal */}
       {showImport && (
         <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-slate-800">Import Bank Transactions</h2>
-              <button onClick={() => setShowImport(false)} className="text-slate-400 hover:text-slate-600">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">Import bank transactions</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  One signed amount per row: positive = credit (money in), negative = debit (money out).
+                </p>
+              </div>
+              <button type="button" onClick={closeImportModal} className="text-slate-400 hover:text-slate-600" aria-label="Close">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              {!parsedRows ? (
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {importPhase === "source" && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setImportInputMode("upload")}
+                      className={`text-left rounded-xl border-2 p-4 transition-colors ${
+                        importInputMode === "upload"
+                          ? "border-blue-500 bg-blue-50/60 ring-1 ring-blue-200"
+                          : "border-slate-200 hover:border-slate-300 bg-white"
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-slate-800">Upload statement file</div>
+                      <p className="text-xs text-slate-500 mt-1">Recommended — CSV export from your bank or wallet.</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImportInputMode("paste")}
+                      className={`text-left rounded-xl border-2 p-4 transition-colors ${
+                        importInputMode === "paste"
+                          ? "border-blue-500 bg-blue-50/60 ring-1 ring-blue-200"
+                          : "border-slate-200 hover:border-slate-300 bg-white"
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-slate-800">Paste CSV manually</div>
+                      <p className="text-xs text-slate-500 mt-1">Fallback when you cannot save a file.</p>
+                    </button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hasHeaderRow}
+                      onChange={e => setHasHeaderRow(e.target.checked)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    First row contains column headers
+                  </label>
+
+                  {importInputMode === "upload" && (
+                    <div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        className="hidden"
+                        onChange={e => {
+                          handleBankFileSelected(e.target.files?.[0] ?? null)
+                          e.target.value = ""
+                        }}
+                      />
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={e => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            fileInputRef.current?.click()
+                          }
+                        }}
+                        onDragOver={e => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                        }}
+                        onDrop={e => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          const f = e.dataTransfer.files?.[0]
+                          if (f) handleBankFileSelected(f)
+                        }}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center cursor-pointer hover:border-blue-300 hover:bg-slate-50/80 transition-colors"
+                      >
+                        <p className="text-sm font-medium text-slate-700">Drop or click to select a CSV file</p>
+                        <p className="text-xs text-slate-500 mt-1">Only .csv is supported in this release.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {importInputMode === "paste" && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-slate-600">
+                        Paste exported data (comma or tab separated). If headers are not recognized, you will map columns on the next step.
+                      </p>
+                      <textarea
+                        value={csvRaw}
+                        onChange={e => setCsvRaw(e.target.value)}
+                        placeholder={"date,description,amount,reference\n2024-03-01,Paystack settlement,985.00,PAY-001"}
+                        rows={10}
+                        className="w-full rounded-lg border border-slate-200 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={handlePasteContinue} disabled={!csvRaw.trim()} className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                          Parse & continue
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {parseError && (
+                    <div className="rounded-lg bg-red-50 border border-red-100 text-red-800 text-sm px-3 py-2">
+                      {parseError}
+                    </div>
+                  )}
+                  {parseWarnings.length > 0 && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-100 text-amber-900 text-sm px-3 py-2 space-y-1">
+                      <p className="font-medium text-xs uppercase tracking-wide text-amber-800">Parse notices</p>
+                      <ul className="list-disc list-inside text-xs">
+                        {parseWarnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {importPhase === "mapping" && parsedGrid && columnMapping && (
                 <>
                   <p className="text-sm text-slate-600">
-                    Paste CSV data below. Columns: <code className="bg-slate-100 px-1 rounded text-xs">date, description, amount, reference</code><br />
-                    Positive amounts = credit (money in), negative = debit (money out). First row may be a header.
+                    We could not confidently detect all columns. Map each field to a column from your file ({parsedGrid.rows.length} data rows).
                   </p>
-                  <textarea
-                    value={csvRaw}
-                    onChange={e => setCsvRaw(e.target.value)}
-                    placeholder={"date,description,amount,reference\n2024-03-01,Paystack settlement,985.00,PAY-001\n2024-03-05,Customer MoMo receipt,4900,MM-042"}
-                    rows={10}
-                    className="w-full rounded-lg border border-slate-200 p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setShowImport(false)} className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
-                    <button onClick={handlePreviewCSV} disabled={!csvRaw.trim()} className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">Preview</button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(["date", "description", "amount", "reference"] as const).map(key => (
+                      <div key={key}>
+                        <label className="block text-xs font-medium text-slate-500 mb-1 capitalize">
+                          {key === "reference" ? "Reference (optional)" : key}
+                        </label>
+                        <select
+                          value={key === "reference" ? (columnMapping.reference ?? "") : columnMapping[key]}
+                          onChange={e => {
+                            const v = e.target.value
+                            setColumnMapping(prev => {
+                              if (!prev) return prev
+                              if (key === "reference") {
+                                return { ...prev, reference: v || undefined }
+                              }
+                              return { ...prev, [key]: v }
+                            })
+                          }}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">{key === "reference" ? "— None —" : "— Select column —"}</option>
+                          {parsedGrid.fields.map(f => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportPhase("source")
+                        setParsedGrid(null)
+                        setColumnMapping(null)
+                        setParseError(null)
+                      }}
+                      className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                    >
+                      Back
+                    </button>
+                    <button type="button" onClick={handleApplyMapping} className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                      Preview import
+                    </button>
                   </div>
                 </>
-              ) : (
+              )}
+
+              {importPhase === "review" && (
                 <>
-                  <p className="text-sm text-slate-600">{parsedRows.length} transactions parsed. Review before importing:</p>
-                  <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="text-sm text-slate-700">
+                      <span className="font-semibold">{previewRows.length}</span> rows — review before confirming.
+                    </p>
+                    {!allPreviewRowsValid(previewRows) && (
+                      <span className="text-xs font-medium text-red-600">Fix invalid rows or adjust mapping — import is blocked until all rows pass.</span>
+                    )}
+                  </div>
+                  <div className="max-h-[min(360px,45vh)] overflow-auto rounded-lg border border-slate-200">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 sticky top-0">
+                      <thead className="bg-slate-50 sticky top-0 z-10">
                         <tr>
+                          <th className="px-3 py-2 text-left font-medium text-slate-500 w-10">#</th>
                           <th className="px-3 py-2 text-left font-medium text-slate-500">Date</th>
                           <th className="px-3 py-2 text-left font-medium text-slate-500">Description</th>
                           <th className="px-3 py-2 text-right font-medium text-slate-500">Amount</th>
-                          <th className="px-3 py-2 text-left font-medium text-slate-500">Ref</th>
+                          <th className="px-3 py-2 text-center font-medium text-slate-500 w-20">Type</th>
+                          <th className="px-3 py-2 text-left font-medium text-slate-500">Reference</th>
+                          <th className="px-3 py-2 text-left font-medium text-slate-500">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {parsedRows.map((r, i) => (
-                          <tr key={i} className="hover:bg-slate-50">
-                            <td className="px-3 py-2 text-slate-600">{r.date}</td>
-                            <td className="px-3 py-2 text-slate-700">{r.description}</td>
-                            <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-slate-800" : "text-green-700"}`}>
-                              {r.amount < 0 ? "−" : "+"}
-                              {formatMoney(Math.abs(r.amount), homeCode)}
+                        {previewRows.map(r => (
+                          <tr key={r.rowIndex} className={r.errors.length ? "bg-red-50/50" : "hover:bg-slate-50"}>
+                            <td className="px-3 py-2 text-slate-400">{r.rowIndex}</td>
+                            <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{r.dateDisplay}</td>
+                            <td className="px-3 py-2 text-slate-800 max-w-[200px] truncate" title={r.description}>{r.description}</td>
+                            <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${r.signedAmount != null && r.signedAmount < 0 ? "text-slate-800" : "text-green-700"}`}>
+                              {r.signedAmount == null ? "—" : (
+                                <>{r.signedAmount < 0 ? "−" : "+"}{formatMoney(Math.abs(r.signedAmount), homeCode)}</>
+                              )}
                             </td>
-                            <td className="px-3 py-2 text-slate-400">{r.reference || "—"}</td>
+                            <td className="px-3 py-2 text-center capitalize text-slate-600">{r.type ?? "—"}</td>
+                            <td className="px-3 py-2 text-slate-500 max-w-[120px] truncate">{r.reference || "—"}</td>
+                            <td className="px-3 py-2">
+                              {r.errors.length === 0
+                                ? <span className="text-green-700 font-medium">OK</span>
+                                : <span className="text-red-700">{r.errors.join("; ")}</span>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setParsedRows(null)} className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Back</button>
-                    <button onClick={handleConfirmImport} disabled={importing} className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                      {importing ? "Importing…" : `Import ${parsedRows.length} Transactions`}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (importReviewBackPhase === "mapping") {
+                            setImportPhase("mapping")
+                          } else {
+                            setImportPhase("source")
+                            setParsedGrid(null)
+                            setPreviewRows([])
+                            setParseError(null)
+                          }
+                        }}
+                        className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                      >
+                        Back
+                      </button>
+                      {parsedGrid && (
+                        <button
+                          type="button"
+                          onClick={() => setImportPhase("mapping")}
+                          className="px-4 py-2 text-sm text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-50"
+                        >
+                          Adjust columns
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleConfirmImport}
+                      disabled={importing || !allPreviewRowsValid(previewRows)}
+                      className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {importing ? "Importing…" : `Import ${previewRows.length} transactions`}
                     </button>
                   </div>
                 </>
               )}
             </div>
+
+            {importPhase === "source" && (
+              <div className="px-6 py-3 border-t border-slate-100 flex justify-end shrink-0">
+                <button type="button" onClick={closeImportModal} className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -5,7 +5,7 @@ import "server-only"
  *
  * - Does **not** verify cryptographic authenticity (not documented for this integration).
  * - Does **not** create `payments` rows, change invoice status, or mark `payment_provider_transactions` paid.
- * - Binds `externalId` → existing `payment_provider_transactions.reference` (service workspace, MTN direct).
+ * - Binds `externalId` → existing `payment_provider_transactions.reference` (service or platform_subscription workspace, MTN direct).
  * - Persists an append-only event row (deduped by payload fingerprint) and refreshes `last_event_payload`
  *   on the parent txn for operators.
  *
@@ -63,6 +63,10 @@ export type RecordTenantMtnCallbackHintResult = {
   bound: boolean
   /** Same payload was already recorded for this txn (idempotent retry). */
   duplicate_hint: boolean
+  /** When bound, workspace of the matched txn (service invoice vs platform subscription). */
+  workspace?: string
+  /** Matched Finza reference (externalId). */
+  reference?: string
 }
 
 /**
@@ -79,15 +83,17 @@ export async function recordTenantMtnCallbackHint(
 
   const { data: txn, error: txnErr } = await supabase
     .from("payment_provider_transactions")
-    .select("id, status")
+    .select("id, status, workspace")
     .eq("provider_type", PROVIDER_TYPE)
-    .eq("workspace", WORKSPACE)
+    .in("workspace", [WORKSPACE, "platform_subscription"])
     .eq("reference", externalRef)
     .maybeSingle()
 
   if (txnErr || !txn?.id) {
     return { bound: false, duplicate_hint: false }
   }
+
+  const workspace = (txn as { workspace?: string }).workspace
 
   const fingerprint = callbackPayloadFingerprint(body)
 
@@ -101,12 +107,12 @@ export async function recordTenantMtnCallbackHint(
   })
 
   if (insErr && isUniqueViolation(insErr)) {
-    return { bound: true, duplicate_hint: true }
+    return { bound: true, duplicate_hint: true, workspace, reference: externalRef }
   }
 
   if (insErr) {
     console.error("[mtnCallbackHint] event insert", insErr)
-    return { bound: true, duplicate_hint: false }
+    return { bound: true, duplicate_hint: false, workspace, reference: externalRef }
   }
 
   await supabase
@@ -118,5 +124,5 @@ export async function recordTenantMtnCallbackHint(
     .eq("id", txn.id)
     .eq("provider_type", PROVIDER_TYPE)
 
-  return { bound: true, duplicate_hint: false }
+  return { bound: true, duplicate_hint: false, workspace, reference: externalRef }
 }

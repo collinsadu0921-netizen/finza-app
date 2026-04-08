@@ -1,6 +1,6 @@
 /**
- * @deprecated Use POST /api/payments/subscription/initiate with { gateway: "paystack", ... }.
- * Retained for backward compatibility.
+ * Unified service subscription checkout: Paystack (card + MoMo) or MTN MoMo sandbox (MoMo only).
+ * Reuses the same subscription metadata and applyPaystackSubscriptionWebhook / Paystack webhooks.
  */
 
 import { NextRequest } from "next/server"
@@ -26,5 +26,5 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 })
   }
 
-  return initiateServiceSubscriptionPayment(request, supabase, user, { ...body, gateway: "paystack" })
+  return initiateServiceSubscriptionPayment(request, supabase, user, body)
 }

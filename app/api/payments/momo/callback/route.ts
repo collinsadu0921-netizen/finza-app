@@ -8,7 +8,10 @@
  *
  * **Authoritative settlement:** `GET /api/payments/momo/tenant/invoice/status` (MTN server verify).
  *
- * Unrelated to **retail** `POST /api/payments/momo` (sales) or **platform** Paystack subscription webhooks.
+ * **Platform subscription** (`workspace = platform_subscription`): after recording the hint, runs the same
+ * MTN Collection status check + `applyPaystackSubscriptionWebhook` as `GET /api/payments/subscription/verify`.
+ *
+ * Unrelated to **retail** `POST /api/payments/momo` (sales).
  *
  * Returns 200 for well-formed JSON even when unbound (limits reference probing differences vs 404);
  * check `bound` / `duplicate_hint` in the JSON body.
@@ -17,6 +20,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { recordTenantMtnCallbackHint } from "@/lib/tenantPayments/mtnCallbackHint"
+import { mtnMomoSandboxVerifyAndApplySubscription } from "@/lib/payments/subscriptionGateway/mtnMomoSandboxProvider"
 
 export const dynamic = "force-dynamic"
 
@@ -40,14 +44,22 @@ export async function POST(request: NextRequest) {
   const supabase = serviceClient()
   const hint = await recordTenantMtnCallbackHint(supabase, body)
 
+  const subscription_verify =
+    hint.bound && hint.workspace === "platform_subscription" && hint.reference
+      ? await mtnMomoSandboxVerifyAndApplySubscription(supabase, hint.reference)
+      : null
+
   return NextResponse.json({
     success: true,
     bound: hint.bound,
     duplicate_hint: hint.duplicate_hint,
+    subscription_verify,
     message: hint.bound
       ? hint.duplicate_hint
         ? "Duplicate callback ignored (idempotent)."
-        : "Callback recorded as hint. Settlement requires verified status check."
+        : hint.workspace === "platform_subscription"
+          ? "Callback recorded; subscription status refreshed when possible."
+          : "Callback recorded as hint. Settlement requires verified status check."
       : "No matching tenant MTN session; nothing stored.",
   })
 }
