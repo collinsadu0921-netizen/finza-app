@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
+import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness } from "@/lib/business"
 
 type RecurringInvoice = {
   id: string
@@ -35,10 +37,23 @@ export default function RecurringInvoiceViewPage() {
     loadRecurringInvoice()
   }, [id])
 
+  const getWorkspaceBusinessId = async (): Promise<string> => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) throw new Error("Not logged in")
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) throw new Error("Business not found")
+    return business.id
+  }
+
   const loadRecurringInvoice = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/recurring-invoices/${id}`)
+      const businessId = await getWorkspaceBusinessId()
+      const response = await fetch(
+        `/api/recurring-invoices/${id}?business_id=${encodeURIComponent(businessId)}`
+      )
       
       if (!response.ok) {
         throw new Error("Failed to load recurring invoice")
@@ -55,10 +70,11 @@ export default function RecurringInvoiceViewPage() {
 
   const handleGenerateNow = async () => {
     try {
+      const businessId = await getWorkspaceBusinessId()
       const response = await fetch("/api/recurring-invoices/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recurring_invoice_id: id }),
+        body: JSON.stringify({ business_id: businessId, recurring_invoice_id: id }),
       })
 
       if (!response.ok) {
@@ -72,7 +88,8 @@ export default function RecurringInvoiceViewPage() {
         window.open(whatsappInfo.url, "_blank", "noopener,noreferrer")
       }
 
-      toast.showToast(`Invoice ${invoice.invoice_number} generated successfully!`, "success")
+      const label = invoice.invoice_number || invoice.id?.slice(0, 8) || "draft"
+      toast.showToast(`Invoice ${label} generated successfully!`, "success")
       loadRecurringInvoice()
     } catch (err: any) {
       setError(err.message || "Failed to generate invoice")
@@ -83,11 +100,12 @@ export default function RecurringInvoiceViewPage() {
     if (!recurringInvoice) return
 
     try {
+      const businessId = await getWorkspaceBusinessId()
       const newStatus = recurringInvoice.status === "active" ? "paused" : "active"
       const response = await fetch(`/api/recurring-invoices/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ business_id: businessId, status: newStatus }),
       })
 
       if (!response.ok) {

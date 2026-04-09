@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 
 export async function GET(
   request: NextRequest,
@@ -17,9 +17,14 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const requestedBusinessId =
+      new URL(request.url).searchParams.get("business_id") ||
+      new URL(request.url).searchParams.get("businessId") ||
+      undefined
+
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
     const { data: recurringInvoice, error } = await supabase
@@ -38,7 +43,7 @@ export async function GET(
       `
       )
       .eq("id", id)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .is("deleted_at", null)
       .single()
 
@@ -74,11 +79,6 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const body = await request.json()
     const {
       customer_id,
@@ -90,12 +90,22 @@ export async function PUT(
       status,
     } = body
 
+    const requestedBusinessId =
+      (typeof body.business_id === "string" && body.business_id.trim()) ||
+      new URL(request.url).searchParams.get("business_id") ||
+      undefined
+
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
     // Verify recurring invoice exists and belongs to business
     const { data: existing } = await supabase
       .from("recurring_invoices")
       .select("id")
       .eq("id", id)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .single()
 
     if (!existing) {
@@ -152,6 +162,7 @@ export async function PUT(
       .from("recurring_invoices")
       .update(updateData)
       .eq("id", id)
+      .eq("business_id", scope.businessId)
       .select()
       .single()
 
@@ -188,23 +199,38 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const requestedBusinessId =
+      new URL(request.url).searchParams.get("business_id") ||
+      new URL(request.url).searchParams.get("businessId") ||
+      undefined
+
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
-    // Soft delete
-    const { error } = await supabase
+    // Soft delete (must affect exactly one row)
+    const { data: deletedRow, error } = await supabase
       .from("recurring_invoices")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", id)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
+      .is("deleted_at", null)
+      .select("id")
+      .maybeSingle()
 
     if (error) {
       console.error("Error deleting recurring invoice:", error)
       return NextResponse.json(
         { error: error.message },
         { status: 500 }
+      )
+    }
+
+    if (!deletedRow) {
+      return NextResponse.json(
+        { error: "Recurring invoice not found" },
+        { status: 404 }
       )
     }
 

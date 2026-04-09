@@ -280,6 +280,11 @@ export default function Sidebar() {
           items: [
             { label: "Proforma Invoices", route: "/service/proforma", minTier: "starter" },
             { label: "Invoices", route: "/service/invoices", minTier: "starter" },
+            {
+              label: "Recurring invoices",
+              route: buildServiceRoute("/service/recurring", effectiveServiceBusinessId ?? undefined),
+              minTier: "starter",
+            },
             { label: "Payments", route: "/service/payments", minTier: "starter" },
             { label: "Credit Notes", route: "/service/credit-notes", minTier: "starter" },
             { label: "Expenses", route: "/service/expenses", minTier: "starter" },

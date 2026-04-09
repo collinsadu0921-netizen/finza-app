@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
+import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,6 +34,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, business_id)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+    try {
+      await assertBusinessNotArchived(supabase, scope.businessId)
+    } catch (e: any) {
+      return NextResponse.json(
+        { error: e?.message || "Business is archived" },
+        { status: 403 }
+      )
+    }
+
     // Canonical tax guard: when apply_taxes is true, template must include tax metadata (same as invoices)
     const applyTaxes = invoice_template_data?.apply_taxes === true
     if (applyTaxes) {
@@ -57,17 +71,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify business ownership
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business || business.id !== business_id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
-    }
-
     // Create recurring invoice
     const { data: recurringInvoice, error: createError } = await supabase
       .from("recurring_invoices")
       .insert({
-        business_id,
+        business_id: scope.businessId,
         customer_id: customer_id || null,
         frequency,
         next_run_date,

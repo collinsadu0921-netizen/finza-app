@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
+import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,11 +17,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
     const body = await request.json()
     const { recurring_invoice_id } = body
 
@@ -30,12 +27,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const requestedBusinessId =
+      (typeof body.business_id === "string" && body.business_id.trim()) ||
+      new URL(request.url).searchParams.get("business_id") ||
+      undefined
+
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    try {
+      await assertBusinessNotArchived(supabase, scope.businessId)
+    } catch (e: any) {
+      return NextResponse.json(
+        { error: e?.message || "Business is archived" },
+        { status: 403 }
+      )
+    }
+
     // Get recurring invoice
     const { data: recurringInvoice, error: fetchError } = await supabase
       .from("recurring_invoices")
       .select("*")
       .eq("id", recurring_invoice_id)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .is("deleted_at", null)
       .single()
 
@@ -57,7 +73,7 @@ export async function POST(request: NextRequest) {
     const { data: invoiceSettings } = await supabase
       .from("invoice_settings")
       .select("*")
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .maybeSingle()
 
     // Extract template data (canonical: use stored tax_lines and totals; no recalculation)
@@ -71,12 +87,22 @@ export async function POST(request: NextRequest) {
     const willBeSent = recurringInvoice.auto_send || false
     let invoiceNumber: string | null = null
     if (willBeSent) {
+      const bootstrap = await ensureAccountingInitialized(supabase, scope.businessId)
+      if (bootstrap.error) {
+        return NextResponse.json(
+          { error: bootstrap.error || "Accounting setup required before issuing invoices." },
+          { status: 500 }
+        )
+      }
       const { data: invoiceNumData } = await supabase.rpc("generate_invoice_number_with_settings", {
-        business_uuid: business.id,
+        business_uuid: scope.businessId,
       })
       invoiceNumber = invoiceNumData || null
       if (!invoiceNumber) {
-        console.error("Failed to generate invoice number for recurring invoice")
+        return NextResponse.json(
+          { error: "Failed to generate invoice number. Cannot issue recurring invoice." },
+          { status: 500 }
+        )
       }
     }
 
@@ -117,14 +143,14 @@ export async function POST(request: NextRequest) {
     dueDate.setDate(dueDate.getDate() + dueDays)
 
     const { data: tokenData } = await supabase.rpc("generate_public_token")
-    const publicToken = tokenData || Buffer.from(`${business.id}-${Date.now()}`).toString("base64url")
+    const publicToken = tokenData || Buffer.from(`${scope.businessId}-${Date.now()}`).toString("base64url")
 
     const sentAtDate = recurringInvoice.auto_send ? new Date().toISOString() : null
 
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
       .insert({
-        business_id: business.id,
+        business_id: scope.businessId,
         customer_id: recurringInvoice.customer_id,
         invoice_number: invoiceNumber,
         issue_date: issueDate,
@@ -213,17 +239,36 @@ export async function POST(request: NextRequest) {
       if (customer) {
         const phone = customer.whatsapp_phone || customer.phone
         if (phone) {
-          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+          let baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+          try {
+            if (request.url) {
+              const origin = new URL(request.url).origin
+              if (origin) baseUrl = origin
+            }
+          } catch {
+            /* keep env default */
+          }
           const publicUrl = `${baseUrl}/invoice-public/${publicToken}`
+          const { data: bizRow } = await supabase
+            .from("businesses")
+            .select("name, trading_name, legal_name")
+            .eq("id", scope.businessId)
+            .maybeSingle()
+          const bizLabel =
+            bizRow?.trading_name?.trim() ||
+            bizRow?.legal_name?.trim() ||
+            bizRow?.name?.trim() ||
+            "Business"
+
           const message = `Hello ${customer.name},
 
-Your invoice ${invoiceNumber} from ${business.name || "Business"} is ready.
+Your invoice ${invoiceNumber} from ${bizLabel} is ready.
 
 View invoice:
 ${publicUrl}
 
 Thank you,
-${business.name || "Business"}`
+${bizLabel}`
           const linkResult = buildWhatsAppLink(phone, message)
           if (linkResult.ok) {
             whatsappInfo = {

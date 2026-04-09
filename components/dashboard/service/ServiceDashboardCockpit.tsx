@@ -98,6 +98,7 @@ function getDashboardRoutes(businessId: string) {
 
 const QUICK_ACTIONS = [
   { label: "Create Invoice", href: "/service/invoices/new", icon: "invoice" as const },
+  { label: "Recurring invoices", href: "/service/recurring", icon: "recurring" as const },
   { label: "Record Expense", href: "/service/expenses/create", icon: "expense" as const },
   { label: "Add Customer", href: "/service/customers/new", icon: "customer" as const },
   { label: "View Reports", href: "/service/reports/profit-and-loss", icon: "reports" as const },

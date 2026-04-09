@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useMemo } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { buildServiceRoute } from "@/lib/service/routes"
 import { useToast } from "@/components/ui/ToastProvider"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -23,11 +24,27 @@ type RecurringInvoice = {
 
 export default function RecurringInvoicesPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const toast = useToast()
+  const urlBusinessId = useMemo(
+    () => searchParams.get("business_id")?.trim() || searchParams.get("businessId")?.trim() || null,
+    [searchParams]
+  )
+  const withWorkspace = (path: string) => buildServiceRoute(path, urlBusinessId ?? undefined)
   const [loading, setLoading] = useState(true)
   const [recurringInvoices, setRecurringInvoices] = useState<RecurringInvoice[]>([])
   const [error, setError] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+
+  const getWorkspaceBusinessId = async (): Promise<string> => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) throw new Error("Not logged in")
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) throw new Error("Business not found")
+    return business.id
+  }
 
   useEffect(() => {
     loadRecurringInvoices()
@@ -36,13 +53,10 @@ export default function RecurringInvoicesPage() {
   const loadRecurringInvoices = async () => {
     try {
       setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("Not logged in")
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) throw new Error("Business not found")
+      const businessId = await getWorkspaceBusinessId()
 
       const params = new URLSearchParams()
-      params.append("business_id", business.id)
+      params.append("business_id", businessId)
       if (statusFilter !== "all") {
         params.append("status", statusFilter)
       }
@@ -86,11 +100,12 @@ export default function RecurringInvoicesPage() {
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
     try {
+      const businessId = await getWorkspaceBusinessId()
       const newStatus = currentStatus === "active" ? "paused" : "active"
       const response = await fetch(`/api/recurring-invoices/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ business_id: businessId, status: newStatus }),
       })
 
       if (!response.ok) {
@@ -105,10 +120,11 @@ export default function RecurringInvoicesPage() {
 
   const handleGenerateNow = async (id: string) => {
     try {
+      const businessId = await getWorkspaceBusinessId()
       const response = await fetch("/api/recurring-invoices/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recurring_invoice_id: id }),
+        body: JSON.stringify({ business_id: businessId, recurring_invoice_id: id }),
       })
 
       if (!response.ok) {
@@ -122,7 +138,8 @@ export default function RecurringInvoicesPage() {
         window.open(whatsappInfo.url, "_blank", "noopener,noreferrer")
       }
 
-      toast.showToast(`Invoice ${invoice.invoice_number} generated successfully!`, "success")
+      const label = invoice.invoice_number || invoice.id?.slice(0, 8) || "draft"
+      toast.showToast(`Invoice ${label} generated successfully!`, "success")
       loadRecurringInvoices()
     } catch (err: any) {
       setError(err.message || "Failed to generate invoice")
@@ -151,7 +168,7 @@ export default function RecurringInvoicesPage() {
               <p className="text-gray-600 dark:text-gray-400 text-lg">Manage automated recurring billing</p>
             </div>
             <button
-              onClick={() => router.push("/recurring/create")}
+              onClick={() => router.push(withWorkspace("/recurring/create"))}
               className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -192,7 +209,7 @@ export default function RecurringInvoicesPage() {
               <p className="text-gray-600 dark:text-gray-400 font-medium text-lg mb-2">No recurring invoices found</p>
               <p className="text-gray-500 dark:text-gray-500 text-sm mb-6">Create your first recurring invoice to automate billing</p>
               <button
-                onClick={() => router.push("/recurring/create")}
+                onClick={() => router.push(withWorkspace("/recurring/create"))}
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all inline-flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -263,13 +280,13 @@ export default function RecurringInvoicesPage() {
                               </svg>
                             </button>
                             <button
-                              onClick={() => router.push(`/recurring/${recurring.id}/view`)}
+                              onClick={() => router.push(withWorkspace(`/recurring/${recurring.id}/view`))}
                               className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium transition-colors"
                             >
                               View
                             </button>
                             <button
-                              onClick={() => router.push(`/recurring/${recurring.id}/edit`)}
+                              onClick={() => router.push(withWorkspace(`/recurring/${recurring.id}/edit`))}
                               className="text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 font-medium transition-colors"
                             >
                               Edit
