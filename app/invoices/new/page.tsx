@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, memo, useCallback } from "react"
+import { useState, useEffect, memo, useCallback, useMemo } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
@@ -17,6 +17,7 @@ import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 // FINZA Design System Components (Phase 2 Refactor)
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 
 type Customer = {
@@ -659,6 +660,14 @@ export default function NewInvoicePage() {
   const countryCode = businessCountry ? normalizeCountry(businessCountry) : null
   const isGhana = countryCode === "GH"
 
+  const customerMenuOptions = useMemo(
+    () => [
+      { value: "", label: "Select a customer..." },
+      ...customers.map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [customers]
+  )
+
   // When under /service/*, the service layout already provides ProtectedLayout (sidebar + header).
   // Avoid double layout (double header/logout and shifted content).
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
@@ -745,17 +754,14 @@ export default function NewInvoicePage() {
                     New Customer
                   </button>
                 </div>
-                <NativeSelect
+                <MenuSelect
                   value={selectedCustomerId}
-                  onChange={(e) => setSelectedCustomerId(e.target.value)}
+                  onValueChange={setSelectedCustomerId}
+                  options={customerMenuOptions}
+                  placeholder="Select a customer..."
                   size="lg"
                   className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
-                >
-                  <option value="">Select a customer...</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </NativeSelect>
+                />
                 {selectedCustomerId && (() => {
                   const c = customers.find(x => x.id === selectedCustomerId)
                   if (c?.address || c?.email || c?.phone) {

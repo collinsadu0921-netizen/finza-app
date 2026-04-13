@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
@@ -8,10 +8,14 @@ import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type Customer = {
   id: string
   name: string
+  email?: string | null
+  phone?: string | null
+  address?: string | null
 }
 
 type EstimateItem = {
@@ -113,7 +117,7 @@ export default function NewEstimatePage() {
       // Load customers
       const { data: customersData } = await supabase
         .from("customers")
-        .select("id, name")
+        .select("id, name, email, phone, address")
         .eq("business_id", business.id)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -330,7 +334,7 @@ export default function NewEstimatePage() {
       // Reload customers list
       const { data: customersData } = await supabase
         .from("customers")
-        .select("id, name")
+        .select("id, name, email, phone, address")
         .eq("business_id", businessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -444,6 +448,14 @@ export default function NewEstimatePage() {
     }
   }
 
+  const customerMenuOptions = useMemo(
+    () => [
+      { value: "", label: "Select a customer..." },
+      ...customers.map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [customers]
+  )
+
   return (
     <ProtectedLayout>
       <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 pb-20 font-sans">
@@ -517,17 +529,27 @@ export default function NewEstimatePage() {
                       New Customer
                     </button>
                   </div>
-                  <NativeSelect
+                  <MenuSelect
                     value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    onValueChange={setSelectedCustomerId}
+                    options={customerMenuOptions}
+                    placeholder="Select a customer..."
                     size="lg"
                     className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
-                  >
-                    <option value="">Select a customer...</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </NativeSelect>
+                  />
+                  {selectedCustomerId && (() => {
+                    const c = customers.find((x) => x.id === selectedCustomerId)
+                    if (c?.address || c?.email || c?.phone) {
+                      return (
+                        <div className="text-xs text-slate-500 pl-1 space-y-1 border-l-2 border-slate-100 dark:border-slate-700">
+                          {c.address && <p>{c.address}</p>}
+                          {c.email && <p>{c.email}</p>}
+                          {c.phone && <p>{c.phone}</p>}
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
 
                 {/* Dates & Tax Toggle */}

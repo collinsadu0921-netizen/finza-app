@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, Suspense, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -9,10 +9,14 @@ import { formatMoney } from "@/lib/money"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type Customer = {
   id: string
   name: string
+  email?: string | null
+  phone?: string | null
+  address?: string | null
 }
 
 type LineItem = {
@@ -128,7 +132,7 @@ function ProformaCreateForm() {
       // Load customers
       const { data: customersData } = await supabase
         .from("customers")
-        .select("id, name")
+        .select("id, name, email, phone, address")
         .eq("business_id", business.id)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -329,7 +333,7 @@ function ProformaCreateForm() {
 
       const { data: customersData } = await supabase
         .from("customers")
-        .select("id, name")
+        .select("id, name, email, phone, address")
         .eq("business_id", businessId)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -414,6 +418,14 @@ function ProformaCreateForm() {
     }
   }
 
+  const customerMenuOptions = useMemo(
+    () => [
+      { value: "", label: "Select a customer..." },
+      ...customers.map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [customers]
+  )
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 flex items-center justify-center">
@@ -481,17 +493,27 @@ function ProformaCreateForm() {
                   New Customer
                 </button>
               </div>
-              <NativeSelect
+              <MenuSelect
                 value={selectedCustomerId}
-                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                onValueChange={setSelectedCustomerId}
+                options={customerMenuOptions}
+                placeholder="Select a customer..."
                 size="lg"
                 className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
-              >
-                <option value="">Select a customer...</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </NativeSelect>
+              />
+              {selectedCustomerId && (() => {
+                const c = customers.find((x) => x.id === selectedCustomerId)
+                if (c?.address || c?.email || c?.phone) {
+                  return (
+                    <div className="text-xs text-slate-500 pl-1 space-y-1 border-l-2 border-slate-100 dark:border-slate-700">
+                      {c.address && <p>{c.address}</p>}
+                      {c.email && <p>{c.email}</p>}
+                      {c.phone && <p>{c.phone}</p>}
+                    </div>
+                  )
+                }
+                return null
+              })()}
             </div>
 
             {/* Dates & Settings */}

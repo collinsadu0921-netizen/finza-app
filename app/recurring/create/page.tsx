@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
@@ -10,10 +10,14 @@ import { getTaxEngineCode } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect } from "@/components/ui/MenuSelect"
 
 type Customer = {
   id: string
   name: string
+  email?: string | null
+  phone?: string | null
+  address?: string | null
 }
 
 type LineItem = {
@@ -60,6 +64,14 @@ export default function CreateRecurringInvoicePage() {
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
   const [businessCountry, setBusinessCountry] = useState<string>("GH")
+
+  const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [newCustomerName, setNewCustomerName] = useState("")
+  const [newCustomerEmail, setNewCustomerEmail] = useState("")
+  const [newCustomerPhone, setNewCustomerPhone] = useState("")
+  const [newCustomerAddress, setNewCustomerAddress] = useState("")
+  const [creatingCustomer, setCreatingCustomer] = useState(false)
+  const [customerError, setCustomerError] = useState("")
 
   useEffect(() => {
     loadData()
@@ -111,7 +123,7 @@ export default function CreateRecurringInvoicePage() {
       // Load customers
       const { data: customersData } = await supabase
         .from("customers")
-        .select("id, name")
+        .select("id, name, email, phone, address")
         .eq("business_id", business.id)
         .is("deleted_at", null)
         .order("name", { ascending: true })
@@ -216,6 +228,61 @@ export default function CreateRecurringInvoicePage() {
   const displayTotalTax = applyTaxes && taxResult ? taxResult.total_tax : 0
   const displayTotal = applyTaxes && taxResult ? taxResult.total_amount : subtotal
 
+  const customerMenuOptions = useMemo(
+    () => [
+      { value: "", label: "Select a customer..." },
+      ...customers.map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [customers]
+  )
+
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setCustomerError("")
+    if (!newCustomerName.trim()) {
+      setCustomerError("Customer name is required")
+      return
+    }
+    try {
+      setCreatingCustomer(true)
+      const { data: newCustomer, error: insertError } = await supabase
+        .from("customers")
+        .insert({
+          business_id: businessId,
+          name: newCustomerName.trim(),
+          email: newCustomerEmail.trim() || null,
+          phone: newCustomerPhone.trim() || null,
+          address: newCustomerAddress.trim() || null,
+        })
+        .select()
+        .single()
+
+      if (insertError) {
+        setCustomerError(insertError.message || "Failed to create customer")
+        setCreatingCustomer(false)
+        return
+      }
+
+      const { data: customersData } = await supabase
+        .from("customers")
+        .select("id, name, email, phone, address")
+        .eq("business_id", businessId)
+        .is("deleted_at", null)
+        .order("name", { ascending: true })
+      setCustomers(customersData || [])
+      if (newCustomer) setSelectedCustomerId(newCustomer.id)
+      setNewCustomerName("")
+      setNewCustomerEmail("")
+      setNewCustomerPhone("")
+      setNewCustomerAddress("")
+      setShowCustomerModal(false)
+      setCreatingCustomer(false)
+    } catch (err: any) {
+      setCustomerError(err.message || "Failed to create customer")
+      setCreatingCustomer(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
@@ -305,111 +372,136 @@ export default function CreateRecurringInvoicePage() {
 
   return (
     <ProtectedLayout>
-      <div className="min-h-screen bg-slate-50">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Create recurring invoice</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Save a template and schedule for automatic invoice generation</p>
+      <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 pb-20 font-sans">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex items-center justify-between mb-8">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="group flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors"
+            >
+              <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to recurring
+            </button>
+            <span className="text-xs text-slate-400 font-mono">TEMPLATE</span>
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
+            <div className="mb-6 rounded-md bg-red-50 border border-red-200 p-4 text-sm text-red-800">{error}</div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Basic Settings */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Recurring settings</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Customer *
-                  </label>
-                  <NativeSelect
+          <form onSubmit={handleSubmit}>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="p-8 border-b border-slate-100 dark:border-slate-700">
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight mb-1">
+                  Recurring invoice template
+                </h1>
+                <p className="text-sm text-slate-500">
+                  Schedule automatic invoices from this template
+                </p>
+              </div>
+
+              <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12 border-b border-slate-100 dark:border-slate-700">
+                <div className="space-y-4">
+                  <div className="flex justify-between items-end">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Bill To</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomerModal(true)}
+                      className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      New Customer
+                    </button>
+                  </div>
+                  <MenuSelect
                     value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    required
-                    size="md"
-                  >
-                    <option value="">Select customer</option>
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Frequency *
-                  </label>
-                  <NativeSelect
-                    value={frequency}
-                    onChange={(e) => setFrequency(e.target.value as any)}
-                    required
-                    size="md"
-                  >
-                    <option value="weekly">Weekly</option>
-                    <option value="biweekly">Bi-weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="yearly">Yearly</option>
-                  </NativeSelect>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Next Run Date *
-                  </label>
-                  <input
-                    type="date"
-                    value={nextRunDate}
-                    onChange={(e) => setNextRunDate(e.target.value)}
-                    required
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+                    onValueChange={setSelectedCustomerId}
+                    options={customerMenuOptions}
+                    placeholder="Select a customer..."
+                    size="lg"
+                    className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
                   />
+                  {selectedCustomerId && (() => {
+                    const c = customers.find((x) => x.id === selectedCustomerId)
+                    if (c?.address || c?.email || c?.phone) {
+                      return (
+                        <div className="text-xs text-slate-500 pl-1 space-y-1 border-l-2 border-slate-100 dark:border-slate-700">
+                          {c.address && <p>{c.address}</p>}
+                          {c.email && <p>{c.email}</p>}
+                          {c.phone && <p>{c.phone}</p>}
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      Frequency
+                    </label>
+                    <NativeSelect
+                      value={frequency}
+                      onChange={(e) => setFrequency(e.target.value as "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly")}
+                      required
+                      size="md"
+                    >
+                      <option value="weekly">Weekly</option>
+                      <option value="biweekly">Bi-weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                      <option value="yearly">Yearly</option>
+                    </NativeSelect>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      Next run date
+                    </label>
+                    <input
+                      type="date"
+                      value={nextRunDate}
+                      onChange={(e) => setNextRunDate(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
+                    />
+                  </div>
+                  <div className="space-y-3 pt-1">
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoSend}
+                        onChange={(e) => setAutoSend(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Auto-send invoice when generated
+                      </span>
+                    </label>
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoWhatsApp}
+                        onChange={(e) => setAutoWhatsApp(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Auto-send via WhatsApp (recommended)
+                      </span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-6 space-y-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoSend}
-                    onChange={(e) => setAutoSend(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-sm font-medium text-slate-700">
-                    Auto-send invoice when generated
-                  </span>
-                </label>
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoWhatsApp}
-                    onChange={(e) => setAutoWhatsApp(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-sm font-medium text-slate-700">
-                    Auto-send via WhatsApp (recommended)
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            {/* Invoice Template */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            {/* Invoice template — line items */}
+            <div className="p-8 border-b border-slate-100 dark:border-slate-700">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Invoice template</h2>
+                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Line items</h2>
                 <button
                   type="button"
                   onClick={addItem}
@@ -595,9 +687,8 @@ export default function CreateRecurringInvoicePage() {
               </div>
             </div>
 
-            {/* Additional Fields */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Additional information</h2>
+            <div className="p-8 border-b border-slate-100 dark:border-slate-700">
+              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Additional information</h2>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -626,11 +717,11 @@ export default function CreateRecurringInvoicePage() {
               </div>
             </div>
 
-            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+            <div className="flex flex-col-reverse sm:flex-row gap-3 p-8 border-t border-slate-100 dark:border-slate-700">
               <button
                 type="button"
                 onClick={() => router.back()}
-                className="flex-1 inline-flex justify-center items-center px-4 py-2.5 text-sm font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+                className="flex-1 inline-flex justify-center items-center px-4 py-2.5 text-sm font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
               >
                 Cancel
               </button>
@@ -648,11 +739,84 @@ export default function CreateRecurringInvoicePage() {
                     Creating...
                   </>
                 ) : (
-                  "Create Recurring Invoice"
+                  "Create recurring invoice"
                 )}
               </button>
             </div>
+            </div>
           </form>
+
+          {showCustomerModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/60" onClick={() => setShowCustomerModal(false)} aria-hidden />
+              <div
+                className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-lg font-bold mb-4 text-gray-900 dark:text-white">New Customer</h3>
+                {customerError && (
+                  <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-2 rounded mb-4">{customerError}</div>
+                )}
+                <form onSubmit={handleCreateCustomer} className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name <span className="text-red-500">*</span></label>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={newCustomerName}
+                      onChange={(e) => setNewCustomerName(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                    <input
+                      type="text"
+                      inputMode="email"
+                      value={newCustomerEmail}
+                      onChange={(e) => setNewCustomerEmail(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone</label>
+                    <input
+                      type="text"
+                      inputMode="tel"
+                      value={newCustomerPhone}
+                      onChange={(e) => setNewCustomerPhone(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Address</label>
+                    <textarea
+                      value={newCustomerAddress}
+                      onChange={(e) => setNewCustomerAddress(e.target.value)}
+                      rows={2}
+                      className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowCustomerModal(false); setCustomerError("") }}
+                      className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creatingCustomer || !newCustomerName.trim()}
+                      className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {creatingCustomer ? "Creating..." : "Create Customer"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </ProtectedLayout>
