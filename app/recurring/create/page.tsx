@@ -304,44 +304,41 @@ export default function CreateRecurringInvoicePage() {
 
   return (
     <ProtectedLayout>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="mb-8">
-            <button
-              onClick={() => router.back()}
-              className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4 flex items-center gap-2 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
-            </button>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-              Create Recurring Invoice
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 text-lg">Set up automated recurring billing</p>
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Create recurring invoice</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Save a template and schedule for automatic invoice generation</p>
           </div>
 
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-6">
-              {error}
-            </div>
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Settings */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Recurring Settings</h2>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Recurring settings</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Customer *
                   </label>
                   <select
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
                     required
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                   >
                     <option value="">Select customer</option>
                     {customers.map((customer) => (
@@ -352,14 +349,14 @@ export default function CreateRecurringInvoicePage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Frequency *
                   </label>
                   <select
                     value={frequency}
                     onChange={(e) => setFrequency(e.target.value as any)}
                     required
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                   >
                     <option value="weekly">Weekly</option>
                     <option value="biweekly">Bi-weekly</option>
@@ -369,7 +366,7 @@ export default function CreateRecurringInvoicePage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Next Run Date *
                   </label>
                   <input
@@ -377,7 +374,7 @@ export default function CreateRecurringInvoicePage() {
                     value={nextRunDate}
                     onChange={(e) => setNextRunDate(e.target.value)}
                     required
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                   />
                 </div>
               </div>
@@ -388,9 +385,9 @@ export default function CreateRecurringInvoicePage() {
                     type="checkbox"
                     checked={autoSend}
                     onChange={(e) => setAutoSend(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
                   />
-                  <span className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <span className="ml-2 text-sm font-medium text-slate-700">
                     Auto-send invoice when generated
                   </span>
                 </label>
@@ -399,9 +396,9 @@ export default function CreateRecurringInvoicePage() {
                     type="checkbox"
                     checked={autoWhatsApp}
                     onChange={(e) => setAutoWhatsApp(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
                   />
-                  <span className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <span className="ml-2 text-sm font-medium text-slate-700">
                     Auto-send via WhatsApp (recommended)
                   </span>
                 </label>
@@ -409,13 +406,13 @@ export default function CreateRecurringInvoicePage() {
             </div>
 
             {/* Invoice Template */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Invoice Template</h2>
+                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Invoice template</h2>
                 <button
                   type="button"
                   onClick={addItem}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium text-sm transition-colors flex items-center gap-2"
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -425,17 +422,17 @@ export default function CreateRecurringInvoicePage() {
               </div>
 
               {items.length === 0 ? (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-8">No items added yet</p>
+                <p className="text-slate-500 text-center py-8 text-sm">No line items yet</p>
               ) : (
                 <div className="space-y-4">
                   {items.map((item) => (
-                    <div key={item.id} className="grid grid-cols-12 gap-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div key={item.id} className="grid grid-cols-12 gap-4 p-4 border border-slate-200 rounded-lg bg-slate-50/50">
                       <div className="col-span-12 md:col-span-4">
-                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Product/Service</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Product/Service</label>
                         <select
                           value={item.product_service_id || ""}
                           onChange={(e) => updateItem(item.id, "product_service_id", e.target.value)}
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                         >
                           <option value="">Select or type description</option>
                           {products.map((product) => (
@@ -446,44 +443,44 @@ export default function CreateRecurringInvoicePage() {
                         </select>
                       </div>
                       <div className="col-span-12 md:col-span-4">
-                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Description</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Description</label>
                         <input
                           type="text"
                           value={item.description}
                           onChange={(e) => updateItem(item.id, "description", e.target.value)}
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                           placeholder="Item description"
                         />
                       </div>
                       <div className="col-span-4 md:col-span-1">
-                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Qty</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label>
                         <input
                           type="number"
                           value={item.qty}
                           onChange={(e) => updateItem(item.id, "qty", Number(e.target.value) || 0)}
                           min="0"
                           step="0.01"
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                         />
                       </div>
                       <div className="col-span-4 md:col-span-2">
-                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Unit Price</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Unit Price</label>
                         <input
                           type="number"
                           value={item.unit_price}
                           onChange={(e) => updateItem(item.id, "unit_price", Number(e.target.value) || 0)}
                           min="0"
                           step="0.01"
-                          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                         />
                       </div>
                       <div className="col-span-4 md:col-span-1">
-                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Discount</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Discount</label>
                         <div className="flex items-center gap-2">
                           <select
                             value={item.discount_type}
                             onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                            className="w-20 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                            className="w-20 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                           >
                             <option value="amount">Amt</option>
                             <option value="percent">%</option>
@@ -495,7 +492,7 @@ export default function CreateRecurringInvoicePage() {
                             onChange={(e) => updateItem(item.id, "discount_value", e.target.value)}
                             onBlur={() => updateItem(item.id, "_rawDiscount", undefined)}
                             placeholder={item.discount_type === "percent" ? "0" : "0.00"}
-                            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white text-right tabular-nums"
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white text-right tabular-nums"
                           />
                         </div>
                       </div>
@@ -516,14 +513,14 @@ export default function CreateRecurringInvoicePage() {
               )}
 
               {/* Tax Toggle */}
-              <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+              <div className="mt-6 pt-6 border-t border-slate-100">
                 <label className="flex items-center cursor-pointer">
                   <div className="flex items-center justify-between w-full">
                     <div className="flex-1">
-                      <label className="text-sm font-medium text-gray-900">
+                      <label className="text-sm font-medium text-slate-900">
                         Apply Ghana Taxes
                       </label>
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-slate-500 mt-1">
                         Include NHIL, GETFund, and VAT
                       </p>
                     </div>
@@ -535,7 +532,7 @@ export default function CreateRecurringInvoicePage() {
                       className={`
                         relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
                         transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-                        ${applyTaxes ? 'bg-blue-600' : 'bg-gray-200'}
+                        ${applyTaxes ? 'bg-blue-600' : 'bg-slate-200'}
                       `}
                     >
                       <span
@@ -551,45 +548,45 @@ export default function CreateRecurringInvoicePage() {
               </div>
 
               {/* Totals Preview */}
-              <div className="mt-6 pt-6 border-t-2 border-gray-300 dark:border-gray-600">
+              <div className="mt-6 pt-6 border-t border-slate-100">
                 <div className="flex justify-end">
-                  <div className="w-72 space-y-3 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 rounded-lg p-5 border border-gray-200 dark:border-gray-600">
+                  <div className="w-full max-w-sm space-y-3 bg-slate-50 rounded-lg p-5 border border-slate-200">
                     <div className="flex justify-between items-center">
-                      <span className="text-gray-700 dark:text-gray-300 font-medium">
-                        {applyTaxes ? "Subtotal (before tax):" : "Subtotal:"}
+                      <span className="text-slate-600 text-sm font-medium">
+                        {applyTaxes ? "Subtotal (before tax)" : "Subtotal"}
                       </span>
-                      <span className="font-semibold text-gray-900 dark:text-white text-lg">₵{displaySubtotal.toFixed(2)}</span>
+                      <span className="font-semibold text-slate-900 text-base tabular-nums">₵{displaySubtotal.toFixed(2)}</span>
                     </div>
                     {totalDiscount > 0 && (
-                      <div className="flex justify-between items-center text-sm text-gray-600 dark:text-gray-400">
+                      <div className="flex justify-between items-center text-sm text-slate-600">
                         <span>Discounts</span>
                         <span className="font-medium text-rose-600 tabular-nums">−₵{totalDiscount.toFixed(2)}</span>
                       </div>
                     )}
                     {applyTaxes && taxResult && taxResult.lines.length > 0 && (
                       <>
-                        <div className="space-y-1 pt-2 border-t border-gray-200 dark:border-gray-500">
+                        <div className="space-y-1 pt-2 border-t border-slate-200">
                           {taxResult.lines
                             .filter((line) => line.amount !== 0)
                             .map((line) => (
                               <div key={line.code} className="flex justify-between items-center text-sm">
-                                <span className="text-gray-600 dark:text-gray-400">
+                                <span className="text-slate-600">
                                   {line.name || line.code}
                                   {line.rate != null ? ` (${(line.rate * 100).toFixed(1)}%)` : ""}:
                                 </span>
-                                <span className="text-gray-700 dark:text-gray-300">₵{line.amount.toFixed(2)}</span>
+                                <span className="text-slate-800 tabular-nums">₵{line.amount.toFixed(2)}</span>
                               </div>
                             ))}
                         </div>
-                        <div className="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-500">
-                          <span className="text-gray-700 dark:text-gray-300 font-medium">Total Tax:</span>
-                          <span className="font-semibold text-gray-900 dark:text-white">₵{displayTotalTax.toFixed(2)}</span>
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                          <span className="text-slate-700 text-sm font-medium">Total tax</span>
+                          <span className="font-semibold text-slate-900 tabular-nums">₵{displayTotalTax.toFixed(2)}</span>
                         </div>
                       </>
                     )}
-                    <div className="flex justify-between items-center pt-3 border-t-2 border-slate-200">
-                      <span className="text-slate-900 font-bold text-lg">Total:</span>
-                      <span className="font-bold text-slate-900 text-xl tabular-nums">₵{displayTotal.toFixed(2)}</span>
+                    <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+                      <span className="text-slate-900 font-bold">Total</span>
+                      <span className="font-bold text-slate-900 text-lg tabular-nums">₵{displayTotal.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
@@ -597,48 +594,48 @@ export default function CreateRecurringInvoicePage() {
             </div>
 
             {/* Additional Fields */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Additional Information</h2>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Additional information</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Payment Terms
                   </label>
                   <textarea
                     value={paymentTerms}
                     onChange={(e) => setPaymentTerms(e.target.value)}
                     rows={2}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                     placeholder="e.g., Payment is due within 30 days"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Notes
                   </label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={3}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
                     placeholder="Additional notes for invoices"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-4 pt-4">
+            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => router.back()}
-                className="flex-1 bg-white dark:bg-gray-700 border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 font-medium transition-all"
+                className="flex-1 inline-flex justify-center items-center px-4 py-2.5 text-sm font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 font-medium shadow-lg transition-all flex items-center justify-center gap-2"
+                className="flex-1 inline-flex justify-center items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
               >
                 {loading ? (
                   <>
