@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
@@ -30,6 +30,74 @@ const getServiceRoleClient = () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY
   )
+}
+
+/** Captured during stock deduction; used only for compensating rollback (do not re-read live DB). */
+type StockCompensationEntry = {
+  products_stock_id: string
+  prior_stock: number
+  created_during_sale: boolean
+}
+
+/**
+ * P0 rollback: reverse operational effects after ledger/reconciliation failure.
+ * Order: stock_movements → products_stock → journal_entries → sale_items → sales.
+ */
+async function compensateFailedRetailSale(params: {
+  supabase: SupabaseClient
+  saleId: string
+  businessId: string
+  stockEntries: StockCompensationEntry[]
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const sr = getServiceRoleClient()
+
+  const { error: movErr } = await sr
+    .from("stock_movements")
+    .delete()
+    .eq("related_sale_id", params.saleId)
+    .eq("business_id", params.businessId)
+
+  if (movErr) {
+    return { ok: false, message: movErr.message || String(movErr) }
+  }
+
+  for (const e of params.stockEntries) {
+    if (e.created_during_sale) {
+      const { error } = await params.supabase.from("products_stock").delete().eq("id", e.products_stock_id)
+      if (error) {
+        return { ok: false, message: error.message || String(error) }
+      }
+    } else {
+      const { error } = await params.supabase
+        .from("products_stock")
+        .update({
+          stock: e.prior_stock,
+          stock_quantity: e.prior_stock,
+        })
+        .eq("id", e.products_stock_id)
+      if (error) {
+        return { ok: false, message: error.message || String(error) }
+      }
+    }
+  }
+
+  const { error: jeErr } = await params.supabase
+    .from("journal_entries")
+    .delete()
+    .eq("reference_type", "sale")
+    .eq("reference_id", params.saleId)
+
+  if (jeErr) {
+    return { ok: false, message: jeErr.message || String(jeErr) }
+  }
+
+  await params.supabase.from("sale_items").delete().eq("sale_id", params.saleId)
+  const { error: saleErr } = await params.supabase.from("sales").delete().eq("id", params.saleId)
+  if (saleErr) {
+    return { ok: false, message: saleErr.message || String(saleErr) }
+  }
+
+  return { ok: true }
 }
 
 type PaymentLine = {
@@ -123,13 +191,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Skip register session validation for offline sync (Phase 4)
-    // Offline transactions are replayed later, and the register session may be closed
-    // We still require register_id and business_id for data integrity
-    if (!isOfflineSync) {
-      // TODO: Add register session validation here if needed for online sales
-      // For now, we rely on the frontend to ensure register is open
-    }
+    // Register session validation for online sales runs after finalStoreId is resolved (below).
 
     // Validate payments if provided
     if (payments && Array.isArray(payments)) {
@@ -149,7 +211,7 @@ export async function POST(request: NextRequest) {
     // Load business to check country eligibility and get owner_id for system accountant
     const { data: businessRow } = await supabase
       .from("businesses")
-      .select("id, address_country, owner_id")
+      .select("id, address_country, owner_id, industry")
       .eq("id", business_id)
       .single()
 
@@ -157,6 +219,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Business not found" },
         { status: 404 }
+      )
+    }
+
+    if (String(businessRow.industry || "").toLowerCase() !== "retail") {
+      return NextResponse.json(
+        {
+          error: "Sales API is only available for retail businesses.",
+          code: "SALES_RETAIL_ONLY",
+        },
+        { status: 403 }
       )
     }
 
@@ -445,6 +517,43 @@ export async function POST(request: NextRequest) {
       }
       
       console.log("Store validation passed")
+    }
+
+    // Online sales: require an open register session for this register + store
+    if (!isOfflineSync) {
+      let sessionQuery = supabase
+        .from("cashier_sessions")
+        .select("id")
+        .eq("business_id", business_id)
+        .eq("register_id", register_id)
+        .eq("store_id", finalStoreId)
+        .eq("status", "open")
+      if (cashier_session_id) {
+        sessionQuery = sessionQuery.eq("id", cashier_session_id)
+      }
+      const { data: openRegSession, error: regSessionErr } = await sessionQuery.maybeSingle()
+
+      if (regSessionErr) {
+        console.error("Register session lookup failed:", regSessionErr)
+        return NextResponse.json(
+          {
+            error: "Could not verify register session. Try again or reopen the register.",
+            code: "REGISTER_NOT_OPEN",
+            details: regSessionErr.message,
+          },
+          { status: 500 }
+        )
+      }
+
+      if (!openRegSession) {
+        return NextResponse.json(
+          {
+            error: "No open register session for this register and store. Open a register before selling.",
+            code: "REGISTER_NOT_OPEN",
+          },
+          { status: 403 }
+        )
+      }
     }
 
     // ============================================================================
@@ -782,6 +891,9 @@ const validation = validateCartDiscount(
       })
     }
 
+    /** Filled only after successful sale_items insert + stock mutations (forward path). */
+    let stockCompensationPlan: StockCompensationEntry[] = []
+
     // Create sale items if provided
     // NOTE: Sale items must be created BEFORE ledger posting so COGS can be calculated
     if (sale_items && Array.isArray(sale_items) && sale_items.length > 0) {
@@ -909,12 +1021,11 @@ const validation = validateCartDiscount(
 
       if (itemsError) {
         console.error("Error creating sale items:", itemsError)
-        // Return error so frontend knows items weren't saved
+        await supabase.from("sales").delete().eq("id", sale.id)
         return NextResponse.json(
-          { 
-            error: `Sale created but failed to save items: ${itemsError.message}`,
-            sale_id: sale.id,
-            warning: "Items were not saved to the sale"
+          {
+            error: `Failed to save sale line items: ${itemsError.message}`,
+            code: "SALE_ITEMS_INSERT_FAILED",
           },
           { status: 500 }
         )
@@ -1009,7 +1120,8 @@ const validation = validateCartDiscount(
           // ALWAYS update products_stock - never modify products_variants.stock
           let stockUpdateError: any = null
           let updatedVariantStockRecordId: string | null = stockRecordId
-          
+          const variantHadStockRowBeforeMutation = !!stockRecordId
+
           if (storeIdForStock && stockRecordId) {
             // Update existing products_stock record
             const { error: updateError } = await supabase
@@ -1112,6 +1224,14 @@ const validation = validateCartDiscount(
             )
           }
 
+          if (updatedVariantStockRecordId) {
+            stockCompensationPlan.push({
+              products_stock_id: updatedVariantStockRecordId,
+              prior_stock: currentStock,
+              created_during_sale: !variantHadStockRowBeforeMutation,
+            })
+          }
+
           continue // Skip product stock deduction for variants
         }
 
@@ -1209,7 +1329,8 @@ const validation = validateCartDiscount(
           // ALWAYS update products_stock - never modify products.stock
           let stockUpdateError: any = null
           let updatedStockRecordId: string | null = stockRecordId
-          
+          const simpleHadStockRowBeforeMutation = !!stockRecordId
+
           if (storeIdForStock && stockRecordId) {
             // Update existing products_stock record
             const { error: updateError } = await supabase
@@ -1313,6 +1434,14 @@ const validation = validateCartDiscount(
               { status: 500 }
             )
           }
+
+          if (updatedStockRecordId) {
+            stockCompensationPlan.push({
+              products_stock_id: updatedStockRecordId,
+              prior_stock: currentStock,
+              created_during_sale: !simpleHadStockRowBeforeMutation,
+            })
+          }
         }
       }
     } else {
@@ -1338,12 +1467,25 @@ const validation = validateCartDiscount(
 
       if (ledgerError) {
         console.error("Failed to post sale to ledger:", ledgerError)
-        // Rollback: Delete sale_items and sale if ledger posting fails
-        await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-        await supabase.from("sales").delete().eq("id", sale.id)
+        const rolled = await compensateFailedRetailSale({
+          supabase,
+          saleId: sale.id,
+          businessId: business_id,
+          stockEntries: stockCompensationPlan,
+        })
+        if (!rolled.ok) {
+          return NextResponse.json(
+            {
+              error: `Ledger posting failed and rollback could not complete: ${rolled.message}`,
+              code: "ROLLBACK_FAILED",
+            },
+            { status: 500 }
+          )
+        }
         return NextResponse.json(
           {
             error: `Failed to post sale to ledger: ${ledgerError.message || "Ledger posting failed"}`,
+            code: "LEDGER_POST_FAILED_ROLLED_BACK",
             details: "Sale creation was rolled back due to ledger posting failure",
           },
           { status: 500 }
@@ -1352,12 +1494,25 @@ const validation = validateCartDiscount(
 
       if (!journalEntryId) {
         console.error("Ledger posting returned no journal entry ID")
-        // Rollback: Delete sale and sale_items if no journal entry was created
-        await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-        await supabase.from("sales").delete().eq("id", sale.id)
+        const rolled = await compensateFailedRetailSale({
+          supabase,
+          saleId: sale.id,
+          businessId: business_id,
+          stockEntries: stockCompensationPlan,
+        })
+        if (!rolled.ok) {
+          return NextResponse.json(
+            {
+              error: `Ledger posting failed and rollback could not complete: ${rolled.message}`,
+              code: "ROLLBACK_FAILED",
+            },
+            { status: 500 }
+          )
+        }
         return NextResponse.json(
           {
             error: "Failed to post sale to ledger: No journal entry was created",
+            code: "LEDGER_POST_FAILED_ROLLED_BACK",
             details: "Sale creation was rolled back",
           },
           { status: 500 }
@@ -1370,12 +1525,25 @@ const validation = validateCartDiscount(
       })
     } catch (ledgerException: any) {
       console.error("Exception while posting sale to ledger:", ledgerException)
-      // Rollback: Delete sale and sale_items if ledger posting throws an exception
-      await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-      await supabase.from("sales").delete().eq("id", sale.id)
+      const rolled = await compensateFailedRetailSale({
+        supabase,
+        saleId: sale.id,
+        businessId: business_id,
+        stockEntries: stockCompensationPlan,
+      })
+      if (!rolled.ok) {
+        return NextResponse.json(
+          {
+            error: `Ledger posting failed and rollback could not complete: ${rolled.message}`,
+            code: "ROLLBACK_FAILED",
+          },
+          { status: 500 }
+        )
+      }
       return NextResponse.json(
         {
           error: `Failed to post sale to ledger: ${ledgerException.message || "Unexpected error"}`,
+          code: "LEDGER_POST_FAILED_ROLLED_BACK",
           details: "Sale creation was rolled back due to ledger posting exception",
         },
         { status: 500 }
@@ -1395,21 +1563,26 @@ const validation = validateCartDiscount(
 
       if (reconciliationError) {
         console.error("Sale reconciliation validation failed:", reconciliationError)
-        // Rollback: Delete the sale and journal entry if reconciliation fails
-        // Note: Journal entry deletion will cascade to journal_entry_lines
-        await supabase
-          .from("journal_entries")
-          .delete()
-          .eq("reference_type", "sale")
-          .eq("reference_id", sale.id)
-        await supabase.from("sales").delete().eq("id", sale.id)
-        await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-        
+        const rolled = await compensateFailedRetailSale({
+          supabase,
+          saleId: sale.id,
+          businessId: business_id,
+          stockEntries: stockCompensationPlan,
+        })
+        if (!rolled.ok) {
+          return NextResponse.json(
+            {
+              error: `Reconciliation failed and rollback could not complete: ${rolled.message}`,
+              code: "ROLLBACK_FAILED",
+            },
+            { status: 500 }
+          )
+        }
         return NextResponse.json(
           {
             error: `Sale reconciliation failed: ${reconciliationError.message || "Operational data does not match ledger data"}`,
             details: "Sale creation was rolled back due to reconciliation failure. This indicates a system error.",
-            code: "RECONCILIATION_FAILED",
+            code: "RECONCILIATION_FAILED_ROLLED_BACK",
           },
           { status: 500 }
         )
@@ -1417,20 +1590,26 @@ const validation = validateCartDiscount(
 
       if (isReconciled !== true) {
         console.error("Sale reconciliation returned false (unexpected)")
-        // Rollback: Delete the sale and journal entry if reconciliation fails
-        await supabase
-          .from("journal_entries")
-          .delete()
-          .eq("reference_type", "sale")
-          .eq("reference_id", sale.id)
-        await supabase.from("sales").delete().eq("id", sale.id)
-        await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-        
+        const rolled = await compensateFailedRetailSale({
+          supabase,
+          saleId: sale.id,
+          businessId: business_id,
+          stockEntries: stockCompensationPlan,
+        })
+        if (!rolled.ok) {
+          return NextResponse.json(
+            {
+              error: `Reconciliation failed and rollback could not complete: ${rolled.message}`,
+              code: "ROLLBACK_FAILED",
+            },
+            { status: 500 }
+          )
+        }
         return NextResponse.json(
           {
             error: "Sale reconciliation validation failed: Operational data does not match ledger data",
             details: "Sale creation was rolled back due to reconciliation failure",
-            code: "RECONCILIATION_FAILED",
+            code: "RECONCILIATION_FAILED_ROLLED_BACK",
           },
           { status: 500 }
         )
@@ -1442,20 +1621,26 @@ const validation = validateCartDiscount(
       })
     } catch (reconciliationException: any) {
       console.error("Exception during sale reconciliation:", reconciliationException)
-      // Rollback: Delete the sale and journal entry if reconciliation throws exception
-      await supabase
-        .from("journal_entries")
-        .delete()
-        .eq("reference_type", "sale")
-        .eq("reference_id", sale.id)
-      await supabase.from("sales").delete().eq("id", sale.id)
-      await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-      
+      const rolled = await compensateFailedRetailSale({
+        supabase,
+        saleId: sale.id,
+        businessId: business_id,
+        stockEntries: stockCompensationPlan,
+      })
+      if (!rolled.ok) {
+        return NextResponse.json(
+          {
+            error: `Reconciliation failed and rollback could not complete: ${rolled.message}`,
+            code: "ROLLBACK_FAILED",
+          },
+          { status: 500 }
+        )
+      }
       return NextResponse.json(
         {
           error: `Sale reconciliation failed: ${reconciliationException.message || "Unexpected error during reconciliation"}`,
           details: "Sale creation was rolled back due to reconciliation exception",
-          code: "RECONCILIATION_EXCEPTION",
+          code: "RECONCILIATION_FAILED_ROLLED_BACK",
         },
         { status: 500 }
       )

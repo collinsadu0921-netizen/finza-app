@@ -53,6 +53,7 @@ describe("Flash Sale Race Condition - No Silent Failure", () => {
         name: `Flash Sale Race Test ${Date.now()}`,
         owner_id: userId,
         address_country: "GH",
+        industry: "retail",
       })
       .select("id")
       .single()
@@ -99,6 +100,19 @@ describe("Flash Sale Race Condition - No Silent Failure", () => {
       throw new Error(`Failed to create register: ${regErr?.message || "unknown"}`)
     }
     registerId = reg.id
+
+    // 5b) Open cashier session (required by /api/sales/create for online sales)
+    const { error: csErr } = await supabase.from("cashier_sessions").insert({
+      register_id: registerId,
+      user_id: userId,
+      business_id: businessId,
+      store_id: storeId,
+      opening_float: 0,
+      status: "open",
+    })
+    if (csErr) {
+      throw new Error(`Failed to open cashier session: ${csErr.message}`)
+    }
 
     // 6) Product (track_stock true, cost for COGS)
     const { data: prod, error: prodErr } = await supabase
