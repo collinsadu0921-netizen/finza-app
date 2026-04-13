@@ -100,6 +100,26 @@ async function compensateFailedRetailSale(params: {
   return { ok: true }
 }
 
+/** When sale + sale_items exist: undo stock/movements/journal/sale. Use `extraStockEntry` if stock was mutated but not yet appended to `plan` (e.g. movement insert failed). */
+async function abortRetailSaleWithCompensation(params: {
+  supabase: SupabaseClient
+  saleId: string
+  businessId: string
+  plan: StockCompensationEntry[]
+  extraStockEntry?: StockCompensationEntry | null
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const stockEntries =
+    params.extraStockEntry != null
+      ? [...params.plan, params.extraStockEntry]
+      : params.plan
+  return compensateFailedRetailSale({
+    supabase: params.supabase,
+    saleId: params.saleId,
+    businessId: params.businessId,
+    stockEntries,
+  })
+}
+
 type PaymentLine = {
   method: "cash" | "momo" | "card"
   amount: number
@@ -1060,14 +1080,22 @@ const validation = validateCartDiscount(
 
             if (variantStockError) {
               console.error(`Error fetching variant stock for product ${item.product_id}, variant ${variantId}, store ${storeIdForStock}:`, variantStockError)
-              // If we can't fetch variant stock, we can't proceed safely - fail the sale
-              await supabase.from("sales").delete().eq("id", sale.id)
-              await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-              
+              const rolled = await abortRetailSaleWithCompensation({
+                supabase,
+                saleId: sale.id,
+                businessId: business_id,
+                plan: stockCompensationPlan,
+              })
+              if (!rolled.ok) {
+                return NextResponse.json(
+                  { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                  { status: 500 }
+                )
+              }
               return NextResponse.json(
-                { 
+                {
                   error: `Stock lookup failed. Sale not completed. Unable to verify stock for variant.`,
-                  details: variantStockError.message || String(variantStockError)
+                  details: variantStockError.message || String(variantStockError),
                 },
                 { status: 500 }
               )
@@ -1104,9 +1132,18 @@ const validation = validateCartDiscount(
 
           // Validate stock availability
           if (currentStock < quantitySold) {
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
               {
                 error: `Insufficient stock for variant. Available: ${currentStock}, Requested: ${quantitySold}`,
@@ -1150,9 +1187,18 @@ const validation = validateCartDiscount(
           } else {
             // This should never happen - storeIdForStock must be set
             // But if it does, fail the sale rather than updating variant stock
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
               { error: `Cannot deduct stock: No store_id available for variant ${variantId}. Please select a store first.` },
               { status: 400 }
@@ -1161,9 +1207,18 @@ const validation = validateCartDiscount(
 
           // If stock update failed, rollback sale and fail
           if (stockUpdateError) {
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
               { error: `Stock update failed. Sale not completed. Product: ${item.product_name || "Variant"}` },
               { status: 500 }
@@ -1199,26 +1254,31 @@ const validation = validateCartDiscount(
               productId: item.product_id,
               storeId: storeIdForStock
             })
-            
-            // Stock movement is part of audit trail - if it fails, rollback sale and stock
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
-            // Restore stock to original value
-            if (updatedVariantStockRecordId) {
-              await supabase.from("products_stock")
-                .update({
-                  stock: currentStock,
-                  stock_quantity: currentStock,
-                })
-                .eq("id", updatedVariantStockRecordId)
+            const extraEntry: StockCompensationEntry | null = updatedVariantStockRecordId
+              ? {
+                  products_stock_id: updatedVariantStockRecordId,
+                  prior_stock: currentStock,
+                  created_during_sale: !variantHadStockRowBeforeMutation,
+                }
+              : null
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+              extraStockEntry: extraEntry,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
             }
-            
             return NextResponse.json(
-              { 
+              {
                 error: `Stock update failed. Sale not completed. Unable to record stock movement.`,
                 details: movementError.message || String(movementError),
-                code: movementError.code
+                code: movementError.code,
               },
               { status: 500 }
             )
@@ -1254,14 +1314,22 @@ const validation = validateCartDiscount(
 
           if (storeStockError) {
             console.error(`Error fetching products_stock for product ${item.product_id}, store ${storeIdForStock}:`, storeStockError)
-            // If we can't fetch store stock, we can't proceed safely - fail the sale
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
-              { 
+              {
                 error: `Stock lookup failed. Sale not completed. Unable to verify stock for product.`,
-                details: storeStockError.message || String(storeStockError)
+                details: storeStockError.message || String(storeStockError),
               },
               { status: 500 }
             )
@@ -1310,13 +1378,21 @@ const validation = validateCartDiscount(
 
           // Validate stock availability - prevent sale if out of stock
           if (currentStock < quantitySold) {
-            // Rollback the sale creation
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
-              { 
-                error: `Insufficient stock for "${product.name || item.product_name}". Available: ${currentStock}, Requested: ${quantitySold}` 
+              {
+                error: `Insufficient stock for "${product.name || item.product_name}". Available: ${currentStock}, Requested: ${quantitySold}`,
               },
               { status: 400 }
             )
@@ -1361,9 +1437,18 @@ const validation = validateCartDiscount(
           } else {
             // This should never happen - storeIdForStock must be set
             // But if it does, fail the sale rather than updating products.stock
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
               { error: `Cannot deduct stock: No store_id available for product ${item.product_id}. Please select a store first.` },
               { status: 400 }
@@ -1372,9 +1457,18 @@ const validation = validateCartDiscount(
 
           // If stock update failed, rollback sale and fail
           if (stockUpdateError) {
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
+            }
             return NextResponse.json(
               { error: `Stock update failed. Sale not completed. Product: ${product.name || item.product_name || "Product"}` },
               { status: 500 }
@@ -1410,26 +1504,31 @@ const validation = validateCartDiscount(
               storeId: storeIdForStock,
               quantitySold: quantitySold
             })
-            
-            // Stock movement is part of audit trail - if it fails, rollback sale and stock
-            await supabase.from("sales").delete().eq("id", sale.id)
-            await supabase.from("sale_items").delete().eq("sale_id", sale.id)
-            
-            // Restore stock to original value
-            if (updatedStockRecordId) {
-              await supabase.from("products_stock")
-                .update({
-                  stock: currentStock,
-                  stock_quantity: currentStock,
-                })
-                .eq("id", updatedStockRecordId)
+            const extraEntrySimple: StockCompensationEntry | null = updatedStockRecordId
+              ? {
+                  products_stock_id: updatedStockRecordId,
+                  prior_stock: currentStock,
+                  created_during_sale: !simpleHadStockRowBeforeMutation,
+                }
+              : null
+            const rolled = await abortRetailSaleWithCompensation({
+              supabase,
+              saleId: sale.id,
+              businessId: business_id,
+              plan: stockCompensationPlan,
+              extraStockEntry: extraEntrySimple,
+            })
+            if (!rolled.ok) {
+              return NextResponse.json(
+                { error: `Rollback failed: ${rolled.message}`, code: "ROLLBACK_FAILED" },
+                { status: 500 }
+              )
             }
-            
             return NextResponse.json(
-              { 
+              {
                 error: `Stock update failed. Sale not completed. Unable to record stock movement.`,
                 details: movementError.message || String(movementError),
-                code: movementError.code
+                code: movementError.code,
               },
               { status: 500 }
             )
