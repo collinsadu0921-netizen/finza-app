@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter, useParams, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
@@ -508,10 +509,11 @@ export default function EstimateEditPage() {
                   Customer
                 </label>
                 <div className="flex gap-2">
-                  <select
+                  <NativeSelect
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="flex-1 border border-gray-300 rounded-lg px-4 py-2"
+                    wrapperClassName="min-w-0 flex-1"
+                    size="md"
                   >
                     <option value="">Select a customer</option>
                     {customers.map((customer) => (
@@ -519,7 +521,7 @@ export default function EstimateEditPage() {
                         {customer.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <button
                     type="button"
                     onClick={() => setShowCustomerModal(true)}
@@ -591,14 +593,14 @@ export default function EstimateEditPage() {
               {items.map((item) => (
                 <div key={item.id} className="grid grid-cols-12 gap-4 items-start">
                   <div className="col-span-12 md:col-span-4">
-                    <select
+                    <NativeSelect
                       value={item.product_id || ""}
                       onChange={(e) => {
                         if (e.target.value) {
                           selectProduct(item.id, e.target.value)
                         }
                       }}
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2"
+                      size="md"
                     >
                       <option value="">Select product/service</option>
                       {products.map((product) => (
@@ -606,7 +608,7 @@ export default function EstimateEditPage() {
                           {product.name}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </div>
                   <div className="col-span-12 md:col-span-4">
                     <input
@@ -654,14 +656,15 @@ export default function EstimateEditPage() {
                   </div>
                   <div className="col-span-4 md:col-span-2">
                     <div className="flex items-center gap-2">
-                      <select
+                      <NativeSelect
                         value={item.discount_type}
                         onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                        className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                        size="sm"
+                        wrapperClassName="w-20 shrink-0"
                       >
                         <option value="amount">Amt</option>
                         <option value="percent">%</option>
-                      </select>
+                      </NativeSelect>
                       <input
                         type="text"
                         inputMode="decimal"

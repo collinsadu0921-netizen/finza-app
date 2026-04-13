@@ -1,5 +1,7 @@
 "use client"
 
+import { NativeSelect } from "@/components/ui/NativeSelect"
+
 export type DashboardHeaderProps = {
   periodLabel: string
   currencyCode: string
@@ -31,17 +33,19 @@ export default function DashboardHeader({
             Period
           </span>
           {periodOptions.length > 0 && onPeriodChange ? (
-            <select
+            <NativeSelect
+              size="sm"
+              wrapperClassName="w-auto shrink-0"
               value={selectedPeriodStart ?? ""}
               onChange={(e) => onPeriodChange(e.target.value)}
-              className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+              className="font-medium text-gray-900 dark:text-white"
             >
               {periodOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           ) : (
             <span className="text-sm font-medium text-gray-900 dark:text-white">{periodLabel}</span>
           )}

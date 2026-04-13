@@ -7,6 +7,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = {
   id: string
@@ -516,23 +517,17 @@ export default function NewEstimatePage() {
                       New Customer
                     </button>
                   </div>
-                  <div className="relative">
-                    <select
-                      value={selectedCustomerId}
-                      onChange={(e) => setSelectedCustomerId(e.target.value)}
-                      className="w-full appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block p-3 pr-8 transition-colors"
-                    >
-                      <option value="">Select a customer...</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
+                  <NativeSelect
+                    value={selectedCustomerId}
+                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    size="lg"
+                    className="bg-slate-50 hover:bg-slate-100 dark:bg-slate-700"
+                  >
+                    <option value="">Select a customer...</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </NativeSelect>
                 </div>
 
                 {/* Dates & Tax Toggle */}
@@ -579,10 +574,11 @@ export default function NewEstimatePage() {
                       <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-blue-50 rounded-md border border-blue-100">
                         <div>
                           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Quote Currency</label>
-                          <select
+                          <NativeSelect
                             value={fxCurrencyCode}
                             onChange={(e) => setFxCurrencyCode(e.target.value)}
-                            className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="bg-white dark:bg-slate-800"
+                            size="sm"
                           >
                             <option value="USD">USD — US Dollar</option>
                             <option value="EUR">EUR — Euro</option>
@@ -590,7 +586,7 @@ export default function NewEstimatePage() {
                             <option value="KES">KES — Kenyan Shilling</option>
                             <option value="NGN">NGN — Nigerian Naira</option>
                             <option value="ZAR">ZAR — South African Rand</option>
-                          </select>
+                          </NativeSelect>
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
@@ -651,7 +647,7 @@ export default function NewEstimatePage() {
                           <tr key={item.id} className="group hover:bg-slate-50/50 transition-colors">
                             <td className="min-w-0 px-4 py-3 align-top sm:px-6">
                               <div className="space-y-1.5">
-                                <select
+                                <NativeSelect
                                   value={item.product_id || ""}
                                   onChange={(e) => {
                                     const selectedProductId = e.target.value
@@ -664,7 +660,7 @@ export default function NewEstimatePage() {
                                       updateItem(item.id, "total", 0)
                                     }
                                   }}
-                                  className="block w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                  size="sm"
                                 >
                                   <option value="">{businessIndustry === "service" ? "Select Service" : "Select product/service"}</option>
                                   {products.length === 0 ? (
@@ -676,7 +672,7 @@ export default function NewEstimatePage() {
                                       </option>
                                     ))
                                   )}
-                                </select>
+                                </NativeSelect>
                                 <input
                                   type="text"
                                   placeholder="Description"
@@ -720,15 +716,16 @@ export default function NewEstimatePage() {
                             </td>
                             <td className="px-3 py-3 align-top sm:px-4">
                               <div className="flex min-w-0 items-stretch gap-2">
-                                <select
+                                <NativeSelect
                                   value={item.discount_type}
                                   onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
                                   aria-label="Discount type"
-                                  className="w-[4.5rem] shrink-0 self-center text-xs border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2"
+                                  size="sm"
+                                  wrapperClassName="w-[4.5rem] shrink-0 self-center"
                                 >
                                   <option value="amount">Amt</option>
                                   <option value="percent">%</option>
-                                </select>
+                                </NativeSelect>
                                 <input
                                   type="text"
                                   inputMode="decimal"

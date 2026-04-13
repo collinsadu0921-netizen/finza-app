@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { NativeSelect } from "@/components/ui/NativeSelect"
+
 type CreditNote = {
   id: string
   credit_number: string
@@ -196,17 +198,18 @@ export default function CreditNotesPage() {
                 className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
               />
             </div>
-            <select
+            <NativeSelect
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
+              size="sm"
+              wrapperClassName="w-auto shrink-0"
             >
               <option value="all">All Status</option>
               <option value="draft">Draft</option>
               <option value="issued">Issued</option>
               <option value="applied">Applied</option>
               <option value="cancelled">Cancelled</option>
-            </select>
+            </NativeSelect>
             {(search || statusFilter !== "all") && (
               <button
                 onClick={() => { setSearch(""); setStatusFilter("all") }}

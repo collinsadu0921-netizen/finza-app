@@ -10,6 +10,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { readApiJson } from "@/lib/readApiJson"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type ExpenseCategory = {
   id: string
@@ -486,10 +487,10 @@ export default function CreateExpensePage() {
                       Add Category
                     </button>
                   </div>
-                  <select
+                  <NativeSelect
                     value={categoryId}
                     onChange={(e) => setCategoryId(e.target.value)}
-                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
+                    size="md"
                   >
                     <option value="">Select category</option>
                     {categories.map((cat) => (
@@ -497,7 +498,7 @@ export default function CreateExpensePage() {
                         {cat.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div>
@@ -674,10 +675,10 @@ export default function CreateExpensePage() {
                   <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Expense Currency</label>
-                      <select
+                      <NativeSelect
                         value={fxCurrencyCode}
                         onChange={(e) => setFxCurrencyCode(e.target.value)}
-                        className="w-full border border-slate-200 text-sm rounded-md p-2 focus:ring-2 focus:ring-slate-100 focus:border-slate-400"
+                        size="sm"
                       >
                         <option value="USD">USD — US Dollar</option>
                         <option value="EUR">EUR — Euro</option>
@@ -687,7 +688,7 @@ export default function CreateExpensePage() {
                         <option value="ZAR">ZAR — South African Rand</option>
                         <option value="CNY">CNY — Chinese Yuan</option>
                         <option value="INR">INR — Indian Rupee</option>
-                      </select>
+                      </NativeSelect>
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems, deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type InvoiceItem = {
   id: string
@@ -556,15 +557,16 @@ function CreateCreditNoteContent() {
                       <div className="col-span-4 min-w-0 md:col-span-2">
                         <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Discount</label>
                         <div className="flex min-w-0 items-stretch gap-2">
-                          <select
+                          <NativeSelect
                             value={item.discount_type}
                             onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
                             aria-label="Discount type"
-                            className="w-[4.5rem] shrink-0 self-center border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                            size="sm"
+                            wrapperClassName="w-[4.5rem] shrink-0 self-center"
                           >
                             <option value="amount">Amt</option>
                             <option value="percent">%</option>
-                          </select>
+                          </NativeSelect>
                           <input
                             type="text"
                             inputMode="decimal"

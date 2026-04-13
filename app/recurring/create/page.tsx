@@ -9,6 +9,7 @@ import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { getTaxEngineCode } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = {
   id: string
@@ -334,11 +335,11 @@ export default function CreateRecurringInvoicePage() {
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Customer *
                   </label>
-                  <select
+                  <NativeSelect
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
                     required
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+                    size="md"
                   >
                     <option value="">Select customer</option>
                     {customers.map((customer) => (
@@ -346,24 +347,24 @@ export default function CreateRecurringInvoicePage() {
                         {customer.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Frequency *
                   </label>
-                  <select
+                  <NativeSelect
                     value={frequency}
                     onChange={(e) => setFrequency(e.target.value as any)}
                     required
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+                    size="md"
                   >
                     <option value="weekly">Weekly</option>
                     <option value="biweekly">Bi-weekly</option>
                     <option value="monthly">Monthly</option>
                     <option value="quarterly">Quarterly</option>
                     <option value="yearly">Yearly</option>
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -429,10 +430,10 @@ export default function CreateRecurringInvoicePage() {
                     <div key={item.id} className="grid grid-cols-12 gap-4 p-4 border border-slate-200 rounded-lg bg-slate-50/50">
                       <div className="col-span-12 md:col-span-4">
                         <label className="block text-xs font-semibold text-slate-500 mb-1">Product/Service</label>
-                        <select
+                        <NativeSelect
                           value={item.product_service_id || ""}
                           onChange={(e) => updateItem(item.id, "product_service_id", e.target.value)}
-                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+                          size="sm"
                         >
                           <option value="">Select or type description</option>
                           {products.map((product) => (
@@ -440,7 +441,7 @@ export default function CreateRecurringInvoicePage() {
                               {product.name}
                             </option>
                           ))}
-                        </select>
+                        </NativeSelect>
                       </div>
                       <div className="col-span-12 md:col-span-4">
                         <label className="block text-xs font-semibold text-slate-500 mb-1">Description</label>
@@ -477,14 +478,15 @@ export default function CreateRecurringInvoicePage() {
                       <div className="col-span-4 md:col-span-1">
                         <label className="block text-xs font-semibold text-slate-500 mb-1">Discount</label>
                         <div className="flex items-center gap-2">
-                          <select
+                          <NativeSelect
                             value={item.discount_type}
                             onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                            className="w-20 border border-slate-200 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-slate-800 dark:border-slate-600 dark:text-white"
+                            size="sm"
+                            wrapperClassName="w-20 shrink-0"
                           >
                             <option value="amount">Amt</option>
                             <option value="percent">%</option>
-                          </select>
+                          </NativeSelect>
                           <input
                             type="text"
                             inputMode="decimal"

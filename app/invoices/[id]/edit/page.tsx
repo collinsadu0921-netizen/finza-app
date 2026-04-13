@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter, useParams, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
+import { NativeSelect } from "@/components/ui/NativeSelect"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
@@ -761,11 +762,11 @@ export default function InvoiceEditPage() {
                     Add New Customer
                   </button>
                 </div>
-                <select
+                <NativeSelect
                   value={selectedCustomerId}
                   onChange={(e) => setSelectedCustomerId(e.target.value)}
                   required
-                  className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+                  size="lg"
                 >
                   <option value="">Select a customer</option>
                   {customers.map((customer) => (
@@ -773,7 +774,7 @@ export default function InvoiceEditPage() {
                       {customer.name}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
 
               <div>
@@ -928,7 +929,7 @@ export default function InvoiceEditPage() {
                         <label className="block text-xs font-medium text-gray-600 mb-1">
                           Product/Service
                         </label>
-                        <select
+                        <NativeSelect
                           value={item.product_id || ""}
                           onChange={(e) => {
                             if (e.target.value) {
@@ -949,7 +950,7 @@ export default function InvoiceEditPage() {
                               )
                             }
                           }}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          size="sm"
                         >
                           <option value="">Select product/service</option>
                           {products.map((product) => (
@@ -957,7 +958,7 @@ export default function InvoiceEditPage() {
                               {product.name} - {currency}{Number(product.price).toFixed(2)}
                             </option>
                           ))}
-                        </select>
+                        </NativeSelect>
                         <input
                           type="text"
                           value={item.description || ""}
@@ -1020,14 +1021,15 @@ export default function InvoiceEditPage() {
                           Discount
                         </label>
                         <div className="flex items-center gap-2">
-                          <select
+                          <NativeSelect
                             value={item.discount_type}
                             onChange={(e) => updateItem(item.id, "discount_type", e.target.value as any)}
-                            className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            size="sm"
+                            wrapperClassName="w-20 shrink-0"
                           >
                             <option value="amount">Amt</option>
                             <option value="percent">%</option>
-                          </select>
+                          </NativeSelect>
                           <input
                             type="text"
                             inputMode="decimal"
