@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter, useParams, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { MenuSelect, type MenuSelectOption } from "@/components/ui/MenuSelect"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
@@ -697,6 +698,16 @@ export default function InvoiceEditPage() {
 
   const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode ?? undefined })
 
+  const productMenuOptions = useMemo((): MenuSelectOption[] => {
+    return [
+      { value: "", label: "Select product/service" },
+      ...products.map((product) => ({
+        value: product.id,
+        label: `${product.name} - ${currency}${Number(product.price).toFixed(2)}`,
+      })),
+    ]
+  }, [products, currency])
+
   return (
     <Wrapper>
       <div className="p-6 max-w-5xl mx-auto">
@@ -929,13 +940,12 @@ export default function InvoiceEditPage() {
                         <label className="block text-xs font-medium text-gray-600 mb-1">
                           Product/Service
                         </label>
-                        <NativeSelect
+                        <MenuSelect
                           value={item.product_id || ""}
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              selectProduct(item.id, e.target.value)
+                          onValueChange={(v) => {
+                            if (v) {
+                              selectProduct(item.id, v)
                             } else {
-                              // Clear product selection - update in single state update
                               setItems(
                                 items.map((it) => {
                                   if (it.id === item.id) {
@@ -950,15 +960,10 @@ export default function InvoiceEditPage() {
                               )
                             }
                           }}
+                          options={productMenuOptions}
+                          placeholder="Select product/service"
                           size="sm"
-                        >
-                          <option value="">Select product/service</option>
-                          {products.map((product) => (
-                            <option key={product.id} value={product.id}>
-                              {product.name} - {currency}{Number(product.price).toFixed(2)}
-                            </option>
-                          ))}
-                        </NativeSelect>
+                        />
                         <input
                           type="text"
                           value={item.description || ""}

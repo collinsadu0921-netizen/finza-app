@@ -17,7 +17,7 @@ import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 // FINZA Design System Components (Phase 2 Refactor)
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { NativeSelect } from "@/components/ui/NativeSelect"
-import { MenuSelect } from "@/components/ui/MenuSelect"
+import { MenuSelect, type MenuSelectOption } from "@/components/ui/MenuSelect"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 
 type Customer = {
@@ -75,11 +75,9 @@ const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{chil
 // ------------------------------------------------------------
 type LineItemRowProps = {
   item: InvoiceItem
-  products: any[]
-  currencySymbol: string
+  productMenuOptions: MenuSelectOption[]
   /** ISO code for line totals (matches invoice view formatMoney). */
   amountCurrencyCode: string | null
-  businessIndustry: string | null
   onUpdate: (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice" | "_rawDiscount", value: any) => void
   onCommit: (id: string, field: "quantity" | "price" | "discount_value") => void
   onRemove: (id: string) => void
@@ -87,7 +85,7 @@ type LineItemRowProps = {
 }
 
 const LineItemRow = memo(function LineItemRow({
-  item, products, currencySymbol, amountCurrencyCode, businessIndustry,
+  item, productMenuOptions, amountCurrencyCode,
   onUpdate, onCommit, onRemove, onSelectProduct,
 }: LineItemRowProps) {
   // Local description state — typed into immediately, flushed to parent only on blur
@@ -102,18 +100,13 @@ const LineItemRow = memo(function LineItemRow({
     <tr className="group hover:bg-slate-50/50 transition-colors">
       <td className="min-w-0 px-4 py-3 align-top sm:px-6">
         <div className="space-y-1.5">
-          <NativeSelect
+          <MenuSelect
             value={item.product_id || ""}
-            onChange={(e) => e.target.value ? onSelectProduct(item.id, e.target.value) : onUpdate(item.id, "product_id", null)}
+            onValueChange={(v) => (v ? onSelectProduct(item.id, v) : onUpdate(item.id, "product_id", null))}
+            options={productMenuOptions}
+            placeholder="Select product or service…"
             size="sm"
-          >
-            <option value="">{businessIndustry === "service" ? "Select Service" : "Select product (optional)..."}</option>
-            {products.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}{p.price != null ? ` — ${formatMoneyWithSymbol(Number(p.price), currencySymbol)}` : ""}
-              </option>
-            ))}
-          </NativeSelect>
+          />
           <textarea
             value={localDesc}
             onChange={(e) => setLocalDesc(e.target.value)}
@@ -668,6 +661,18 @@ export default function NewInvoicePage() {
     [customers]
   )
 
+  const productMenuOptions = useMemo((): MenuSelectOption[] => {
+    const emptyLabel =
+      businessIndustry === "service" ? "Select Service" : "Select product (optional)..."
+    return [
+      { value: "", label: emptyLabel },
+      ...products.map((p) => ({
+        value: p.id,
+        label: `${p.name}${p.price != null ? ` — ${formatMoneyWithSymbol(Number(p.price), displaySymbol)}` : ""}`,
+      })),
+    ]
+  }, [products, businessIndustry, displaySymbol])
+
   // When under /service/*, the service layout already provides ProtectedLayout (sidebar + header).
   // Avoid double layout (double header/logout and shifted content).
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
@@ -939,10 +944,8 @@ export default function NewInvoicePage() {
                         <LineItemRow
                           key={item.id}
                           item={item}
-                          products={products}
-                          currencySymbol={displaySymbol}
+                          productMenuOptions={productMenuOptions}
                           amountCurrencyCode={amountCurrencyCode}
-                          businessIndustry={businessIndustry}
                           onUpdate={updateItem}
                           onCommit={commitItem}
                           onRemove={removeItem}
