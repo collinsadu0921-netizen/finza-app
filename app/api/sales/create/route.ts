@@ -1560,6 +1560,9 @@ const validation = validateCartDiscount(
         "post_sale_to_ledger",
         {
           p_sale_id: sale.id,
+          p_entry_type: null,
+          p_backfill_reason: null,
+          p_backfill_actor: null,
           p_posted_by_accountant_id: businessRow.owner_id, // System accountant: business owner
         }
       )
