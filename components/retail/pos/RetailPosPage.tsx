@@ -23,7 +23,7 @@ import {
 import PaymentModal, { PaymentLine, PaymentResult } from "@/components/PaymentModal"
 import ParkedSalesList from "@/components/ParkedSalesList"
 import { getStockStatus } from "@/lib/inventory"
-import VariantSelectorModal from "@/components/VariantSelectorModal"
+import VariantSelectorModal, { type Variant as PosVariantRow } from "@/components/VariantSelectorModal"
 import Toast from "@/components/Toast"
 import Modal from "@/components/ui/Modal"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
@@ -40,6 +40,14 @@ import { formatMoney } from "@/lib/money"
 import { calculateDiscounts, type LineDiscount, type CartDiscount } from "@/lib/discounts/calculator"
 import { addOfflineTransaction, getPendingCount, initOfflineQueue } from "@/lib/offline/indexedDb"
 import { isOnline, setupOfflineSyncListener, syncOfflineTransactions } from "@/lib/offline/sync"
+import {
+  saveRetailPosOfflineCatalog,
+  loadRetailPosOfflineCatalog,
+} from "@/lib/retail/offline/retailPosOfflineCatalog"
+import type {
+  RetailPosOfflineCatalogPayloadV1,
+  RetailPosOfflineVariantRow,
+} from "@/lib/retail/offline/types"
 import { RetailMenuSelect } from "@/components/retail/RetailBackofficeUi"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 
@@ -198,6 +206,10 @@ export default function RetailPosPage() {
   const [isOffline, setIsOffline] = useState(false)
   const [pendingOfflineCount, setPendingOfflineCount] = useState(0)
   const [syncingOffline, setSyncingOffline] = useState(false)
+  /** Phase 1: variant rows from last online catalog sync (barcode / SKU when offline). */
+  const [offlineVariants, setOfflineVariants] = useState<RetailPosOfflineVariantRow[]>([])
+  const [lastOfflineCatalogSyncAt, setLastOfflineCatalogSyncAt] = useState<string | null>(null)
+  const [catalogSnapshotSyncing, setCatalogSnapshotSyncing] = useState(false)
   /** After online sale success: summary for modal (cart cleared; stay on POS) */
   const [saleSuccess, setSaleSuccess] = useState<{
     saleId: string
@@ -382,6 +394,9 @@ export default function RetailPosPage() {
     const handleOnline = () => {
       setIsOffline(false)
       updatePendingCount()
+      if (businessId && currentStoreId && currentStoreId !== "all") {
+        void loadProductsForStore(businessId, currentStoreId)
+      }
       // Auto-sync when coming back online
       if (pendingOfflineCount > 0) {
         handleSyncOffline()
@@ -651,6 +666,48 @@ export default function RetailPosPage() {
   const loadData = async () => {
     try {
       setLoading(true)
+
+      /** Phase 1: PIN cashier + prior catalog sync — hydrate without Supabase when offline. */
+      if (!isOnline()) {
+        const cashierOnly = getCashierSession()
+        if (!cashierOnly) {
+          setError(
+            "You’re offline. Open POS once while online (cashier PIN on this device) so your catalog can sync, then you can use the terminal without internet."
+          )
+          setLoading(false)
+          return
+        }
+        const snap = await loadRetailPosOfflineCatalog(cashierOnly.businessId, cashierOnly.storeId)
+        if (!snap) {
+          setError(
+            "You’re offline and this device has no saved store catalog yet. Connect to the internet, open POS with your cashier PIN, wait for products to load, then you can go offline."
+          )
+          setLoading(false)
+          return
+        }
+        setParkSaleClientAvailable(false)
+        setUserRole("cashier")
+        setBusinessId(snap.businessId)
+        setBusinessCountry(snap.businessCountry ?? null)
+        setCurrencyCode(snap.currencyCode ?? null)
+        setRetailVatInclusive(snap.retailVatInclusive !== false)
+        setProducts((snap.products || []) as Product[])
+        setCategories((snap.categories || []) as Category[])
+        setVariantStockById(snap.variantStockById || {})
+        setQuickKeys((snap.quickKeys || []) as Product[])
+        setOfflineVariants(snap.variants || [])
+        setLastOfflineCatalogSyncAt(snap.lastSyncedAt || null)
+        setCurrentStoreId(cashierOnly.storeId)
+        setCurrentStoreName(snap.storeLabel ?? null)
+        setHasValidStore(true)
+        setRegisterSession(null)
+        setRegisterStatusLoading(false)
+        setTerminalBoundRegisterId(getTerminalRegisterId(snap.businessId, snap.storeId))
+        setTerminalBoundRegisterName(null)
+        setTerminalRegisterOptions([])
+        setLoading(false)
+        return
+      }
       
       // Check for cashier PIN authentication first
       const cashierSession = getCashierSession()
@@ -1229,6 +1286,17 @@ export default function RetailPosPage() {
       }
       setVariantStockById(variantStockMap)
 
+      let variantRowsSnapshot: RetailPosOfflineVariantRow[] = []
+      try {
+        const { data: vSnap } = await supabase
+          .from("products_variants")
+          .select("id, product_id, variant_name, price, stock_quantity, stock, barcode, sku")
+          .in("product_id", allProducts.map((p: { id: string }) => p.id))
+        variantRowsSnapshot = (vSnap || []) as RetailPosOfflineVariantRow[]
+      } catch (e) {
+        console.warn("[Retail POS offline] variant snapshot skipped:", e)
+      }
+
       // Filter products: show products with stock > 0 OR if no stock records exist yet (initial state)
       // If active_store_id = "all", show products with any stock across stores
       // If active_store_id is a specific store, only show products with stock > 0 for that store
@@ -1278,6 +1346,7 @@ export default function RetailPosPage() {
 
       setProducts(productsWithStock)
       
+      let categoriesSnapshot: Category[] = []
       // Load categories (optional - not required for checkout)
       try {
         const { data: categoriesData, error: categoriesError } = await supabase
@@ -1288,18 +1357,49 @@ export default function RetailPosPage() {
         if (categoriesError) {
           // Log error but don't block - categories are optional
           console.warn("Categories not loaded (non-blocking):", categoriesError.message)
+          categoriesSnapshot = []
           setCategories([])
         } else {
-          setCategories(categoriesData || [])
+          categoriesSnapshot = (categoriesData || []) as Category[]
+          setCategories(categoriesSnapshot)
         }
       } catch (err: any) {
         // Categories loading failed - non-blocking, continue with empty array
         console.warn("Error loading categories (non-blocking):", err?.message || err)
+        categoriesSnapshot = []
         setCategories([])
       }
 
-      // Load quick keys after products are loaded
-      await loadQuickKeys(businessId, productsWithStock)
+      const quickKeysResult = await loadQuickKeys(businessId, productsWithStock)
+
+      const catalogStoreId = storeId && storeId !== "all" ? storeId : ""
+      if (isOnline() && catalogStoreId) {
+        setCatalogSnapshotSyncing(true)
+        try {
+          const payload: RetailPosOfflineCatalogPayloadV1 = {
+            schemaVersion: 1,
+            businessId,
+            storeId: catalogStoreId,
+            storeLabel: getActiveStoreName(),
+            lastSyncedAt: new Date().toISOString(),
+            products: productsWithStock as unknown[],
+            categories: categoriesSnapshot as unknown[],
+            variantStockById: variantStockMap,
+            variants: variantRowsSnapshot,
+            quickKeys: quickKeysResult as unknown[],
+            currencyCode,
+            businessCountry,
+            retailVatInclusive,
+          }
+          await saveRetailPosOfflineCatalog(payload)
+          setLastOfflineCatalogSyncAt(payload.lastSyncedAt)
+          setOfflineVariants(variantRowsSnapshot)
+        } catch (e) {
+          console.warn("[Retail POS offline] catalog persist failed:", e)
+        } finally {
+          setCatalogSnapshotSyncing(false)
+        }
+      }
       
       setLoadingProducts(false)
     } catch (err: any) {
@@ -1310,7 +1410,7 @@ export default function RetailPosPage() {
   }
 
   // Load quick keys from table or auto-populate top 6 most-sold products
-  const loadQuickKeys = async (businessId: string, allProducts: Product[]) => {
+  const loadQuickKeys = async (businessId: string, allProducts: Product[]): Promise<Product[]> => {
     try {
       // First, try to load from quick_keys table
       const { data: quickKeysData, error: quickKeysError } = await supabase
@@ -1347,7 +1447,7 @@ export default function RetailPosPage() {
           })
           .filter((p: Product | null): p is Product => p !== null && Number(p.price || 0) > 0)
         setQuickKeys(keys)
-        return
+        return keys
       }
 
       // If no quick keys in table, auto-populate top 6 most-sold products
@@ -1404,21 +1504,28 @@ export default function RetailPosPage() {
               .map((id) => topProducts.find((p) => p.id === id))
               .filter((p): p is Product => p !== undefined)
             setQuickKeys(orderedProducts)
-            return
+            return orderedProducts
           }
         }
       }
 
       // Fallback: use first 6 products
-      setQuickKeys(allProducts.slice(0, 6))
+      const fallback = allProducts.slice(0, 6)
+      setQuickKeys(fallback)
+      return fallback
     } catch (err) {
       // On error, use first 6 products as fallback
-      setQuickKeys(allProducts.slice(0, 6))
+      const fallback = allProducts.slice(0, 6)
+      setQuickKeys(fallback)
+      return fallback
     }
   }
 
   // Check if product has variants or modifiers
   const checkProductVariants = async (productId: string): Promise<boolean> => {
+    if (!isOnline()) {
+      return offlineVariants.some((v) => v.product_id === productId)
+    }
     try {
       const [variantsResult, modifiersResult] = await Promise.all([
         supabase
@@ -1569,6 +1676,85 @@ export default function RetailPosPage() {
     if (!code) return
 
     try {
+      if (!isOnline()) {
+        const variantsByBarcode = offlineVariants.filter((v) => (v.barcode || "").trim() === code)
+        const matchedVariantIds = new Set(variantsByBarcode.map((v) => v.id))
+        const variantsBySku = offlineVariants.filter(
+          (v) => (v.sku || "").trim() === code && !matchedVariantIds.has(v.id)
+        )
+        const productMatches = products.filter((p) => (p.barcode || "").trim() === code && !p.hasVariants)
+
+        const allMatches: Array<{
+          id: string
+          name: string
+          price: number
+          type: "product" | "variant"
+          variantName?: string
+          productId: string
+          variantId?: string
+        }> = []
+
+        for (const variant of variantsByBarcode) {
+          const product = products.find((p) => p.id === variant.product_id)
+          if (product) {
+            const variantPrice = variant.price !== null ? Number(variant.price) : product.price
+            allMatches.push({
+              id: variant.id,
+              name: product.name,
+              price: variantPrice,
+              type: "variant",
+              variantName: variant.variant_name,
+              productId: product.id,
+              variantId: variant.id,
+            })
+          }
+        }
+
+        for (const product of productMatches) {
+          allMatches.push({
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            type: "product",
+            productId: product.id,
+          })
+        }
+
+        for (const variant of variantsBySku) {
+          const product = products.find((p) => p.id === variant.product_id)
+          if (product) {
+            const variantPrice = variant.price !== null ? Number(variant.price) : product.price
+            allMatches.push({
+              id: variant.id,
+              name: product.name,
+              price: variantPrice,
+              type: "variant",
+              variantName: variant.variant_name,
+              productId: product.id,
+              variantId: variant.id,
+            })
+          }
+        }
+
+        if (allMatches.length === 0) {
+          setToast({
+            message: `No matching product, variant barcode, or variant SKU for "${code}" (offline catalog)`,
+            type: "error",
+          })
+          return
+        }
+
+        if (allMatches.length === 1) {
+          const match = allMatches[0]
+          await addBarcodeMatchToCart(match)
+          setSearchQuery("")
+        } else {
+          setBarcodeMatches(allMatches)
+          setScannedBarcode(code)
+        }
+        return
+      }
+
       /**
        * Exact code resolution order for checkout (USB / Bluetooth scanners behave like keyboard + Enter):
        * 1) Variant barcode — `products_variants.barcode`
@@ -2045,22 +2231,47 @@ export default function RetailPosPage() {
     if (cart.length === 0) setShowCartTaxDetails(false)
   }, [cart.length])
 
+  const variantSelectorLocalCatalog = useMemo(() => {
+    if (!isOffline || !selectedProductForVariant) return undefined
+    const rows = offlineVariants.filter((v) => v.product_id === selectedProductForVariant.id)
+    const variants: PosVariantRow[] = rows.map((v) => {
+      const sq = Math.floor(variantStockById[v.id] ?? 0)
+      return {
+        id: v.id,
+        variant_name: v.variant_name,
+        price: v.price !== null && v.price !== undefined ? Number(v.price) : null,
+        stock_quantity: sq,
+        stock: sq,
+        sku: v.sku,
+      }
+    })
+    return { variants, modifiers: [] as Array<{ id: string; name: string; price: number }> }
+  }, [isOffline, selectedProductForVariant, offlineVariants, variantStockById])
+
   // Filter products by search + optional category (client-side only)
   const filteredProducts = useMemo(() => {
     let list = products
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
-      list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(query) ||
-          (p.barcode?.toLowerCase().includes(query) ?? false)
-      )
+      list = list.filter((p) => {
+        if (p.name.toLowerCase().includes(query)) return true
+        if (p.barcode?.toLowerCase().includes(query)) return true
+        if (isOffline) {
+          return offlineVariants.some(
+            (v) =>
+              v.product_id === p.id &&
+              ((v.barcode && v.barcode.toLowerCase().includes(query)) ||
+                (v.sku && v.sku.toLowerCase().includes(query)))
+          )
+        }
+        return false
+      })
     }
     if (posCategoryFilter !== "all") {
       list = list.filter((p) => p.category_id === posCategoryFilter)
     }
     return list
-  }, [products, searchQuery, posCategoryFilter])
+  }, [products, searchQuery, posCategoryFilter, isOffline, offlineVariants])
 
   const getCartLineStockHint = (
     item: CartItem
@@ -2212,15 +2423,27 @@ export default function RetailPosPage() {
                       <span className="inline-flex max-w-[5.5rem] shrink-0 items-center truncate whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 min-[400px]:max-w-none">
                         {cashierDisplayName || "—"}
                       </span>
-                      {isOffline ? (
+                      {catalogSnapshotSyncing ? (
+                        <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-blue-50 px-1.5 py-0.5 font-bold text-blue-900 ring-1 ring-blue-300/70">
+                          Syncing catalog…
+                        </span>
+                      ) : isOffline ? (
                         <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-950 ring-1 ring-amber-400/50">
-                          Offline{pendingOfflineCount > 0 ? ` ${pendingOfflineCount}` : ""}
+                          Offline{pendingOfflineCount > 0 ? ` · queue ${pendingOfflineCount}` : ""}
                         </span>
                       ) : (
                         <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-900 ring-1 ring-emerald-300/70">
                           Online
                         </span>
                       )}
+                      {lastOfflineCatalogSyncAt && !catalogSnapshotSyncing ? (
+                        <span
+                          className="hidden max-w-[7rem] truncate whitespace-nowrap rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[8px] font-medium text-slate-600 min-[420px]:inline-flex min-[420px]:max-w-[10rem]"
+                          title={`Catalog saved on this device: ${new Date(lastOfflineCatalogSyncAt).toLocaleString()}`}
+                        >
+                          Saved {new Date(lastOfflineCatalogSyncAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -3471,6 +3694,7 @@ export default function RetailPosPage() {
             productName={selectedProductForVariant.name}
             productPrice={selectedProductForVariant.price}
             currencyCode={currencyCode}
+            localCatalog={variantSelectorLocalCatalog}
             onSelect={handleVariantSelected}
             onClose={() => {
               setShowVariantModal(false)

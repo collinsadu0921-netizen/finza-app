@@ -1,0 +1,11 @@
+{
+  "name": "Finza Retail POS",
+  "short_name": "Finza POS",
+  "description": "Finza Retail point of sale (scoped PWA shell).",
+  "start_url": "/retail/pos",
+  "scope": "/retail/pos",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": []
+}

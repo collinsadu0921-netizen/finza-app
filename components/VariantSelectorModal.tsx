@@ -6,7 +6,7 @@ import { getActiveStoreId } from "@/lib/storeSession"
 import { useToast } from "@/components/ui/ToastProvider"
 import { formatMoney } from "@/lib/money"
 
-type Variant = {
+export type Variant = {
   id: string
   variant_name: string
   price: number | null
@@ -15,7 +15,7 @@ type Variant = {
   sku: string | null
 }
 
-type Modifier = {
+export type Modifier = {
   id: string
   name: string
   price: number
@@ -29,6 +29,11 @@ type VariantSelectorModalProps = {
   currencyCode?: string | null
   onSelect: (variantId: string | null, variantName: string, variantPrice: number, modifiers: Modifier[]) => void
   onClose: () => void
+  /**
+   * When provided, skip Supabase and render from this catalog (Retail POS offline).
+   * Modifiers are omitted offline unless included here.
+   */
+  localCatalog?: { variants: Variant[]; modifiers: Modifier[] }
 }
 
 export default function VariantSelectorModal({
@@ -38,6 +43,7 @@ export default function VariantSelectorModal({
   currencyCode = null,
   onSelect,
   onClose,
+  localCatalog,
 }: VariantSelectorModalProps) {
   const toast = useToast()
   const homeCode = currencyCode ?? "GHS"
@@ -48,8 +54,14 @@ export default function VariantSelectorModal({
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadVariantsAndModifiers()
-  }, [productId])
+    if (localCatalog) {
+      setVariants(localCatalog.variants)
+      setModifiers(localCatalog.modifiers)
+      setLoading(false)
+      return
+    }
+    void loadVariantsAndModifiers()
+  }, [productId, localCatalog])
 
   const loadVariantsAndModifiers = async () => {
     try {

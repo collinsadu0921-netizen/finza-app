@@ -2,6 +2,19 @@
 
 import { ESCPOSGenerator, type ReceiptData, type PrinterWidth, type ReceiptMode } from "@/lib/escpos"
 
+/** Web Serial port shape used after `requestPort()` — avoids relying on DOM `SerialPort` in `lib` TS config. */
+type BrowserSerialPortLike = {
+  open: (opts: { baudRate: number }) => Promise<void>
+  writable: WritableStream<Uint8Array> | null
+  close: () => Promise<void>
+}
+
+type NavigatorWithWebSerial = Navigator & {
+  serial?: {
+    requestPort: () => Promise<BrowserSerialPortLike>
+  }
+}
+
 /** Subset of receipt_settings used for raw thermal output (matches ReceiptPrinter ESC/POS path). */
 export type RetailReceiptEscposSerialSettings = {
   printer_width: PrinterWidth
@@ -26,12 +39,12 @@ export async function printRetailReceiptEscposSerial(
     throw new Error("Web Serial API not supported. Please use Chrome/Edge browser.")
   }
 
-  const navSerial = (navigator as Navigator & { serial?: { requestPort: () => Promise<SerialPort> } }).serial
+  const navSerial = (navigator as NavigatorWithWebSerial).serial
   if (!navSerial?.requestPort) {
     throw new Error("Web Serial API not available in this browser.")
   }
 
-  const port = await navSerial.requestPort()
+  const port: BrowserSerialPortLike = await navSerial.requestPort()
 
   try {
     await port.open({ baudRate: 9600 })
