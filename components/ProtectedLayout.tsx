@@ -673,7 +673,13 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                   : "min-h-[calc(100vh-4rem)]"
             }
           >
-            <PlatformAnnouncementsHost businessIndustry={workspaceBusiness?.industry}>
+            <PlatformAnnouncementsHost
+              businessIndustry={
+                workspaceBusiness != null && typeof workspaceBusiness.industry === "string"
+                  ? workspaceBusiness.industry
+                  : undefined
+              }
+            >
               {children}
             </PlatformAnnouncementsHost>
             {!hideFloatingAssistant && (
