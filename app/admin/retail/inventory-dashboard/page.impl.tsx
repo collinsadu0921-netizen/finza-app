@@ -10,6 +10,17 @@ import { getActiveStoreId } from "@/lib/storeSession"
 import { getStockStatus, isLowStock } from "@/lib/inventory"
 import { checkStoreContextClient } from "@/lib/storeContextGuard"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { retailPaths } from "@/lib/retail/routes"
+import {
+  RetailBackofficeAlert,
+  RetailBackofficeBackLink,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeCardTitle,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+} from "@/components/retail/RetailBackofficeUi"
 
 type Product = {
   id: string
@@ -21,6 +32,8 @@ type Product = {
   track_stock?: boolean
   barcode?: string
   category_id?: string
+  variant_id?: string | null
+  variant_name?: string | null
 }
 
 type Category = {
@@ -195,17 +208,48 @@ export default function InventoryDashboardPage() {
 
       const { data: stockData } = await stockQuery
 
-      // Create a map of product_id -> stock (aggregate if multiple stores)
-      const stockMap: Record<string, number> = {}
+      const { data: variantsData } = await supabase
+        .from("products_variants")
+        .select("id, product_id, variant_name, price, barcode")
+        .in("product_id", productsData.map((x: { id: string }) => x.id))
+
+      const variantsByProduct = new Map<
+        string,
+        Array<{
+          id: string
+          variant_name: string
+          price: number | null
+          barcode: string | null
+        }>
+      >()
+      const productIdsWithVariants = new Set<string>()
+      for (const v of variantsData || []) {
+        productIdsWithVariants.add(v.product_id)
+        if (!variantsByProduct.has(v.product_id)) {
+          variantsByProduct.set(v.product_id, [])
+        }
+        variantsByProduct.get(v.product_id)!.push({
+          id: v.id,
+          variant_name: v.variant_name,
+          price: v.price != null ? Number(v.price) : null,
+          barcode: v.barcode ?? null,
+        })
+      }
+
+      const parentStockMap: Record<string, number> = {}
+      const variantStockMap: Record<string, number> = {}
       if (stockData) {
         stockData.forEach((s: any) => {
-          if (!s.variant_id) { // Only count non-variant stock for main products
-            const currentStock = s.stock_quantity !== null && s.stock_quantity !== undefined
+          const rowQty =
+            s.stock_quantity !== null && s.stock_quantity !== undefined
               ? Number(s.stock_quantity)
               : s.stock !== null && s.stock !== undefined
-              ? Number(s.stock)
-              : 0
-            stockMap[s.product_id] = (stockMap[s.product_id] || 0) + currentStock
+                ? Number(s.stock)
+                : 0
+          if (s.variant_id) {
+            variantStockMap[s.variant_id] = (variantStockMap[s.variant_id] || 0) + rowQty
+          } else {
+            parentStockMap[s.product_id] = (parentStockMap[s.product_id] || 0) + rowQty
           }
         })
       }
@@ -218,26 +262,61 @@ export default function InventoryDashboardPage() {
       const outOfStockList: Array<Product & { category_name?: string }> = []
 
       productsData.forEach((p: any) => {
-        // Use stock from products_stock if available, otherwise fallback to product.stock
-        const stockQty = Math.floor(
-          stockMap[p.id] !== undefined
-            ? stockMap[p.id]
-            : p.stock_quantity !== null && p.stock_quantity !== undefined
-            ? Number(p.stock_quantity)
-            : p.stock !== null && p.stock !== undefined
-            ? Number(p.stock)
-            : 0
-        )
-        const price = Number(p.price) || 0
-        const threshold = p.low_stock_threshold !== null && p.low_stock_threshold !== undefined ? Number(p.low_stock_threshold) : 5
+        const basePrice = Number(p.price) || 0
+        const threshold =
+          p.low_stock_threshold !== null && p.low_stock_threshold !== undefined
+            ? Number(p.low_stock_threshold)
+            : 5
 
-        // Calculate inventory value (only for tracked stock)
+        if (productIdsWithVariants.has(p.id)) {
+          const vlist = variantsByProduct.get(p.id) || []
+          for (const v of vlist) {
+            const stockQty = Math.floor(variantStockMap[v.id] ?? 0)
+            const unitPrice = v.price != null && !Number.isNaN(v.price) ? Number(v.price) : basePrice
+
+            if (p.track_stock !== false) {
+              totalInventoryValue += stockQty * unitPrice
+              totalStockUnits += stockQty
+            }
+
+            const stockStatus = getStockStatus(stockQty, threshold, p.track_stock)
+            if (stockStatus.status === "out_of_stock") {
+              outOfStock++
+              outOfStockList.push({
+                id: p.id,
+                name: `${p.name} · ${v.variant_name}`,
+                price: unitPrice,
+                stock_quantity: stockQty,
+                stock: stockQty,
+                barcode: v.barcode || p.barcode,
+                category_id: p.category_id,
+                category_name: p.categories?.name || "Uncategorized",
+                variant_id: v.id,
+                variant_name: v.variant_name,
+              })
+            } else if (stockStatus.status === "low_stock") {
+              lowStock++
+            }
+          }
+          return
+        }
+
+        const stockQty = Math.floor(
+          parentStockMap[p.id] !== undefined
+            ? parentStockMap[p.id]
+            : p.stock_quantity !== null && p.stock_quantity !== undefined
+              ? Number(p.stock_quantity)
+              : p.stock !== null && p.stock !== undefined
+                ? Number(p.stock)
+                : 0
+        )
+        const price = basePrice
+
         if (p.track_stock !== false) {
           totalInventoryValue += stockQty * price
           totalStockUnits += stockQty
         }
 
-        // Check stock status
         const stockStatus = getStockStatus(stockQty, threshold, p.track_stock)
         if (stockStatus.status === "out_of_stock") {
           outOfStock++
@@ -516,191 +595,200 @@ export default function InventoryDashboardPage() {
 
   if (!hasAccess && !loading) {
     return (
-      <>
-        <div className="p-6">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+      <RetailBackofficeShell>
+        <RetailBackofficeMain>
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error || "Access denied"}
-          </div>
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </>
+          </RetailBackofficeAlert>
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push(retailPaths.dashboard)}>
+            Back to dashboard
+          </RetailBackofficeButton>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   return (
-    <>
-      <div className="p-6">
-        {/* Currency Setup Banner */}
+    <RetailBackofficeShell>
+      <RetailBackofficeMain>
         {!business?.default_currency && (
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-6">
-            <div className="flex items-start gap-3">
-              <svg className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-1">Currency Not Configured</h3>
-                <p className="text-sm text-yellow-700 dark:text-yellow-400 mb-3">
-                  Please set your business currency in Business Profile to display amounts correctly.
-                </p>
-                <button
-                  onClick={() => router.push("/retail/settings/business-profile")}
-                  className="text-sm font-medium text-yellow-800 dark:text-yellow-300 hover:text-yellow-900 dark:hover:text-yellow-200 underline"
-                >
-                  Go to Business Profile →
-                </button>
-              </div>
-            </div>
-          </div>
+          <RetailBackofficeAlert tone="warning" className="mb-6">
+            <p className="font-medium text-amber-950">Currency not configured</p>
+            <p className="mt-1 text-sm text-amber-950/90">
+              Set your business currency in Business Profile so amounts display correctly.
+            </p>
+            <RetailBackofficeButton
+              variant="secondary"
+              className="mt-4"
+              onClick={() => router.push(retailPaths.settingsBusinessProfile)}
+            >
+              Open business profile
+            </RetailBackofficeButton>
+          </RetailBackofficeAlert>
         )}
-        <div className="mb-6">
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="text-blue-600 hover:underline mb-4"
-          >
-            ← Back to Dashboard
-          </button>
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-2xl font-bold">Inventory Dashboard</h1>
-            {business?.default_currency && (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                All amounts in {business.default_currency}
-              </p>
-            )}
-          </div>
-          <p className="text-gray-600">Comprehensive inventory analytics and insights</p>
+
+        <RetailBackofficeBackLink onClick={() => router.push(retailPaths.dashboard)}>Back to dashboard</RetailBackofficeBackLink>
+
+        <RetailBackofficePageHeader
+          eyebrow="Product & inventory"
+          title="Inventory overview"
+          description="Stock health, value at retail prices, and recent operational signals for the selected store."
+          actions={
+            business?.default_currency ? (
+              <span className="text-xs font-medium text-slate-500">All amounts · {business.default_currency}</span>
+            ) : null
+          }
+        />
+
+        <div className="mb-8 flex flex-wrap gap-2">
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push(retailPaths.inventory)}>
+            Inventory
+          </RetailBackofficeButton>
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push("/retail/admin/low-stock")}>
+            Low stock
+          </RetailBackofficeButton>
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push(retailPaths.products)}>
+            Products
+          </RetailBackofficeButton>
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push(retailPaths.inventoryHistory)}>
+            Movement history
+          </RetailBackofficeButton>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        {error ? (
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error}
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
         {loading ? (
-          <div className="bg-white border border-gray-200 rounded-lg p-6 text-center">
-            <p>Loading inventory dashboard...</p>
-          </div>
+          <RetailBackofficeCard className="text-center text-sm text-slate-600">Loading dashboard…</RetailBackofficeCard>
         ) : (
           <>
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {/* Total Inventory Value - Large Card */}
-              <div className="md:col-span-2 lg:col-span-1 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg p-6 shadow-lg">
-                <div className="text-sm font-medium opacity-90 mb-1">Total Inventory Value</div>
-                <div className="text-3xl font-bold">{formatCurrency(kpis.totalInventoryValue)}</div>
-                <div className="text-sm opacity-75 mt-2">Based on current stock and selling prices</div>
-              </div>
+            <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <RetailBackofficeCard
+                padding="p-6"
+                className="border-slate-300/90 bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-md md:col-span-2 lg:col-span-1"
+              >
+                <p className="text-xs font-medium uppercase tracking-wide text-white/70">Inventory value</p>
+                <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{formatCurrency(kpis.totalInventoryValue)}</p>
+                <p className="mt-3 text-sm text-white/75">At current on-hand quantity × selling price</p>
+              </RetailBackofficeCard>
 
-              {/* Total Products */}
-              <div className="bg-white border border-gray-200 rounded-lg p-4 shadow">
-                <div className="text-sm text-gray-600 mb-1">Total Products</div>
-                <div className="text-2xl font-bold text-gray-900">{kpis.totalProducts}</div>
-              </div>
+              <RetailBackofficeCard>
+                <p className="text-xs font-medium text-slate-500">Products</p>
+                <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">{kpis.totalProducts}</p>
+              </RetailBackofficeCard>
 
-              {/* Total Categories */}
-              <div className="bg-white border border-gray-200 rounded-lg p-4 shadow">
-                <div className="text-sm text-gray-600 mb-1">Total Categories</div>
-                <div className="text-2xl font-bold text-gray-900">{kpis.totalCategories}</div>
-              </div>
+              <RetailBackofficeCard>
+                <p className="text-xs font-medium text-slate-500">Categories</p>
+                <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">{kpis.totalCategories}</p>
+              </RetailBackofficeCard>
 
-              {/* Total Stock Units */}
-              <div className="bg-white border border-gray-200 rounded-lg p-4 shadow">
-                <div className="text-sm text-gray-600 mb-1">Total Stock Units</div>
-                <div className="text-2xl font-bold text-gray-900">{kpis.totalStockUnits.toLocaleString()}</div>
-              </div>
+              <RetailBackofficeCard>
+                <p className="text-xs font-medium text-slate-500">Stock units</p>
+                <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">
+                  {kpis.totalStockUnits.toLocaleString()}
+                </p>
+              </RetailBackofficeCard>
 
-              {/* Out of Stock Count */}
-              <div className="bg-white border border-red-200 rounded-lg p-4 shadow">
-                <div className="text-sm text-red-600 mb-1">Out of Stock Items</div>
-                <div className="text-2xl font-bold text-red-600">{kpis.outOfStockCount}</div>
-              </div>
+              <RetailBackofficeCard className="border-rose-200/80 bg-rose-50/40">
+                <p className="text-xs font-medium text-rose-900/80">Out of stock</p>
+                <p className="mt-2 text-2xl font-semibold tracking-tight text-rose-950 tabular-nums">{kpis.outOfStockCount}</p>
+              </RetailBackofficeCard>
 
-              {/* Low Stock Count */}
-              <div className="bg-white border border-yellow-200 rounded-lg p-4 shadow">
-                <div className="text-sm text-yellow-600 mb-1">Low Stock Items</div>
-                <div className="text-2xl font-bold text-yellow-600">{kpis.lowStockCount}</div>
-              </div>
+              <RetailBackofficeCard className="border-amber-200/80 bg-amber-50/40">
+                <p className="text-xs font-medium text-amber-950/80">Low stock</p>
+                <p className="mt-2 text-2xl font-semibold tracking-tight text-amber-950 tabular-nums">{kpis.lowStockCount}</p>
+              </RetailBackofficeCard>
             </div>
 
-            {/* Profit Analytics */}
-            <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 shadow">
-              <h2 className="text-lg font-semibold mb-3">Profit Analytics</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-green-50 border border-green-200 rounded p-4">
-                  <div className="text-sm text-green-700 mb-1">Daily Gross Profit</div>
-                  <div className="text-2xl font-bold text-green-800">{formatCurrency(dailyGrossProfit)}</div>
-                  <div className="text-xs text-green-600 mt-1">
-                    Revenue: {formatCurrency(dailyRevenue)} | COGS: {formatCurrency(dailyCogs)}
-                  </div>
+            <RetailBackofficeCard className="mb-8">
+              <RetailBackofficeCardTitle className="mb-4">Profit snapshot</RetailBackofficeCardTitle>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                  <p className="text-xs font-medium text-slate-500">Daily gross profit</p>
+                  <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">
+                    {formatCurrency(dailyGrossProfit)}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-600">
+                    Revenue {formatCurrency(dailyRevenue)} · COGS {formatCurrency(dailyCogs)}
+                  </p>
                 </div>
-                <div className="bg-blue-50 border border-blue-200 rounded p-4">
-                  <div className="text-sm text-blue-700 mb-1">Monthly Gross Profit</div>
-                  <div className="text-2xl font-bold text-blue-800">{formatCurrency(monthlyGrossProfit)}</div>
-                  <div className="text-xs text-blue-600 mt-1">
-                    Revenue: {formatCurrency(monthlyRevenue)} | COGS: {formatCurrency(monthlyCogs)}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Low Stock Overview */}
-            <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 shadow">
-              <h2 className="text-lg font-semibold mb-3">Low-Stock Overview</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-yellow-50 border border-yellow-200 rounded p-4">
-                  <div className="text-sm text-yellow-700 mb-1">Low Stock Items</div>
-                  <div className="text-2xl font-bold text-yellow-800">{lowStockCount}</div>
-                  <div className="text-xs text-yellow-600 mt-1">Items below threshold</div>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded p-4">
-                  <div className="text-sm text-red-700 mb-1">Out of Stock Items</div>
-                  <div className="text-2xl font-bold text-red-800">{outOfStockCount}</div>
-                  <div className="text-xs text-red-600 mt-1">Items with zero stock</div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                  <p className="text-xs font-medium text-slate-500">Monthly gross profit</p>
+                  <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 tabular-nums">
+                    {formatCurrency(monthlyGrossProfit)}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-600">
+                    Revenue {formatCurrency(monthlyRevenue)} · COGS {formatCurrency(monthlyCogs)}
+                  </p>
                 </div>
               </div>
-            </div>
+            </RetailBackofficeCard>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              {/* Out of Stock List */}
-              <div className="bg-white border border-gray-200 rounded-lg shadow">
-                <div className="p-4 border-b border-gray-200">
-                  <h2 className="text-lg font-semibold">Out of Stock Items</h2>
+            <RetailBackofficeCard className="mb-8">
+              <RetailBackofficeCardTitle className="mb-4">Attention needed</RetailBackofficeCardTitle>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-amber-200/70 bg-amber-50/30 p-4">
+                  <p className="text-xs font-medium text-amber-950/80">Below threshold</p>
+                  <p className="mt-2 text-2xl font-semibold text-amber-950 tabular-nums">{lowStockCount}</p>
+                </div>
+                <div className="rounded-xl border border-rose-200/70 bg-rose-50/30 p-4">
+                  <p className="text-xs font-medium text-rose-950/80">Zero on hand</p>
+                  <p className="mt-2 text-2xl font-semibold text-rose-950 tabular-nums">{outOfStockCount}</p>
+                </div>
+              </div>
+            </RetailBackofficeCard>
+
+            <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <RetailBackofficeCard padding="p-0" className="overflow-hidden">
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <RetailBackofficeCardTitle>Out of stock</RetailBackofficeCardTitle>
+                  <p className="mt-1 text-xs text-slate-500">Zero on-hand for tracked products</p>
                 </div>
                 {outOfStockProducts.length === 0 ? (
-                  <div className="p-6 text-center text-gray-500">
-                    <p>No out of stock items</p>
-                  </div>
+                  <div className="px-5 py-10 text-center text-sm text-slate-500">No out-of-stock SKUs</div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
+                    <table className="w-full min-w-[480px]">
+                      <thead className="border-b border-slate-100 bg-slate-50/80">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Product
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Barcode
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Category
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Stock
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Action
+                          </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
+                      <tbody className="divide-y divide-slate-100">
                         {outOfStockProducts.map((product) => (
-                          <tr key={product.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">{product.name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{product.barcode || "-"}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{product.category_name || "Uncategorized"}</td>
-                            <td className="px-4 py-3 text-sm text-red-600 font-semibold">0</td>
+                          <tr
+                            key={product.variant_id ? `${product.id}-${product.variant_id}` : product.id}
+                            className="transition-colors hover:bg-slate-50/60"
+                          >
+                            <td className="px-4 py-3 text-sm font-medium text-slate-900">{product.name}</td>
+                            <td className="px-4 py-3 text-sm text-slate-600">{product.barcode || "—"}</td>
+                            <td className="px-4 py-3 text-sm text-slate-600">{product.category_name || "Uncategorized"}</td>
+                            <td className="px-4 py-3 text-sm font-semibold text-rose-800 tabular-nums">0</td>
                             <td className="px-4 py-3 text-sm">
-                              <a
-                                href={`/products`}
-                                className="text-blue-600 hover:underline"
+                              <RetailBackofficeButton
+                                variant="ghost"
+                                className="text-xs"
+                                onClick={() => router.push(retailPaths.productEdit(product.id))}
                               >
-                                View
-                              </a>
+                                Edit
+                              </RetailBackofficeButton>
                             </td>
                           </tr>
                         ))}
@@ -708,88 +796,116 @@ export default function InventoryDashboardPage() {
                     </table>
                   </div>
                 )}
-              </div>
+              </RetailBackofficeCard>
 
-              {/* Recently Adjusted Items */}
-              <div className="bg-white border border-gray-200 rounded-lg shadow">
-                <div className="p-4 border-b border-gray-200">
-                  <h2 className="text-lg font-semibold">Recently Adjusted Items</h2>
+              <RetailBackofficeCard padding="p-0" className="overflow-hidden">
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <RetailBackofficeCardTitle>Recent adjustments</RetailBackofficeCardTitle>
+                  <p className="mt-1 text-xs text-slate-500">Latest logged stock changes</p>
                 </div>
                 {recentAdjustments.length === 0 ? (
-                  <div className="p-6 text-center text-gray-500">
-                    <p>No recent adjustments</p>
-                  </div>
+                  <div className="px-5 py-10 text-center text-sm text-slate-500">No recent adjustments</div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
+                    <table className="w-full min-w-[480px]">
+                      <thead className="border-b border-slate-100 bg-slate-50/80">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Staff</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Product
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Type
+                          </th>
+                          <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Qty
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Date
+                          </th>
+                          <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Staff
+                          </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
+                      <tbody className="divide-y divide-slate-100">
                         {recentAdjustments.map((adjustment) => (
-                          <tr key={adjustment.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm text-gray-900">{adjustment.product_name}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{getAdjustmentTypeLabel(adjustment.type, adjustment.quantity_change)}</td>
-                            <td className="px-4 py-3 text-sm text-right">
-                              <span className={adjustment.quantity_change > 0 ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
+                          <tr key={adjustment.id} className="transition-colors hover:bg-slate-50/60">
+                            <td className="px-4 py-3 text-sm text-slate-900">{adjustment.product_name}</td>
+                            <td className="px-4 py-3 text-sm text-slate-600">
+                              {getAdjustmentTypeLabel(adjustment.type, adjustment.quantity_change)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-sm tabular-nums">
+                              <span
+                                className={
+                                  adjustment.quantity_change > 0
+                                    ? "font-semibold text-emerald-800"
+                                    : "font-semibold text-rose-800"
+                                }
+                              >
                                 {adjustment.quantity_change > 0 ? "+" : ""}
                                 {adjustment.quantity_change}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{formatDate(adjustment.created_at)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{adjustment.user_name}</td>
+                            <td className="px-4 py-3 text-sm text-slate-600">{formatDate(adjustment.created_at)}</td>
+                            <td className="px-4 py-3 text-sm text-slate-600">{adjustment.user_name}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
-              </div>
+              </RetailBackofficeCard>
             </div>
 
-            {/* Top Selling Items */}
-            <div className="bg-white border border-gray-200 rounded-lg shadow">
-              <div className="p-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold">Top-Selling Items (Last 30 Days)</h2>
+            <RetailBackofficeCard padding="p-0" className="overflow-hidden">
+              <div className="border-b border-slate-100 px-5 py-4">
+                <RetailBackofficeCardTitle>Top sellers (30 days)</RetailBackofficeCardTitle>
+                <p className="mt-1 text-xs text-slate-500">By units sold</p>
               </div>
               {topSellingItems.length === 0 ? (
-                <div className="p-6 text-center text-gray-500">
-                  <p>No sales data available for the last 30 days</p>
-                </div>
+                <div className="px-5 py-10 text-center text-sm text-slate-500">No sales in the last 30 days</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
+                  <table className="w-full min-w-[560px]">
+                    <thead className="border-b border-slate-100 bg-slate-50/80">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Units Sold</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">COGS</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Gross Profit</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Product
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Units
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Revenue
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          COGS
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Gross profit
+                        </th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200">
+                    <tbody className="divide-y divide-slate-100">
                       {topSellingItems.map((item) => (
-                        <tr key={item.product_id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{item.product_name}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">{item.units_sold.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(item.revenue)}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">
-                            {item.cogs > 0 ? formatCurrency(item.cogs) : "-"}
+                        <tr key={item.product_id} className="transition-colors hover:bg-slate-50/60">
+                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.product_name}</td>
+                          <td className="px-4 py-3 text-right text-sm tabular-nums text-slate-600">
+                            {item.units_sold.toLocaleString()}
                           </td>
-                          <td className="px-4 py-3 text-sm text-right font-semibold">
+                          <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-slate-900">
+                            {formatCurrency(item.revenue)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm tabular-nums text-slate-600">
+                            {item.cogs > 0 ? formatCurrency(item.cogs) : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
                             {item.gross_profit > 0 ? (
-                              <span className="text-green-600">{formatCurrency(item.gross_profit)}</span>
+                              <span className="text-emerald-800">{formatCurrency(item.gross_profit)}</span>
                             ) : item.cogs > 0 ? (
-                              <span className="text-red-600">{formatCurrency(item.gross_profit)}</span>
+                              <span className="text-rose-800">{formatCurrency(item.gross_profit)}</span>
                             ) : (
-                              "-"
+                              "—"
                             )}
                           </td>
                         </tr>
@@ -798,11 +914,11 @@ export default function InventoryDashboardPage() {
                   </table>
                 </div>
               )}
-            </div>
+            </RetailBackofficeCard>
           </>
         )}
-      </div>
-    </>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }
 

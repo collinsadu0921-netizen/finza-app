@@ -7,8 +7,13 @@
 import {
   resolveAccess,
   getWorkspaceFromPath,
+  isPosSurfacePath,
+  isPinCashierRetailAllowedPath,
 } from "../accessControl"
+import { activateRetailPosPinUrlIsolation } from "../retail/posPinUrlIsolation"
 import { getCurrentBusiness } from "../business"
+import { isCashierAuthenticated } from "../cashierSession"
+import { getUserRole } from "../userRoles"
 
 jest.mock("../business")
 jest.mock("../userRoles", () => ({
@@ -23,6 +28,8 @@ jest.mock("../cashierSession", () => ({
 }))
 
 const mockGetCurrentBusiness = getCurrentBusiness as jest.MockedFunction<typeof getCurrentBusiness>
+const mockIsCashierAuthenticated = isCashierAuthenticated as jest.MockedFunction<typeof isCashierAuthenticated>
+const mockGetUserRole = getUserRole as jest.MockedFunction<typeof getUserRole>
 
 function createMockSupabase(overrides: {
   firmUsersData?: Array<{ firm_id: string }>
@@ -50,6 +57,32 @@ function createMockSupabase(overrides: {
 }
 
 describe("accessControl", () => {
+  describe("isPosSurfacePath", () => {
+    it("matches /retail/pos, /retail/pos/*, /pos, /pos/* only", () => {
+      expect(isPosSurfacePath("/retail/pos")).toBe(true)
+      expect(isPosSurfacePath("/retail/pos/pin")).toBe(true)
+      expect(isPosSurfacePath("/retail/pos/foo")).toBe(true)
+      expect(isPosSurfacePath("/pos")).toBe(true)
+      expect(isPosSurfacePath("/pos/pin")).toBe(true)
+      expect(isPosSurfacePath("/retail/dashboard")).toBe(false)
+      expect(isPosSurfacePath("/retail/sales/open-session")).toBe(false)
+      expect(isPosSurfacePath("/inventory")).toBe(false)
+    })
+  })
+
+  describe("isPinCashierRetailAllowedPath", () => {
+    it("allows POS shell and POS-adjacent retail sales routes", () => {
+      expect(isPinCashierRetailAllowedPath("/retail/pos")).toBe(true)
+      expect(isPinCashierRetailAllowedPath("/retail/pos/pin")).toBe(true)
+      expect(isPinCashierRetailAllowedPath("/retail/sales/open-session")).toBe(true)
+      expect(isPinCashierRetailAllowedPath("/retail/sales/close-session")).toBe(true)
+      expect(isPinCashierRetailAllowedPath("/retail/sales/offline/abc")).toBe(true)
+      expect(isPinCashierRetailAllowedPath("/retail/sales/sale-id/receipt")).toBe(true)
+      expect(isPinCashierRetailAllowedPath("/retail/dashboard")).toBe(false)
+      expect(isPinCashierRetailAllowedPath("/retail/products")).toBe(false)
+    })
+  })
+
   describe("getWorkspaceFromPath", () => {
     it("returns accounting for /accounting/* paths", () => {
       expect(getWorkspaceFromPath("/accounting/ledger")).toBe("accounting")
@@ -129,6 +162,159 @@ describe("accessControl", () => {
 
       const journals = await resolveAccess(supabase, "user-1", "/accounting/journals")
       expect(journals.allowed).toBe(true)
+    })
+  })
+
+  describe("resolveAccess – POS surface (PIN + cashier role)", () => {
+    beforeEach(() => {
+      mockIsCashierAuthenticated.mockReturnValue(false)
+      mockGetUserRole.mockResolvedValue("owner" as any)
+    })
+
+    it("allows no-user + PIN on /retail/pos", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(true)
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/pos")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("denies no-user + no PIN on /retail/pos with redirect to retail PIN", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(false)
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/pos")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos/pin")
+    })
+
+    it("denies no-user + PIN on non-POS retail routes (redirect to retail PIN)", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(true)
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos/pin")
+    })
+
+    it("allows no-user + PIN on /retail/sales/open-session", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(true)
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/sales/open-session")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("denies owner + PIN session on /retail/dashboard (redirect to POS)", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(true)
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, "owner-user", "/retail/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos")
+    })
+
+    it("allows cashier role on /retail/pos", async () => {
+      mockGetUserRole.mockResolvedValue("cashier" as any)
+      const supabase = createMockSupabase()
+      mockGetCurrentBusiness.mockResolvedValue({ id: "b-retail", industry: "retail" } as any)
+      const res = await resolveAccess(supabase, "cashier-user", "/retail/pos")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("allows cashier role on /retail/admin/staff", async () => {
+      mockGetUserRole.mockResolvedValue("cashier" as any)
+      const supabase = createMockSupabase()
+      mockGetCurrentBusiness.mockResolvedValue({ id: "b-retail", industry: "retail" } as any)
+      const res = await resolveAccess(supabase, "cashier-user", "/retail/admin/staff")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("denies cashier role on non-POS retail routes (e.g. dashboard)", async () => {
+      mockGetUserRole.mockResolvedValue("cashier" as any)
+      const supabase = createMockSupabase()
+      mockGetCurrentBusiness.mockResolvedValue({ id: "b-retail", industry: "retail" } as any)
+      const res = await resolveAccess(supabase, "cashier-user", "/retail/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos")
+    })
+
+    it("allows signed-in user with PIN session on /retail/admin/staff", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(true)
+      mockGetUserRole.mockResolvedValue("owner" as any)
+      const supabase = createMockSupabase()
+      mockGetCurrentBusiness.mockResolvedValue({ id: "b-retail", industry: "retail" } as any)
+      const res = await resolveAccess(supabase, "owner-user", "/retail/admin/staff")
+      expect(res.allowed).toBe(true)
+    })
+  })
+
+  describe("resolveAccess – retail PIN URL isolation (signed-in owner)", () => {
+    const sessionMem: Record<string, string> = {}
+    const mockSessionStorage = {
+      getItem: (k: string) => sessionMem[k] ?? null,
+      setItem: (k: string, v: string) => {
+        sessionMem[k] = String(v)
+      },
+      removeItem: (k: string) => {
+        delete sessionMem[k]
+      },
+      clear: () => {
+        Object.keys(sessionMem).forEach((key) => delete sessionMem[key])
+      },
+      key: () => "",
+      get length() {
+        return Object.keys(sessionMem).length
+      },
+    } as Storage
+
+    beforeAll(() => {
+      Object.defineProperty(globalThis, "sessionStorage", {
+        configurable: true,
+        value: mockSessionStorage,
+      })
+    })
+
+    afterAll(() => {
+      Reflect.deleteProperty(globalThis, "sessionStorage")
+    })
+
+    beforeEach(() => {
+      mockSessionStorage.clear()
+      mockIsCashierAuthenticated.mockReturnValue(false)
+      mockGetUserRole.mockResolvedValue("owner" as any)
+      mockGetCurrentBusiness.mockResolvedValue({ id: "b-retail", industry: "retail" } as any)
+    })
+
+    it("allows owner to /retail/admin when PIN URL lock is not active", async () => {
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, "owner-1", "/retail/admin/registers")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("allows owner to /retail/admin when PIN URL lock is active (back-office bypasses kiosk lock)", async () => {
+      activateRetailPosPinUrlIsolation()
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, "owner-1", "/retail/admin/registers")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("allows owner to /retail/settings and /retail/reports when PIN URL lock is active", async () => {
+      activateRetailPosPinUrlIsolation()
+      const supabase = createMockSupabase()
+      const settings = await resolveAccess(supabase, "owner-1", "/retail/settings/receipt")
+      const reports = await resolveAccess(supabase, "owner-1", "/retail/reports/sales")
+      expect(settings.allowed).toBe(true)
+      expect(reports.allowed).toBe(true)
+    })
+
+    it("allows owner to /retail/admin/staff when PIN URL lock is active", async () => {
+      activateRetailPosPinUrlIsolation()
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, "owner-1", "/retail/admin/staff")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("allows owner to /retail/pos/pin when PIN URL lock is active", async () => {
+      activateRetailPosPinUrlIsolation()
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, "owner-1", "/retail/pos/pin")
+      expect(res.allowed).toBe(true)
     })
   })
 })

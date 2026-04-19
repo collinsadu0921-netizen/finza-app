@@ -5,6 +5,20 @@ import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import Link from "next/link"
+import {
+  RetailBackofficeAlert,
+  RetailBackofficeBadge,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeEmpty,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+  RetailBackofficeSkeleton,
+  retailFieldClass,
+  retailLabelClass,
+} from "@/components/retail/RetailBackofficeUi"
+import { supplierPaymentPreferenceLabel, supplierPaymentTermsLabel } from "@/lib/retail/supplierRetailFields"
 
 type Supplier = {
   id: string
@@ -13,6 +27,15 @@ type Supplier = {
   email: string | null
   status: "active" | "blocked"
   created_at: string
+  contact_person?: string | null
+  payment_preference?: string | null
+  payment_terms_type?: string | null
+  payment_terms_custom?: string | null
+  location_line?: string | null
+}
+
+function statusTone(status: string): "success" | "danger" {
+  return status === "active" ? "success" : "danger"
 }
 
 export default function SuppliersPage() {
@@ -22,10 +45,6 @@ export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-
-  useEffect(() => {
-    loadSuppliers()
-  }, [statusFilter])
 
   const loadSuppliers = async () => {
     try {
@@ -37,217 +56,185 @@ export default function SuppliersPage() {
       } = await supabase.auth.getUser()
 
       if (!user) {
-        setError("You must be logged in")
+        setError("Sign in to manage suppliers.")
         setLoading(false)
         return
       }
 
       const business = await getCurrentBusiness(supabase, user.id)
       if (!business) {
-        setError("Business not found")
+        setError("No store found for your account.")
         setLoading(false)
         return
       }
 
       const params = new URLSearchParams()
-      if (statusFilter !== "all") {
-        params.append("status", statusFilter)
-      }
-      if (searchQuery) {
-        params.append("search", searchQuery)
-      }
+      if (statusFilter !== "all") params.append("status", statusFilter)
+      if (searchQuery.trim()) params.append("search", searchQuery.trim())
 
       const response = await fetch(`/api/suppliers?${params.toString()}`)
       const data = await response.json()
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load suppliers")
-      }
+      if (!response.ok) throw new Error(data.error || "Failed to load suppliers")
 
       setSuppliers(data.suppliers || [])
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load suppliers"
       console.error("Error loading suppliers:", err)
-      setError(err.message || "Failed to load suppliers")
+      setError(message)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSearch = () => {
-    loadSuppliers()
-  }
-
-  const getStatusBadge = (status: string) => {
-    return (
-      <span
-        className={`px-2 py-1 rounded text-xs font-semibold ${
-          status === "active"
-            ? "bg-green-100 text-green-800"
-            : "bg-red-100 text-red-800"
-        }`}
-      >
-        {status.toUpperCase()}
-      </span>
-    )
-  }
-
-  if (loading) {
-    return (
-      <>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading suppliers...</p>
-          </div>
-        </div>
-      </>
-    )
-  }
+  useEffect(() => {
+    void loadSuppliers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- search on button / Enter like customers list
+  }, [statusFilter])
 
   return (
-    <>
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Suppliers</h1>
-            <p className="text-gray-600 mt-1">
-              Manage your suppliers and purchase orders
-            </p>
-          </div>
-          <Link
-            href="/admin/retail/suppliers/new"
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            + New Supplier
-          </Link>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain className="max-w-5xl">
+        <RetailBackofficePageHeader
+          eyebrow="Procurement"
+          title="Suppliers"
+          description="Who you buy stock from — contacts, how you pay, and quick links to purchase orders. Keep records light and practical."
+          actions={
+            <RetailBackofficeButton variant="primary" type="button" onClick={() => router.push("/retail/admin/suppliers/new")}>
+              New supplier
+            </RetailBackofficeButton>
+          }
+        />
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        {error ? (
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error}
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        {/* Search and Filters */}
-        <div className="mb-4 flex gap-2">
-          <input
-            type="text"
-            placeholder="Search suppliers..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            className="flex-1 border rounded px-4 py-2"
+        <RetailBackofficeCard className="mb-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+            <div className="min-w-0 flex-1">
+              <label className={retailLabelClass}>Search</label>
+              <input
+                type="search"
+                placeholder="Name, phone, contact, location, notes…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void loadSuppliers()}
+                className={retailFieldClass}
+                autoComplete="off"
+              />
+            </div>
+            <RetailBackofficeButton variant="secondary" type="button" onClick={() => void loadSuppliers()}>
+              Search
+            </RetailBackofficeButton>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            {(["all", "active", "blocked"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setStatusFilter(key)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  statusFilter === key
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                {key === "all" ? "All" : key === "active" ? "Active" : "Blocked"}
+              </button>
+            ))}
+          </div>
+        </RetailBackofficeCard>
+
+        {loading ? (
+          <RetailBackofficeSkeleton rows={5} />
+        ) : suppliers.length === 0 ? (
+          <RetailBackofficeEmpty
+            title="No suppliers match"
+            description="Try another search, clear filters, or add a vendor you order from often."
+            action={
+              <RetailBackofficeButton variant="primary" type="button" onClick={() => router.push("/retail/admin/suppliers/new")}>
+                New supplier
+              </RetailBackofficeButton>
+            }
           />
-          <button
-            onClick={handleSearch}
-            className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
-          >
-            Search
-          </button>
-          <button
-            onClick={() => setStatusFilter("all")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "all"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setStatusFilter("active")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "active"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            Active
-          </button>
-          <button
-            onClick={() => setStatusFilter("blocked")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "blocked"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            Blocked
-          </button>
-        </div>
-
-        {/* Suppliers Table */}
-        {suppliers.length === 0 ? (
-          <div className="bg-white rounded-lg shadow p-8 text-center">
-            <p className="text-gray-600">No suppliers found</p>
-            <Link
-              href="/admin/retail/suppliers/new"
-              className="text-blue-600 hover:underline mt-2 inline-block"
-            >
-              Create your first supplier
-            </Link>
-          </div>
         ) : (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contact
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Created
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {suppliers.map((supplier) => (
-                  <tr key={supplier.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {supplier.name}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <div>{supplier.phone || "-"}</div>
-                      <div>{supplier.email || "-"}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(supplier.status)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(supplier.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <Link
-                        href={`/admin/retail/suppliers/${supplier.id}`}
-                        className="text-blue-600 hover:text-blue-900 mr-4"
-                      >
-                        View
-                      </Link>
-                      <Link
-                        href={`/admin/retail/purchase-orders/new?supplier_id=${supplier.id}`}
-                        className="text-green-600 hover:text-green-900"
-                      >
-                        New PO
-                      </Link>
-                    </td>
+          <RetailBackofficeCard padding="p-0 sm:p-0" className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur-sm">
+                  <tr>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Business
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Contact
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Pay / terms
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {suppliers.map((supplier) => (
+                    <tr key={supplier.id} className="transition hover:bg-slate-50/80">
+                      <td className="px-4 py-3.5 font-medium text-slate-900 sm:px-6">
+                        <div>{supplier.name}</div>
+                        {supplier.location_line ? (
+                          <div className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{supplier.location_line}</div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3.5 text-slate-600 sm:px-6">
+                        {supplier.contact_person ? (
+                          <div className="font-medium text-slate-800">{supplier.contact_person}</div>
+                        ) : null}
+                        <div className="whitespace-nowrap">{supplier.phone || "—"}</div>
+                        <div className="text-xs text-slate-500">{supplier.email || "—"}</div>
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-slate-600 sm:px-6">
+                        <div>{supplierPaymentPreferenceLabel(supplier.payment_preference ?? undefined)}</div>
+                        <div className="text-slate-500">
+                          {supplierPaymentTermsLabel(
+                            supplier.payment_terms_type ?? undefined,
+                            supplier.payment_terms_custom
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-6">
+                        <RetailBackofficeBadge tone={statusTone(supplier.status)}>
+                          {supplier.status === "active" ? "Active" : "Blocked"}
+                        </RetailBackofficeBadge>
+                      </td>
+                      <td className="px-4 py-3.5 text-right sm:px-6">
+                        <Link
+                          href={`/retail/admin/suppliers/${supplier.id}`}
+                          className="mr-3 text-sm font-medium text-slate-900 underline-offset-2 hover:underline"
+                        >
+                          Open
+                        </Link>
+                        <Link
+                          href={`/retail/admin/purchase-orders/new?supplier_id=${encodeURIComponent(supplier.id)}`}
+                          className="text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+                        >
+                          New PO
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </RetailBackofficeCard>
         )}
-      </div>
-    </>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }

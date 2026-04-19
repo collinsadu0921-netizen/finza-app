@@ -7,6 +7,7 @@ import { getAuthorityLevel, requiresOverride, REQUIRED_AUTHORITY } from "@/lib/a
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { calculateExpectedCash } from "@/lib/db/actions/register"
 
 interface CloseRegisterModalProps {
   isOpen: boolean
@@ -33,6 +34,7 @@ export default function CloseRegisterModal({
   const [error, setError] = useState("")
   const [showOverrideModal, setShowOverrideModal] = useState(false)
   const [sessionData, setSessionData] = useState<any>(null)
+  const [goodsSoldSessionTotal, setGoodsSoldSessionTotal] = useState<number | null>(null)
 
   useEffect(() => {
     if (isOpen && sessionId) {
@@ -42,6 +44,7 @@ export default function CloseRegisterModal({
 
   const loadSessionData = async () => {
     try {
+      setGoodsSoldSessionTotal(null)
       // Get session data
       const { data: session, error: sessionError } = await supabase
         .from("cashier_sessions")
@@ -53,73 +56,24 @@ export default function CloseRegisterModal({
 
       setSessionData(session)
 
-      // Load business to get currency
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      // Calculate expected cash
-      // Expected = opening_float + cash sales - cash drops
-      const openingFloat = Number(session.opening_float || 0)
-
-      // Get cash sales and change given for this session
-      const { data: allSales, error: salesError } = await supabase
+      const { data: sessionSales, error: sessionSalesErr } = await supabase
         .from("sales")
-        .select("amount, cash_amount, change_given, payment_method")
+        .select("amount")
         .eq("cashier_session_id", sessionId)
         .eq("payment_status", "paid")
 
-      if (salesError) throw salesError
-
-      // LEDGER-BASED: Expected cash = Cash account (1000) ledger balance
-      const businessId = session.business_id
-      if (!businessId) {
-        throw new Error("Business ID not found for session")
+      if (sessionSalesErr) {
+        console.error("Session goods sold query:", sessionSalesErr)
+        setGoodsSoldSessionTotal(null)
+      } else {
+        const goodsTotal =
+          sessionSales?.reduce((sum, row) => sum + Number((row as { amount?: unknown }).amount || 0), 0) ?? 0
+        setGoodsSoldSessionTotal(goodsTotal)
       }
 
-      // Get Cash account (account_code '1000')
-      const { data: cashAccount } = await supabase
-        .from("accounts")
-        .select("id")
-        .eq("business_id", businessId)
-        .eq("code", "1000")
-        .is("deleted_at", null)
-        .single()
-
-      if (!cashAccount) {
-        // Fallback to opening float if cash account not found
-        setExpectedCash(openingFloat)
-        return
-      }
-
-      // Calculate Cash account balance: SUM(debit) - SUM(credit) for asset account
-      const { data: cashLines } = await supabase
-        .from("journal_entry_lines")
-        .select(
-          `
-          debit,
-          credit,
-          journal_entries!inner (
-            business_id
-          )
-        `
-        )
-        .eq("account_id", cashAccount.id)
-        .eq("journal_entries.business_id", businessId)
-
-      if (!cashLines) {
-        // Fallback to opening float if no ledger entries
-        setExpectedCash(openingFloat)
-        return
-      }
-
-      // For asset accounts: balance = debit - credit
-      const cashBalance = cashLines.reduce(
-        (sum: number, line: any) => sum + Number(line.debit || 0) - Number(line.credit || 0),
-        0
-      )
-
-      setExpectedCash(Math.max(0, cashBalance))
+      // Session-scoped expected cash (opening + net cash sales − drops), not business-wide ledger
+      const expected = await calculateExpectedCash(supabase, sessionId)
+      setExpectedCash(Number.isFinite(expected) ? expected : Number(session.opening_float || 0))
     } catch (err: any) {
       setError(err.message || "Failed to load session data")
     }
@@ -262,6 +216,20 @@ export default function CloseRegisterModal({
           )}
 
           <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Goods sold (session)
+              </label>
+              <div className="border p-3 rounded bg-gray-50">
+                <span className="text-lg font-semibold">
+                  {goodsSoldSessionTotal === null ? "—" : format(goodsSoldSessionTotal)}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Total paid sales tied to this register session
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-2">
                 Expected Cash

@@ -1,10 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
-import { getSelectedBusinessId } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
+import { supabase } from "@/lib/supabaseClient"
+import { retailPaths } from "@/lib/retail/routes"
 
 type VatControlReport = {
   opening_balance: number
@@ -57,17 +59,60 @@ function getPeriodPresets() {
 
 export default function VatControlReportPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
+  const isRetailContext = Boolean(pathname?.startsWith("/retail/"))
   const businessIdFromUrl =
     searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
   const [businessId, setBusinessId] = useState<string | null>(businessIdFromUrl)
+  /** False until we have finished URL → localStorage → getCurrentBusiness resolution (avoids a false "no business" flash). */
+  const [businessContextReady, setBusinessContextReady] = useState(!!businessIdFromUrl)
   const { format } = useBusinessCurrency()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [reportData, setReportData] = useState<VatControlReport | null>(null)
 
   useEffect(() => {
-    setBusinessId(businessIdFromUrl ?? getSelectedBusinessId())
+    let cancelled = false
+
+    if (businessIdFromUrl) {
+      setBusinessId(businessIdFromUrl)
+      setBusinessContextReady(true)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setBusinessContextReady(false)
+    ;(async () => {
+      const fromStorage = getSelectedBusinessId()
+      if (fromStorage) {
+        if (!cancelled) {
+          setBusinessId(fromStorage)
+          setBusinessContextReady(true)
+        }
+        return
+      }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user || cancelled) {
+        if (!cancelled) {
+          setBusinessId(null)
+          setBusinessContextReady(true)
+        }
+        return
+      }
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (!cancelled) {
+        setBusinessId(business?.id ?? null)
+        setBusinessContextReady(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [businessIdFromUrl])
 
   const now = new Date()
@@ -81,8 +126,9 @@ export default function VatControlReportPage() {
   const presets = getPeriodPresets()
 
   useEffect(() => {
+    if (!businessContextReady) return
     loadReport()
-  }, [startDate, endDate, businessId])
+  }, [startDate, endDate, businessId, businessContextReady])
 
   const loadReport = async () => {
     try {
@@ -97,7 +143,7 @@ export default function VatControlReportPage() {
 
       if (!businessId) {
         setError(
-          "No business selected. Open VAT Report from the service sidebar or pick your workspace in settings."
+          "No business could be resolved for this report. Choose your business in workspace settings, or open the VAT report from a link that includes your business."
         )
         setLoading(false)
         return
@@ -146,7 +192,10 @@ export default function VatControlReportPage() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <button
-                onClick={() => router.back()}
+                type="button"
+                onClick={() =>
+                  isRetailContext ? router.push(retailPaths.dashboard) : router.back()
+                }
                 className="group flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
               >
                 <svg
@@ -155,7 +204,7 @@ export default function VatControlReportPage() {
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
-                Reports
+                {isRetailContext ? "Retail home" : "Reports"}
               </button>
               <span className="text-slate-300 dark:text-slate-600">|</span>
               <span className="font-mono text-xs tracking-widest text-slate-400 uppercase">
@@ -246,12 +295,15 @@ export default function VatControlReportPage() {
               {/* Header */}
               <div className="px-6 py-4 border-b border-slate-100 dark:border-gray-700">
                 <h1 className="text-lg font-semibold text-slate-800 dark:text-white tracking-tight">
-                  VAT Control Report
+                  VAT control (ledger)
                 </h1>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {reportData.account.code} — {reportData.account.name}
                   &ensp;·&ensp;
                   {reportData.period.start_date} to {reportData.period.end_date}
+                  {isRetailContext ? (
+                    <> · Totals follow posted journal entry dates (not POS receipt time).</>
+                  ) : null}
                 </p>
               </div>
 

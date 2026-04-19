@@ -26,4 +26,9 @@ describe("routePermissionRules", () => {
     expect(getRequiredPermissionForPath("/service/settings/team")).toBe("team.manage")
     expect(getRequiredPermissionForPath("/service/settings/subscription")).toBe("settings.view")
   })
+
+  it("retail ledger reports require reports.view", () => {
+    expect(getRequiredPermissionForPath("/retail/reports/profit-and-loss")).toBe("reports.view")
+    expect(getRequiredPermissionForPath("/retail/reports/balance-sheet")).toBe("reports.view")
+  })
 })

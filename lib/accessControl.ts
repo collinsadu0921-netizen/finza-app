@@ -22,6 +22,7 @@ import { getCurrentBusiness } from "./business"
 import { logAccessDeniedAttempt } from "./firmActivityLog"
 import { hasPermission, type CustomPermissions } from "./permissions"
 import { ROUTE_PERMISSION_RULES } from "./nav/routePermissionRules"
+import { isRetailPosPinUrlIsolationActive } from "./retail/posPinUrlIsolation"
 
 export type Workspace = "retail" | "service" | "accounting"
 
@@ -31,6 +32,41 @@ export interface AccessDecision {
   allowed: boolean
   redirectTo?: string
   reason?: string
+}
+
+function normalizePathnameForAccess(pathname: string | null | undefined): string {
+  const path = (pathname || "").split("?")[0]
+  if (path.endsWith("/") && path !== "/") return path.slice(0, -1)
+  return path || ""
+}
+
+/**
+ * True for POS terminal surfaces only — not other retail routes.
+ * Used for cashier role + PIN-only (no Supabase user) access; do not widen beyond this.
+ */
+export function isPosSurfacePath(pathname: string | null | undefined): boolean {
+  const p = normalizePathnameForAccess(pathname)
+  if (!p || p === "/") return false
+  return (
+    p === "/retail/pos" ||
+    p.startsWith("/retail/pos/") ||
+    p === "/pos" ||
+    p.startsWith("/pos/")
+  )
+}
+
+/**
+ * Routes a PIN cashier (or owner with parallel PIN session) may use inside the retail workspace.
+ * Broader than {@link isPosSurfacePath} — includes POS-adjacent session/receipt flows under `/retail/sales/*`.
+ */
+export function isPinCashierRetailAllowedPath(pathname: string | null | undefined): boolean {
+  const p = normalizePathnameForAccess(pathname)
+  if (!p) return false
+  if (isPosSurfacePath(p)) return true
+  if (p === "/retail/sales/open-session" || p === "/retail/sales/close-session") return true
+  if (p.startsWith("/retail/sales/offline/")) return true
+  if (/^\/retail\/sales\/[^/]+\/receipt$/.test(p)) return true
+  return false
 }
 
 /**
@@ -134,20 +170,49 @@ export async function resolveAccess(
 
   // STEP 1: Check authentication
   const cashierAuth = isCashierAuthenticated()
-  
+
   if (!userId) {
-    // No Supabase session - check for cashier PIN session for POS routes
-    if (pathname?.startsWith("/pos")) {
-      if (cashierAuth) {
-        // Cashier PIN session exists - allow POS routes only
-        return debugDecision({ allowed: true })
-      } else {
-        return debugDecision({ allowed: false, redirectTo: "/pos/pin", reason: "No cashier PIN session" })
+    // No Supabase session — PIN session may access POS shell + POS-adjacent retail routes only
+    if (cashierAuth && isPinCashierRetailAllowedPath(pathname)) {
+      return debugDecision({ allowed: true })
+    }
+    if (cashierAuth && getWorkspaceFromPath(pathname || "") === "retail") {
+      return debugDecision({
+        allowed: false,
+        redirectTo: "/retail/pos/pin",
+        reason: "PIN session: retail route outside cashier POS shell",
+      })
+    }
+    if (isPosSurfacePath(pathname)) {
+      return debugDecision({
+        allowed: false,
+        redirectTo: "/retail/pos/pin",
+        reason: "No cashier PIN session",
+      })
+    }
+    return debugDecision({ allowed: false, redirectTo: "/login", reason: "Not authenticated" })
+  }
+
+  // Logged-in user with an active cashier PIN session — same retail restrictions as PIN-only (owner kiosk).
+  // Exception: retail Staff page so signed-in users can manage / change PINs while a PIN session is still active.
+  if (cashierAuth) {
+    const ws = getWorkspaceFromPath(pathname || "")
+    if (ws === "retail" && !isPinCashierRetailAllowedPath(pathname)) {
+      const p = normalizePathnameForAccess(pathname || "")
+      const allowRetailStaff =
+        !!userId && (p === "/retail/admin/staff" || p.startsWith("/retail/admin/staff/"))
+      if (!allowRetailStaff) {
+        return debugDecision({
+          allowed: false,
+          redirectTo: "/retail/pos",
+          reason: "PIN cashier session: retail workspace limited to POS shell routes",
+        })
       }
-    } else {
-      return debugDecision({ allowed: false, redirectTo: "/login", reason: "Not authenticated" })
     }
   }
+
+  // Retail PIN URL isolation (kiosk lock) is applied AFTER role resolution — see STEP 8.5 below.
+  // Applying it here would block owners/admins/managers from /retail/admin/* before we know their role.
 
   // STEP 2: Get user metadata (for signup intent check)
   let signupIntent: "business_owner" | "accounting_firm" = "business_owner"
@@ -321,12 +386,17 @@ export async function resolveAccess(
   }
   
   if (workspace === "service" && businessIndustry === "retail") {
-    // Retail user trying to access service workspace - redirect to retail
-    return debugDecision({
-      allowed: false,
-      redirectTo: "/retail/dashboard",
-      reason: "Service workspace routes are not available for retail businesses",
-    })
+    // Shared hubs (e.g. VAT) live under /reports/* but are not "service" industry routes
+    const p = normalizePathnameForAccess(pathname || "")
+    if (p.startsWith("/reports")) {
+      // allow — e.g. /reports/vat for retail businesses
+    } else {
+      return debugDecision({
+        allowed: false,
+        redirectTo: "/retail/dashboard",
+        reason: "Service workspace routes are not available for retail businesses",
+      })
+    }
   }
 
   // STEP 6: Apply workspace-specific access rules
@@ -383,12 +453,20 @@ export async function resolveAccess(
     return debugDecision({ allowed: false, redirectTo: "/login", reason: "No user role" })
   }
 
-  // Cashier rules: Only POS routes
+  // Cashier rules: POS surface + retail Staff (PIN / user management for their own account)
   if ((role as UserRole) === "cashier") {
-    if (pathname?.startsWith("/pos")) {
+    if (isPosSurfacePath(pathname)) {
       return debugDecision({ allowed: true })
     }
-    return debugDecision({ allowed: false, redirectTo: "/pos", reason: "Cashiers can only access POS" })
+    const p = normalizePathnameForAccess(pathname || "")
+    if (p === "/retail/admin/staff" || p.startsWith("/retail/admin/staff/")) {
+      return debugDecision({ allowed: true })
+    }
+    return debugDecision({
+      allowed: false,
+      redirectTo: "/retail/pos",
+      reason: "Cashiers can only access POS and staff settings",
+    })
   }
 
   // Fetch custom_permissions now (after cashier early-return to avoid wasted DB query)
@@ -476,6 +554,26 @@ export async function resolveAccess(
     }
   }
 
+  // STEP 8.5: Retail PIN URL isolation (sessionStorage kiosk lock from PIN screen — see posPinUrlIsolation.ts).
+  // Only constrain users who are NOT retail back-office roles. Owners/admins/managers may use /retail/admin,
+  // settings, reports, and dashboard even while the lock flag is set (e.g. after visiting PIN once in the tab).
+  if (
+    userId &&
+    !isCashierAuthenticated() &&
+    isRetailPosPinUrlIsolationActive() &&
+    workspace === "retail"
+  ) {
+    const privilegedRetailBackoffice =
+      role === "owner" || role === "admin" || role === "manager"
+    if (!isPinCashierRetailAllowedPath(pathname) && !privilegedRetailBackoffice) {
+      return debugDecision({
+        allowed: false,
+        redirectTo: "/retail/pos/pin",
+        reason: "Cashier PIN screen lock: exit the PIN page before using other retail routes",
+      })
+    }
+  }
+
   // STEP 9: Access granted
   return debugDecision({ allowed: true })
 }
@@ -496,7 +594,7 @@ export function getHomeRouteForRole(role: UserRole, workspace: Workspace = "reta
 
   switch (role) {
     case "cashier":
-      return "/pos"
+      return "/retail/pos"
     case "manager":
       return workspace === "accounting" ? "/accounting" : "/retail/dashboard"
     case "admin":

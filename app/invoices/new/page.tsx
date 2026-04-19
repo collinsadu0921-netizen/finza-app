@@ -19,6 +19,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect, type MenuSelectOption } from "@/components/ui/MenuSelect"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
+import { openWhatsAppUrlInBrowser } from "@/lib/communication/openWhatsAppClient"
 
 type Customer = {
   id: string
@@ -250,7 +251,14 @@ export default function NewInvoicePage() {
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
   const [createdInvoiceCustomer, setCreatedInvoiceCustomer] = useState<any>(null)
   const [previewInvoiceId, setPreviewInvoiceId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
+  const [toast, setToast] = useState<{
+    message: string
+    type: "success" | "error" | "info"
+    duration?: number
+  } | null>(null)
+
+  const invoiceViewHref = (id: string) =>
+    pathname?.startsWith("/service") ? `/service/invoices/${id}/view` : `/invoices/${id}/view`
 
   useEffect(() => {
     loadData()
@@ -639,7 +647,7 @@ export default function NewInvoicePage() {
         setLoading(false)
       } else {
         // Draft saved - redirect to view
-        router.push(`/service/invoices/${invoiceId}/view`)
+        router.push(invoiceViewHref(invoiceId))
       }
 
     } catch (err: any) {
@@ -912,6 +920,16 @@ export default function NewInvoicePage() {
 
             {/* 3. High Density Line Items Table */}
             <div className="border-t border-slate-200 dark:border-slate-700">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 sm:px-6">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                  Add Line Item
+                </button>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[56rem] table-fixed text-sm text-left">
                   <colgroup>
@@ -936,7 +954,7 @@ export default function NewInvoicePage() {
                     {items.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic bg-slate-50/30">
-                          No line items added. Click "Add Line Item" below to start.
+                          No line items added. Use &quot;Add Line Item&quot; above to start.
                         </td>
                       </tr>
                     ) : (
@@ -955,16 +973,6 @@ export default function NewInvoicePage() {
                     )}
                   </tbody>
                 </table>
-              </div>
-              {/* Table Footer Action */}
-              <div className="bg-slate-50 border-t border-slate-200 px-6 py-3">
-                <button
-                  onClick={addItem}
-                  className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                  Add Line Item
-                </button>
               </div>
             </div>
 
@@ -1253,28 +1261,96 @@ export default function NewInvoicePage() {
               invoiceId={createdInvoiceId}
               customer={createdInvoiceCustomer}
               onSend={async (method) => {
-                // Reusing original handleSend logic
                 if (!createdInvoiceId) return
                 setLoading(true)
+                const needsWaPrep = method === "whatsapp" || method === "both"
+                const waPrep = needsWaPrep ? window.open("about:blank", "_blank") : null
                 try {
                   const response = await fetch(`/api/invoices/${createdInvoiceId}/send`, {
-                    method: "POST", headers: { "Content-Type": "application/json" },
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                      sendMethod: method, sendWhatsApp: method === "whatsapp" || method === "both",
-                      sendEmail: method === "email" || method === "both", copyLink: method === "link",
+                      ...(businessId.trim() ? { business_id: businessId.trim() } : {}),
+                      sendMethod: method,
+                      sendWhatsApp: method === "whatsapp" || method === "both",
+                      sendEmail: method === "email" || method === "both",
+                      copyLink: method === "link",
                       email: createdInvoiceCustomer?.email || "",
                     }),
                   })
-                  if (!response.ok) throw new Error("Failed to send")
+                  const data = await response.json().catch(() => ({} as Record<string, unknown>))
+                  if (!response.ok) {
+                    if (waPrep && !waPrep.closed) {
+                      try {
+                        waPrep.close()
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                    throw new Error(
+                      (typeof data.error === "string" && data.error) ||
+                        (typeof data.message === "string" && data.message) ||
+                        "Failed to send"
+                    )
+                  }
+
+                  if (method === "link" && typeof data.publicUrl === "string" && data.publicUrl) {
+                    try {
+                      await navigator.clipboard.writeText(data.publicUrl)
+                      setToast({ message: "Public link copied to clipboard.", type: "success", duration: 2800 })
+                    } catch {
+                      setToast({
+                        message: "Link is ready on the invoice page if copy failed.",
+                        type: "info",
+                        duration: 5000,
+                      })
+                    }
+                  }
+
+                  if (needsWaPrep) {
+                    const waUrl = typeof data.whatsappUrl === "string" ? data.whatsappUrl : ""
+                    if (waUrl) {
+                      const opened = openWhatsAppUrlInBrowser(waUrl, waPrep)
+                      if (!opened) {
+                        setToast({
+                          message:
+                            "Invoice sent. If WhatsApp did not open, your browser may have blocked it — open the invoice and use Send / WhatsApp from there.",
+                          type: "info",
+                          duration: 9500,
+                        })
+                      }
+                    } else if (waPrep && !waPrep.closed) {
+                      try {
+                        waPrep.close()
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                  }
+
                   setShowSendChoiceModal(false)
-                  router.push(`/service/invoices/${createdInvoiceId}/view`)
-                } catch (e: any) { setError(e.message); setLoading(false); }
+                  router.push(invoiceViewHref(createdInvoiceId))
+                } catch (e: any) {
+                  setError(e?.message || "Failed to send")
+                } finally {
+                  setLoading(false)
+                }
               }}
-              onSkip={() => { setShowSendChoiceModal(false); router.push(`/service/invoices/${createdInvoiceId}/view`) }}
+              onSkip={() => {
+                setShowSendChoiceModal(false)
+                router.push(invoiceViewHref(createdInvoiceId))
+              }}
             />
           )}
 
-          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+          {toast && (
+            <Toast
+              message={toast.message}
+              type={toast.type}
+              duration={toast.duration}
+              onClose={() => setToast(null)}
+            />
+          )}
         </div>
       </div>
     </Wrapper>

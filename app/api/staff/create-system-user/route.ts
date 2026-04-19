@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
+import { canActorCreateStaffRole } from "@/lib/staff/businessStaffPermissions"
 import { createClient } from "@supabase/supabase-js"
 import { randomUUID } from "node:crypto"
 import { findAuthUserIdByEmail } from "@/lib/authAdminLookup"
@@ -52,6 +54,11 @@ export async function POST(request: NextRequest) {
 
     console.log("Business found:", business.id)
 
+    const actorRole = await getUserRole(supabase, user.id, business.id)
+    if (!actorRole || actorRole === "cashier") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+
     let body
     try {
       body = await request.json()
@@ -81,6 +88,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Invalid role. Must be admin, manager, or cashier." },
         { status: 400 }
+      )
+    }
+
+    if (!canActorCreateStaffRole(actorRole, role)) {
+      return NextResponse.json(
+        { error: "Forbidden: your role cannot create this staff type." },
+        { status: 403 }
       )
     }
 

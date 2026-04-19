@@ -3,7 +3,14 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
-import { getCurrentBusiness } from "@/lib/business"
+import { RetailMenuSelect, type MenuSelectOption } from "@/components/retail/RetailBackofficeUi"
+
+const RECEIPT_PRINTER_WIDTH_OPTIONS: MenuSelectOption[] = [
+  { value: "58mm", label: "58mm (Standard)" },
+  { value: "80mm", label: "80mm (Wide)" },
+]
+import { retailPaths } from "@/lib/retail/routes"
+import { retailSettingsShell as RS } from "@/lib/retail/retailSettingsShell"
 
 type ReceiptSettings = {
   id?: string
@@ -37,6 +44,7 @@ export default function ReceiptSettingsPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
   const [tableMissing, setTableMissing] = useState(false)
+  const [canEditReceipt, setCanEditReceipt] = useState(true)
 
   useEffect(() => {
     loadSettings()
@@ -54,49 +62,47 @@ export default function ReceiptSettingsPage() {
         return
       }
 
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setLoading(false)
-        return
+      const res = await fetch("/api/retail/receipt-settings", { credentials: "include" })
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string
+        business_id?: string
+        can_edit?: boolean
+        settings?: Record<string, unknown> | null
       }
 
-      setBusinessId(business.id)
-
-      // Load existing settings
-      const { data, error: fetchError } = await supabase
-        .from("receipt_settings")
-        .select("*")
-        .eq("business_id", business.id)
-        .maybeSingle()
-
-      if (fetchError && fetchError.code !== "PGRST116") {
-        // PGRST205 = table not in schema cache / table does not exist
+      if (!res.ok) {
+        const msg = json.error || "Failed to load settings"
         const isTableMissing =
-          (fetchError as { code?: string }).code === "PGRST205" ||
-          String((fetchError as { message?: string }).message ?? "").toLowerCase().includes("schema cache") ||
-          String((fetchError as { message?: string }).message ?? "").toLowerCase().includes("could not find the table")
+          String(msg).toLowerCase().includes("schema cache") ||
+          String(msg).toLowerCase().includes("could not find the table") ||
+          String(msg).toLowerCase().includes("receipt_settings")
         if (isTableMissing) {
           setTableMissing(true)
           setError(
             "The receipt_settings table is missing. Run the database migration: supabase/migrations/024_receipt_settings.sql (and 299_receipt_settings_add_missing_columns.sql if needed), then reload the schema cache in Supabase Dashboard (Settings → API → Reload schema)."
           )
-          setLoading(false)
-          return
+        } else {
+          setError(msg)
         }
-        throw fetchError
+        setLoading(false)
+        return
       }
 
+      if (json.business_id) setBusinessId(json.business_id)
+      setCanEditReceipt(json.can_edit !== false)
+
+      const data = json.settings
       if (data) {
         setSettings({
-          printer_type: data.printer_type || "browser_print",
-          printer_width: data.printer_width || "58mm",
-          auto_cut: data.auto_cut || false,
-          drawer_kick: data.drawer_kick || false,
-          show_logo: data.show_logo !== undefined ? data.show_logo : true,
-          receipt_mode: data.receipt_mode || "full",
-          footer_text: data.footer_text || "",
-          show_qr_code: data.show_qr_code || false,
-          qr_code_content: data.qr_code_content || "",
+          printer_type: (data.printer_type as ReceiptSettings["printer_type"]) || "browser_print",
+          printer_width: (data.printer_width as ReceiptSettings["printer_width"]) || "58mm",
+          auto_cut: Boolean(data.auto_cut),
+          drawer_kick: Boolean(data.drawer_kick),
+          show_logo: data.show_logo !== undefined ? Boolean(data.show_logo) : true,
+          receipt_mode: (data.receipt_mode as ReceiptSettings["receipt_mode"]) || "full",
+          footer_text: String(data.footer_text || ""),
+          show_qr_code: Boolean(data.show_qr_code),
+          qr_code_content: String(data.qr_code_content || ""),
         })
       }
     } catch (err: any) {
@@ -106,18 +112,7 @@ export default function ReceiptSettingsPage() {
           : err != null
             ? String(err)
             : "Failed to load settings"
-      const isTableMissing =
-        (err && typeof err === "object" && (err as { code?: string }).code === "PGRST205") ||
-        String(message).toLowerCase().includes("schema cache") ||
-        String(message).toLowerCase().includes("could not find the table")
-      if (isTableMissing) {
-        setTableMissing(true)
-        setError(
-          "The receipt_settings table is missing. Run the database migration: supabase/migrations/024_receipt_settings.sql (and 299_receipt_settings_add_missing_columns.sql if needed), then reload the schema cache in Supabase Dashboard (Settings → API → Reload schema)."
-        )
-      } else {
-        setError(message || "Failed to load settings")
-      }
+      setError(message || "Failed to load settings")
       console.error("Error loading settings:", message, err)
     } finally {
       setLoading(false)
@@ -135,20 +130,16 @@ export default function ReceiptSettingsPage() {
     setSuccess(false)
 
     try {
-      const { error: upsertError } = await supabase
-        .from("receipt_settings")
-        .upsert(
-          {
-            business_id: businessId,
-            ...settings,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "business_id",
-          }
-        )
-
-      if (upsertError) throw upsertError
+      const res = await fetch("/api/retail/receipt-settings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error((json as { error?: string }).error || "Failed to save settings")
+      }
 
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
@@ -161,56 +152,57 @@ export default function ReceiptSettingsPage() {
 
   if (loading) {
     return (
-      <>
-        <div className="p-6">
-          <p>Loading...</p>
+      <div className={RS.outer}>
+        <div className={RS.container}>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Loading…</p>
         </div>
-      </>
+      </div>
     )
   }
 
   return (
-    <>
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="text-blue-600 hover:underline mb-4"
-          >
+    <div className={RS.outer}>
+      <div className={RS.container}>
+        <div className={RS.headerBlock}>
+          <button type="button" onClick={() => router.push("/retail/dashboard")} className={RS.backLink}>
             ← Back to Dashboard
           </button>
-          <h1 className="text-2xl font-bold mb-2">Receipt Settings</h1>
-          <p className="text-gray-600">Configure thermal printer and receipt options</p>
-          <p className="text-sm text-gray-500 mt-1">
-            To create or manage cash registers (tills),{" "}
-            <button
-              type="button"
-              onClick={() => router.push("/retail/admin/registers")}
-              className="text-blue-600 hover:underline font-medium"
-            >
-              go to Manage Registers
+          <h1 className={RS.title}>Receipts & printer</h1>
+          <p className={RS.subtitle}>Thermal or browser printing, receipt layout, and footer text for POS receipts.</p>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Manage tills in{" "}
+            <button type="button" onClick={() => router.push(retailPaths.adminRegisters)} className={RS.linkInline}>
+              Registers
             </button>
+            .
           </p>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
             {error}
             {tableMissing && (
               <p className="mt-2 text-sm">
-                From the project folder run: <code className="bg-red-100 px-1 rounded">npx supabase db push</code>
+                From the project folder run: <code className="rounded bg-red-100 px-1 dark:bg-red-900/50">npx supabase db push</code>
               </p>
             )}
           </div>
         )}
 
         {success && (
-          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
-            Settings saved successfully!
+          <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-green-800 dark:border-green-900/40 dark:bg-green-950/30 dark:text-green-200">
+            Settings saved.
           </div>
         )}
 
-        <div className="bg-white border rounded-lg p-6 space-y-6">
+        {!canEditReceipt && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/35 dark:text-amber-100 mb-4">
+            <span className="font-semibold">View only.</span> Only the business owner or an admin can change receipt and
+            printer settings. You can still review the options below.
+          </div>
+        )}
+
+        <fieldset disabled={!canEditReceipt} className={`${RS.formSectionCard} space-y-6`}>
           {/* Printer Type */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -252,16 +244,13 @@ export default function ReceiptSettingsPage() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Printer Width
             </label>
-            <select
+            <RetailMenuSelect
               value={settings.printer_width}
-              onChange={(e) =>
-                setSettings({ ...settings, printer_width: e.target.value as "58mm" | "80mm" })
+              onValueChange={(v) =>
+                setSettings({ ...settings, printer_width: v as "58mm" | "80mm" })
               }
-              className="w-full border border-gray-300 rounded px-3 py-2"
-            >
-              <option value="58mm">58mm (Standard)</option>
-              <option value="80mm">80mm (Wide)</option>
-            </select>
+              options={RECEIPT_PRINTER_WIDTH_OPTIONS}
+            />
           </div>
 
           {/* Receipt Mode */}
@@ -344,7 +333,7 @@ export default function ReceiptSettingsPage() {
               <span className="text-sm font-medium text-gray-700">Show Business Logo</span>
             </label>
             <p className="text-xs text-gray-500 mt-1 ml-6">
-              Display business logo at top of receipt (if uploaded in Business Settings)
+              Show logo on receipt when a URL is set: store logo (Store settings) takes priority, otherwise the business logo from Business Profile.
             </p>
           </div>
 
@@ -391,20 +380,27 @@ export default function ReceiptSettingsPage() {
               Multi-line text displayed at bottom of receipt. Use line breaks to separate lines.
             </p>
           </div>
+        </fieldset>
 
-          {/* Save Button */}
-          <div className="flex justify-end pt-4 border-t">
-            <button
-              onClick={handleSave}
-              disabled={saving || tableMissing}
-              className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-            >
-              {saving ? "Saving..." : tableMissing ? "Save unavailable (run migration)" : "Save Settings"}
-            </button>
-          </div>
+        <div className="mt-6 flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 dark:border-gray-700 sm:flex-row sm:justify-end">
+          <button
+            onClick={handleSave}
+            type="button"
+            disabled={saving || tableMissing || !canEditReceipt}
+            title={!canEditReceipt ? "Only business owner or admin can save receipt settings." : undefined}
+            className={`${RS.primaryButton} sm:min-w-[9rem] disabled:cursor-not-allowed`}
+          >
+            {saving
+              ? "Saving…"
+              : tableMissing
+                ? "Save unavailable"
+                : !canEditReceipt
+                  ? "View only"
+                  : "Save changes"}
+          </button>
         </div>
       </div>
-    </>
+    </div>
   )
 }
 

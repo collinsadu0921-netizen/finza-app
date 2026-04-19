@@ -1,1 +1,1 @@
-export { default } from "@/app/select-store/page.impl"
+export { default } from "@/components/retail/stores/RetailSelectStorePage"

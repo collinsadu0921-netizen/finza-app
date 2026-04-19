@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, type ReactNode } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
@@ -8,12 +8,40 @@ import { getUserRole } from "@/lib/userRoles"
 import { getUserStore, getStores } from "@/lib/stores"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { useRouteGuard } from "@/lib/useRouteGuard"
-import { normalizeCountry, getAllowedProviders, getAllowedMethods } from "@/lib/payments/eligibility"
+import { normalizeCountry } from "@/lib/payments/eligibility"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
-import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
+import { retailPaths } from "@/lib/retail/routes"
+import {
+  RetailBackofficeBackLink,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeCardTitle,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+  retailFieldClass,
+  retailLabelClass,
+  RetailMenuSelect,
+  type MenuSelectOption,
+} from "@/components/retail/RetailBackofficeUi"
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
 
 type DateRange = "today" | "yesterday" | "last7" | "last30" | "custom"
+
+const ANALYTICS_DATE_RANGE_OPTIONS: MenuSelectOption[] = [
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "last7", label: "Last 7 days" },
+  { value: "last30", label: "Last 30 days" },
+  { value: "custom", label: "Custom range" },
+]
+
+const ANALYTICS_CHART_METRIC_OPTIONS: MenuSelectOption[] = [
+  { value: "all", label: "All metrics" },
+  { value: "revenue", label: "Revenue only" },
+  { value: "cogs", label: "COGS only" },
+  { value: "profit", label: "Gross profit only" },
+]
 
 type KPIData = {
   totalSales: number
@@ -67,18 +95,24 @@ type RegisterSession = {
   variance: number
 }
 
-const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"]
+const COLORS = ["#0f766e", "#0369a1", "#4f46e5", "#b45309", "#64748b", "#be185d"]
+
+const chartTooltipStyle = {
+  borderRadius: 12,
+  border: "1px solid rgb(226 232 240)",
+  boxShadow: "0 4px 24px rgba(15, 23, 42, 0.06)",
+}
+
+const chartGridColor = "#e2e8f0"
+const chartAxisColor = "#64748b"
 
 export default function AnalyticsPage() {
   const router = useRouter()
   useRouteGuard()
   const { format } = useBusinessCurrency()
   
-  // HARD GUARD: Block execution - This report uses operational tables instead of ledger
-  const [error, setError] = useState("LEDGER_ONLY_REPORT_REQUIRED: This report has been deprecated. Use accounting reports.")
-  const [loading, setLoading] = useState(false)
-  
-  // BLOCKED: All state below is unreachable but kept for type safety
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(true)
   const [businessId, setBusinessId] = useState("")
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userStoreId, setUserStoreId] = useState<string | null>(null)
@@ -108,6 +142,11 @@ export default function AnalyticsPage() {
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
 
   const [chartMetric, setChartMetric] = useState<"revenue" | "cogs" | "profit" | "all">("all")
+
+  const storeMenuOptions = useMemo(() => {
+    const head: MenuSelectOption[] = [{ value: "", label: "All stores" }]
+    return head.concat(stores.map((s: { id: string; name: string }) => ({ value: s.id, label: s.name })))
+  }, [stores])
 
   useEffect(() => {
     loadInitialData()
@@ -268,14 +307,6 @@ export default function AnalyticsPage() {
       const storeFilter = activeStoreId === 'all' 
         ? null 
         : (activeStoreId || (selectedStoreId !== null ? selectedStoreId : null))
-      
-      // Debug logging
-      console.log("Analytics store filter:", {
-        activeStoreId,
-        selectedStoreId,
-        storeFilter,
-        businessId
-      })
 
       // Load sales in date range
       // NOTE: store_id column may not exist in sales table yet
@@ -315,13 +346,7 @@ export default function AnalyticsPage() {
       // Execute the basic query first (without store_id and payment_status filters)
       let sales: any[] | null = null
       let salesQueryError: any = null
-      
-      console.log("Executing sales query with filters:", {
-        businessId,
-        storeFilter,
-        dateRange: dateFilter
-      })
-      
+
       const queryResult = await salesQuery
       sales = queryResult.data
       salesQueryError = queryResult.error
@@ -333,7 +358,6 @@ export default function AnalyticsPage() {
         
         // If it's a column error, try without that column
         if (salesQueryError.code === "42703" || salesQueryError.message?.includes("does not exist")) {
-          console.warn("Column error detected, trying query with minimal columns")
           // Try with absolute minimal columns
           const { data: minimalData, error: minimalError } = await supabase
             .from("sales")
@@ -344,7 +368,6 @@ export default function AnalyticsPage() {
             .lte("created_at", dateFilter.end)
           
           if (!minimalError && minimalData) {
-            console.log("Minimal query succeeded, found", minimalData.length, "sales")
             sales = minimalData
             salesQueryError = null
           } else {
@@ -384,33 +407,11 @@ export default function AnalyticsPage() {
           const hasStoreId = sales.some((s: any) => s.store_id !== undefined)
           if (hasStoreId) {
             sales = sales.filter((s: any) => s.store_id === storeFilter)
-          } else {
-            console.warn("store_id column doesn't exist, cannot filter by store. Showing all sales.")
           }
         }
       }
 
-      // Debug: Log what we found
-      console.log("Analytics sales query result:", {
-        salesCount: sales?.length || 0,
-        storeFilter,
-        dateFilter,
-        firstSale: sales?.[0] ? {
-          id: sales[0].id,
-          store_id: sales[0].store_id,
-          payment_status: sales[0].payment_status,
-          created_at: sales[0].created_at
-        } : null
-      })
-
       if (!sales || sales.length === 0) {
-        console.log("No sales found with filters:", {
-          businessId,
-          storeFilter,
-          dateFilter,
-          payment_status: "paid",
-          queryError: salesQueryError?.message
-        })
         // Reset all data to empty
         setKpiData({
           totalSales: 0,
@@ -950,289 +951,266 @@ export default function AnalyticsPage() {
     }
   }
 
+  const kpiCard = (
+    label: string,
+    value: ReactNode,
+    accent: "slate" | "teal" | "sky" | "amber" | "violet" | "rose",
+  ) => {
+    const bar =
+      accent === "teal"
+        ? "bg-teal-600"
+        : accent === "sky"
+          ? "bg-sky-600"
+          : accent === "amber"
+            ? "bg-amber-500"
+            : accent === "violet"
+              ? "bg-violet-600"
+              : accent === "rose"
+                ? "bg-rose-600"
+                : "bg-slate-800"
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <div className={`absolute inset-y-0 left-0 w-1 ${bar}`} aria-hidden />
+        <p className="pl-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+        <div className="mt-1.5 pl-2 text-xl font-semibold tabular-nums tracking-tight text-slate-900">{value}</div>
+      </div>
+    )
+  }
+
+  const tableWrapClass = "overflow-hidden rounded-xl border border-slate-100"
+  const thBase =
+    "bg-slate-50/90 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 first:rounded-tl-xl last:rounded-tr-xl"
+  const thClass = `${thBase} text-left`
+  const thRightClass = `${thBase} text-right`
+  const tdClass = "border-t border-slate-100 px-3 py-2.5 text-sm text-slate-700"
+  const tdRightClass = `${tdClass} text-right tabular-nums`
+
   if (error) {
     return (
-      <>
-        <div className="p-6 max-w-7xl mx-auto">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            <p className="font-semibold">Report Deprecated</p>
-            <p>{error}</p>
-          </div>
-        </div>
-      </>
+      <RetailBackofficeShell>
+        <RetailBackofficeMain className="max-w-3xl">
+          <RetailBackofficeBackLink onClick={() => router.push(retailPaths.dashboard)}>Dashboard</RetailBackofficeBackLink>
+          <RetailBackofficeCard className="border-red-200/80 bg-red-50/50">
+            <p className="text-sm font-semibold text-red-900">Something went wrong</p>
+            <p className="mt-1 text-sm text-red-800/90">{error}</p>
+          </RetailBackofficeCard>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   if (loading) {
     return (
-      <>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </>
+      <RetailBackofficeShell>
+        <RetailBackofficeMain className="max-w-6xl">
+          <div className="mb-10 h-9 max-w-xs animate-pulse rounded-lg bg-slate-200/80" />
+          <div className="mb-6 h-24 rounded-2xl border border-slate-200/90 bg-white shadow-sm">
+            <div className="h-full animate-pulse bg-slate-100/80" />
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="h-24 animate-pulse rounded-2xl bg-slate-200/60" />
+            ))}
+          </div>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   return (
-    <>
-      <div className="p-6 max-w-7xl mx-auto dark:bg-gray-900 dark:text-gray-100 min-h-screen">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="text-blue-600 dark:text-blue-400 hover:underline mb-4"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold mb-2 dark:text-white">Retail Analytics</h1>
-          <p className="text-gray-600 dark:text-gray-400">Comprehensive sales and performance insights</p>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain className="max-w-7xl">
+        <RetailBackofficeBackLink onClick={() => router.push(retailPaths.dashboard)}>Dashboard</RetailBackofficeBackLink>
 
-        {/* Filters */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <RetailBackofficePageHeader
+          eyebrow="Insights"
+          title="Retail analytics"
+          description="Sales, margin, payments, and register activity for the selected period and store."
+          actions={
+            <RetailBackofficeButton variant="secondary" onClick={() => void loadAnalytics()}>
+              Refresh
+            </RetailBackofficeButton>
+          }
+        />
+
+        <RetailBackofficeCard className="mb-8" padding="p-4 sm:p-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Date Range
-              </label>
-              <select
+              <label className={retailLabelClass}>Date range</label>
+              <RetailMenuSelect
                 value={dateRange}
-                onChange={(e) => setDateRange(e.target.value as DateRange)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
-              >
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="last7">Last 7 Days</option>
-                <option value="last30">Last 30 Days</option>
-                <option value="custom">Custom Range</option>
-              </select>
+                onValueChange={(v) => setDateRange(v as DateRange)}
+                options={ANALYTICS_DATE_RANGE_OPTIONS}
+              />
             </div>
 
             {dateRange === "custom" && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Start Date
-                  </label>
+                  <label className={retailLabelClass}>Start</label>
                   <input
                     type="date"
                     value={customStartDate}
                     onChange={(e) => setCustomStartDate(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+                    className={retailFieldClass}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    End Date
-                  </label>
+                  <label className={retailLabelClass}>End</label>
                   <input
                     type="date"
                     value={customEndDate}
                     onChange={(e) => setCustomEndDate(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
+                    className={retailFieldClass}
                   />
                 </div>
               </>
             )}
 
             {(userRole === "owner" || userRole === "admin") && stores.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Store
-                </label>
-                <select
+              <div className={dateRange === "custom" ? "md:col-span-2 lg:col-span-1" : ""}>
+                <label className={retailLabelClass}>Store</label>
+                <RetailMenuSelect
                   value={selectedStoreId || ""}
-                  onChange={(e) => setSelectedStoreId(e.target.value || null)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="">All Stores</option>
-                  {stores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {store.name}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(v) => setSelectedStoreId(v || null)}
+                  options={storeMenuOptions}
+                />
               </div>
             )}
           </div>
+        </RetailBackofficeCard>
+
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+          {kpiCard("Revenue (ledger)", format(kpiData.totalSales), "slate")}
+          {kpiCard("Transactions", kpiData.totalTransactions, "sky")}
+          {kpiCard("Avg sale", format(kpiData.averageSaleValue), "teal")}
+          {kpiCard("COGS", format(kpiData.totalCogs), "amber")}
+          {kpiCard("Gross profit", format(kpiData.grossProfit), "teal")}
+          {kpiCard("Gross margin", `${kpiData.grossMarginPercent.toFixed(1)}%`, "violet")}
+          {kpiCard("VAT (period)", format(kpiData.totalVat), "rose")}
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4 mb-6">
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Sales</div>
-            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-              {format(kpiData.totalSales)}
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Transactions</div>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-              {kpiData.totalTransactions}
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Avg Sale Value</div>
-            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
-              {format(kpiData.averageSaleValue)}
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total COGS</div>
-            <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-              {format(kpiData.totalCogs)}
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Gross Profit</div>
-            <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">
-              {format(kpiData.grossProfit)}
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Gross Margin</div>
-            <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-              {kpiData.grossMarginPercent.toFixed(1)}%
-            </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total VAT</div>
-            <div className="text-2xl font-bold text-red-600 dark:text-red-400">
-              {format(kpiData.totalVat)}
-            </div>
-          </div>
-        </div>
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Revenue/COGS/Profit Chart */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold dark:text-white">Revenue & Profit Over Time</h2>
-              <select
+        <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <RetailBackofficeCard padding="p-4 sm:p-5">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <RetailBackofficeCardTitle>Revenue &amp; profit</RetailBackofficeCardTitle>
+              <RetailMenuSelect
+                size="sm"
                 value={chartMetric}
-                onChange={(e) => setChartMetric(e.target.value as any)}
-                className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-700 dark:text-white"
-              >
-                <option value="all">All Metrics</option>
-                <option value="revenue">Revenue Only</option>
-                <option value="cogs">COGS Only</option>
-                <option value="profit">Gross Profit Only</option>
-              </select>
+                onValueChange={(v) => setChartMetric(v as "revenue" | "cogs" | "profit" | "all")}
+                options={ANALYTICS_CHART_METRIC_OPTIONS}
+                wrapperClassName="max-w-[220px] shrink-0"
+                className="text-xs"
+              />
             </div>
             {dailyData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 {chartMetric === "all" ? (
-                  <LineChart data={dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="revenue" stroke="#3B82F6" name="Revenue" />
-                    <Line type="monotone" dataKey="cogs" stroke="#EF4444" name="COGS" />
-                    <Line type="monotone" dataKey="grossProfit" stroke="#10B981" name="Gross Profit" />
+                  <LineChart data={dailyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={chartGridColor} strokeDasharray="4 4" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fill: chartAxisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: chartAxisColor, fontSize: 11 }} axisLine={false} tickLine={false} width={48} />
+                    <Tooltip contentStyle={chartTooltipStyle} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Line type="monotone" dataKey="revenue" stroke="#0f172a" strokeWidth={2} dot={false} name="Revenue" />
+                    <Line type="monotone" dataKey="cogs" stroke="#94a3b8" strokeWidth={2} dot={false} name="COGS" />
+                    <Line type="monotone" dataKey="grossProfit" stroke="#0d9488" strokeWidth={2} dot={false} name="Gross profit" />
                   </LineChart>
                 ) : (
-                  <BarChart data={dailyData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
+                  <BarChart data={dailyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={chartGridColor} strokeDasharray="4 4" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fill: chartAxisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: chartAxisColor, fontSize: 11 }} axisLine={false} tickLine={false} width={48} />
+                    <Tooltip contentStyle={chartTooltipStyle} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
                     <Bar
                       dataKey={chartMetric === "revenue" ? "revenue" : chartMetric === "cogs" ? "cogs" : "grossProfit"}
-                      fill={chartMetric === "revenue" ? "#3B82F6" : chartMetric === "cogs" ? "#EF4444" : "#10B981"}
-                      name={chartMetric === "revenue" ? "Revenue" : chartMetric === "cogs" ? "COGS" : "Gross Profit"}
+                      fill={chartMetric === "revenue" ? "#0f172a" : chartMetric === "cogs" ? "#94a3b8" : "#0d9488"}
+                      radius={[6, 6, 0, 0]}
+                      name={chartMetric === "revenue" ? "Revenue" : chartMetric === "cogs" ? "COGS" : "Gross profit"}
                     />
                   </BarChart>
                 )}
               </ResponsiveContainer>
             ) : (
-              <div className="h-300 flex items-center justify-center text-gray-500 dark:text-gray-400">
+              <div className="flex h-[300px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-sm text-slate-500">
                 No data for this period
               </div>
             )}
-          </div>
+          </RetailBackofficeCard>
 
-          {/* Payment Breakdown */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-            <h2 className="text-lg font-semibold mb-4 dark:text-white">Payment Methods</h2>
+          <RetailBackofficeCard padding="p-4 sm:p-5">
+            <RetailBackofficeCardTitle className="mb-4">Payment mix</RetailBackofficeCardTitle>
             {paymentBreakdown.length > 0 ? (
               <>
-                <ResponsiveContainer width="100%" height={250}>
+                <ResponsiveContainer width="100%" height={240}>
                   <PieChart>
                     <Pie
                       data={paymentBreakdown}
                       cx="50%"
                       cy="50%"
-                      labelLine={false}
-                      label={(entry: any) => `${entry.name}: ${entry.percentage.toFixed(1)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
+                      innerRadius={52}
+                      outerRadius={78}
+                      paddingAngle={2}
                       dataKey="revenue"
+                      nameKey="method"
+                      labelLine={false}
                     >
                       {paymentBreakdown.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        <Cell key={`cell-${entry.method}-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip contentStyle={chartTooltipStyle} formatter={(value: number) => format(value)} />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="mt-4 space-y-2">
-                  {paymentBreakdown.map((pm, idx) => (
-                    <div key={idx} className="flex justify-between text-sm">
-                      <span className="dark:text-gray-300">{pm.method}</span>
-                      <span className="font-semibold dark:text-white">
-                        {format(pm.revenue)} ({pm.percentage.toFixed(1)}%)
+                <ul className="mt-2 space-y-1.5 border-t border-slate-100 pt-3">
+                  {paymentBreakdown.map((pm) => (
+                    <li key={pm.method} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">{pm.method}</span>
+                      <span className="font-medium tabular-nums text-slate-900">
+                        {format(pm.revenue)}{" "}
+                        <span className="text-slate-400">({pm.percentage.toFixed(0)}%)</span>
                       </span>
-                    </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
               </>
             ) : (
-              <div className="h-250 flex items-center justify-center text-gray-500 dark:text-gray-400">
+              <div className="flex h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-sm text-slate-500">
                 No payment data
               </div>
             )}
-          </div>
+          </RetailBackofficeCard>
         </div>
 
-        {/* Tables Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Top Products */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-            <h2 className="text-lg font-semibold mb-4 dark:text-white">Top Selling Products</h2>
+        <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <RetailBackofficeCard padding="p-4 sm:p-5">
+            <RetailBackofficeCardTitle className="mb-4">Top products</RetailBackofficeCardTitle>
             {topProducts.length > 0 ? (
-              <div className="overflow-x-auto">
+              <div className={tableWrapClass}>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b dark:border-gray-700">
-                      <th className="text-left py-2 dark:text-gray-300">Product</th>
-                      <th className="text-right py-2 dark:text-gray-300">Units</th>
-                      <th className="text-right py-2 dark:text-gray-300">Revenue</th>
-                      <th className="text-right py-2 dark:text-gray-300">Profit</th>
+                    <tr>
+                      <th className={thClass}>Product</th>
+                      <th className={thRightClass}>Units</th>
+                      <th className={thRightClass}>Revenue</th>
+                      <th className={thRightClass}>Profit</th>
                     </tr>
                   </thead>
                   <tbody>
                     {topProducts.map((product, idx) => (
-                      <tr key={idx} className="border-b dark:border-gray-700">
-                        <td className="py-2 dark:text-gray-300">
-                          <div>{product.product_name}</div>
-                          {product.variant_name && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {product.variant_name}
-                            </div>
-                          )}
+                      <tr key={idx} className="bg-white transition hover:bg-slate-50/80">
+                        <td className={tdClass}>
+                          <div className="font-medium text-slate-900">{product.product_name}</div>
+                          {product.variant_name ? (
+                            <div className="text-xs text-slate-500">{product.variant_name}</div>
+                          ) : null}
                         </td>
-                        <td className="text-right py-2 dark:text-gray-300">{product.units_sold}</td>
-                        <td className="text-right py-2 dark:text-gray-300">
-                          {format(product.revenue)}
-                        </td>
+                        <td className={tdRightClass}>{product.units_sold}</td>
+                        <td className={tdRightClass}>{format(product.revenue)}</td>
                         <td
-                          className={`text-right py-2 font-semibold ${
-                            product.gross_profit >= 0
-                              ? "text-green-600 dark:text-green-400"
-                              : "text-red-600 dark:text-red-400"
+                          className={`${tdRightClass} font-semibold ${
+                            product.gross_profit >= 0 ? "text-emerald-700" : "text-red-600"
                           }`}
                         >
                           {format(product.gross_profit)}
@@ -1243,37 +1221,32 @@ export default function AnalyticsPage() {
                 </table>
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">No products sold in this period</div>
+              <p className="py-10 text-center text-sm text-slate-500">No products sold in this period.</p>
             )}
-          </div>
+          </RetailBackofficeCard>
 
-          {/* Staff Performance */}
-          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-            <h2 className="text-lg font-semibold mb-4 dark:text-white">Staff Performance</h2>
+          <RetailBackofficeCard padding="p-4 sm:p-5">
+            <RetailBackofficeCardTitle className="mb-4">Staff performance</RetailBackofficeCardTitle>
             {staffPerformance.length > 0 ? (
-              <div className="overflow-x-auto">
+              <div className={tableWrapClass}>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b dark:border-gray-700">
-                      <th className="text-left py-2 dark:text-gray-300">Staff</th>
-                      <th className="text-right py-2 dark:text-gray-300">Sales</th>
-                      <th className="text-right py-2 dark:text-gray-300">Revenue</th>
-                      <th className="text-right py-2 dark:text-gray-300">Profit</th>
+                    <tr>
+                      <th className={thClass}>Staff</th>
+                      <th className={thRightClass}>Sales</th>
+                      <th className={thRightClass}>Revenue</th>
+                      <th className={thRightClass}>Profit</th>
                     </tr>
                   </thead>
                   <tbody>
                     {staffPerformance.map((staff, idx) => (
-                      <tr key={idx} className="border-b dark:border-gray-700">
-                        <td className="py-2 dark:text-gray-300">{staff.staff_name}</td>
-                        <td className="text-right py-2 dark:text-gray-300">{staff.sales_count}</td>
-                        <td className="text-right py-2 dark:text-gray-300">
-                          {format(staff.total_revenue)}
-                        </td>
+                      <tr key={idx} className="bg-white transition hover:bg-slate-50/80">
+                        <td className={`${tdClass} font-medium text-slate-900`}>{staff.staff_name}</td>
+                        <td className={tdRightClass}>{staff.sales_count}</td>
+                        <td className={tdRightClass}>{format(staff.total_revenue)}</td>
                         <td
-                          className={`text-right py-2 font-semibold ${
-                            staff.total_gross_profit >= 0
-                              ? "text-green-600 dark:text-green-400"
-                              : "text-red-600 dark:text-red-400"
+                          className={`${tdRightClass} font-semibold ${
+                            staff.total_gross_profit >= 0 ? "text-emerald-700" : "text-red-600"
                           }`}
                         >
                           {format(staff.total_gross_profit)}
@@ -1284,73 +1257,62 @@ export default function AnalyticsPage() {
                 </table>
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">No staff data for this period</div>
+              <p className="py-10 text-center text-sm text-slate-500">No staff data for this period.</p>
             )}
-          </div>
+          </RetailBackofficeCard>
         </div>
 
-        {/* Register Sessions */}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4 dark:text-white">Register Sessions</h2>
+        <RetailBackofficeCard className="mb-10" padding="p-4 sm:p-5">
+          <RetailBackofficeCardTitle className="mb-4">Register sessions</RetailBackofficeCardTitle>
           {registerSessions.length > 0 ? (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Total Sessions</div>
-                  <div className="text-xl font-bold dark:text-white">{registerSessions.length}</div>
+              <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Sessions</p>
+                  <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">{registerSessions.length}</p>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Total Opening Float</div>
-                  <div className="text-xl font-bold dark:text-white">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Session sales (sum)</p>
+                  <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">
                     {format(registerSessions.reduce((sum, s) => sum + (s.sales_total || 0), 0))}
-                  </div>
+                  </p>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Total Variance</div>
-                  <div className="text-xl font-bold dark:text-white">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Variance (sum)</p>
+                  <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">
                     {format(registerSessions.reduce((sum, s) => sum + (s.variance || 0), 0))}
-                  </div>
+                  </p>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Inventory Value</div>
-                  <div className="text-xl font-bold dark:text-white">
-                    {format(inventoryValue)}
-                  </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Inventory value</p>
+                  <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">{format(inventoryValue)}</p>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className={tableWrapClass}>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b dark:border-gray-700">
-                      {userRole === "owner" || userRole === "admin" ? (
-                        <th className="text-left py-2 dark:text-gray-300">Store</th>
-                      ) : null}
-                      <th className="text-left py-2 dark:text-gray-300">Register</th>
-                      <th className="text-left py-2 dark:text-gray-300">Date/Time</th>
-                      <th className="text-left py-2 dark:text-gray-300">Cashier</th>
-                      <th className="text-right py-2 dark:text-gray-300">Sales Total</th>
-                      <th className="text-right py-2 dark:text-gray-300">Variance</th>
+                    <tr>
+                      {userRole === "owner" || userRole === "admin" ? <th className={thClass}>Store</th> : null}
+                      <th className={thClass}>Register</th>
+                      <th className={thClass}>Started</th>
+                      <th className={thClass}>Cashier</th>
+                      <th className={thRightClass}>Sales</th>
+                      <th className={thRightClass}>Variance</th>
                     </tr>
                   </thead>
                   <tbody>
                     {registerSessions.map((session) => (
-                      <tr key={session.id} className="border-b dark:border-gray-700">
+                      <tr key={session.id} className="bg-white transition hover:bg-slate-50/80">
                         {(userRole === "owner" || userRole === "admin") && (
-                          <td className="py-2 dark:text-gray-300">{session.store_name || "—"}</td>
+                          <td className={tdClass}>{session.store_name || "—"}</td>
                         )}
-                        <td className="py-2 dark:text-gray-300">{session.register_name}</td>
-                        <td className="py-2 dark:text-gray-300">
-                          {new Date(session.started_at).toLocaleString()}
-                        </td>
-                        <td className="py-2 dark:text-gray-300">{session.cashier_name}</td>
-                        <td className="text-right py-2 dark:text-gray-300">
-                          {format(session.sales_total)}
-                        </td>
+                        <td className={`${tdClass} font-medium text-slate-900`}>{session.register_name}</td>
+                        <td className={tdClass}>{new Date(session.started_at).toLocaleString()}</td>
+                        <td className={tdClass}>{session.cashier_name}</td>
+                        <td className={tdRightClass}>{format(session.sales_total)}</td>
                         <td
-                          className={`text-right py-2 font-semibold ${
-                            session.variance >= 0
-                              ? "text-green-600 dark:text-green-400"
-                              : "text-red-600 dark:text-red-400"
+                          className={`${tdRightClass} font-semibold ${
+                            session.variance >= 0 ? "text-emerald-700" : "text-red-600"
                           }`}
                         >
                           {format(session.variance)}
@@ -1362,11 +1324,11 @@ export default function AnalyticsPage() {
               </div>
             </>
           ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">No register sessions in this period</div>
+            <p className="py-10 text-center text-sm text-slate-500">No register sessions in this period.</p>
           )}
-        </div>
-      </div>
-    </>
+        </RetailBackofficeCard>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }
 

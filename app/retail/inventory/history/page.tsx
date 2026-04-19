@@ -1,1 +1,3 @@
-export { default } from "@/app/inventory/history/page.impl"
+import RetailInventoryHistoryPage from "@/components/retail/inventory/RetailInventoryHistoryPage"
+
+export default RetailInventoryHistoryPage

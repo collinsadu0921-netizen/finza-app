@@ -5,6 +5,57 @@ import { supabase } from "@/lib/supabaseClient"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { formatMoney } from "@/lib/money"
 
+/** One line from POS `cart_json` when parking a sale */
+type ParkedCartLine = {
+  id?: string
+  product?: { name?: string; price?: number }
+  quantity?: number
+  variantName?: string | null
+  variantPrice?: number | null
+  modifiers?: Array<{ name?: string; price?: number }>
+  note?: string
+  discount_type?: string
+  discount_value?: number
+}
+
+function getParkedCartLines(
+  cartJson: unknown,
+  currencyCode: string | null
+): Array<{ key: string; label: string; detail: string; lineTotal: number }> {
+  if (!Array.isArray(cartJson)) return []
+  return cartJson.map((raw: unknown, idx: number) => {
+    const item = raw as ParkedCartLine
+    const name = (item.product?.name || "").trim() || "Item"
+    const qty = Math.max(1, Math.floor(Number(item.quantity) || 1))
+    const modTotal = (item.modifiers || []).reduce((s, m) => s + Number(m?.price || 0), 0)
+    const unit = Number(item.variantPrice ?? item.product?.price ?? 0) + modTotal
+    const gross = unit * qty
+    let discount = 0
+    const dv = Number(item.discount_value) || 0
+    if (dv > 0) {
+      if (item.discount_type === "percent") discount = (gross * Math.min(100, dv)) / 100
+      else if (item.discount_type === "amount") discount = Math.min(dv, gross)
+    }
+    const net = Math.max(0, gross - discount)
+    const vn = item.variantName?.trim()
+    const label =
+      vn && vn !== name ? `${name} — ${vn}` : name
+    const modLabels = (item.modifiers || [])
+      .map((m) => m.name)
+      .filter(Boolean)
+      .join(", ")
+    const detailParts: string[] = [`${qty} × ${formatMoney(unit, currencyCode)}`]
+    if (modLabels) detailParts.push(modLabels)
+    if (item.note?.trim()) detailParts.push(`"${item.note.trim()}"`)
+    return {
+      key: typeof item.id === "string" && item.id ? item.id : `line-${idx}`,
+      label,
+      detail: detailParts.join(" · "),
+      lineTotal: net,
+    }
+  })
+}
+
 type ParkedSale = {
   id: string
   business_id: string
@@ -157,7 +208,31 @@ export default function ParkedSalesList({
                     <div className="text-sm text-gray-600 mb-1">
                       Cashier: {sale.users?.full_name || sale.users?.email || "Unknown"}
                     </div>
-                    <div className="flex gap-4 text-sm">
+                    {(() => {
+                      const lines = getParkedCartLines(sale.cart_json, currencyCode ?? null)
+                      if (lines.length === 0) return null
+                      return (
+                        <div className="mb-3 mt-2 rounded-md border border-slate-200 bg-slate-50">
+                          <div className="border-b border-slate-200 bg-white px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Items ({lines.length})
+                          </div>
+                          <ul className="max-h-48 divide-y divide-slate-200 overflow-y-auto text-sm">
+                            {lines.map((line) => (
+                              <li key={line.key} className="flex gap-2 px-2 py-1.5">
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate font-medium text-slate-900">{line.label}</div>
+                                  <div className="truncate text-xs text-slate-600">{line.detail}</div>
+                                </div>
+                                <div className="shrink-0 text-right font-semibold tabular-nums text-slate-900">
+                                  {formatMoney(line.lineTotal, currencyCode ?? null)}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )
+                    })()}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                       <span>
                         <strong>Subtotal:</strong> {formatMoney(sale.subtotal, homeCode)}
                       </span>

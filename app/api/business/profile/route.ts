@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
+import { canEditBusinessWideSensitiveSettings } from "@/lib/retail/retailSensitiveSettingsEditors"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 
@@ -97,6 +99,14 @@ export async function PUT(request: NextRequest) {
     const business = await getBusinessForProfile(supabase, user?.id || "", preferredId ? String(preferredId).trim() : null)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const editorRole = await getUserRole(supabase, user.id, business.id)
+    if (!canEditBusinessWideSensitiveSettings(editorRole)) {
+      return NextResponse.json(
+        { error: "Forbidden: only business owners and admins can update the business profile." },
+        { status: 403 }
+      )
     }
 
     const {

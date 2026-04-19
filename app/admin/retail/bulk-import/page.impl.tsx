@@ -6,6 +6,17 @@ import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
 import { getActiveStoreId } from "@/lib/storeSession"
+import { retailPaths } from "@/lib/retail/routes"
+import {
+  RetailBackofficeAlert,
+  RetailBackofficeBackLink,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeCardTitle,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+} from "@/components/retail/RetailBackofficeUi"
 
 const TAX_CATEGORIES = ["taxable", "zero_rated", "exempt"] as const
 
@@ -70,8 +81,8 @@ export default function BulkImportPage() {
       setBusinessId(business.id)
 
       const role = await getUserRole(supabase, user.id, business.id)
-      if (role !== "owner" && role !== "admin") {
-        setError("Access denied. Only owners and admins can access bulk import.")
+      if (role !== "owner" && role !== "admin" && role !== "manager") {
+        setError("Access denied. Only owners, admins, and managers can access bulk import.")
         return
       }
 
@@ -890,85 +901,82 @@ export default function BulkImportPage() {
 
   if (!hasAccess && !loading) {
     return (
-      <>
-        <div className="p-6 min-h-screen">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+      <RetailBackofficeShell>
+        <RetailBackofficeMain className="max-w-7xl">
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error || "Access denied"}
-          </div>
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </>
+          </RetailBackofficeAlert>
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push(retailPaths.dashboard)}>
+            Back to dashboard
+          </RetailBackofficeButton>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   return (
-    <>
-      <div className="p-6 max-w-7xl mx-auto min-h-screen">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="text-blue-600 hover:underline mb-4"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold mb-2">Bulk Product Import</h1>
-          <p className="text-gray-600">Import or update multiple products from a CSV file</p>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain className="max-w-7xl">
+        <RetailBackofficeBackLink onClick={() => router.push(retailPaths.dashboard)}>Back to dashboard</RetailBackofficeBackLink>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        <RetailBackofficePageHeader
+          eyebrow="Product & inventory"
+          title="Bulk import"
+          description="Validate a CSV preview before committing. Use products-only mode unless you intentionally need to write stock for the open store."
+        />
+
+        {error ? (
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error}
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        {importing && (
-          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded mb-4">
-            <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
-              <div>
-                <p className="font-semibold text-blue-700">Importing products...</p>
-                <p className="text-sm text-blue-700">
-                  Processing {importProgress.current} of {importProgress.total} rows
+        {importing ? (
+          <RetailBackofficeAlert tone="info" className="mb-6">
+            <div className="flex items-start gap-3">
+              <div
+                className="mt-0.5 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800"
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-900">Importing…</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Row {importProgress.current} of {importProgress.total}
                 </p>
-                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-200">
                   <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
-                  ></div>
+                    className="h-full rounded-full bg-slate-800 transition-[width] duration-300"
+                    style={{
+                      width: `${importProgress.total ? (importProgress.current / importProgress.total) * 100 : 0}%`,
+                    }}
+                  />
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        {importSummary && (
-          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
-            <h3 className="font-semibold mb-2 text-green-700">Import Complete!</h3>
-            <ul className="list-disc list-inside space-y-1">
-              <li className="text-green-700">{importSummary.created} products created</li>
-              <li className="text-green-700">{importSummary.updated} products updated</li>
-              <li className="text-green-700">{importSummary.stockAdjustments} stock adjustments logged</li>
-              {importSummary.errors > 0 && (
-                <li className="text-red-600">{importSummary.errors} errors occurred</li>
-              )}
+        {importSummary ? (
+          <RetailBackofficeAlert tone={importSummary.errors > 0 ? "warning" : "success"} className="mb-6">
+            <p className="font-medium text-slate-900">Import finished</p>
+            <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-slate-700">
+              <li>{importSummary.created} created</li>
+              <li>{importSummary.updated} updated</li>
+              <li>{importSummary.stockAdjustments} stock movements logged</li>
+              {importSummary.errors > 0 ? <li className="text-rose-900">{importSummary.errors} row errors</li> : null}
             </ul>
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-md mb-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold">Upload CSV File</h2>
-            <button
-              onClick={downloadTemplate}
-              className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 text-sm"
-            >
-              Download CSV Template
-            </button>
+        <RetailBackofficeCard className="mb-6">
+          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <RetailBackofficeCardTitle>Upload CSV</RetailBackofficeCardTitle>
+              <p className="mt-1 text-xs text-slate-500">Download the template first to match column headers.</p>
+            </div>
+            <RetailBackofficeButton variant="secondary" onClick={downloadTemplate}>
+              Download template
+            </RetailBackofficeButton>
           </div>
 
           <div className="mb-4">
@@ -1038,17 +1046,17 @@ export default function BulkImportPage() {
           </div>
 
           {validationErrors.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded mb-4">
-              <h3 className="font-semibold mb-2 text-yellow-700">Validation Errors ({validationErrors.length})</h3>
-              <ul className="list-disc list-inside text-sm space-y-1 max-h-40 overflow-y-auto">
+            <RetailBackofficeAlert tone="warning" className="mb-4">
+              <p className="font-medium text-amber-950">Validation issues ({validationErrors.length})</p>
+              <ul className="mt-2 max-h-40 list-inside list-disc space-y-1 overflow-y-auto text-sm text-amber-950/90">
                 {validationErrors.slice(0, 10).map((err, idx) => (
-                  <li key={idx} className="text-yellow-700">{err}</li>
+                  <li key={idx}>{err}</li>
                 ))}
                 {validationErrors.length > 10 && (
-                  <li className="font-semibold text-yellow-700">... and {validationErrors.length - 10} more errors</li>
+                  <li className="font-medium">… and {validationErrors.length - 10} more</li>
                 )}
               </ul>
-            </div>
+            </RetailBackofficeAlert>
           )}
 
           {previewData.length > 0 && (
@@ -1113,8 +1121,9 @@ export default function BulkImportPage() {
                 </table>
               </div>
 
-              <div className="flex gap-4 mt-6">
-                <button
+              <div className="mt-6 flex flex-wrap gap-3">
+                <RetailBackofficeButton
+                  variant="secondary"
                   onClick={() => {
                     setCsvData([])
                     setPreviewData([])
@@ -1124,24 +1133,23 @@ export default function BulkImportPage() {
                       fileInputRef.current.value = ""
                     }
                   }}
-                  className="bg-gray-300 text-gray-800 px-6 py-2 rounded hover:bg-gray-400"
                   disabled={importing}
                 >
-                  Cancel
-                </button>
-                <button
+                  Clear
+                </RetailBackofficeButton>
+                <RetailBackofficeButton
+                  variant="primary"
                   onClick={handleImport}
                   disabled={importing || validationErrors.length > 0 || csvData.length === 0}
-                  className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                 >
-                  {importing ? "Importing..." : `Import ${csvData.length} Products`}
-                </button>
+                  {importing ? "Importing…" : `Import ${csvData.length} rows`}
+                </RetailBackofficeButton>
               </div>
             </div>
           )}
-        </div>
-      </div>
-    </>
+        </RetailBackofficeCard>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }
 

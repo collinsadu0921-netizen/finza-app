@@ -7,6 +7,7 @@ import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { retailPaths } from "@/lib/retail/routes"
 import { clearSelectedBusinessId } from "@/lib/business"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
@@ -27,7 +28,13 @@ function sidebarBusinessLabel(row: {
 
 type MenuSection = {
   title: string
-  items: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>
+  items: Array<{
+    label: string
+    route: string
+    minTier?: ServiceSubscriptionTier
+    /** Same URL as another item — do not show selected state (avoids multiple highlights). */
+    skipActiveHighlight?: boolean
+  }>
 }
 
 export default function Sidebar() {
@@ -68,7 +75,7 @@ export default function Sidebar() {
     const resolvedIndustry =
       businessIndustry ?? (pathname?.startsWith("/service/") && urlBusinessId ? "service" : null)
 
-    if (resolvedIndustry !== "service") {
+    if (resolvedIndustry !== "service" && resolvedIndustry !== "retail") {
       setNavPermsResolved(true)
       setNavRole(null)
       setNavCustomPermissions(null)
@@ -81,8 +88,58 @@ export default function Sidebar() {
       return
     }
 
-    const bid = urlBusinessId ?? serviceBusinessId
-    if (!bid) {
+    let bid =
+      resolvedIndustry === "service" ? urlBusinessId ?? serviceBusinessId : urlBusinessId ?? getSelectedBusinessId()
+    if (resolvedIndustry === "retail" && !bid) {
+      setNavPermsResolved(false)
+      ;(async () => {
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser()
+          if (!user || cancelled) {
+            if (!cancelled) {
+              setNavRole(null)
+              setNavCustomPermissions(null)
+              setNavPermsResolved(true)
+            }
+            return
+          }
+          const business = await getCurrentBusiness(supabase, user.id)
+          bid = business?.id ?? null
+          if (!bid || cancelled) {
+            if (!cancelled) {
+              setNavRole(null)
+              setNavCustomPermissions(null)
+              setNavPermsResolved(true)
+            }
+            return
+          }
+          const role = await getUserRole(supabase, user.id, bid)
+          const { data: buRow } = await supabase
+            .from("business_users")
+            .select("custom_permissions")
+            .eq("business_id", bid)
+            .eq("user_id", user.id)
+            .maybeSingle()
+          if (cancelled) return
+          setNavRole(role)
+          setNavCustomPermissions((buRow?.custom_permissions as CustomPermissions) ?? null)
+        } catch {
+          if (!cancelled) {
+            setNavRole(null)
+            setNavCustomPermissions(null)
+          }
+        } finally {
+          if (!cancelled) setNavPermsResolved(true)
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (resolvedIndustry === "service" && !bid) {
       setNavPermsResolved(true)
       setNavRole(null)
       setNavCustomPermissions(null)
@@ -92,16 +149,18 @@ export default function Sidebar() {
     setNavPermsResolved(false)
     ;(async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
         if (!user || cancelled) {
           if (!cancelled) setNavPermsResolved(true)
           return
         }
-        const role = await getUserRole(supabase, user.id, bid)
+        const role = await getUserRole(supabase, user.id, bid as string)
         const { data: buRow } = await supabase
           .from("business_users")
           .select("custom_permissions")
-          .eq("business_id", bid)
+          .eq("business_id", bid as string)
           .eq("user_id", user.id)
           .maybeSingle()
         if (cancelled) return
@@ -391,39 +450,40 @@ export default function Sidebar() {
           title: "RETAIL OPERATIONS",
           items: [
             { label: "Dashboard", route: "/retail/dashboard" },
-            { label: "POS Terminal", route: "/pos" },
-            { label: "Open Register Session", route: "/sales/open-session" },
-            { label: "Close Register Session", route: "/sales/close-session" },
+            { label: "POS Terminal", route: "/retail/pos" },
+            { label: "Open Register Session", route: "/retail/sales/open-session" },
+            { label: "Close Register Session", route: "/retail/sales/close-session" },
           ],
         },
         {
           title: "PRODUCT & INVENTORY",
           items: [
-            { label: "Products", route: "/inventory" },
-            { label: "Categories", route: "/admin/retail/inventory-dashboard" },
-            { label: "Inventory", route: "/inventory" },
-            { label: "Bulk Import", route: "/admin/retail/bulk-import" },
-            { label: "Low Stock Report", route: "/admin/retail/low-stock" },
-            { label: "Inventory Dashboard", route: "/admin/retail/inventory-dashboard" },
+            { label: "Products", route: "/retail/products" },
+            { label: "Categories", route: "/retail/categories" },
+            { label: "Inventory", route: "/retail/inventory" },
+            { label: "Bulk Import", route: "/retail/admin/bulk-import" },
+            { label: "Low Stock Report", route: "/retail/admin/low-stock" },
+            { label: "Inventory Dashboard", route: "/retail/admin/inventory-dashboard" },
           ],
         },
         {
           title: "SALES & REPORTS",
           items: [
-            { label: "Analytics Dashboard", route: "/admin/retail/analytics" },
-            { label: "Sales History", route: "/sales-history" },
-            { label: "View Profit & Loss", route: "/admin/retail/analytics" },
-            { label: "View Balance Sheet", route: "/admin/retail/analytics" },
-            { label: "Register Reports", route: "/sales-history" },
-            { label: "VAT Report", route: "/reports/vat" },
+            { label: "Analytics Dashboard", route: retailPaths.adminAnalytics },
+            { label: "Sales History", route: "/retail/sales-history" },
+            { label: "Store expenses", route: retailPaths.expenses },
+            { label: "Profit & Loss", route: retailPaths.reportsProfitAndLoss },
+            { label: "Balance Sheet", route: retailPaths.reportsBalanceSheet },
+            { label: "Register Reports", route: retailPaths.reportsRegisterSessions },
+            { label: "VAT Report", route: retailPaths.reportsVat },
           ],
         },
         {
           title: "CUSTOMERS & SUPPLIERS",
           items: [
             { label: "Customers", route: "/retail/customers" },
-            { label: "Suppliers", route: "/admin/retail/suppliers" },
-            { label: "Purchase Orders", route: "/admin/retail/purchase-orders" },
+            { label: "Suppliers", route: "/retail/admin/suppliers" },
+            { label: "Purchase Orders", route: "/retail/admin/purchase-orders" },
           ],
         },
         {
@@ -468,6 +528,20 @@ export default function Sidebar() {
     const raw = getMenuSections()
     const resolvedIndustry =
       businessIndustry ?? (pathname?.startsWith("/service/") && urlBusinessId ? "service" : null)
+
+    if (effectiveIndustry === "retail" && navPermsResolved && navRole === "cashier") {
+      return [
+        {
+          title: "RETAIL OPERATIONS",
+          items: [{ label: "POS Terminal", route: "/retail/pos" }],
+        },
+        {
+          title: "SETTINGS",
+          items: [{ label: "Staff Management", route: "/retail/admin/staff" }],
+        },
+      ]
+    }
+
     if (
       resolvedIndustry !== "service" ||
       isAccountantFirmUser ||
@@ -598,7 +672,8 @@ export default function Sidebar() {
                       {isExpanded && (
                         <div className="mt-1 space-y-0.5">
                           {section.items.map((item, itemIdx) => {
-                            const active = isActive(item.route)
+                            const active =
+                              !item.skipActiveHighlight && isActive(item.route)
                             // Client-scoped accounting links (not Control Tower) require sidebarBusinessId (Wave 11).
                             const isAccountingClientRoute =
                               item.route.startsWith("/accounting") && !item.route.includes("control-tower")

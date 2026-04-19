@@ -43,18 +43,19 @@ export async function POST(
       )
     }
 
-    // Validate status
-    if (po.status !== "draft") {
+    // Buy list: planned → ordered (sent to supplier)
+    if (po.status !== "planned") {
       return NextResponse.json(
-        { error: `Cannot send purchase order with status: ${po.status}. Only draft orders can be sent.` },
+        {
+          error: `Only a planned buy list can be marked ordered (current: ${po.status}).`,
+        },
         { status: 400 }
       )
     }
 
-    // Update status to sent
     const { data: updatedPO, error: updateError } = await supabase
       .from("purchase_orders")
-      .update({ status: "sent" })
+      .update({ status: "ordered" })
       .eq("id", poId)
       .select()
       .single()

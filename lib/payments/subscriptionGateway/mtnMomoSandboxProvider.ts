@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   fetchMtnCollectionAccessToken,
   getRequestToPayStatus,
+  mtnCollectionRequestToPayCurrency,
   normalizeGhanaMsisdnForMtn,
   requestToPayCollection,
   type MtnMomoDirectTenantCredentials,
@@ -126,7 +127,7 @@ export async function mtnMomoSandboxInitiateSubscription(
     accessToken: tokenRes.accessToken,
     xReferenceId,
     amount: amountStr,
-    currency: "GHS",
+    currency: mtnCollectionRequestToPayCurrency(creds.targetEnvironment, "GHS"),
     externalId: reference,
     payerMsisdn: msisdn,
     payerMessage: `Finza subscription (${ctx.tier})`,

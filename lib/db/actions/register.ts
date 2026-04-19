@@ -27,18 +27,67 @@ export interface CashierSession {
   ended_at: string | null
 }
 
+function parsePaymentLines(raw: unknown): Array<{ method?: string; amount?: number }> {
+  if (!raw) return []
+  let arr: unknown[] = []
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw) as unknown
+      if (Array.isArray(p)) arr = p
+    } catch {
+      return []
+    }
+  } else if (Array.isArray(raw)) {
+    arr = raw
+  }
+  return arr.map((row) => row as { method?: string; amount?: number })
+}
+
+/** Cash tender from `payment_lines` when legacy rows omit cash_amount / cash_received */
+function cashTenderFromPaymentLines(raw: unknown): number {
+  return parsePaymentLines(raw).reduce((sum, row) => {
+    const m = String(row.method ?? "")
+      .trim()
+      .toLowerCase()
+    if (m !== "cash" && m !== "cash_tender") return sum
+    const amt = Number(row.amount ?? 0)
+    return sum + (Number.isFinite(amt) ? amt : 0)
+  }, 0)
+}
+
 /**
- * Calculate expected cash for a cashier session
- * LEDGER-BASED: Expected cash = Cash account (1000) ledger balance
+ * Net physical cash movement for one sale row (paid sales only).
+ * Prefers cash_received − change_given; falls back to cash_amount / payment_lines.
+ */
+function netCashDrawerDeltaFromSale(sale: Record<string, unknown>): number {
+  const changeGiven = Number(sale.change_given ?? 0) || 0
+  const crRaw = sale.cash_received
+  if (crRaw != null && crRaw !== "") {
+    const cr = Number(crRaw)
+    if (Number.isFinite(cr)) return cr - changeGiven
+  }
+  const ca = Number(sale.cash_amount ?? 0) || 0
+  if (ca > 0 || changeGiven > 0) return ca - changeGiven
+  const fromLines = cashTenderFromPaymentLines(sale.payment_lines)
+  return fromLines - changeGiven
+}
+
+/**
+ * Expected cash in the drawer for one cashier session (operational, not business-wide ledger).
+ *
+ * opening_float (or opening_cash) + net cash from paid sales for this session
+ * − cash removed via cash_drops for this session.
+ *
+ * This must not use the global Cash (1000) ledger balance — that mixes all registers/sessions
+ * and repeats the same “expected” after a prior close.
  */
 export async function calculateExpectedCash(
   supabase: SupabaseClient,
   sessionId: string
 ): Promise<number> {
-  // Get session to find business_id
   const { data: session, error: sessionError } = await supabase
     .from("cashier_sessions")
-    .select("business_id, opening_float")
+    .select("opening_float, opening_cash")
     .eq("id", sessionId)
     .single()
 
@@ -46,57 +95,43 @@ export async function calculateExpectedCash(
     throw new Error("Session not found")
   }
 
-  const businessId = session.business_id
-  if (!businessId) {
-    throw new Error("Business ID not found for session")
+  const of = session.opening_float
+  const opening =
+    of !== null && of !== undefined && !Number.isNaN(Number(of))
+      ? Number(of)
+      : Number((session as { opening_cash?: unknown }).opening_cash ?? 0) || 0
+
+  const { data: sales, error: salesError } = await supabase
+    .from("sales")
+    .select("cash_received, cash_amount, change_given, payment_lines, payment_status")
+    .eq("cashier_session_id", sessionId)
+    .eq("payment_status", "paid")
+
+  if (salesError) {
+    console.error("calculateExpectedCash sales query:", salesError)
   }
 
-  // LEDGER-BASED: Get Cash account (account_code '1000')
-  const { data: cashAccount } = await supabase
-    .from("accounts")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("code", "1000")
-    .is("deleted_at", null)
-    .single()
-
-  if (!cashAccount) {
-    // Fallback to opening float if cash account not found
-    return Number(session.opening_float || 0)
+  let netFromSales = 0
+  for (const row of sales || []) {
+    netFromSales += netCashDrawerDeltaFromSale(row as Record<string, unknown>)
   }
 
-  // Calculate Cash account balance: SUM(debit) - SUM(credit) for asset account
-  const { data: cashLines } = await supabase
-    .from("journal_entry_lines")
-    .select(
-      `
-      debit,
-      credit,
-      journal_entries!inner (
-        business_id
-      )
-    `
-    )
-    .eq("account_id", cashAccount.id)
-    .eq("journal_entries.business_id", businessId)
+  const { data: drops, error: dropsError } = await supabase
+    .from("cash_drops")
+    .select("amount")
+    .eq("session_id", sessionId)
 
-  if (!cashLines) {
-    // Fallback to opening float if no ledger entries
-    return Number(session.opening_float || 0)
+  if (dropsError) {
+    console.error("calculateExpectedCash cash_drops query:", dropsError)
   }
 
-  // For asset accounts: balance = debit - credit
-  const cashBalance = cashLines.reduce(
-    (sum: number, line: any) => sum + Number(line.debit || 0) - Number(line.credit || 0),
-    0
-  )
+  const dropTotal = (drops || []).reduce((sum, d) => sum + Number((d as { amount?: unknown }).amount || 0), 0)
 
-  // Ensure we return a valid number
-  if (isNaN(cashBalance) || !isFinite(cashBalance)) {
-    return Number(session.opening_float || 0) // Fallback to opening float if calculation fails
+  const expected = opening + netFromSales - dropTotal
+  if (!Number.isFinite(expected)) {
+    return opening
   }
-  
-  return Math.max(0, cashBalance)
+  return expected
 }
 
 /**
@@ -141,5 +176,3 @@ export async function createRegisterVariance(
   if (error) throw error
   return data as RegisterVariance
 }
-
-

@@ -162,7 +162,6 @@ export async function POST(request: NextRequest) {
         .from("sales")
         .update({
           momo_transaction_id: result.transactionId,
-          payment_reference: reference,
         })
         .eq("id", reference)
     }

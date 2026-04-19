@@ -1,1 +1,3 @@
-export { default } from "@/app/products/new/page.impl"
+import RetailNewProductPage from "@/components/retail/products/RetailNewProductPage"
+
+export default RetailNewProductPage

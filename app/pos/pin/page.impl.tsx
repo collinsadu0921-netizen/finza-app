@@ -2,9 +2,20 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { getCashierSession, setCashierSession, isCashierAuthenticated } from "@/lib/cashierSession"
+import {
+  getCashierSession,
+  setCashierSession,
+  setCashierPosToken,
+  isCashierAuthenticated,
+} from "@/lib/cashierSession"
 import { setActiveStoreId } from "@/lib/storeSession"
 import { supabase } from "@/lib/supabaseClient"
+import { retailPaths } from "@/lib/retail/routes"
+import {
+  activateRetailPosPinUrlIsolation,
+  clearRetailPosPinUrlIsolation,
+} from "@/lib/retail/posPinUrlIsolation"
+import { PosTerminalSetupHint } from "@/components/retail/pos/PosTerminalSetupHint"
 
 export default function PinLoginPage() {
   const router = useRouter()
@@ -16,9 +27,11 @@ export default function PinLoginPage() {
   useEffect(() => {
     // If already authenticated as cashier, redirect to POS
     if (isCashierAuthenticated()) {
-      router.push("/pos")
+      router.push("/retail/pos")
       return
     }
+
+    activateRetailPosPinUrlIsolation()
 
     // Don't redirect if admin/manager is logged in - allow cashier PIN login
     // Cashiers can log in even when admin session exists (different auth systems)
@@ -69,6 +82,9 @@ export default function PinLoginPage() {
           storeId: data.cashier.store_id,
           businessId: data.cashier.business_id,
         })
+        setCashierPosToken(
+          typeof data.cashier_pos_token === "string" ? data.cashier_pos_token : null
+        )
 
         // Set active store for store context
         // Get store name from database
@@ -84,8 +100,9 @@ export default function PinLoginPage() {
           setActiveStoreId(data.cashier.store_id, null)
         }
 
-        // Redirect to POS
-        router.push("/pos")
+        clearRetailPosPinUrlIsolation()
+        // Redirect to POS (canonical retail URL)
+        router.push("/retail/pos")
       } else {
         setError("Invalid PIN")
         setLoading(false)
@@ -168,17 +185,35 @@ export default function PinLoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 space-y-4 text-center">
+          <p className="text-sm text-gray-600">
+            <button
+              type="button"
+              onClick={() => {
+                clearRetailPosPinUrlIsolation()
+                router.push(retailPaths.dashboard)
+              }}
+              className="text-gray-700 font-medium hover:text-gray-900 underline-offset-2 hover:underline"
+            >
+              Exit cashier screen — open retail dashboard
+            </button>
+          </p>
           <p className="text-sm text-gray-600">
             Admin or Manager?{" "}
             <button
-              onClick={() => router.push("/login")}
+              type="button"
+              onClick={() => {
+                clearRetailPosPinUrlIsolation()
+                router.push("/login")
+              }}
               className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
             >
               Sign in with email
             </button>
           </p>
         </div>
+
+        <PosTerminalSetupHint />
       </div>
     </div>
   )

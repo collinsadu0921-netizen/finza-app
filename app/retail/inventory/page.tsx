@@ -1,1 +1,3 @@
-export { default } from "@/app/inventory/page.impl"
+import RetailInventoryPage from "@/components/retail/inventory/RetailInventoryPage"
+
+export default RetailInventoryPage

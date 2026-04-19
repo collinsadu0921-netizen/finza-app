@@ -6,6 +6,7 @@
 const CASHIER_SESSION_KEY = 'finza_cashier_session'
 const CASHIER_STORE_KEY = 'finza_cashier_store_id'
 const CASHIER_STORE_NAME_KEY = 'finza_cashier_store_name'
+const CASHIER_POS_TOKEN_KEY = 'finza_cashier_pos_token'
 
 export interface CashierSession {
   cashierId: string
@@ -43,8 +44,21 @@ export function clearCashierSession(): void {
   sessionStorage.removeItem(CASHIER_SESSION_KEY)
   sessionStorage.removeItem(CASHIER_STORE_KEY)
   sessionStorage.removeItem(CASHIER_STORE_NAME_KEY)
+  sessionStorage.removeItem(CASHIER_POS_TOKEN_KEY)
   
   window.dispatchEvent(new CustomEvent('cashierSessionChanged', { detail: null }))
+}
+
+/** Server-verifiable POS token from POST /api/auth/pin-login (receipt API, etc.). */
+export function getCashierPosToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return sessionStorage.getItem(CASHIER_POS_TOKEN_KEY)
+}
+
+export function setCashierPosToken(token: string | null): void {
+  if (typeof window === 'undefined') return
+  if (token) sessionStorage.setItem(CASHIER_POS_TOKEN_KEY, token)
+  else sessionStorage.removeItem(CASHIER_POS_TOKEN_KEY)
 }
 
 export function isCashierAuthenticated(): boolean {

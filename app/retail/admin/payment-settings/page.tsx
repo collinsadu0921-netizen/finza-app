@@ -1,1 +1,3 @@
-export { default } from "@/app/service/settings/payments/page"
+import RetailPaymentSettingsPage from "@/components/retail/admin/RetailPaymentSettingsPage"
+
+export default RetailPaymentSettingsPage

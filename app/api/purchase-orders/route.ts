@@ -74,9 +74,13 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      if (!unit_cost || unit_cost < 0) {
+      const uc =
+        unit_cost === undefined || unit_cost === null || unit_cost === ""
+          ? null
+          : Number(unit_cost)
+      if (uc != null && (Number.isNaN(uc) || uc < 0)) {
         return NextResponse.json(
-          { error: "Each item must have unit_cost >= 0" },
+          { error: "Optional unit_cost must be a number >= 0" },
           { status: 400 }
         )
       }
@@ -96,26 +100,35 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      const qty = Number(quantity)
+      const lineTotal = uc != null && !Number.isNaN(uc) ? qty * uc : null
+
       poItems.push({
         product_id,
         variant_id: variant_id || null,
-        quantity: Number(quantity),
-        unit_cost: Number(unit_cost),
-        total_cost: Number(quantity) * Number(unit_cost),
+        quantity: qty,
+        unit_cost: uc,
+        total_cost: lineTotal,
+        quantity_received: 0,
+        received_unit_cost: null,
       })
     }
 
-    // Create purchase order (draft status)
+    const supplier_order_note =
+      typeof body.supplier_order_note === "string" ? body.supplier_order_note.trim() || null : null
+
+    // Create purchase order (planned = buy list not yet sent)
     const { data: purchaseOrder, error: poError } = await supabase
       .from("purchase_orders")
       .insert({
         business_id: business.id,
         supplier_id,
-        status: "draft",
+        status: "planned",
         reference: reference || null,
         order_date: order_date || new Date().toISOString().split("T")[0],
         expected_date: expected_date || null,
         created_by: user.id,
+        supplier_order_note,
       })
       .select()
       .single()

@@ -7,7 +7,20 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
 import { getUserStore } from "@/lib/stores"
 import { getActiveStoreId } from "@/lib/storeSession"
-import { getStockStatus, isLowStock } from "@/lib/inventory"
+import { getStockStatus } from "@/lib/inventory"
+import { retailPaths } from "@/lib/retail/routes"
+import {
+  RetailBackofficeBadge,
+  RetailBackofficeBackLink,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeCardTitle,
+  RetailBackofficeEmpty,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+  RetailBackofficeAlert,
+} from "@/components/retail/RetailBackofficeUi"
 
 type Product = {
   id: string
@@ -23,6 +36,8 @@ type LowStockProduct = Product & {
   currentStock: number
   status: "low_stock" | "out_of_stock"
   threshold: number
+  variant_id?: string | null
+  variant_name?: string | null
 }
 
 export default function LowStockReportPage() {
@@ -104,51 +119,94 @@ export default function LowStockReportPage() {
 
       const { data: stockData } = await stockQuery
 
-      // Create a map of product_id -> stock (aggregate if multiple stores)
-      const stockMap: Record<string, number> = {}
+      const { data: variantsData } = await supabase
+        .from("products_variants")
+        .select("id, product_id, variant_name, barcode")
+        .in("product_id", productsData.map((x: { id: string }) => x.id))
+
+      const variantsByProduct = new Map<
+        string,
+        Array<{ id: string; variant_name: string; barcode: string | null }>
+      >()
+      const productIdsWithVariants = new Set<string>()
+      for (const v of variantsData || []) {
+        productIdsWithVariants.add(v.product_id)
+        if (!variantsByProduct.has(v.product_id)) {
+          variantsByProduct.set(v.product_id, [])
+        }
+        variantsByProduct.get(v.product_id)!.push({
+          id: v.id,
+          variant_name: v.variant_name,
+          barcode: v.barcode ?? null,
+        })
+      }
+
+      const parentStockMap: Record<string, number> = {}
+      const variantStockMap: Record<string, number> = {}
       if (stockData) {
         stockData.forEach((s: any) => {
-          if (!s.variant_id) { // Only count non-variant stock for main products
-            const currentStock = s.stock_quantity !== null && s.stock_quantity !== undefined
+          const rowQty =
+            s.stock_quantity !== null && s.stock_quantity !== undefined
               ? Number(s.stock_quantity)
               : s.stock !== null && s.stock !== undefined
-              ? Number(s.stock)
-              : 0
-            stockMap[s.product_id] = (stockMap[s.product_id] || 0) + currentStock
+                ? Number(s.stock)
+                : 0
+          if (s.variant_id) {
+            variantStockMap[s.variant_id] = (variantStockMap[s.variant_id] || 0) + rowQty
+          } else {
+            parentStockMap[s.product_id] = (parentStockMap[s.product_id] || 0) + rowQty
           }
         })
       }
 
-      // Filter and process low stock products
-      const lowStockProducts: LowStockProduct[] = (productsData || [])
-        .map((p) => {
-          // Use stock from products_stock if available, otherwise fallback to product.stock
-          const currentStock = Math.floor(
-            stockMap[p.id] !== undefined
-              ? stockMap[p.id]
-              : p.stock_quantity !== null && p.stock_quantity !== undefined
+      const lowStockProducts: LowStockProduct[] = []
+
+      for (const p of productsData || []) {
+        const threshold =
+          p.low_stock_threshold !== null && p.low_stock_threshold !== undefined
+            ? Number(p.low_stock_threshold)
+            : 5
+
+        if (productIdsWithVariants.has(p.id)) {
+          const vlist = variantsByProduct.get(p.id) || []
+          for (const v of vlist) {
+            const currentStock = Math.floor(variantStockMap[v.id] ?? 0)
+            const stockStatus = getStockStatus(currentStock, threshold, p.track_stock)
+            if (stockStatus.status === "low_stock" || stockStatus.status === "out_of_stock") {
+              lowStockProducts.push({
+                ...p,
+                barcode: v.barcode ?? p.barcode ?? undefined,
+                currentStock,
+                status: stockStatus.status,
+                threshold,
+                variant_id: v.id,
+                variant_name: v.variant_name,
+              })
+            }
+          }
+          continue
+        }
+
+        const currentStock = Math.floor(
+          parentStockMap[p.id] !== undefined
+            ? parentStockMap[p.id]
+            : p.stock_quantity !== null && p.stock_quantity !== undefined
               ? Number(p.stock_quantity)
               : p.stock !== null && p.stock !== undefined
-              ? Number(p.stock)
-              : 0
-          )
-          const threshold = p.low_stock_threshold !== null && p.low_stock_threshold !== undefined
-            ? Number(p.low_stock_threshold)
-            : 5 // Default threshold
-
-          const stockStatus = getStockStatus(currentStock, threshold, p.track_stock)
-
-          if (stockStatus.status === "low_stock" || stockStatus.status === "out_of_stock") {
-            return {
-              ...p,
-              currentStock,
-              status: stockStatus.status,
-              threshold,
-            } as LowStockProduct
-          }
-          return null
-        })
-        .filter((p): p is LowStockProduct => p !== null)
+                ? Number(p.stock)
+                : 0
+        )
+        const stockStatus = getStockStatus(currentStock, threshold, p.track_stock)
+        if (stockStatus.status === "low_stock" || stockStatus.status === "out_of_stock") {
+          lowStockProducts.push({
+            ...p,
+            currentStock,
+            status: stockStatus.status,
+            threshold,
+            variant_id: null,
+          })
+        }
+      }
 
       // Sort: Out of stock first, then low stock, then by name
       lowStockProducts.sort((a, b) => {
@@ -169,128 +227,131 @@ export default function LowStockReportPage() {
 
   if (loading) {
     return (
-      <>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </>
+      <RetailBackofficeShell>
+        <RetailBackofficeMain>
+          <p className="text-sm text-slate-600">Loading low stock report…</p>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   if (error || !hasAccess) {
     return (
-      <>
-        <div className="p-6">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+      <RetailBackofficeShell>
+        <RetailBackofficeMain>
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error || "Access denied"}
-          </div>
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </>
+          </RetailBackofficeAlert>
+          <RetailBackofficeButton variant="secondary" onClick={() => router.push(retailPaths.dashboard)}>
+            Back to dashboard
+          </RetailBackofficeButton>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   return (
-    <>
-      <div className="p-6">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="text-blue-600 hover:underline mb-4"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-2xl font-bold mb-2">Low Stock Report</h1>
-          <p className="text-gray-600">
-            Products with low stock or out of stock items
-          </p>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain>
+        <RetailBackofficeBackLink onClick={() => router.push(retailPaths.dashboard)}>Back to dashboard</RetailBackofficeBackLink>
+
+        <RetailBackofficePageHeader
+          eyebrow="Product & inventory"
+          title="Low stock"
+          description="Tracked products at or below their threshold. Restock or adjust thresholds from the product record."
+        />
 
         {products.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-lg p-6 text-center text-gray-500">
-            <p className="text-lg font-semibold mb-2">All products are in stock!</p>
-            <p className="text-sm">No low stock or out of stock items found.</p>
-          </div>
+          <RetailBackofficeEmpty
+            title="Nothing needs attention"
+            description="No tracked products are below threshold or out of stock for the current store context."
+          />
         ) : (
-          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Product Name
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    SKU
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Current Stock
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Threshold
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {products.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {product.name}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                      {product.barcode || "-"}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
-                      {product.currentStock}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-center">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-bold text-white ${
-                          product.status === "out_of_stock"
-                            ? "bg-red-500"
-                            : "bg-yellow-500"
-                        }`}
+          <>
+            <RetailBackofficeCard padding="p-0" className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px]">
+                  <thead className="border-b border-slate-100 bg-slate-50/80">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Product
+                      </th>
+                      <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Barcode
+                      </th>
+                      <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        On hand
+                      </th>
+                      <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Threshold
+                      </th>
+                      <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {products.map((product) => (
+                      <tr
+                        key={product.variant_id ? `${product.id}-${product.variant_id}` : product.id}
+                        className="transition-colors hover:bg-slate-50/60"
                       >
-                        {product.status === "out_of_stock" ? "OUT" : "LOW"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-600">
-                      {product.threshold}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-center">
-                      <button
-                        onClick={() => router.push("/products")}
-                        className="text-blue-600 hover:underline text-xs"
-                      >
-                        View Product
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                        <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-slate-900">
+                          {product.variant_name
+                            ? `${product.name} · ${product.variant_name}`
+                            : product.name}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{product.barcode || "—"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums font-semibold text-slate-900">
+                          {product.currentStock}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center text-sm">
+                          {product.status === "out_of_stock" ? (
+                            <RetailBackofficeBadge tone="danger">Out</RetailBackofficeBadge>
+                          ) : (
+                            <RetailBackofficeBadge tone="warning">Low</RetailBackofficeBadge>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-slate-600">
+                          {product.threshold}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-center text-sm">
+                          <RetailBackofficeButton
+                            variant="ghost"
+                            className="text-xs"
+                            onClick={() => router.push(retailPaths.productEdit(product.id))}
+                          >
+                            Edit product
+                          </RetailBackofficeButton>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </RetailBackofficeCard>
 
-        <div className="mt-4 text-sm text-gray-600">
-          <p>Total items: {products.length}</p>
-          <p>
-            Out of stock: {products.filter((p) => p.status === "out_of_stock").length} | Low stock:{" "}
-            {products.filter((p) => p.status === "low_stock").length}
-          </p>
-        </div>
-      </div>
-    </>
+            <RetailBackofficeCard className="mt-6" padding="p-4 sm:p-5">
+              <RetailBackofficeCardTitle className="mb-2">Summary</RetailBackofficeCardTitle>
+              <p className="text-sm text-slate-600">
+                <span className="font-medium text-slate-900">{products.length}</span> items need attention ·{" "}
+                <span className="font-medium text-rose-900">
+                  {products.filter((p) => p.status === "out_of_stock").length}
+                </span>{" "}
+                out ·{" "}
+                <span className="font-medium text-amber-950">
+                  {products.filter((p) => p.status === "low_stock").length}
+                </span>{" "}
+                low
+              </p>
+            </RetailBackofficeCard>
+          </>
+        )}
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }
 

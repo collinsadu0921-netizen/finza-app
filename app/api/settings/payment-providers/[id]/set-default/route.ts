@@ -4,6 +4,7 @@ import { statusForSettingsError } from "@/lib/settings/paymentProviders/httpErro
 import { setPaymentProviderDefault } from "@/lib/settings/paymentProviders/service"
 import type { PaymentProviderEnvironment } from "@/lib/tenantPayments/types"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { assertBusinessPaymentWriteAccess } from "@/lib/settings/assertBusinessPaymentWriteAccess"
 
 function parseEnvironment(raw: string | null | undefined): PaymentProviderEnvironment {
   if (raw === "test" || raw === "live") return raw
@@ -28,6 +29,11 @@ export async function POST(request: NextRequest, ctx: RouteParams) {
     const scope = await resolveBusinessScopeForUser(supabase, user.id, businessIdRaw)
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    const writeGate = await assertBusinessPaymentWriteAccess(supabase, user.id, scope.businessId)
+    if (!writeGate.ok) {
+      return NextResponse.json({ error: writeGate.error }, { status: writeGate.status })
     }
 
     const environment = parseEnvironment(typeof body.environment === "string" ? body.environment : undefined)

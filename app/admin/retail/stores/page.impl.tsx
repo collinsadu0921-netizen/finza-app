@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
 import { initializeStoreStock } from "@/lib/productsStock"
-import { setActiveStoreId } from "@/lib/storeSession"
+import { getActiveStoreId, setActiveStoreId } from "@/lib/storeSession"
+import { retailPaths } from "@/lib/retail/routes"
 import { useRouteGuard } from "@/lib/useRouteGuard"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { retailSettingsShell as RS } from "@/lib/retail/retailSettingsShell"
 
 type Store = {
   id: string
@@ -37,9 +39,23 @@ export default function StoresPage() {
     phone: "",
     email: "",
   })
+  /** Session active store id (`all` = no single-store focus) */
+  const [sessionActiveStoreId, setSessionActiveStoreId] = useState<string | null>(null)
+
+  const syncSessionActiveStore = () => {
+    if (typeof window === "undefined") return
+    setSessionActiveStoreId(getActiveStoreId())
+  }
 
   useEffect(() => {
     loadData()
+  }, [])
+
+  useEffect(() => {
+    syncSessionActiveStore()
+    const onStoreChanged = () => syncSessionActiveStore()
+    window.addEventListener("storeChanged", onStoreChanged)
+    return () => window.removeEventListener("storeChanged", onStoreChanged)
   }, [])
 
   const loadData = async () => {
@@ -286,67 +302,62 @@ export default function StoresPage() {
 
   if (loading) {
     return (
-      <>
-        <div className="p-6">
-          <p>Loading...</p>
+      <div className={RS.outer}>
+        <div className={RS.containerWide}>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Loading…</p>
         </div>
-      </>
+      </div>
     )
   }
 
   if (userRole !== "owner" && userRole !== "admin") {
     return (
-      <>
-        <div className="p-6">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+      <div className={RS.outer}>
+        <div className={RS.containerWide}>
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
             {error || "Access denied"}
           </div>
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="bg-blue-600 text-white px-4 py-2 rounded"
-          >
-            Back to Dashboard
+          <button type="button" onClick={() => router.push("/retail/dashboard")} className={RS.primaryButton}>
+            Back to dashboard
           </button>
         </div>
-      </>
+      </div>
     )
   }
 
   return (
-    <>
-      <div className="p-6 max-w-6xl mx-auto">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push("/retail/dashboard")}
-            className="text-blue-600 hover:underline mb-4"
-          >
+    <div className={RS.outer}>
+      <div className={RS.containerWide}>
+        <div className={RS.headerBlock}>
+          <button type="button" onClick={() => router.push("/retail/dashboard")} className={RS.backLink}>
             ← Back to Dashboard
           </button>
-          <div className="flex justify-between items-center">
+          <div className={RS.actionsRow}>
             <div>
-              <h1 className="text-2xl font-bold mb-2">Stores Management</h1>
-              <p className="text-gray-600">Manage your store locations and branches</p>
+              <h1 className={RS.title}>Stores</h1>
+              <p className={RS.subtitle}>Branches and contact details. Open a store to set it active for POS and registers.</p>
             </div>
             <button
+              type="button"
               onClick={() => {
                 cancelEdit()
                 setShowAddForm(true)
               }}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+              className={`${RS.primaryButton} shrink-0 self-start sm:self-auto`}
             >
-              + Add Store
+              Add store
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
             {error}
           </div>
         )}
 
         {showAddForm && (
-          <div className="bg-white border rounded-lg p-6 mb-6">
+          <div className={`${RS.formSectionCard} mb-6`}>
             <h2 className="text-lg font-semibold mb-4">
               {editingId ? "Edit Store" : "Add New Store"}
             </h2>
@@ -373,7 +384,7 @@ export default function StoresPage() {
                   placeholder="e.g., Accra, Osu"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <input
@@ -395,94 +406,145 @@ export default function StoresPage() {
                   />
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
-                >
-                  {editingId ? "Update" : "Create"} Store
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelEdit}
-                  className="bg-gray-300 text-gray-800 px-6 py-2 rounded hover:bg-gray-400"
-                >
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button type="button" onClick={cancelEdit} className={RS.secondaryButton}>
                   Cancel
+                </button>
+                <button type="submit" className={RS.primaryButton}>
+                  {editingId ? "Update store" : "Create store"}
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        <div className="bg-white border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Store Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Location
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Contact
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {stores.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
-                    No stores found. Add your first store to get started.
-                  </td>
-                </tr>
-              ) : (
-                stores.map((store) => (
-                  <tr key={store.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 font-medium">{store.name}</td>
-                    <td className="px-6 py-4 text-gray-600">{store.location || "—"}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {store.phone && <div>📞 {store.phone}</div>}
-                      {store.email && <div>✉️ {store.email}</div>}
-                      {!store.phone && !store.email && "—"}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            // Set active store using helper function (single source of truth)
-                            setActiveStoreId(store.id, store.name)
-                            router.push(`/admin/retail/store/${store.id}`)
-                          }}
-                          className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 text-sm font-medium"
-                        >
-                          Open Store
-                        </button>
-                        <button
-                          onClick={() => startEdit(store)}
-                          className="text-blue-600 hover:text-blue-800 text-sm"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(store.id)}
-                          className="text-red-600 hover:text-red-800 text-sm"
-                        >
-                          Delete
-                        </button>
+        {stores.length === 0 ? (
+          <div className={`${RS.card} ${RS.cardPad} text-center text-sm text-gray-500 dark:text-gray-400`}>
+            No stores yet. Add your first branch to get started.
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className={RS.listStack}>
+              {stores.map((store) => (
+                <div key={`m-${store.id}`} className={RS.listCard}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 font-medium text-gray-900 dark:text-white">
+                        {store.name}
+                        {sessionActiveStoreId &&
+                          sessionActiveStoreId !== "all" &&
+                          sessionActiveStoreId === store.id && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-100 dark:ring-emerald-800">
+                              Active for POS
+                            </span>
+                          )}
                       </div>
-                    </td>
+                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{store.location || "—"}</p>
+                      <div className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                        {store.phone && <div>{store.phone}</div>}
+                        {store.email && <div>{store.email}</div>}
+                        {!store.phone && !store.email && <span>—</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveStoreId(store.id, store.name)
+                        router.push(retailPaths.adminStoreDetail(store.id))
+                      }}
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                    >
+                      Open store
+                    </button>
+                    <button type="button" onClick={() => startEdit(store)} className={RS.secondaryButton}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(store.id)}
+                      className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-950/30"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className={RS.tableWrap}>
+              <table className="w-full min-w-[640px]">
+                <thead className="bg-gray-50 dark:bg-gray-800/80">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Store
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Location
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Contact
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Actions
+                    </th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {stores.map((store) => (
+                    <tr key={store.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
+                      <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{store.name}</span>
+                          {sessionActiveStoreId &&
+                            sessionActiveStoreId !== "all" &&
+                            sessionActiveStoreId === store.id && (
+                              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900 ring-1 ring-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-100 dark:ring-emerald-800">
+                                Active for POS
+                              </span>
+                            )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-gray-600 dark:text-gray-400">{store.location || "—"}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                        {store.phone && <div>{store.phone}</div>}
+                        {store.email && <div>{store.email}</div>}
+                        {!store.phone && !store.email && "—"}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveStoreId(store.id, store.name)
+                              router.push(retailPaths.adminStoreDetail(store.id))
+                            }}
+                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                          >
+                            Open store
+                          </button>
+                          <button type="button" onClick={() => startEdit(store)} className={`${RS.linkInline} text-sm`}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(store.id)}
+                            className="text-sm font-medium text-red-600 hover:text-red-800 dark:text-red-400"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
-    </>
+    </div>
   )
 }
 

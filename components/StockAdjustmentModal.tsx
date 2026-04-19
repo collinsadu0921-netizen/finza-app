@@ -1,10 +1,28 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserRole } from "@/lib/userRoles"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { ensureProductsStockRow } from "@/lib/productsStock"
+import { cn } from "@/lib/utils"
+import {
+  retailFieldClass,
+  retailLabelClass,
+  RetailBackofficeBadge,
+  RetailBackofficeCard,
+} from "@/components/retail/RetailBackofficeUi"
+
+const ADJUSTMENT_REASON_OPTIONS = [
+  { value: "supplier_delivery", label: "Supplier delivery / restock" },
+  { value: "damaged", label: "Damaged or spoilage" },
+  { value: "shrinkage", label: "Shrinkage / theft" },
+  { value: "found", label: "Found / recovered stock" },
+  { value: "cycle_count", label: "Cycle count correction" },
+  { value: "customer_return", label: "Customer return to shelf" },
+  { value: "transfer", label: "Store transfer" },
+  { value: "other", label: "Other (describe in note)" },
+] as const
 
 type StockAdjustmentModalProps = {
   isOpen: boolean
@@ -20,6 +38,9 @@ type StockAdjustmentModalProps = {
   userId: string
   variantId?: string | null
   variantName?: string
+  presentation?: "modal" | "inline"
+  /** Shown in summary when provided (e.g. from add-stock page) */
+  productBarcode?: string | null
 }
 
 type AdjustmentType = "add" | "remove" | "correct"
@@ -33,9 +54,13 @@ export default function StockAdjustmentModal({
   userId,
   variantId = null,
   variantName,
+  presentation = "modal",
+  productBarcode = null,
 }: StockAdjustmentModalProps) {
+  const inline = presentation === "inline"
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>("add")
   const [quantity, setQuantity] = useState("")
+  const [adjustmentReason, setAdjustmentReason] = useState<string>("")
   const [note, setNote] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -44,6 +69,20 @@ export default function StockAdjustmentModal({
 
   // Current stock state - will be loaded from products_stock for active store
   const [currentStock, setCurrentStock] = useState(0)
+
+  const previewQty = useMemo(() => {
+    const s = String(quantity ?? "").replace(/[^\d]/g, "")
+    if (s === "") return null
+    const n = parseInt(s, 10)
+    return Number.isNaN(n) ? null : n
+  }, [quantity])
+
+  const projectedNewStock = useMemo(() => {
+    if (previewQty === null) return null
+    if (adjustmentType === "add") return currentStock + previewQty
+    if (adjustmentType === "remove") return Math.max(0, currentStock - previewQty)
+    return previewQty
+  }, [previewQty, adjustmentType, currentStock])
 
   // Load current stock from products_stock for active store
   const loadCurrentStock = useCallback(async () => {
@@ -98,7 +137,7 @@ export default function StockAdjustmentModal({
       console.error("Error loading current stock:", err)
       setCurrentStock(0)
     }
-  }, [product.id])
+  }, [product.id, variantId])
 
   const checkPermission = useCallback(async () => {
     try {
@@ -123,6 +162,7 @@ export default function StockAdjustmentModal({
       // Reset form first
       setAdjustmentType("add")
       setQuantity("")
+      setAdjustmentReason("")
       setNote("")
       setError("")
       setCurrentStock(0)
@@ -134,6 +174,7 @@ export default function StockAdjustmentModal({
       setError("")
       setCurrentStock(0)
       setQuantity("")
+      setAdjustmentReason("")
       setNote("")
     }
   }, [isOpen, checkPermission, loadCurrentStock])
@@ -150,6 +191,11 @@ export default function StockAdjustmentModal({
     // Parse quantity as a clean integer - ensure no multiplication or string concatenation
     // First, ensure we have a valid string input
     const quantityStr = String(quantity || "").trim()
+    if (!adjustmentReason) {
+      setError("Please select a reason for this adjustment")
+      return
+    }
+
     if (!quantityStr) {
       setError("Quantity is required")
       return
@@ -165,8 +211,13 @@ export default function StockAdjustmentModal({
     // Parse as base-10 integer - this ensures no multiplication or string concatenation
     const qty = parseInt(cleanQuantity, 10)
     
-    // Validate the parsed quantity
-    if (isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
+    // Validate the parsed quantity (correction may be zero)
+    if (adjustmentType === "correct") {
+      if (isNaN(qty) || qty < 0 || !Number.isInteger(qty)) {
+        setError("Corrected stock must be a whole number (0 or more)")
+        return
+      }
+    } else if (isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
       setError("Quantity must be a positive whole number")
       return
     }
@@ -366,8 +417,12 @@ export default function StockAdjustmentModal({
         }
       }
 
-      // Create stock movement record
-      const adjustmentNote = note.trim() || `${adjustmentType === "add" ? "Added" : adjustmentType === "remove" ? "Removed" : "Corrected"} stock: ${qty} units`
+      const reasonLabel =
+        ADJUSTMENT_REASON_OPTIONS.find((o) => o.value === adjustmentReason)?.label ?? adjustmentReason
+      const parts = [reasonLabel, note.trim()].filter(Boolean)
+      const adjustmentNote =
+        parts.join(" — ") ||
+        `${adjustmentType === "add" ? "Added" : adjustmentType === "remove" ? "Removed" : "Corrected"} stock: ${qty} units`
 
       // Create stock movement record with store_id (ALWAYS include store_id)
       const movementData: any = {
@@ -401,11 +456,18 @@ export default function StockAdjustmentModal({
 
   if (!isOpen) return null
 
+  const shellOuter = inline
+    ? "w-full max-w-xl mx-auto"
+    : "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-3 backdrop-blur-[2px] sm:p-4"
+  const shellInner = inline
+    ? "w-full rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[0_12px_40px_-12px_rgba(15,23,42,0.12)] sm:p-6"
+    : "w-full max-w-md max-h-[min(88vh,34rem)] overflow-y-auto overscroll-contain rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[0_24px_48px_-12px_rgba(15,23,42,0.18)] sm:max-h-[min(90vh,36rem)] sm:p-5"
+
   if (checkingPermission) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-          <p>Checking permissions...</p>
+      <div className={shellOuter}>
+        <div className={shellInner}>
+          <p className="text-sm text-slate-600">Checking permissions…</p>
         </div>
       </div>
     )
@@ -413,15 +475,16 @@ export default function StockAdjustmentModal({
 
   if (!hasPermission) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-          <h2 className="text-xl font-bold mb-4">Adjust Stock</h2>
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            <p>Only owners, admins, and managers can adjust stock.</p>
+      <div className={shellOuter}>
+        <div className={shellInner}>
+          <h2 className="text-lg font-semibold text-slate-900">Adjust stock</h2>
+          <div className="mt-4 rounded-xl border border-red-200/90 bg-red-50/90 px-4 py-3 text-sm text-red-950">
+            Only owners, admins, and managers can adjust stock.
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-full bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400"
+            className="mt-6 w-full rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
           >
             Close
           </button>
@@ -431,72 +494,128 @@ export default function StockAdjustmentModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-        <h2 className="text-xl font-bold mb-4">Adjust Stock</h2>
-        <p className="text-sm text-gray-600 mb-4">
-          {variantId && variantName ? (
-            <>Variant: {variantName} ({product.name})</>
-          ) : (
-            <>Product: {product.name}</>
-          )}
-        </p>
+    <div className={shellOuter}>
+      <div className={shellInner}>
+        <div className="mb-4 border-b border-slate-100 pb-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Stock adjustment</p>
+          <h2 className="mt-1 text-base font-semibold tracking-tight text-slate-900 sm:text-lg">Adjust on-hand quantity</h2>
+          <p className="mt-1.5 text-sm leading-snug text-slate-600">
+            {variantId && variantName ? (
+              <>
+                <span className="font-medium text-slate-800">{product.name}</span>
+                <span className="text-slate-400"> · </span>
+                <span>{variantName}</span>
+              </>
+            ) : (
+              <span className="font-medium text-slate-800">{product.name}</span>
+            )}
+          </p>
+        </div>
+
+        <RetailBackofficeCard padding="p-3 sm:p-4" className="mb-4 border-slate-100 bg-slate-50/60">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Summary</p>
+          <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-slate-500">Current on hand</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums text-slate-900">{currentStock}</dd>
+            </div>
+            {productBarcode ? (
+              <div>
+                <dt className="text-xs text-slate-500">Barcode / SKU</dt>
+                <dd className="mt-0.5 font-mono text-xs text-slate-800">{productBarcode}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt className="text-xs text-slate-500">This adjustment</dt>
+              <dd className="mt-0.5 flex flex-wrap items-center gap-2">
+                <RetailBackofficeBadge tone="neutral">
+                  {adjustmentType === "add" ? "Add" : adjustmentType === "remove" ? "Remove" : "Set to"}
+                </RetailBackofficeBadge>
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {previewQty == null
+                    ? "—"
+                    : adjustmentType === "add"
+                      ? `+${previewQty}`
+                      : adjustmentType === "remove"
+                        ? `−${previewQty}`
+                        : String(previewQty)}
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">After save (preview)</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums text-slate-900">
+                {projectedNewStock != null ? projectedNewStock : "—"}
+              </dd>
+            </div>
+          </dl>
+        </RetailBackofficeCard>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="mb-5 rounded-xl border border-red-200/90 bg-red-50/90 px-4 py-3 text-sm text-red-950">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div>
-            <label className="block text-sm font-medium mb-1">Current Stock</label>
-            <input
-              type="text"
-              value={currentStock}
-              readOnly
-              className="w-full border rounded px-3 py-2 bg-gray-50"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Adjustment Type</label>
-            <div className="space-y-2">
-              <label className="flex items-center">
+            <span className={retailLabelClass}>Adjustment type</span>
+            <div className="mt-1.5 space-y-2 rounded-xl border border-slate-100 bg-slate-50/40 p-2.5 sm:p-3">
+              <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-800">
                 <input
                   type="radio"
                   value="add"
                   checked={adjustmentType === "add"}
                   onChange={(e) => setAdjustmentType(e.target.value as AdjustmentType)}
-                  className="mr-2"
+                  className="h-4 w-4 border-slate-300 text-slate-900 focus:ring-slate-400"
                 />
-                <span>Add Stock</span>
+                <span>Add to existing stock</span>
               </label>
-              <label className="flex items-center">
+              <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-800">
                 <input
                   type="radio"
                   value="remove"
                   checked={adjustmentType === "remove"}
                   onChange={(e) => setAdjustmentType(e.target.value as AdjustmentType)}
-                  className="mr-2"
+                  className="h-4 w-4 border-slate-300 text-slate-900 focus:ring-slate-400"
                 />
-                <span>Remove Stock</span>
+                <span>Remove from stock</span>
               </label>
-              <label className="flex items-center">
+              <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-800">
                 <input
                   type="radio"
                   value="correct"
                   checked={adjustmentType === "correct"}
                   onChange={(e) => setAdjustmentType(e.target.value as AdjustmentType)}
-                  className="mr-2"
+                  className="h-4 w-4 border-slate-300 text-slate-900 focus:ring-slate-400"
                 />
-                <span>Correct Stock</span>
+                <span>Set exact count (cycle count)</span>
               </label>
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label className={retailLabelClass}>
+              Reason <span className="text-red-600">*</span>
+            </label>
+            <select
+              value={adjustmentReason}
+              onChange={(e) => setAdjustmentReason(e.target.value)}
+              className={retailFieldClass}
+              required
+              disabled={loading}
+            >
+              <option value="">Select a reason…</option>
+              {ADJUSTMENT_REASON_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={retailLabelClass}>
               Quantity <span className="text-red-600">*</span>
             </label>
             <input
@@ -539,7 +658,7 @@ export default function StockAdjustmentModal({
                 // Prevent all other keys (prevents paste issues, etc.)
                 e.preventDefault()
               }}
-              className="w-full border rounded px-3 py-2"
+              className={retailFieldClass}
               placeholder={adjustmentType === "correct" ? "Enter correct stock amount" : "Enter quantity"}
               required
               disabled={loading}
@@ -557,32 +676,32 @@ export default function StockAdjustmentModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Note (Optional)</label>
+            <label className={retailLabelClass}>Note (optional)</label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-              rows={3}
-              placeholder="Reason for adjustment..."
+              className={cn(retailFieldClass, "min-h-[72px] resize-y")}
+              rows={2}
+              placeholder="Reference PO, staff initials, or context (recommended for “Other”)"
               disabled={loading}
             />
           </div>
 
-          <div className="flex gap-2 pt-4">
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-40"
               disabled={loading}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              disabled={loading || !quantity}
+              className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={loading || String(quantity ?? "").trim() === "" || !adjustmentReason}
             >
-              {loading ? "Processing..." : "Submit"}
+              {loading ? "Saving…" : "Save adjustment"}
             </button>
           </div>
         </form>

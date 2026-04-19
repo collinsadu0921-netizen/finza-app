@@ -11,8 +11,14 @@ export interface OpenRegisterSession {
   user_id: string
   store_id: string | null
   started_at: string
+  /** Opening float for this session (e.g. close-register UI) */
+  opening_float?: number
   registers?: {
     id: string
+    name: string
+  } | null
+  /** Present when query embeds stores(name); useful when listing sessions across stores */
+  stores?: {
     name: string
   } | null
 }
@@ -42,8 +48,12 @@ export async function getAllOpenRegisterSessions(
       user_id,
       store_id,
       started_at,
+      opening_float,
       registers (
         id,
+        name
+      ),
+      stores (
         name
       )
     `)
@@ -77,9 +87,14 @@ export async function getAllOpenRegisterSessions(
     user_id: session.user_id,
     store_id: session.store_id,
     started_at: session.started_at,
-    registers: Array.isArray(session.registers) 
+    opening_float:
+      session.opening_float !== null && session.opening_float !== undefined
+        ? Number(session.opening_float)
+        : undefined,
+    registers: Array.isArray(session.registers)
       ? session.registers[0] || null
       : session.registers || null,
+    stores: Array.isArray(session.stores) ? session.stores[0] || null : session.stores || null,
   }))
 }
 

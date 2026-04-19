@@ -13,5 +13,11 @@ export default function RetailLayout({
     setTabIndustryMode("retail")
   }, [])
 
-  return <ProtectedLayout>{children}</ProtectedLayout>
+  return (
+    <ProtectedLayout>
+      <div className="min-h-screen bg-gray-50 text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100">
+        {children}
+      </div>
+    </ProtectedLayout>
+  )
 }

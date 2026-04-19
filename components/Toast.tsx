@@ -6,6 +6,7 @@ type ToastProps = {
   message: string
   type: "success" | "error" | "info"
   onClose: () => void
+  /** Auto-dismiss delay in ms (default 3000). */
   duration?: number
 }
 
@@ -16,7 +17,7 @@ export default function Toast({ message, type, onClose, duration = 3000 }: Toast
     }, duration)
 
     return () => clearTimeout(timer)
-  }, [duration, onClose])
+  }, [duration, message, onClose])
 
   const styles = {
     success: "bg-green-50 border-green-400 text-green-800 dark:bg-green-900/20 dark:text-green-400",

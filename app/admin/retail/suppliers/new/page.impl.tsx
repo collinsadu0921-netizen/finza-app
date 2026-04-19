@@ -1,11 +1,27 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
+import {
+  RetailBackofficeAlert,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+  retailFieldClass,
+  retailLabelClass,
+  RetailMenuSelect,
+  type MenuSelectOption,
+} from "@/components/retail/RetailBackofficeUi"
+
+const SUPPLIER_STATUS_OPTIONS: MenuSelectOption[] = [
+  { value: "active", label: "Active" },
+  { value: "blocked", label: "Blocked" },
+]
 
 export default function NewSupplierPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [name, setName] = useState("")
@@ -44,36 +60,40 @@ export default function NewSupplierPage() {
         throw new Error(data.error || "Failed to create supplier")
       }
 
-      // Redirect to suppliers list page
-      router.push("/admin/retail/suppliers")
+      const id = data.supplier?.id as string | undefined
+      if (id) {
+        router.push(`/retail/admin/suppliers/${id}`)
+      } else {
+        router.push("/retail/admin/suppliers")
+      }
     } catch (err: any) {
       console.error("Error creating supplier:", err)
       setError(err.message || "Failed to create supplier")
+    } finally {
       setLoading(false)
     }
   }
 
   return (
-    <>
-      <div className="container mx-auto px-4 py-8 max-w-2xl">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">New Supplier</h1>
-          <p className="text-gray-600 mt-1">
-            Add a new supplier to your system
-          </p>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain className="max-w-xl">
+        <RetailBackofficePageHeader
+          eyebrow="Suppliers"
+          title="New supplier"
+          description="Start with the basics. After saving, you can add MoMo, bank details, terms, and notes on their profile."
+        />
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        {error ? (
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error}
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6">
-          <div className="space-y-4">
+        <RetailBackofficeCard>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                Name <span className="text-red-600">*</span>
+              <label htmlFor="name" className={retailLabelClass}>
+                Business name <span className="text-red-600">*</span>
               </label>
               <input
                 type="text"
@@ -81,14 +101,14 @@ export default function NewSupplierPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Supplier name"
+                className={retailFieldClass}
+                placeholder="Who you buy from"
                 disabled={loading}
               />
             </div>
 
             <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="phone" className={retailLabelClass}>
                 Phone
               </label>
               <input
@@ -96,63 +116,57 @@ export default function NewSupplierPage() {
                 id="phone"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Phone number"
+                className={retailFieldClass}
+                placeholder="Main phone"
                 disabled={loading}
               />
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email
+              <label htmlFor="email" className={retailLabelClass}>
+                Email (optional)
               </label>
               <input
                 type="email"
                 id="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={retailFieldClass}
                 placeholder="Email address"
                 disabled={loading}
               />
             </div>
 
             <div>
-              <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="status" className={retailLabelClass}>
                 Status
               </label>
-              <select
+              <RetailMenuSelect
                 id="status"
                 value={status}
-                onChange={(e) => setStatus(e.target.value as "active" | "blocked")}
-                className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onValueChange={(v) => setStatus(v as "active" | "blocked")}
+                disabled={loading}
+                options={SUPPLIER_STATUS_OPTIONS}
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <RetailBackofficeButton
+                variant="secondary"
+                type="button"
+                className="flex-1"
+                onClick={() => router.push("/retail/admin/suppliers")}
                 disabled={loading}
               >
-                <option value="active">Active</option>
-                <option value="blocked">Blocked</option>
-              </select>
+                Cancel
+              </RetailBackofficeButton>
+              <RetailBackofficeButton variant="primary" type="submit" className="flex-1" disabled={loading}>
+                {loading ? "Creating…" : "Create and open profile"}
+              </RetailBackofficeButton>
             </div>
-          </div>
-
-          <div className="mt-6 flex gap-4">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="flex-1 bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              disabled={loading}
-            >
-              {loading ? "Creating..." : "Create Supplier"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </>
+          </form>
+        </RetailBackofficeCard>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }

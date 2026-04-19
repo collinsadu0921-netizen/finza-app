@@ -1,1 +1,3 @@
-export { default } from "@/app/sales/close-session/page.impl"
+import RetailCloseSessionPage from "@/components/retail/sales/RetailCloseSessionPage"
+
+export default RetailCloseSessionPage

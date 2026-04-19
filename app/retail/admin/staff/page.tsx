@@ -1,1 +1,3 @@
-export { default } from "@/app/service/settings/staff/page"
+import RetailStaffSettingsPage from "@/components/retail/admin/RetailStaffSettingsPage"
+
+export default RetailStaffSettingsPage

@@ -1,13 +1,14 @@
 "use client"
 
-import { Suspense, createContext, useContext, useEffect, useState } from "react"
+import { Suspense, createContext, useContext, useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, usePathname } from "next/navigation"
 import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscriptionContext"
 import StoreSwitcher from "./StoreSwitcher"
 import Sidebar from "./Sidebar"
 import { isCashierAuthenticated } from "@/lib/cashierSession"
-import { resolveAccess } from "@/lib/accessControl"
+import { resolveAccess, isPosSurfacePath } from "@/lib/accessControl"
+import { getUserRole } from "@/lib/userRoles"
 import { autoBindSingleStore } from "@/lib/autoBindStore"
 import { useExportMode } from "@/lib/hooks/useExportMode"
 import RetailPosIdleSessionWatcher from "@/components/RetailPosIdleSessionWatcher"
@@ -32,8 +33,27 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [aiContextRefreshKey, setAiContextRefreshKey] = useState(0)
   const [workspaceBusiness, setWorkspaceBusiness] = useState<WorkspaceBusiness>(null)
   const [workspaceSessionUser, setWorkspaceSessionUser] = useState<WorkspaceSessionUser>(null)
+  /** DB role cashier on a retail business — hide owner sidebar/nav (parallel to PIN session chrome). */
+  const [restrictRetailCashierChrome, setRestrictRetailCashierChrome] = useState(false)
+  const [cashierSessionBump, setCashierSessionBump] = useState(0)
+  /** Bumped when pathname / cashier bump changes so in-flight checkAccess can bail (avoids stale state + UI flicker). */
+  const layoutAccessEpochRef = useRef(0)
   const isExportMode = useExportMode()
-  const isPOSRoute = pathname?.startsWith("/pos")
+  const isPOSRoute = isPosSurfacePath(pathname ?? "")
+  const cashierAuth = isCashierAuthenticated()
+  /** Cashier PIN entry — no session yet, so still hide owner shell (kiosk / shared register). */
+  const rawPath = pathname?.split("?")[0] ?? ""
+  const pathNoTrailing = rawPath.replace(/\/$/, "") || "/"
+  const isRetailCashierPinScreen =
+    pathNoTrailing === "/retail/pos/pin" || pathNoTrailing === "/pos/pin"
+  /** Hide sidebar + top bar: active PIN session, DB cashier role, or cashier PIN login route */
+  const hideRetailOwnerChrome =
+    cashierAuth || restrictRetailCashierChrome || isRetailCashierPinScreen
+  /** Hide floating assistant on POS paths and whenever retail cashier / PIN session uses the restricted shell */
+  const hideFloatingAssistant =
+    pathname?.startsWith("/retail/pos") ||
+    pathname?.startsWith("/pos/") ||
+    hideRetailOwnerChrome
   const isAccountingRoute = pathname?.startsWith("/accounting")
 
   useEffect(() => {
@@ -43,8 +63,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       return
     }
 
+    const epoch = ++layoutAccessEpochRef.current
     let isMounted = true
-    
+
+    const stale = () => !isMounted || layoutAccessEpochRef.current !== epoch
+
     async function checkAccess() {
       // CENTRALIZED ACCESS CONTROL: Single source of truth for all access decisions
       // This function evaluates ALL conditions (auth, role, workspace, route, store) in ONE place
@@ -55,10 +78,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       // Get user ID from session
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
       
-      if (!isMounted) return
+      if (stale()) return
       
       if (sessionError) {
         console.error("ProtectedLayout: Session error:", sessionError)
+        if (stale()) return
         setLoading(false)
         router.push("/login")
         return
@@ -71,11 +95,13 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       if (userId) {
         await autoBindSingleStore(supabase, userId)
       }
+
+      if (stale()) return
       
       // CENTRALIZED ACCESS RESOLUTION: Single function makes ALL access decisions
       const decision = await resolveAccess(supabase, userId, pathname || "")
       
-      if (!isMounted) return
+      if (stale()) return
       
       if (typeof window !== "undefined" && process.env.NODE_ENV === "development" && pathname?.startsWith("/accounting")) {
         console.log("[ProtectedLayout] accounting decision", { allowed: decision.allowed, redirectTo: decision.redirectTo, reason: decision.reason })
@@ -83,8 +109,10 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       
       if (!decision.allowed) {
         // SINGLE REDIRECT POINT: All redirects happen here only
+        if (stale()) return
         const redirectTo = decision.redirectTo || "/login"
         console.log(`ProtectedLayout: Access denied (${decision.reason}), redirecting to ${redirectTo}`)
+        setRestrictRetailCashierChrome(false)
         setLoading(false)
         router.push(redirectTo)
         return
@@ -93,32 +121,40 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       if (userId) {
         try {
           const business = await getCurrentBusiness(supabase, userId)
-          if (isMounted) {
-            setAiBusinessId(business?.id || null)
-            setWorkspaceBusiness((business as WorkspaceBusiness) ?? null)
-            setWorkspaceSessionUser(
-              sessionData?.session?.user
-                ? {
-                    id: sessionData.session.user.id,
-                    email: sessionData.session.user.email,
-                    user_metadata: sessionData.session.user.user_metadata,
-                  }
-                : null
-            )
+          if (stale()) return
+          setAiBusinessId(business?.id || null)
+          setWorkspaceBusiness((business as WorkspaceBusiness) ?? null)
+          setWorkspaceSessionUser(
+            sessionData?.session?.user
+              ? {
+                  id: sessionData.session.user.id,
+                  email: sessionData.session.user.email,
+                  user_metadata: sessionData.session.user.user_metadata,
+                }
+              : null
+          )
+          let restrictChrome = false
+          if (business?.id && (business.industry || "").toLowerCase() === "retail") {
+            const role = await getUserRole(supabase, userId, business.id)
+            restrictChrome = role === "cashier"
           }
+          if (!stale()) setRestrictRetailCashierChrome(restrictChrome)
         } catch (error) {
           console.error("ProtectedLayout: Failed to resolve business for AI context", error)
-          if (isMounted) {
+          if (!stale()) {
             setAiBusinessId(null)
             setWorkspaceBusiness(null)
             setWorkspaceSessionUser(null)
+            setRestrictRetailCashierChrome(false)
           }
         }
-      } else if (isMounted) {
+      } else if (!stale()) {
         setWorkspaceBusiness(null)
         setWorkspaceSessionUser(null)
+        setRestrictRetailCashierChrome(false)
       }
       
+      if (stale()) return
       console.log("ProtectedLayout: Access granted")
       setLoading(false)
     }
@@ -129,7 +165,16 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     return () => {
       isMounted = false
     }
-  }, [router, pathname, isNestedProtectedLayout, loading])
+    // Note: do not depend on `loading` — setting loading false here would re-fire this effect and re-run
+    // resolveAccess + getUserRole, which caused visible retail UI flicker.
+  }, [router, pathname, isNestedProtectedLayout, cashierSessionBump])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onCashierSession = () => setCashierSessionBump((n) => n + 1)
+    window.addEventListener("cashierSessionChanged", onCashierSession)
+    return () => window.removeEventListener("cashierSessionChanged", onCashierSession)
+  }, [])
 
   useEffect(() => {
     if (isNestedProtectedLayout || !aiBusinessId) {
@@ -579,8 +624,6 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const invoiceIdFromPath =
     pathname?.match(/\/service\/invoices\/([0-9a-f-]{36})\/(?:view|edit)/i)?.[1] ?? null
 
-  const cashierAuth = isCashierAuthenticated()
-
   return (
     <ProtectedLayoutContext.Provider value={true}>
       <WorkspaceBusinessProvider
@@ -595,16 +638,16 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             data-export-mode={isExportMode ? "true" : undefined}
           >
             {/* Sidebar - hidden in print/export/preview (export-hide) */}
-            {!cashierAuth && !isAccountingRoute && (
+            {!hideRetailOwnerChrome && !isAccountingRoute && (
               <div className="export-hide print-hide">
                 <Sidebar />
               </div>
             )}
 
             {/* Main Layout */}
-            <div className={cashierAuth || isAccountingRoute ? "" : "lg:pl-64"}>
+            <div className={hideRetailOwnerChrome || isAccountingRoute ? "" : "lg:pl-64"}>
           {/* Top navigation for non-accounting workspaces. */}
-          {!cashierAuth && !pathname?.startsWith('/service') && !isAccountingRoute && (
+          {!hideRetailOwnerChrome && !pathname?.startsWith('/service') && !isAccountingRoute && (
             <nav className="export-hide print-hide bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm sticky top-0 z-30">
               <div className="px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between items-center h-16">
@@ -619,19 +662,29 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             </nav>
           )}
 
-          {/* Main content */}
-          <main className={pathname?.startsWith('/service') ? "min-h-screen" : "min-h-[calc(100vh-4rem)]"}>
+          {/* Main content — full height when owner top nav is hidden (PIN, POS shell, cashier) */}
+          <main
+            className={
+              pathname?.startsWith("/service")
+                ? "min-h-screen"
+                : hideRetailOwnerChrome
+                  ? "min-h-screen"
+                  : "min-h-[calc(100vh-4rem)]"
+            }
+          >
             {children}
-            <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)]">
-              <AiAssistant
-                onPanelOpen={() => setAiContextRefreshKey((k) => k + 1)}
-                context={{
-                  ...(aiContext ?? { page_scope: "global", warning: "AI context is still loading." }),
-                  current_path: pathname || "/",
-                  ...(invoiceIdFromPath ? { page_invoice_id: invoiceIdFromPath } : {}),
-                }}
-              />
-            </div>
+            {!hideFloatingAssistant && (
+              <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)]">
+                <AiAssistant
+                  onPanelOpen={() => setAiContextRefreshKey((k) => k + 1)}
+                  context={{
+                    ...(aiContext ?? { page_scope: "global", warning: "AI context is still loading." }),
+                    current_path: pathname || "/",
+                    ...(invoiceIdFromPath ? { page_invoice_id: invoiceIdFromPath } : {}),
+                  }}
+                />
+              </div>
+            )}
           </main>
             </div>
           </div>

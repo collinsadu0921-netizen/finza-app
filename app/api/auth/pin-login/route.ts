@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createClient } from "@supabase/supabase-js"
+import { signCashierPosToken } from "@/lib/cashierPosToken.server"
 
 // Service role client for database operations
 const supabaseAdmin = createClient(
@@ -170,6 +170,12 @@ export async function POST(request: NextRequest) {
     // Clear failed attempts on successful login
     clearFailedAttempts(clientIp)
 
+    const cashier_pos_token = signCashierPosToken({
+      cashierId: cashierUser.id,
+      businessId: businessUser.business_id,
+      storeId: String(cashierUser.store_id),
+    })
+
     // Return cashier info (without sensitive data)
     return NextResponse.json(
       {
@@ -180,6 +186,7 @@ export async function POST(request: NextRequest) {
           store_id: cashierUser.store_id,
           business_id: businessUser.business_id,
         },
+        ...(cashier_pos_token ? { cashier_pos_token } : {}),
       },
       { status: 200 }
     )

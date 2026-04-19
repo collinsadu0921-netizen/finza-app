@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { RetailMenuSelect } from "@/components/retail/RetailBackofficeUi"
 
 interface RetailOnboardingRegisterProps {
   business: any
@@ -29,6 +30,11 @@ export default function RetailOnboardingRegister({
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
+
+  const registerMenuOptions = useMemo(
+    () => registers.map((r) => ({ value: r.id, label: r.name })),
+    [registers],
+  )
 
   useEffect(() => {
     loadRegisters()
@@ -294,18 +300,11 @@ export default function RetailOnboardingRegister({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Register *
             </label>
-            <select
+            <RetailMenuSelect
               value={selectedRegisterId}
-              onChange={(e) => setSelectedRegisterId(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-              required
-            >
-              {registers.map((register) => (
-                <option key={register.id} value={register.id}>
-                  {register.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={setSelectedRegisterId}
+              options={registerMenuOptions}
+            />
           </div>
         )}
 

@@ -6,25 +6,50 @@ import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import Link from "next/link"
 import { formatMoney } from "@/lib/money"
+import {
+  RetailBackofficeAlert,
+  RetailBackofficeBadge,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeEmpty,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeShell,
+  RetailBackofficeSkeleton,
+} from "@/components/retail/RetailBackofficeUi"
+import {
+  purchaseOrderStatusBadgeTone,
+  purchaseOrderStatusLabel,
+} from "@/lib/retail/purchaseOrderStatusLabels"
+
+type PoItem = {
+  id: string
+  product_id: string
+  variant_id: string | null
+  quantity: number
+  unit_cost: number | null
+  total_cost: number | null
+}
 
 type PurchaseOrder = {
   id: string
   supplier_id: string
-  status: "draft" | "sent" | "received" | "cancelled"
+  status: string
+  payment_state?: string
   reference: string | null
   order_date: string
   expected_date: string | null
   created_at: string
   received_at: string | null
   supplier: { id: string; name: string }
-  items: Array<{
-    id: string
-    product_id: string
-    variant_id: string | null
-    quantity: number
-    unit_cost: number
-    total_cost: number
-  }>
+  items: PoItem[]
+}
+
+function estimatedLineTotal(it: PoItem): number {
+  const u = it.unit_cost != null ? Number(it.unit_cost) : NaN
+  if (Number.isFinite(u) && u >= 0) return Number(it.quantity) * u
+  if (it.total_cost != null) return Number(it.total_cost)
+  return 0
 }
 
 export default function PurchaseOrdersPage() {
@@ -36,8 +61,9 @@ export default function PurchaseOrdersPage() {
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
 
   useEffect(() => {
-    loadPurchaseOrders()
-    loadCurrency()
+    void loadPurchaseOrders()
+    void loadCurrency()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter])
 
   const loadCurrency = async () => {
@@ -46,9 +72,7 @@ export default function PurchaseOrdersPage() {
     } = await supabase.auth.getUser()
     if (user) {
       const business = await getCurrentBusiness(supabase, user.id)
-      if (business) {
-        setCurrencyCode(business.default_currency || "GHS")
-      }
+      if (business) setCurrencyCode(business.default_currency || "GHS")
     }
   }
 
@@ -62,7 +86,7 @@ export default function PurchaseOrdersPage() {
       } = await supabase.auth.getUser()
 
       if (!user) {
-        setError("You must be logged in")
+        setError("Sign in to view supplier orders.")
         setLoading(false)
         return
       }
@@ -75,204 +99,155 @@ export default function PurchaseOrdersPage() {
       }
 
       const params = new URLSearchParams()
-      if (statusFilter !== "all") {
-        params.append("status", statusFilter)
-      }
+      if (statusFilter !== "all") params.append("status", statusFilter)
 
       const response = await fetch(`/api/purchase-orders?${params.toString()}`)
       const data = await response.json()
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load purchase orders")
-      }
+      if (!response.ok) throw new Error(data.error || "Failed to load purchase orders")
 
       setPurchaseOrders(data.purchase_orders || [])
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load purchase orders"
       console.error("Error loading purchase orders:", err)
-      setError(err.message || "Failed to load purchase orders")
+      setError(message)
     } finally {
       setLoading(false)
     }
   }
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      draft: "bg-gray-100 text-gray-800",
-      sent: "bg-yellow-100 text-yellow-800",
-      received: "bg-green-100 text-green-800",
-      cancelled: "bg-red-100 text-red-800",
-    }
-    return (
-      <span
-        className={`px-2 py-1 rounded text-xs font-semibold ${
-          styles[status] || styles.draft
-        }`}
-      >
-        {status.replace("_", " ").toUpperCase()}
-      </span>
-    )
-  }
+  const estimatedTotal = (items: PoItem[]) => items.reduce((s, it) => s + estimatedLineTotal(it), 0)
 
-  const calculateTotalCost = (items: PurchaseOrder["items"]) => {
-    return items.reduce((sum, item) => sum + Number(item.total_cost || 0), 0)
-  }
-
-  if (loading) {
-    return (
-      <>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading purchase orders...</p>
-          </div>
-        </div>
-      </>
-    )
-  }
+  const filters = ["all", "planned", "ordered", "partially_received", "received", "cancelled"] as const
 
   return (
-    <>
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Purchase Orders</h1>
-            <p className="text-gray-600 mt-1">
-              Manage purchase orders and inventory receipts
-            </p>
-          </div>
-          <Link
-            href="/admin/retail/purchase-orders/new"
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
-            + New Purchase Order
-          </Link>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain className="max-w-6xl">
+        <RetailBackofficePageHeader
+          eyebrow="Procurement"
+          title="Buy lists & supplier orders"
+          description="Plan what to restock, send a simple list by WhatsApp or email, then enter real costs when goods arrive. Inventory and supplier payables update when you receive."
+          actions={
+            <RetailBackofficeButton variant="primary" type="button" onClick={() => router.push("/retail/admin/purchase-orders/new")}>
+              New buy list
+            </RetailBackofficeButton>
+          }
+        />
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        {error ? (
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error}
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        {/* Filters */}
-        <div className="mb-4 flex gap-2">
-          <button
-            onClick={() => setStatusFilter("all")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "all"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setStatusFilter("draft")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "draft"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            Draft
-          </button>
-          <button
-            onClick={() => setStatusFilter("sent")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "sent"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            Sent
-          </button>
-          <button
-            onClick={() => setStatusFilter("received")}
-            className={`px-4 py-2 rounded ${
-              statusFilter === "received"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            Received
-          </button>
-        </div>
-
-        {/* Purchase Orders Table */}
-        {purchaseOrders.length === 0 ? (
-          <div className="bg-white rounded-lg shadow p-8 text-center">
-            <p className="text-gray-600">No purchase orders found</p>
-            <Link
-              href="/admin/retail/purchase-orders/new"
-              className="text-blue-600 hover:underline mt-2 inline-block"
-            >
-              Create your first purchase order
-            </Link>
+        <RetailBackofficeCard className="mb-6">
+          <div className="flex flex-wrap gap-2">
+            {filters.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setStatusFilter(key)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  statusFilter === key
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                {key === "all" ? "All" : purchaseOrderStatusLabel(key)}
+              </button>
+            ))}
           </div>
+        </RetailBackofficeCard>
+
+        {loading ? (
+          <RetailBackofficeSkeleton rows={6} />
+        ) : purchaseOrders.length === 0 ? (
+          <RetailBackofficeEmpty
+            title="No buy lists yet"
+            description="Start from low stock or add lines manually, then share with your supplier."
+            action={
+              <RetailBackofficeButton variant="primary" type="button" onClick={() => router.push("/retail/admin/purchase-orders/new")}>
+                New buy list
+              </RetailBackofficeButton>
+            }
+          />
         ) : (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Reference
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Supplier
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Items
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Total Cost
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Order Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {purchaseOrders.map((po) => (
-                  <tr key={po.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {po.reference || po.id.substring(0, 8)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {po.supplier.name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {po.items.length} item{po.items.length !== 1 ? "s" : ""}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {formatMoney(calculateTotalCost(po.items), currencyCode)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(po.status)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(po.order_date).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <Link
-                        href={`/admin/retail/purchase-orders/${po.id}`}
-                        className="text-blue-600 hover:text-blue-900"
-                      >
-                        View
-                      </Link>
-                    </td>
+          <RetailBackofficeCard padding="p-0 sm:p-0" className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur-sm">
+                  <tr>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Ref
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Supplier
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Lines
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Est. total
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Send
+                    </th>
+                    <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:px-6">
+                      Open
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {purchaseOrders.map((po) => (
+                    <tr key={po.id} className="hover:bg-slate-50/80">
+                      <td className="px-4 py-3.5 font-medium text-slate-900 sm:px-6">
+                        {po.reference || po.id.slice(0, 8)}
+                      </td>
+                      <td className="px-4 py-3.5 text-slate-800 sm:px-6">{po.supplier.name}</td>
+                      <td className="px-4 py-3.5 text-slate-600 sm:px-6">
+                        {po.items.length} line{po.items.length !== 1 ? "s" : ""}
+                      </td>
+                      <td className="px-4 py-3.5 text-slate-700 sm:px-6">
+                        {estimatedTotal(po.items) > 0
+                          ? formatMoney(estimatedTotal(po.items), currencyCode)
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-6">
+                        <RetailBackofficeBadge tone={purchaseOrderStatusBadgeTone(po.status)}>
+                          {purchaseOrderStatusLabel(po.status)}
+                        </RetailBackofficeBadge>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-6">
+                        {po.status === "planned" ? (
+                          <Link
+                            href={`/retail/admin/purchase-orders/${po.id}#send-to-supplier`}
+                            className="text-sm font-medium text-emerald-800 underline-offset-2 hover:underline"
+                          >
+                            Send list
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-right sm:px-6">
+                        <Link
+                          href={`/retail/admin/purchase-orders/${po.id}`}
+                          className="text-sm font-medium text-slate-900 underline-offset-2 hover:underline"
+                        >
+                          Open
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </RetailBackofficeCard>
         )}
-      </div>
-    </>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }

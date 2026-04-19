@@ -3,6 +3,12 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { RetailMenuSelect, type MenuSelectOption } from "@/components/retail/RetailBackofficeUi"
+
+const CUSTOMER_STATUS_OPTIONS: MenuSelectOption[] = [
+  { value: "active", label: "Active" },
+  { value: "blocked", label: "Blocked" },
+]
 import { getCurrentBusiness } from "@/lib/business"
 
 type Customer = {
@@ -235,16 +241,13 @@ export default function RetailCustomerEditPage() {
             <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
               Status
             </label>
-            <select
+            <RetailMenuSelect
               id="status"
               value={status}
-              onChange={(e) => setStatus(e.target.value as "active" | "blocked")}
-              className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              onValueChange={(v) => setStatus(v as "active" | "blocked")}
               disabled={saving}
-            >
-              <option value="active">Active</option>
-              <option value="blocked">Blocked</option>
-            </select>
+              options={CUSTOMER_STATUS_OPTIONS}
+            />
           </div>
         </div>
 

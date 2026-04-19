@@ -1,30 +1,40 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { getActiveStoreId } from "@/lib/storeSession"
+import { retailPaths } from "@/lib/retail/routes"
+import type { RetailLowStockRow } from "@/lib/retail/purchaseOrdersLowStock"
+import {
+  RetailBackofficeAlert,
+  RetailBackofficeButton,
+  RetailBackofficeCard,
+  RetailBackofficeCardTitle,
+  RetailBackofficeMain,
+  RetailBackofficePageHeader,
+  RetailBackofficeSectionTitle,
+  RetailBackofficeShell,
+  retailFieldClass,
+  retailLabelClass,
+  RetailMenuSelect,
+  type MenuSelectOption,
+} from "@/components/retail/RetailBackofficeUi"
 
-type Supplier = {
-  id: string
-  name: string
-}
+type Supplier = { id: string; name: string }
+type Product = { id: string; name: string; price: number | null }
+type StoreRow = { id: string; name: string }
 
-type Product = {
-  id: string
-  name: string
-  price: number
-}
-
-type POItem = {
-  id: string
+type Line = {
+  key: string
   product_id: string | null
   variant_id: string | null
   quantity: number
-  unit_cost: number
+  unit_cost: string
 }
 
-export default function NewPurchaseOrderPage() {
+export default function NewBuyListPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [loading, setLoading] = useState(true)
@@ -32,33 +42,54 @@ export default function NewPurchaseOrderPage() {
   const [error, setError] = useState("")
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [stores, setStores] = useState<StoreRow[]>([])
+  const [lowStock, setLowStock] = useState<RetailLowStockRow[]>([])
+  const [lowStockStoreId, setLowStockStoreId] = useState<string>("")
   const [supplierId, setSupplierId] = useState(searchParams.get("supplier_id") || "")
   const [reference, setReference] = useState("")
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split("T")[0])
   const [expectedDate, setExpectedDate] = useState("")
-  const [items, setItems] = useState<POItem[]>([
-    { id: "1", product_id: null, variant_id: null, quantity: 1, unit_cost: 0 },
+  const [supplierOrderNote, setSupplierOrderNote] = useState("")
+  const [lines, setLines] = useState<Line[]>([
+    { key: crypto.randomUUID(), product_id: null, variant_id: null, quantity: 1, unit_cost: "" },
   ])
 
+  const supplierMenuOptions = useMemo(() => {
+    const head: MenuSelectOption[] = [{ value: "", label: "Select supplier" }]
+    return head.concat(suppliers.map((s) => ({ value: s.id, label: s.name })))
+  }, [suppliers])
+
+  const lowStockStoreMenuOptions = useMemo(
+    () => stores.map((s) => ({ value: s.id, label: s.name })),
+    [stores],
+  )
+
+  const lineProductMenuOptions = useMemo(() => {
+    const head: MenuSelectOption[] = [{ value: "", label: "Select" }]
+    return head.concat(products.map((p) => ({ value: p.id, label: p.name })))
+  }, [products])
+
   useEffect(() => {
-    loadData()
+    void loadData()
   }, [])
+
+  useEffect(() => {
+    if (!lowStockStoreId) return
+    void loadLowStock(lowStockStoreId)
+  }, [lowStockStoreId])
 
   const loadData = async () => {
     try {
       setLoading(true)
       setError("")
-
       const {
         data: { user },
       } = await supabase.auth.getUser()
-
       if (!user) {
         setError("You must be logged in")
         setLoading(false)
         return
       }
-
       const business = await getCurrentBusiness(supabase, user.id)
       if (!business) {
         setError("Business not found")
@@ -66,7 +97,6 @@ export default function NewPurchaseOrderPage() {
         return
       }
 
-      // Load suppliers
       const { data: suppliersData, error: suppliersError } = await supabase
         .from("suppliers")
         .select("id, name")
@@ -74,320 +104,326 @@ export default function NewPurchaseOrderPage() {
         .eq("status", "active")
         .order("name", { ascending: true })
 
-      if (suppliersError) {
-        throw new Error(suppliersError.message || "Failed to load suppliers")
-      }
-
+      if (suppliersError) throw new Error(suppliersError.message || "Failed to load suppliers")
       setSuppliers(suppliersData || [])
 
-      // Load products
       const { data: productsData, error: productsError } = await supabase
         .from("products")
         .select("id, name, price")
         .eq("business_id", business.id)
         .order("name", { ascending: true })
 
-      if (productsError) {
-        throw new Error(productsError.message || "Failed to load products")
+      if (productsError) throw new Error(productsError.message || "Failed to load products")
+      setProducts((productsData || []) as Product[])
+
+      const { data: storesData, error: storesError } = await supabase
+        .from("stores")
+        .select("id, name")
+        .eq("business_id", business.id)
+        .order("name", { ascending: true })
+
+      if (!storesError && storesData?.length) {
+        setStores(storesData as StoreRow[])
+        const active = getActiveStoreId()
+        const pick =
+          active && active !== "all" && storesData.some((s: StoreRow) => s.id === active)
+            ? active
+            : (storesData[0] as StoreRow).id
+        setLowStockStoreId(pick)
       }
 
-      setProducts(productsData || [])
       setLoading(false)
-    } catch (err: any) {
-      console.error("Error loading data:", err)
-      setError(err.message || "Failed to load data")
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load")
       setLoading(false)
     }
   }
 
-  const addItem = () => {
-    setItems([
-      ...items,
-      {
-        id: Date.now().toString(),
-        product_id: null,
-        variant_id: null,
-        quantity: 1,
-        unit_cost: 0,
-      },
+  const loadLowStock = async (storeId: string) => {
+    try {
+      const qs = new URLSearchParams({ store_id: storeId })
+      const res = await fetch(`${retailPaths.apiPurchaseOrdersLowStock}?${qs}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Low stock failed")
+      setLowStock(data.items || [])
+    } catch {
+      setLowStock([])
+    }
+  }
+
+  const addLine = () => {
+    setLines((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), product_id: null, variant_id: null, quantity: 1, unit_cost: "" },
     ])
   }
 
-  const removeItem = (id: string) => {
-    if (items.length === 1) {
-      setError("Purchase order must have at least one item")
+  const removeLine = (key: string) => {
+    if (lines.length <= 1) {
+      setError("Add at least one product line.")
       return
     }
-    setItems(items.filter((item) => item.id !== id))
+    setLines((prev) => prev.filter((l) => l.key !== key))
+    setError("")
   }
 
-  const updateItem = (id: string, field: keyof POItem, value: any) => {
-    setItems(
-      items.map((item) => {
-        if (item.id === id) {
-          return { ...item, [field]: value }
-        }
-        return item
-      })
+  const updateLine = (key: string, patch: Partial<Line>) => {
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  }
+
+  const addLowStockProduct = (row: RetailLowStockRow) => {
+    const rowVariant = row.variant_id ?? null
+    const exists = lines.some(
+      (l) => l.product_id === row.product_id && (l.variant_id || null) === rowVariant
     )
+    if (exists) {
+      setLines((prev) =>
+        prev.map((l) =>
+          l.product_id === row.product_id && (l.variant_id || null) === rowVariant
+            ? { ...l, quantity: l.quantity + row.suggested_order_qty }
+            : l
+        )
+      )
+      return
+    }
+    setLines((prev) => [
+      ...prev,
+      {
+        key: crypto.randomUUID(),
+        product_id: row.product_id,
+        variant_id: rowVariant,
+        quantity: row.suggested_order_qty,
+        unit_cost: "",
+      },
+    ])
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-
     if (!supplierId) {
-      setError("Supplier is required")
+      setError("Choose a supplier.")
       return
     }
+    const payloadItems: Array<{
+      product_id: string
+      variant_id: string | null
+      quantity: number
+      unit_cost: number | null
+    }> = []
+    for (const l of lines) {
+      if (!l.product_id || l.quantity <= 0) continue
+      const uc = l.unit_cost.trim() === "" ? null : Number(l.unit_cost)
+      if (uc != null && (Number.isNaN(uc) || uc < 0)) {
+        setError("Optional costs must be numbers ≥ 0.")
+        setSubmitting(false)
+        return
+      }
+      payloadItems.push({
+        product_id: l.product_id,
+        variant_id: l.variant_id ?? null,
+        quantity: Number(l.quantity),
+        unit_cost: uc,
+      })
+    }
 
-    const validItems = items.filter(
-      (item) => item.product_id && item.quantity > 0 && item.unit_cost >= 0
-    )
-
-    if (validItems.length === 0) {
-      setError("Purchase order must have at least one valid item")
+    if (payloadItems.length === 0) {
+      setError("Add at least one product with quantity.")
       return
     }
 
     setSubmitting(true)
-
     try {
       const response = await fetch("/api/purchase-orders", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           supplier_id: supplierId,
           reference: reference.trim() || null,
           order_date: orderDate,
           expected_date: expectedDate || null,
-          items: validItems.map((item) => ({
-            product_id: item.product_id,
-            variant_id: item.variant_id || null,
-            quantity: Number(item.quantity),
-            unit_cost: Number(item.unit_cost),
-          })),
+          supplier_order_note: supplierOrderNote.trim() || null,
+          items: payloadItems,
         }),
       })
-
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create purchase order")
-      }
-
-      // Redirect to purchase orders list page
-      router.push("/admin/retail/purchase-orders")
-    } catch (err: any) {
-      console.error("Error creating purchase order:", err)
-      setError(err.message || "Failed to create purchase order")
+      if (!response.ok) throw new Error(data.error || "Failed to create buy list")
+      const id = data.purchase_order?.id as string | undefined
+      router.push(id ? `/retail/admin/purchase-orders/${id}` : "/retail/admin/purchase-orders")
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create")
+    } finally {
       setSubmitting(false)
     }
   }
 
   if (loading) {
     return (
-      <>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading...</p>
-          </div>
-        </div>
-      </>
+      <RetailBackofficeShell>
+        <RetailBackofficeMain className="max-w-4xl">
+          <p className="text-sm text-slate-600">Loading…</p>
+        </RetailBackofficeMain>
+      </RetailBackofficeShell>
     )
   }
 
   return (
-    <>
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">New Purchase Order</h1>
-          <p className="text-gray-600 mt-1">
-            Create a new purchase order for inventory
-          </p>
-        </div>
+    <RetailBackofficeShell>
+      <RetailBackofficeMain className="max-w-4xl">
+        <RetailBackofficePageHeader
+          eyebrow="Procurement"
+          title="New buy list"
+          description="List what you need and quantities. You can send without prices — enter real costs when goods arrive."
+        />
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+        {error ? (
+          <RetailBackofficeAlert tone="error" className="mb-4">
             {error}
-          </div>
-        )}
+          </RetailBackofficeAlert>
+        ) : null}
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6">
-          <div className="space-y-6">
-            {/* Supplier Selection */}
-            <div>
-              <label htmlFor="supplier" className="block text-sm font-medium text-gray-700 mb-1">
-                Supplier <span className="text-red-600">*</span>
-              </label>
-              <select
-                id="supplier"
-                value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value)}
-                required
-                className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={submitting}
-              >
-                <option value="">Select a supplier</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Reference and Dates */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label htmlFor="reference" className="block text-sm font-medium text-gray-700 mb-1">
-                  Reference
-                </label>
-                <input
-                  type="text"
-                  id="reference"
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value)}
-                  className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="PO-001"
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6">
+          <RetailBackofficeCard>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className={retailLabelClass}>Supplier *</label>
+                <RetailMenuSelect
+                  value={supplierId}
+                  onValueChange={setSupplierId}
                   disabled={submitting}
+                  options={supplierMenuOptions}
                 />
               </div>
               <div>
-                <label htmlFor="orderDate" className="block text-sm font-medium text-gray-700 mb-1">
-                  Order Date <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="date"
-                  id="orderDate"
-                  value={orderDate}
-                  onChange={(e) => setOrderDate(e.target.value)}
-                  required
-                  className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  disabled={submitting}
-                />
+                <label className={retailLabelClass}>Your reference (optional)</label>
+                <input className={retailFieldClass} value={reference} onChange={(e) => setReference(e.target.value)} disabled={submitting} />
               </div>
               <div>
-                <label htmlFor="expectedDate" className="block text-sm font-medium text-gray-700 mb-1">
-                  Expected Date
-                </label>
-                <input
-                  type="date"
-                  id="expectedDate"
-                  value={expectedDate}
-                  onChange={(e) => setExpectedDate(e.target.value)}
-                  className="w-full border rounded px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                <label className={retailLabelClass}>Date</label>
+                <input type="date" className={retailFieldClass} value={orderDate} onChange={(e) => setOrderDate(e.target.value)} disabled={submitting} />
+              </div>
+              <div>
+                <label className={retailLabelClass}>Expected (optional)</label>
+                <input type="date" className={retailFieldClass} value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} disabled={submitting} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={retailLabelClass}>Note for supplier (optional)</label>
+                <textarea
+                  className={retailFieldClass}
+                  rows={2}
+                  value={supplierOrderNote}
+                  onChange={(e) => setSupplierOrderNote(e.target.value)}
+                  placeholder="e.g. Deliver to back entrance Saturday morning"
                   disabled={submitting}
                 />
               </div>
             </div>
+          </RetailBackofficeCard>
 
-            {/* Items */}
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Items <span className="text-red-600">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="text-sm bg-gray-200 text-gray-800 px-3 py-1 rounded hover:bg-gray-300"
+          {stores.length > 0 ? (
+            <RetailBackofficeCard>
+              <RetailBackofficeCardTitle>Low stock — quick add</RetailBackofficeCardTitle>
+              <p className="mt-1 text-xs text-slate-500">
+                Choose which store shelf you are buying for. Suggested qty is a rough restock hint, not a forecast.
+              </p>
+              <div className="mt-4 max-w-md">
+                <label className={retailLabelClass}>Store for low-stock view</label>
+                <RetailMenuSelect
+                  value={lowStockStoreId}
+                  onValueChange={setLowStockStoreId}
                   disabled={submitting}
-                >
-                  + Add Item
-                </button>
+                  options={lowStockStoreMenuOptions}
+                />
               </div>
-
-              <div className="space-y-3">
-                {items.map((item, index) => (
-                  <div key={item.id} className="grid grid-cols-12 gap-2 items-end border-b pb-3">
-                    <div className="col-span-5">
-                      <label className="block text-xs text-gray-600 mb-1">Product</label>
-                      <select
-                        value={item.product_id || ""}
-                        onChange={(e) => updateItem(item.id, "product_id", e.target.value || null)}
-                        required
-                        className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        disabled={submitting}
-                      >
-                        <option value="">Select product</option>
-                        {products.map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {product.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-xs text-gray-600 mb-1">Quantity</label>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={item.quantity}
-                        onChange={(e) => updateItem(item.id, "quantity", Number(e.target.value))}
-                        required
-                        className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div className="col-span-3">
-                      <label className="block text-xs text-gray-600 mb-1">Unit Cost</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.unit_cost}
-                        onChange={(e) => updateItem(item.id, "unit_cost", Number(e.target.value))}
-                        required
-                        className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        disabled={submitting}
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <label className="block text-xs text-gray-600 mb-1">Total</label>
-                      <div className="px-3 py-2 text-sm text-gray-700 font-semibold">
-                        {(item.quantity * item.unit_cost).toFixed(2)}
+              {lowStock.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-600">Nothing low for this store right now.</p>
+              ) : (
+                <div className="mt-4 max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50/50 p-3">
+                  {lowStock.map((row) => (
+                    <div
+                      key={`${row.product_id}-${row.variant_id ?? "base"}`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm shadow-sm"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-slate-900">{row.name}</div>
+                        <div className="text-xs text-slate-500">
+                          Stock {row.current_stock} · threshold {row.threshold} · suggest {row.suggested_order_qty}
+                        </div>
                       </div>
+                      <RetailBackofficeButton type="button" variant="secondary" onClick={() => addLowStockProduct(row)} disabled={submitting}>
+                        Add
+                      </RetailBackofficeButton>
                     </div>
-                    <div className="col-span-1">
-                      <button
-                        type="button"
-                        onClick={() => removeItem(item.id)}
-                        className="w-full bg-red-100 text-red-700 px-2 py-2 rounded text-sm hover:bg-red-200"
-                        disabled={submitting || items.length === 1}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+                  ))}
+                </div>
+              )}
+            </RetailBackofficeCard>
+          ) : null}
 
-          <div className="mt-6 flex gap-4">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="flex-1 bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
-              disabled={submitting}
-            >
+          <RetailBackofficeCard>
+            <RetailBackofficeSectionTitle>Lines</RetailBackofficeSectionTitle>
+            <p className="mb-4 text-xs text-slate-500">Quantity required. Unit cost is optional (estimate only).</p>
+            <div className="space-y-3">
+              {lines.map((item) => (
+                <div key={item.key} className="grid grid-cols-12 gap-2 border-b border-slate-100 pb-3">
+                  <div className="col-span-12 sm:col-span-5">
+                    <label className={retailLabelClass}>Product</label>
+                    <RetailMenuSelect
+                      value={item.product_id || ""}
+                      onValueChange={(v) =>
+                        updateLine(item.key, { product_id: v || null, variant_id: null })
+                      }
+                      disabled={submitting}
+                      options={lineProductMenuOptions}
+                    />
+                  </div>
+                  <div className="col-span-4 sm:col-span-2">
+                    <label className={retailLabelClass}>Qty</label>
+                    <input
+                      type="number"
+                      min={1}
+                      className={retailFieldClass}
+                      value={item.quantity}
+                      onChange={(e) => updateLine(item.key, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className={retailLabelClass}>Est. unit cost (optional)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className={retailFieldClass}
+                      value={item.unit_cost}
+                      onChange={(e) => updateLine(item.key, { unit_cost: e.target.value })}
+                      placeholder="—"
+                      disabled={submitting}
+                    />
+                  </div>
+                  <div className="col-span-2 flex items-end sm:col-span-2">
+                    <RetailBackofficeButton type="button" variant="ghost" onClick={() => removeLine(item.key)} disabled={submitting || lines.length <= 1}>
+                      Remove
+                    </RetailBackofficeButton>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <RetailBackofficeButton type="button" variant="secondary" className="mt-4" onClick={addLine} disabled={submitting}>
+              + Add line
+            </RetailBackofficeButton>
+          </RetailBackofficeCard>
+
+          <div className="flex flex-wrap gap-3">
+            <RetailBackofficeButton type="button" variant="secondary" onClick={() => router.push("/retail/admin/purchase-orders")} disabled={submitting}>
               Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              disabled={submitting}
-            >
-              {submitting ? "Creating..." : "Create Purchase Order"}
-            </button>
+            </RetailBackofficeButton>
+            <RetailBackofficeButton type="submit" variant="primary" disabled={submitting}>
+              {submitting ? "Saving…" : "Save buy list"}
+            </RetailBackofficeButton>
           </div>
         </form>
-      </div>
-    </>
+      </RetailBackofficeMain>
+    </RetailBackofficeShell>
   )
 }

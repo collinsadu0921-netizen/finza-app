@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { ESCPOSGenerator, generateReceiptHTML, type ReceiptData, type PrinterWidth, type ReceiptMode } from "@/lib/escpos"
+import { retailReceiptQrDataUrl } from "@/lib/receipt/retailReceiptQrDataUrl"
 
 type ReceiptPrinterProps = {
   receiptData: ReceiptData
@@ -60,19 +61,25 @@ export default function ReceiptPrinter({
       await port.open({ baudRate: 9600 })
 
       // Generate ESC/POS commands
+      const showQrEffective = !!settings.show_qr_code || !!receiptData.qrCodeContent
       const generator = new ESCPOSGenerator(
         settings.printer_width,
         settings.receipt_mode,
         settings.auto_cut,
         settings.drawer_kick,
         settings.show_logo,
-        settings.show_qr_code
+        showQrEffective
       )
+
+      const qrMerged =
+        (receiptData.qrCodeContent && receiptData.qrCodeContent.trim()) ||
+        (settings.qr_code_content && settings.qr_code_content.trim()) ||
+        ""
 
       const commands = generator.generate({
         ...receiptData,
         footerText: settings.footer_text,
-        qrCodeContent: settings.qr_code_content,
+        qrCodeContent: qrMerged || undefined,
       })
 
       // Write to printer
@@ -95,13 +102,30 @@ export default function ReceiptPrinter({
 
   const printBrowser = async () => {
     // Generate HTML receipt
-    const html = generateReceiptHTML(receiptData, {
-      width: settings.printer_width,
-      mode: settings.receipt_mode,
-      showLogo: settings.show_logo,
-      showQR: settings.show_qr_code,
-      footerText: settings.footer_text,
-    })
+    const qrMerged =
+      (receiptData.qrCodeContent && receiptData.qrCodeContent.trim()) ||
+      (settings.qr_code_content && settings.qr_code_content.trim()) ||
+      ""
+    const showQrEffective = !!settings.show_qr_code || !!qrMerged
+    let qrImageDataUrl: string | undefined
+    if (showQrEffective && qrMerged) {
+      try {
+        qrImageDataUrl = await retailReceiptQrDataUrl(qrMerged, settings.printer_width)
+      } catch {
+        qrImageDataUrl = undefined
+      }
+    }
+    const html = generateReceiptHTML(
+      { ...receiptData, qrCodeContent: qrMerged || undefined },
+      {
+        width: settings.printer_width,
+        mode: settings.receipt_mode,
+        showLogo: settings.show_logo,
+        showQR: showQrEffective,
+        footerText: settings.footer_text,
+        qrImageDataUrl,
+      }
+    )
 
     // Open print window
     const printWindow = window.open("", "_blank")

@@ -1,1 +1,1 @@
-export { default } from "@/app/pos/pin/page.impl"
+export { default } from "@/components/retail/pos/RetailPosPinPage"

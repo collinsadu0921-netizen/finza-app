@@ -1,0 +1,3 @@
+import RetailRegisterSessionsReportPage from "@/components/retail/reports/RetailRegisterSessionsReportPage"
+
+export default RetailRegisterSessionsReportPage

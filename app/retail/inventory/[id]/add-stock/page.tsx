@@ -1,7 +1,10 @@
-export default function ComingSoonPage() {
+import { Suspense } from "react"
+import RetailInventoryAddStockPage from "@/components/retail/inventory/RetailInventoryAddStockPage"
+
+export default function AddStockPage() {
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <p className="text-muted-foreground">This feature is coming soon.</p>
-    </div>
+    <Suspense fallback={<div className="p-6 text-slate-600">Loading…</div>}>
+      <RetailInventoryAddStockPage />
+    </Suspense>
   )
 }

@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
+import { normalizeCountry, assertMethodAllowed, UNSUPPORTED_COUNTRY_MARKER } from "@/lib/payments/eligibility"
 import { getTaxEngineCode } from "@/lib/taxEngine/helpers"
+import { calculateTaxes } from "@/lib/taxEngine"
+import type { LineItem as TaxEngineLineItem } from "@/lib/taxEngine/types"
 import { calculateDiscounts, type LineDiscount, type CartDiscount } from "@/lib/discounts/calculator"
 import {
   validateLineDiscount,
@@ -16,11 +18,37 @@ import {
 import type { UserRole as AuthorityUserRole } from "@/lib/authority"
 import { getUserRole, type UserRole } from "@/lib/userRoles"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import type { RetailMomoCartSnapshot } from "@/lib/retail/pos/retailMomoCartFingerprint"
+import { computeServerRetailMomoFingerprint } from "@/lib/retail/pos/retailMomoFingerprintServer"
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
+
+/** POS sends `taxResultToJSONB`: object with `tax_total` and nested `tax_lines`; tolerate legacy shapes. */
+function parseClientTaxTotalFromPayload(taxLines: unknown): number {
+  if (taxLines == null) return 0
+  if (Array.isArray(taxLines)) {
+    return taxLines.reduce((s, row: { amount?: unknown }) => s + Number(row?.amount ?? 0), 0)
+  }
+  if (typeof taxLines !== "object") return 0
+  const obj = taxLines as Record<string, unknown>
+  if (typeof obj.tax_total === "number" && Number.isFinite(obj.tax_total)) return obj.tax_total
+  if (typeof obj.tax_total === "string") {
+    const n = Number(obj.tax_total)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (Array.isArray(obj.lines)) {
+    return (obj.lines as Array<{ amount?: unknown }>).reduce((s, row) => s + Number(row?.amount ?? 0), 0)
+  }
+  if (Array.isArray(obj.tax_lines)) {
+    return (obj.tax_lines as Array<{ amount?: unknown }>).reduce((s, row) => s + Number(row?.amount ?? 0), 0)
+  }
+  return 0
+}
+
+const RETAIL_TAX_TOTAL_TOLERANCE = 0.05
 
 const getServiceRoleClient = () => {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -186,10 +214,18 @@ export async function POST(request: NextRequest) {
       customer_id, // Optional customer reference (Phase 1 - identity only)
       // Layaway fields (Phase 2 - Layaway/Installments) - NOT IMPLEMENTED YET
       // is_layaway and deposit_amount are ignored for now - layaway not implemented
+      /** Retail POS — MTN MoMo sandbox: finalize only after provider success (see retail API routes). */
+      retail_mtn_sandbox_payment_reference,
     } = body
 
     const business_id = business.id
     const user_id = authUser.id
+
+    const retailMomoRef =
+      typeof retail_mtn_sandbox_payment_reference === "string"
+        ? retail_mtn_sandbox_payment_reference.trim()
+        : ""
+    let retailMomoTxnId: string | null = null
 
     if (!amount) {
       return NextResponse.json(
@@ -576,6 +612,125 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ---------------------------------------------------------------------------
+    // Retail MTN MoMo sandbox — require confirmed provider txn before sale insert
+    // ---------------------------------------------------------------------------
+    if (retailMomoRef) {
+      const { data: momoTxn, error: momoTxnErr } = await supabase
+        .from("payment_provider_transactions")
+        .select("id, status, sale_id, amount_minor, request_payload, workspace")
+        .eq("business_id", business_id)
+        .eq("reference", retailMomoRef)
+        .eq("workspace", "retail")
+        .maybeSingle()
+
+      if (momoTxnErr || !momoTxn) {
+        return NextResponse.json(
+          { error: "MoMo payment reference not found", code: "MOMO_TXN_NOT_FOUND" },
+          { status: 404 },
+        )
+      }
+
+      const req = (momoTxn.request_payload ?? {}) as Record<string, unknown>
+      if (req.kind !== "retail_pos_momo_sandbox") {
+        return NextResponse.json({ error: "Invalid MoMo payment reference" }, { status: 400 })
+      }
+
+      if (momoTxn.sale_id) {
+        console.log("[retail-momo-sandbox] idempotent sale finalize", {
+          reference: retailMomoRef,
+          sale_id: momoTxn.sale_id,
+        })
+        return NextResponse.json({
+          success: true,
+          sale_id: momoTxn.sale_id,
+          message: "Sale already recorded for this payment",
+          idempotent: true,
+        })
+      }
+
+      if (momoTxn.status !== "successful") {
+        return NextResponse.json(
+          {
+            error: "Mobile Money payment is not confirmed successful yet",
+            code: "MOMO_NOT_SUCCESSFUL",
+            status: momoTxn.status,
+          },
+          { status: 402 },
+        )
+      }
+
+      const expectedPesewas = Math.round(Number(amount) * 100)
+      const storedMinor = Number(momoTxn.amount_minor ?? 0)
+      if (Math.abs(storedMinor - expectedPesewas) > 1) {
+        return NextResponse.json(
+          {
+            error: "Sale total does not match the MoMo payment amount",
+            code: "MOMO_AMOUNT_MISMATCH",
+          },
+          { status: 400 },
+        )
+      }
+
+      const snapRaw = req.cart_snapshot
+      if (!snapRaw || typeof snapRaw !== "object" || !Array.isArray((snapRaw as { items?: unknown }).items)) {
+        return NextResponse.json(
+          {
+            error: "MoMo payment attempt is missing cart_snapshot; create a new payment attempt.",
+            code: "MOMO_CART_SNAPSHOT_REQUIRED",
+          },
+          { status: 400 },
+        )
+      }
+      const cartSnapshot = snapRaw as RetailMomoCartSnapshot
+      let recomputedFp: string
+      try {
+        recomputedFp = computeServerRetailMomoFingerprint(cartSnapshot, Number(amount))
+      } catch {
+        return NextResponse.json(
+          { error: "Could not validate cart snapshot for MoMo finalize", code: "MOMO_CART_SNAPSHOT_INVALID" },
+          { status: 400 },
+        )
+      }
+      if (recomputedFp !== String(req.server_cart_fingerprint ?? "")) {
+        return NextResponse.json(
+          {
+            error: "Cart or total no longer matches the MoMo payment attempt",
+            code: "MOMO_FINGERPRINT_MISMATCH",
+          },
+          { status: 400 },
+        )
+      }
+
+      if (String(req.store_id ?? "") !== String(finalStoreId)) {
+        return NextResponse.json(
+          { error: "Store does not match the MoMo payment attempt", code: "MOMO_STORE_MISMATCH" },
+          { status: 400 },
+        )
+      }
+
+      if (String(req.register_id ?? "") !== String(register_id ?? "")) {
+        return NextResponse.json(
+          { error: "Register does not match the MoMo payment attempt", code: "MOMO_REGISTER_MISMATCH" },
+          { status: 400 },
+        )
+      }
+
+      const bodySession = cashier_session_id != null && cashier_session_id !== "" ? String(cashier_session_id) : ""
+      const txnSession =
+        req.cashier_session_id != null && String(req.cashier_session_id) !== ""
+          ? String(req.cashier_session_id)
+          : ""
+      if (bodySession !== txnSession) {
+        return NextResponse.json(
+          { error: "Register session does not match the MoMo payment attempt", code: "MOMO_SESSION_MISMATCH" },
+          { status: 400 },
+        )
+      }
+
+      retailMomoTxnId = momoTxn.id as string
+    }
+
     // ============================================================================
     // DISCOUNT CALCULATION (Phase 1 - Ledger-Safe Pricing)
     // ============================================================================
@@ -758,6 +913,132 @@ const validation = validateCartDiscount(
     const finalTaxEngineCode = tax_engine_code || (jurisdiction ? getTaxEngineCode(jurisdiction) : null)
     // Use provided effective_from if available, otherwise use current date
     const effectiveDate = tax_engine_effective_from || new Date().toISOString().split('T')[0]
+
+    // ============================================================================
+    // RETAIL: Reconcile output tax against DB `products.tax_category`
+    // Rebuilds taxable-only net lines (same cart-discount spread as POS) and
+    // compares aggregate tax_total to the client payload (does not repost ledger).
+    // ============================================================================
+    if (
+      taxesApplied &&
+      tax_lines &&
+      discountCalculation &&
+      sale_items &&
+      Array.isArray(sale_items) &&
+      sale_items.length > 0 &&
+      jurisdiction &&
+      jurisdiction !== UNSUPPORTED_COUNTRY_MARKER &&
+      finalTaxEngineCode
+    ) {
+      const productIds = Array.from(
+        new Set(
+          (sale_items as any[])
+            .map((row) => row?.product_id || row?.productId)
+            .filter((id): id is string => typeof id === "string" && id.length > 0)
+        )
+      )
+
+      if (productIds.length > 0) {
+        const { data: productTaxRows, error: productTaxErr } = await supabase
+          .from("products")
+          .select("id, tax_category")
+          .eq("business_id", business_id)
+          .in("id", productIds)
+
+        if (!productTaxErr && productTaxRows && productTaxRows.length > 0) {
+          const taxCategoryById = new Map<string, string | null>()
+          for (const row of productTaxRows) {
+            taxCategoryById.set(row.id, row.tax_category ?? null)
+          }
+
+          const lineItemsForEngine: TaxEngineLineItem[] = []
+          const saleRows = sale_items as any[]
+
+          for (let i = 0; i < saleRows.length; i++) {
+            const saleItem = saleRows[i]
+            const pid = saleItem?.product_id || saleItem?.productId
+            const qty = Math.max(1, Math.floor(Number(saleItem?.quantity || saleItem?.qty || 1)))
+            const unitPrice = Number(saleItem?.unit_price || saleItem?.price || 0)
+            if (!pid || unitPrice <= 0 || qty <= 0) continue
+
+            const rawCat = taxCategoryById.get(pid)
+            const taxCat = (rawCat ?? "taxable").toLowerCase()
+            if (taxCat !== "taxable") continue
+
+            const netLine = discountCalculation.lineItems[i]?.net_line
+            if (netLine == null || netLine <= 0) continue
+
+            const netUnit = qty > 0 ? netLine / qty : unitPrice
+            lineItemsForEngine.push({
+              quantity: qty,
+              unit_price: netUnit,
+              discount_amount: 0,
+            })
+          }
+
+          if (
+            discountCalculation.cart_discount_amount > 0 &&
+            discountCalculation.subtotal_after_line_discounts > 0 &&
+            lineItemsForEngine.length > 0
+          ) {
+            const cartDiscountProportion =
+              discountCalculation.cart_discount_amount /
+              discountCalculation.subtotal_after_line_discounts
+            for (const lineItem of lineItemsForEngine) {
+              const originalNetLine = lineItem.unit_price * lineItem.quantity
+              const cartDiscountAllocation = originalNetLine * cartDiscountProportion
+              const finalNetLine = originalNetLine - cartDiscountAllocation
+              lineItem.unit_price =
+                lineItem.quantity > 0 ? finalNetLine / lineItem.quantity : lineItem.unit_price
+            }
+          }
+
+          const clientTaxTotal = parseClientTaxTotalFromPayload(tax_lines)
+
+          if (lineItemsForEngine.length === 0) {
+            if (clientTaxTotal > RETAIL_TAX_TOTAL_TOLERANCE) {
+              return NextResponse.json(
+                {
+                  error:
+                    "Tax amount does not match product tax categories. Exempt or zero-rated lines cannot carry output VAT.",
+                  code: "TAX_CATEGORY_MISMATCH",
+                },
+                { status: 422 }
+              )
+            }
+          } else {
+            try {
+              const engineDate =
+                typeof tax_engine_effective_from === "string" && tax_engine_effective_from.length >= 8
+                  ? tax_engine_effective_from
+                  : effectiveDate
+              const serverResult = calculateTaxes(
+                lineItemsForEngine,
+                businessRow.address_country,
+                engineDate,
+                true
+              )
+              const serverTaxTotal = Number(serverResult.tax_total) || 0
+              if (Math.abs(serverTaxTotal - clientTaxTotal) > RETAIL_TAX_TOTAL_TOLERANCE) {
+                return NextResponse.json(
+                  {
+                    error:
+                      "Reported tax does not match server calculation for taxable lines and current product tax categories.",
+                    code: "TAX_RECONCILIATION_MISMATCH",
+                    details: { server_tax_total: serverTaxTotal, client_tax_total: clientTaxTotal },
+                  },
+                  { status: 422 }
+                )
+              }
+            } catch (e: any) {
+              console.warn("Retail tax reconciliation skipped (engine error):", e?.message || e)
+            }
+          }
+        } else if (productTaxErr) {
+          console.warn("Retail tax reconciliation: could not load products.tax_category:", productTaxErr.message)
+        }
+      }
+    }
     
     // Create sale record
     const saleData: any = {
@@ -1751,6 +2032,89 @@ const validation = validateCartDiscount(
     // Register session cash balance is calculated from sales when closing
     // Cash received increases register balance, change given decreases it
     // This is handled in the register closing logic
+
+    if (retailMomoRef && retailMomoTxnId) {
+      const { data: attached, error: attachErr } = await supabase
+        .from("payment_provider_transactions")
+        .update({ sale_id: sale.id })
+        .eq("id", retailMomoTxnId)
+        .is("sale_id", null)
+        .select("id")
+        .maybeSingle()
+
+      if (attachErr) {
+        console.error("[retail-momo-sandbox] attach sale_id failed", attachErr)
+      }
+
+      if (!attached?.id) {
+        const { data: linked } = await supabase
+          .from("payment_provider_transactions")
+          .select("sale_id")
+          .eq("id", retailMomoTxnId)
+          .maybeSingle()
+
+        const existingSaleId = (linked as { sale_id?: string | null } | null)?.sale_id
+        if (existingSaleId) {
+          console.warn("[retail-momo-sandbox] concurrent finalize — compensating duplicate sale", {
+            duplicate_sale_id: sale.id,
+            kept_sale_id: existingSaleId,
+            reference: retailMomoRef,
+          })
+          const rolled = await compensateFailedRetailSale({
+            supabase,
+            saleId: sale.id,
+            businessId: business_id,
+            stockEntries: stockCompensationPlan,
+          })
+          if (!rolled.ok) {
+            return NextResponse.json(
+              {
+                error: "Duplicate finalize rollback failed — contact support",
+                code: "MOMO_DUPLICATE_FINALIZE_ROLLBACK_FAILED",
+                details: rolled.message,
+              },
+              { status: 500 },
+            )
+          }
+          return NextResponse.json({
+            success: true,
+            sale_id: existingSaleId,
+            message: "Sale already recorded for this payment",
+            idempotent: true,
+          })
+        }
+
+        console.error("[retail-momo-sandbox] attach race without linked sale_id", {
+          sale_id: sale.id,
+          reference: retailMomoRef,
+        })
+        const rolledOrphan = await compensateFailedRetailSale({
+          supabase,
+          saleId: sale.id,
+          businessId: business_id,
+          stockEntries: stockCompensationPlan,
+        })
+        if (!rolledOrphan.ok) {
+          return NextResponse.json(
+            {
+              error: "Could not link MoMo payment to sale; rollback failed",
+              code: "MOMO_LINK_FAILED",
+              details: rolledOrphan.message,
+            },
+            { status: 500 },
+          )
+        }
+        return NextResponse.json(
+          { error: "Could not finalize MoMo payment linkage", code: "MOMO_LINK_FAILED" },
+          { status: 500 },
+        )
+      }
+
+      console.log("[retail-momo-sandbox] sale linked to payment attempt", {
+        reference: retailMomoRef,
+        sale_id: sale.id,
+      })
+    }
 
     return NextResponse.json({
       success: true,

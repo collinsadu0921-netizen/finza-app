@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getEffectiveStoreId } from "@/lib/storeContext"
+import {
+  normalizeSaleUuidFromLookupInput,
+  parseSaleAmountSearch,
+  parseSaleHistoryDateSearch,
+  saleLookupIlikePattern,
+} from "@/lib/retail/saleLookupSearchParse"
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,6 +28,7 @@ export async function GET(request: NextRequest) {
     const storeId = searchParams.get("store_id") // CRITICAL: Store filter for multi-store support
     const sortField = searchParams.get("sort_field") || "date"
     const sortDirection = searchParams.get("sort_direction") || "desc"
+    const search = (searchParams.get("search") || "").trim()
 
     if (!businessId || !userId) {
       return NextResponse.json(
@@ -86,6 +92,31 @@ export async function GET(request: NextRequest) {
 
     const offset = (page - 1) * pageSize
 
+    let parkedLookupRow: Record<string, unknown> | null = null
+    const normalizedSearchUuid = search ? normalizeSaleUuidFromLookupInput(search) : null
+    if (normalizedSearchUuid) {
+      const { data: parkedHit } = await supabase
+        .from("parked_sales")
+        .select(
+          `
+          id,
+          subtotal,
+          taxes,
+          created_at,
+          user_id,
+          cart_json,
+          users:user_id (
+            email,
+            full_name
+          )
+        `
+        )
+        .eq("business_id", businessId)
+        .eq("id", normalizedSearchUuid)
+        .maybeSingle()
+      if (parkedHit) parkedLookupRow = parkedHit as Record<string, unknown>
+    }
+
     // Build query for sales
     let salesQuery = supabase
       .from("sales")
@@ -127,10 +158,6 @@ export async function GET(request: NextRequest) {
     // Manager = always filter by their assigned store
     if (effectiveStoreId) {
       salesQuery = salesQuery.eq("store_id", effectiveStoreId)
-      console.log("Sales history query - filtering by effective store_id:", effectiveStoreId)
-    } else {
-      // Admin in global mode - no store filter
-      console.log("Sales history query - admin global mode (no store filter)")
     }
 
     // Apply filters
@@ -148,6 +175,53 @@ export async function GET(request: NextRequest) {
     }
     if (registerId) {
       salesQuery = salesQuery.eq("register_id", registerId)
+    }
+    if (search) {
+      const uuidNorm = normalizeSaleUuidFromLookupInput(search)
+      if (uuidNorm) {
+        salesQuery = salesQuery.eq("id", uuidNorm)
+      } else {
+        const day = parseSaleHistoryDateSearch(search)
+        const amt = parseSaleAmountSearch(search)
+        if (day) {
+          salesQuery = salesQuery.gte("created_at", day.start).lt("created_at", day.end)
+        } else if (amt !== null) {
+          const lo = amt - 0.02
+          const hi = amt + 0.02
+          salesQuery = salesQuery.gte("amount", lo).lte("amount", hi)
+        } else {
+          const pat = saleLookupIlikePattern(search)
+          const orParts: string[] = []
+          if (pat.length > 0) {
+            const safe = pat.replace(/,/g, "")
+            const like = `%${safe}%`
+            orParts.push(`momo_transaction_id.ilike.${like}`)
+            orParts.push(`hubtel_transaction_id.ilike.${like}`)
+            orParts.push(`description.ilike.${like}`)
+            const s = search.trim().toLowerCase()
+            if (/^[0-9a-f-]+$/.test(s) && s.includes("-") && s.length >= 8 && s.length < 36) {
+              orParts.push(`id.ilike.${like}`)
+            }
+            const { data: custHits } = await supabase
+              .from("customers")
+              .select("id")
+              .eq("business_id", businessId)
+              .or(`name.ilike.${like},phone.ilike.${like}`)
+              .limit(50)
+            const ids = (custHits || []).map((c: { id: string }) => c.id).filter(Boolean)
+            if (ids.length === 1) {
+              orParts.push(`customer_id.eq.${ids[0]}`)
+            } else if (ids.length > 1) {
+              orParts.push(`customer_id.in.(${ids.join(",")})`)
+            }
+          }
+          if (orParts.length > 0) {
+            salesQuery = salesQuery.or(orParts.join(","))
+          } else {
+            salesQuery = salesQuery.eq("id", "00000000-0000-0000-0000-000000000000")
+          }
+        }
+      }
     }
     if (status) {
       if (status === "completed") {
@@ -200,21 +274,11 @@ export async function GET(request: NextRequest) {
       )
     }
     
-    // Debug logging
-    console.log("Sales history query result:", {
-      storeId,
-      salesCount: salesData?.length || 0,
-      totalCount: count,
-      firstSale: salesData?.[0] ? {
-        id: salesData[0].id,
-        store_id: (salesData[0] as any).store_id,
-        created_at: salesData[0].created_at
-      } : null
-    })
-
     // Also fetch parked sales if status filter includes parked or no status filter
     let parkedSalesData: any[] = []
-    if (!status || status === "parked") {
+    if (parkedLookupRow && (!status || status === "parked")) {
+      parkedSalesData = [parkedLookupRow]
+    } else if (!search && (!status || status === "parked")) {
       let parkedQuery = supabase
         .from("parked_sales")
         .select(
@@ -260,7 +324,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch voided sales from overrides table
     let voidedSalesData: any[] = []
-    if (!status || status === "voided") {
+    if (!search && (!status || status === "voided")) {
       let voidedQuery = supabase
         .from("overrides")
         .select(

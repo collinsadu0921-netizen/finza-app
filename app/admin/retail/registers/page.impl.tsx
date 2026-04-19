@@ -7,7 +7,11 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { getUserRole } from "@/lib/userRoles"
 import { getEffectiveStoreIdClient } from "@/lib/storeContext"
+import { setActiveStoreId } from "@/lib/storeSession"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { NativeSelect } from "@/components/ui/NativeSelect"
+import { retailPaths } from "@/lib/retail/routes"
+import { retailSettingsShell as RS } from "@/lib/retail/retailSettingsShell"
 
 type Register = {
   id: string
@@ -28,6 +32,12 @@ export default function RegistersPageImpl() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState("")
   const [newRegisterName, setNewRegisterName] = useState("")
+  /** Owner/admin: stores for choosing which branch's registers to manage */
+  const [storesForPicker, setStoresForPicker] = useState<Array<{ id: string; name: string }>>([])
+  /** Resolved store for list + mutations (never `"all"`) */
+  const [resolvedRegisterStoreId, setResolvedRegisterStoreId] = useState<string | null>(null)
+  const [resolvedStoreName, setResolvedStoreName] = useState<string | null>(null)
+  const [needsStorePick, setNeedsStorePick] = useState(false)
 
   useEffect(() => {
     loadRegisters()
@@ -77,18 +87,54 @@ export default function RegistersPageImpl() {
       if ((role === "manager" || role === "cashier") && !effectiveStoreId) {
         setError("You must be assigned to a store to manage registers.")
         setRegisters([])
+        setResolvedRegisterStoreId(null)
+        setResolvedStoreName(null)
+        setNeedsStorePick(false)
+        setStoresForPicker([])
         setLoading(false)
         return
       }
 
-      let registersQuery = supabase
-        .from("registers")
-        .select("*")
-        .eq("business_id", business.id)
-
-      if (effectiveStoreId) {
-        registersQuery = registersQuery.eq("store_id", effectiveStoreId)
+      let listStoreId: string | null = null
+      let pick = false
+      if (role === "owner" || role === "admin") {
+        if (activeStoreId && activeStoreId !== "all") {
+          listStoreId = activeStoreId
+          pick = false
+        } else {
+          listStoreId = null
+          pick = true
+        }
+        const { data: storeRows } = await supabase
+          .from("stores")
+          .select("id, name")
+          .eq("business_id", business.id)
+          .order("name", { ascending: true })
+        setStoresForPicker(storeRows || [])
+      } else {
+        setStoresForPicker([])
+        listStoreId = effectiveStoreId
+        pick = false
       }
+
+      setNeedsStorePick(pick)
+      setResolvedRegisterStoreId(listStoreId)
+
+      if (listStoreId) {
+        const { data: sn } = await supabase.from("stores").select("name").eq("id", listStoreId).maybeSingle()
+        setResolvedStoreName(sn?.name ?? null)
+      } else {
+        setResolvedStoreName(null)
+      }
+
+      if (!listStoreId) {
+        setRegisters([])
+        setError("")
+        setLoading(false)
+        return
+      }
+
+      let registersQuery = supabase.from("registers").select("*").eq("business_id", business.id).eq("store_id", listStoreId)
 
       let regs: any[] | null = null
       let regsError: any = null
@@ -137,9 +183,9 @@ export default function RegistersPageImpl() {
       return
     }
 
-    const activeStoreId = getActiveStoreId()
-    if (!activeStoreId || activeStoreId === "all") {
-      setError("Please select a store before creating a register. Go to Stores and open a store.")
+    const targetStoreId = resolvedRegisterStoreId
+    if (!targetStoreId) {
+      setError("Select a single store before creating a register (Stores → Open Store, or use the store picker below).")
       return
     }
 
@@ -148,12 +194,12 @@ export default function RegistersPageImpl() {
         .from("registers")
         .select("id")
         .eq("business_id", businessId)
-        .eq("store_id", activeStoreId)
+        .eq("store_id", targetStoreId)
 
       const isFirstRegister = !existingRegisters || existingRegisters.length === 0
       const insertData: any = {
         business_id: businessId,
-        store_id: activeStoreId,
+        store_id: targetStoreId,
         name: newRegisterName.trim(),
       }
 
@@ -206,14 +252,16 @@ export default function RegistersPageImpl() {
       setError("Please enter a register name")
       return
     }
-    const activeStoreId = getActiveStoreId()
-    if (activeStoreId && activeStoreId !== "all") {
-      const register = registers.find((r) => r.id === editingId)
-      if (register && register.store_id !== activeStoreId) {
-        setError("Access denied: This register belongs to a different store.")
-        cancelEdit()
-        return
-      }
+    if (!resolvedRegisterStoreId) {
+      setError("Select a store before editing registers.")
+      cancelEdit()
+      return
+    }
+    const register = registers.find((r) => r.id === editingId)
+    if (register && register.store_id !== resolvedRegisterStoreId) {
+      setError("Access denied: This register belongs to a different store.")
+      cancelEdit()
+      return
     }
     try {
       const { error: updateError } = await supabase
@@ -236,13 +284,14 @@ export default function RegistersPageImpl() {
   const setRegisterAsDefault = async (id: string) => {
     setError("")
     setSuccess("")
-    const activeStoreId = getActiveStoreId()
-    if (activeStoreId && activeStoreId !== "all") {
-      const register = registers.find((r) => r.id === id)
-      if (register && register.store_id !== activeStoreId) {
-        setError("Access denied: This register belongs to a different store.")
-        return
-      }
+    if (!resolvedRegisterStoreId) {
+      setError("Select a store first.")
+      return
+    }
+    const register = registers.find((r) => r.id === id)
+    if (register && register.store_id !== resolvedRegisterStoreId) {
+      setError("Access denied: This register belongs to a different store.")
+      return
     }
     try {
       const { error: updateError } = await supabase.from("registers").update({ is_default: true }).eq("id", id)
@@ -275,15 +324,33 @@ export default function RegistersPageImpl() {
   }
 
   const runDeleteRegister = async (id: string) => {
-    const activeStoreId = getActiveStoreId()
-    if (activeStoreId && activeStoreId !== "all") {
-      const register = registers.find((r) => r.id === id)
-      if (register && register.store_id !== activeStoreId) {
-        setError("Access denied: This register belongs to a different store.")
-        return
-      }
+    if (!resolvedRegisterStoreId) {
+      setError("Select a store first.")
+      return
+    }
+    const register = registers.find((r) => r.id === id)
+    if (register && register.store_id !== resolvedRegisterStoreId) {
+      setError("Access denied: This register belongs to a different store.")
+      return
     }
     try {
+      const { count: openCount } = await supabase
+        .from("cashier_sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("register_id", id)
+        .eq("status", "open")
+      if (openCount && openCount > 0) {
+        setError("Cannot delete: close open cashier sessions for this register first.")
+        return
+      }
+      const { count: saleCount } = await supabase
+        .from("sales")
+        .select("id", { count: "exact", head: true })
+        .eq("register_id", id)
+      if (saleCount && saleCount > 0) {
+        setError("Cannot delete: this register has sales history. Keep it or rename it instead.")
+        return
+      }
       const { error: deleteError } = await supabase.from("registers").delete().eq("id", id)
       if (deleteError) {
         setError((deleteError as { message?: string }).message ?? "Failed to delete register")
@@ -299,166 +366,277 @@ export default function RegistersPageImpl() {
 
   if (loading) {
     return (
-      <>
-        <div className="p-6">
-          <p>Loading...</p>
+      <div className={RS.outer}>
+        <div className={RS.container}>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Loading…</p>
         </div>
-      </>
+      </div>
     )
   }
 
   return (
-    <>
-      <div className="p-6 max-w-4xl">
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold">Register Management</h1>
-          <div className="flex gap-2">
-            <button
-              onClick={() => router.push("/retail/dashboard")}
-              className="bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400"
-            >
-              Back to Dashboard
-            </button>
-          </div>
+    <div className={RS.outer}>
+      <div className={RS.container}>
+        <div className={RS.headerBlock}>
+          <button type="button" onClick={() => router.push("/retail/dashboard")} className={RS.backLink}>
+            ← Back to Dashboard
+          </button>
+          <h1 className={RS.title}>Registers</h1>
+          <p className={RS.subtitle}>Tills for this branch. Add a register for each checkout or device.</p>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
             {error}
           </div>
         )}
 
         {success && (
-          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
+          <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-green-800 dark:border-green-900/40 dark:bg-green-950/30 dark:text-green-200">
             {success}
           </div>
         )}
 
-        <div className="border p-4 rounded-lg mb-6 bg-gray-50">
-          <h2 className="text-lg font-semibold mb-3">Add Register</h2>
-          <div className="flex gap-2">
+        {needsStorePick && storesForPicker.length > 0 && (
+          <div className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <span className="font-semibold">Select a store</span> to view and manage its registers (active session is &quot;All stores&quot; or unset).{" "}
+            <button type="button" className="font-medium text-blue-700 underline" onClick={() => router.push(retailPaths.adminStores)}>
+              Open Stores
+            </button>
+            <div className="mt-2 max-w-md">
+              <NativeSelect
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (!v) return
+                  const st = storesForPicker.find((s) => s.id === v)
+                  setActiveStoreId(v, st?.name ?? null)
+                  void loadRegisters()
+                }}
+              >
+                <option value="">Choose store…</option>
+                {storesForPicker.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+          </div>
+        )}
+
+        {resolvedRegisterStoreId && resolvedStoreName && (
+          <p className="mb-2 text-sm text-gray-700">
+            Registers for: <span className="font-semibold">{resolvedStoreName}</span>
+          </p>
+        )}
+
+        <div className={`${RS.mutedPanel} mb-6`}>
+          <h2 className={`${RS.sectionTitle} mb-3`}>Add register</h2>
+          <div className="flex flex-col gap-2 sm:flex-row">
             <input
-              className="border p-2 flex-1 rounded"
-              placeholder="e.g., Till 1, Register 2, Counter 3"
+              className="min-h-[42px] flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+              placeholder="e.g. Till 1, Front counter"
               value={newRegisterName}
               onChange={(e) => setNewRegisterName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addRegister()}
+              disabled={!resolvedRegisterStoreId}
             />
             <button
+              type="button"
               onClick={addRegister}
-              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+              disabled={!resolvedRegisterStoreId}
+              className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-400"
             >
-              Add Register
+              Add register
             </button>
           </div>
         </div>
 
-        <h2 className="text-xl font-bold mb-3">Your Registers</h2>
+        <h2 className={`${RS.sectionTitle} mb-3`}>Registers for this store</h2>
 
         {registers.length === 0 ? (
-          <div className="border p-6 rounded-lg text-center text-gray-500">
-            <p className="mb-2">No registers found for this store.</p>
-            <p className="text-sm">Add your first register above to get started.</p>
-            {(!getActiveStoreId() || getActiveStoreId() === "all") && (
-              <p className="text-sm text-red-600 mt-2">
-                Please select a store first from{" "}
-                <button
-                  type="button"
-                  onClick={() => router.push("/retail/admin/stores")}
-                  className="underline"
-                >
+          <div className={`${RS.card} ${RS.cardPad} text-center text-sm text-gray-500 dark:text-gray-400`}>
+            <p className="mb-1">No registers for this store yet.</p>
+            <p>Add one above, or pick a store if the list is empty.</p>
+            {!resolvedRegisterStoreId && (
+              <p className="mt-3 text-red-600 dark:text-red-400">
+                Choose a store in{" "}
+                <button type="button" onClick={() => router.push(retailPaths.adminStores)} className={RS.linkInline}>
                   Stores
-                </button>
-                .
+                </button>{" "}
+                or use the picker above.
               </p>
             )}
           </div>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left py-3 px-4 font-semibold">Register Name</th>
-                  <th className="text-left py-3 px-4 font-semibold">Status</th>
-                  <th className="text-left py-3 px-4 font-semibold">Created</th>
-                  <th className="text-right py-3 px-4 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {registers.map((register) => (
-                  <tr key={register.id} className="border-b hover:bg-gray-50">
-                    {editingId === register.id ? (
-                      <>
-                        <td className="py-3 px-4">
-                          <input
-                            className="border p-2 w-full rounded"
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && saveEdit()}
-                          />
-                        </td>
-                        <td className="py-3 px-4 text-sm text-gray-600">
-                          {register.is_default ? (
-                            <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-semibold">Default</span>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-gray-600">
-                          {new Date(register.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex justify-end gap-2">
-                            <button onClick={saveEdit} className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
-                              Save
-                            </button>
-                            <button onClick={cancelEdit} className="bg-gray-300 text-gray-800 px-3 py-1 rounded text-sm hover:bg-gray-400">
-                              Cancel
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="py-3 px-4 font-medium">{register.name}</td>
-                        <td className="py-3 px-4 text-sm text-gray-600">
-                          {register.is_default ? (
-                            <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-semibold">Default</span>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-gray-600">
-                          {new Date(register.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex justify-end gap-2">
-                            {!register.is_default && (
-                              <button
-                                onClick={() => setRegisterAsDefault(register.id)}
-                                className="bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700"
-                                title="Set as default register"
-                              >
-                                Set Default
-                              </button>
-                            )}
-                            <button onClick={() => startEdit(register)} className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
-                              Edit
-                            </button>
-                            <button onClick={() => deleteRegister(register.id)} className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700">
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    )}
+          <>
+            <div className={RS.listStack}>
+              {registers.map((register) => (
+                <div key={`m-${register.id}`} className={RS.listCard}>
+                  {editingId === register.id ? (
+                    <div className="space-y-3">
+                      <input
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={saveEdit} className={RS.primaryButton}>
+                          Save
+                        </button>
+                        <button type="button" onClick={cancelEdit} className={RS.secondaryButton}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">{register.name}</p>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Added {new Date(register.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        {register.is_default ? (
+                          <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                            Default till
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {!register.is_default && (
+                          <button
+                            type="button"
+                            onClick={() => setRegisterAsDefault(register.id)}
+                            className={RS.secondaryButton}
+                            title="Use as default till for this store"
+                          >
+                            Set as default
+                          </button>
+                        )}
+                        <button type="button" onClick={() => startEdit(register)} className={RS.secondaryButton}>
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteRegister(register.id)}
+                          className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:bg-gray-900 dark:text-red-300"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className={RS.tableWrap}>
+              <table className="w-full min-w-[560px]">
+                <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/80">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Till / register
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Default
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Created
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {registers.map((register) => (
+                    <tr key={register.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
+                      {editingId === register.id ? (
+                        <>
+                          <td className="px-4 py-3">
+                            <input
+                              className="w-full max-w-xs rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {register.is_default ? (
+                              <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                                Default till
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {new Date(register.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-2">
+                              <button type="button" onClick={saveEdit} className={RS.primaryButton}>
+                                Save
+                              </button>
+                              <button type="button" onClick={cancelEdit} className={RS.secondaryButton}>
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{register.name}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {register.is_default ? (
+                              <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                                Default till
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {new Date(register.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              {!register.is_default && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRegisterAsDefault(register.id)}
+                                  className={RS.secondaryButton}
+                                  title="Default till for this store"
+                                >
+                                  Set default
+                                </button>
+                              )}
+                              <button type="button" onClick={() => startEdit(register)} className={RS.secondaryButton}>
+                                Rename
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteRegister(register.id)}
+                                className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:bg-gray-900 dark:text-red-300"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
-    </>
+    </div>
   )
 }

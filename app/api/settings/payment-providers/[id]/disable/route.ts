@@ -3,6 +3,7 @@ import { resolveBusinessScopeForUser } from "@/lib/business"
 import { statusForSettingsError } from "@/lib/settings/paymentProviders/httpErrors"
 import { setPaymentProviderEnabled } from "@/lib/settings/paymentProviders/service"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { assertBusinessPaymentWriteAccess } from "@/lib/settings/assertBusinessPaymentWriteAccess"
 
 type RouteParams = { params: Promise<{ id: string }> }
 
@@ -22,6 +23,11 @@ export async function POST(request: NextRequest, ctx: RouteParams) {
     const scope = await resolveBusinessScopeForUser(supabase, user.id, businessIdRaw)
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    const writeGate = await assertBusinessPaymentWriteAccess(supabase, user.id, scope.businessId)
+    if (!writeGate.ok) {
+      return NextResponse.json({ error: writeGate.error }, { status: writeGate.status })
     }
 
     const masked = await setPaymentProviderEnabled(supabase, scope.businessId, providerId, false)

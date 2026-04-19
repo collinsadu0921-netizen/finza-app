@@ -5,6 +5,14 @@ import { supabase } from "@/lib/supabaseClient"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { formatMoney } from "@/lib/money"
 import { getCurrencySymbol } from "@/lib/currency"
+import { RetailMenuSelect, type MenuSelectOption } from "@/components/retail/RetailBackofficeUi"
+
+const ONBOARDING_PRODUCT_TAX_OPTIONS: MenuSelectOption[] = [
+  { value: "", label: "— Select —" },
+  { value: "taxable", label: "Taxable" },
+  { value: "zero_rated", label: "Zero-rated" },
+  { value: "exempt", label: "Exempt" },
+]
 
 interface RetailOnboardingProductsProps {
   business: any
@@ -213,17 +221,11 @@ export default function RetailOnboardingProducts({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Tax Category <span className="text-red-500">*</span>
             </label>
-            <select
+            <RetailMenuSelect
               value={formData.tax_category}
-              onChange={(e) => setFormData({ ...formData, tax_category: e.target.value as TaxCategory | "" })}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-              required
-            >
-              <option value="">— Select —</option>
-              <option value="taxable">Taxable</option>
-              <option value="zero_rated">Zero-rated</option>
-              <option value="exempt">Exempt</option>
-            </select>
+              onValueChange={(v) => setFormData({ ...formData, tax_category: v as TaxCategory | "" })}
+              options={ONBOARDING_PRODUCT_TAX_OPTIONS}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

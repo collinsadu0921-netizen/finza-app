@@ -25,6 +25,7 @@ import { normalizeCountry, assertProviderAllowed } from "@/lib/payments/eligibil
 import {
   fetchMtnCollectionAccessToken,
   getRequestToPayStatus,
+  mtnCollectionRequestToPayCurrency,
   normalizeGhanaMsisdnForMtn,
   requestToPayCollection,
   type MtnMomoDirectTenantCredentials,
@@ -405,7 +406,7 @@ export async function initiateTenantMtnInvoicePayment(
     accessToken: tokenRes.accessToken,
     xReferenceId,
     amount: amountStr,
-    currency: "GHS",
+    currency: mtnCollectionRequestToPayCurrency(creds.targetEnvironment, "GHS"),
     externalId: reference,
     payerMsisdn: msisdn,
     payerMessage: `Invoice ${invoice.invoice_number}`,

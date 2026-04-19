@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import SendMethodDropdown, { SendMethod } from "./SendMethodDropdown"
 import { normalizePhoneForWaMe } from "@/lib/communication/whatsappLink"
+import { openWhatsAppUrlInBrowser } from "@/lib/communication/openWhatsAppClient"
 import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
 
 type Invoice = {
@@ -123,31 +124,8 @@ export default function SendInvoiceModal({
 
       if (data.whatsappUrl && /^https:\/\/wa\.me\//i.test(String(data.whatsappUrl))) {
         const url = String(data.whatsappUrl)
-        let opened = false
-        let navigatedPrep = false
-        if (waPrepWindow && !waPrepWindow.closed) {
-          try {
-            waPrepWindow.location.href = url
-            opened = true
-            navigatedPrep = true
-          } catch {
-            opened = false
-          }
-        }
-        // No noopener — Chromium often returns null from window.open(..., "noopener") even when a tab opens.
-        if (!opened) {
-          const w = window.open(url, "_blank")
-          opened = !!w
-        }
+        const opened = openWhatsAppUrlInBrowser(url, waPrepWindow)
         if (opened) {
-          // If we still have a blank prep tab because we used a second window for wa.me, close it.
-          if (waPrepWindow && !waPrepWindow.closed && !navigatedPrep) {
-            try {
-              waPrepWindow.close()
-            } catch {
-              /* ignore */
-            }
-          }
           onSuccess()
         } else {
           closePrep()
