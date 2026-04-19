@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import RetailBarcodeFieldWithCamera from "@/components/retail/RetailBarcodeFieldWithCamera"
 
 type Variant = {
   id?: string
@@ -363,13 +364,16 @@ export default function ProductVariantsManager({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Barcode</label>
-                    <input
-                      type="text"
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      Barcode <span className="font-normal text-gray-500">(optional, unique per business)</span>
+                    </label>
+                    <RetailBarcodeFieldWithCamera
                       value={variant.barcode || ""}
-                      onChange={(e) => updateVariant(index, "barcode", e.target.value)}
-                      placeholder="Optional"
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm dark:bg-gray-700 dark:text-white"
+                      onChange={(next) => updateVariant(index, "barcode", next)}
+                      inputClassName="w-full border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm dark:bg-gray-700 dark:text-white"
+                      placeholder="Scan or type — must not duplicate another variant barcode in your business"
+                      scanButtonClassName="inline-flex shrink-0 items-center justify-center rounded border border-gray-300 bg-white px-2 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                      scanButtonLabel="Scan barcode"
                     />
                   </div>
                   <div>

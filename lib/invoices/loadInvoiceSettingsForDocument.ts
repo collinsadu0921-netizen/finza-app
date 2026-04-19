@@ -56,7 +56,7 @@ export async function loadInvoiceSettingsForDocument(
   const { data, error } = await supabase
     .from("invoice_settings")
     .select(
-      "bank_name, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, default_payment_terms, default_footer_message, quote_terms_and_conditions"
+      "bank_name, bank_branch, bank_swift, bank_iban, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, default_payment_terms, default_footer_message, quote_terms_and_conditions"
     )
     .eq("business_id", businessId)
     .maybeSingle()
@@ -73,19 +73,28 @@ export async function loadInvoiceSettingsForDocument(
     }
   }
 
+  const row = data as typeof data & {
+    bank_branch?: string | null
+    bank_swift?: string | null
+    bank_iban?: string | null
+  }
+
   const payment_details: DocumentPaymentDetails = {
-    bank_name: data.bank_name,
-    bank_account_name: data.bank_account_name,
-    bank_account_number: data.bank_account_number,
-    momo_provider: data.momo_provider,
-    momo_name: data.momo_name,
-    momo_number: data.momo_number,
+    bank_name: row.bank_name,
+    bank_branch: row.bank_branch ?? null,
+    bank_swift: row.bank_swift ?? null,
+    bank_iban: row.bank_iban ?? null,
+    bank_account_name: row.bank_account_name,
+    bank_account_number: row.bank_account_number,
+    momo_provider: row.momo_provider,
+    momo_name: row.momo_name,
+    momo_number: row.momo_number,
   }
 
   return {
     payment_details,
-    default_payment_terms: data.default_payment_terms ?? null,
-    default_footer_message: data.default_footer_message ?? null,
-    quote_terms_and_conditions: data.quote_terms_and_conditions ?? null,
+    default_payment_terms: row.default_payment_terms ?? null,
+    default_footer_message: row.default_footer_message ?? null,
+    quote_terms_and_conditions: row.quote_terms_and_conditions ?? null,
   }
 }

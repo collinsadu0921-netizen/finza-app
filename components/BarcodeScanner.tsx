@@ -1,126 +1,65 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 
 type BarcodeScannerProps = {
   onScan: (barcode: string) => void
   enabled?: boolean
 }
 
+/**
+ * Optional global keyboard-wedge listener (not mounted on Retail POS — the visible scan field is primary).
+ * Uses a ref buffer so rapid scanner keys are not lost to stale React closures.
+ *
+ * Ignores key events when focus is already in a form field so typing in modals is not captured.
+ */
 export default function BarcodeScanner({ onScan, enabled = true }: BarcodeScannerProps) {
-  const [barcodeBuffer, setBarcodeBuffer] = useState("")
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const bufferRef = useRef("")
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!enabled) return
 
-    // Focus the hidden input on mount
-    if (inputRef.current) {
-      inputRef.current.focus()
+    const flush = () => {
+      const v = bufferRef.current.trim()
+      bufferRef.current = ""
+      if (v) onScan(v)
     }
 
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // Ignore if user is typing in a visible input/textarea
-      const target = e.target as HTMLElement
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        // Only process if it's our hidden input
-        if (target !== inputRef.current) {
-          return
-        }
-      }
-
-      // Clear timeout if it exists
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-      }
-
-      // Handle Enter key (end of scan)
-      if (e.key === "Enter") {
-        e.preventDefault()
-        if (barcodeBuffer.trim().length > 0) {
-          onScan(barcodeBuffer.trim())
-          setBarcodeBuffer("")
-        }
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const tag = target.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
         return
       }
 
-      // Handle regular characters
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setBarcodeBuffer((prev) => prev + e.key)
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
 
-        // Set timeout to auto-submit if no input for 100ms (typical barcode scanner behavior)
+      if (e.key === "Enter") {
+        e.preventDefault()
+        flush()
+        return
+      }
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        bufferRef.current += e.key
         timeoutRef.current = setTimeout(() => {
-          if (barcodeBuffer.trim().length > 0) {
-            onScan(barcodeBuffer.trim())
-            setBarcodeBuffer("")
-          }
+          flush()
+          timeoutRef.current = null
         }, 100)
       }
     }
 
-    // Handle input events on the hidden input
-    const handleInput = (e: Event) => {
-      const target = e.target as HTMLInputElement
-      if (target.value && target.value.length > 0) {
-        setBarcodeBuffer(target.value)
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyPress)
-    const input = inputRef.current
-    if (input) {
-      input.addEventListener("input", handleInput)
-    }
-
+    window.addEventListener("keydown", onKeyDown)
     return () => {
-      window.removeEventListener("keydown", handleKeyPress)
-      if (input) {
-        input.removeEventListener("input", handleInput)
-      }
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-      }
+      window.removeEventListener("keydown", onKeyDown)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
-  }, [enabled, barcodeBuffer, onScan])
+  }, [enabled, onScan])
 
-  // Auto-focus when enabled changes
-  useEffect(() => {
-    if (enabled && inputRef.current) {
-      inputRef.current.focus()
-    }
-  }, [enabled])
-
-  return (
-    <input
-      ref={inputRef}
-      type="text"
-      autoFocus
-      value={barcodeBuffer}
-      onChange={(e) => setBarcodeBuffer(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault()
-          if (barcodeBuffer.trim().length > 0) {
-            onScan(barcodeBuffer.trim())
-            setBarcodeBuffer("")
-          }
-        }
-      }}
-      className="absolute opacity-0 pointer-events-none w-0 h-0"
-      style={{ position: "fixed", left: "-9999px" }}
-      tabIndex={-1}
-    />
-  )
+  return null
 }
-
-
-
-
-
-
-

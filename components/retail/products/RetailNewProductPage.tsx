@@ -23,6 +23,7 @@ import {
 import { getActiveStoreId } from "@/lib/storeSession"
 import { processProductImage } from "@/lib/imageProcessing"
 import { cn } from "@/lib/utils"
+import RetailBarcodeFieldWithCamera from "@/components/retail/RetailBarcodeFieldWithCamera"
 
 type Category = {
   id: string
@@ -334,11 +335,10 @@ export default function RetailNewProductPage() {
                 </div>
                 <div>
                   <label className={retailLabelClass}>Barcode (optional, unique per business)</label>
-                  <input
-                    type="text"
+                  <RetailBarcodeFieldWithCamera
                     value={formData.barcode}
-                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                    className={retailFieldClass}
+                    onChange={(barcode) => setFormData({ ...formData, barcode })}
+                    inputClassName={retailFieldClass}
                     placeholder="Scan or type barcode"
                   />
                 </div>

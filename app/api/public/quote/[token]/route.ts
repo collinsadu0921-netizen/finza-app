@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import {
+  loadInvoiceSettingsForDocument,
+  mergeQuotePdfTerms,
+} from "@/lib/invoices/loadInvoiceSettingsForDocument"
 
 export const dynamic = "force-dynamic"
 
@@ -107,7 +111,10 @@ export async function GET(
 
     const estimate = normalizeEstimateForPublic(row as Record<string, unknown>, customers)
 
-    const [{ data: items }, { data: biz }, { data: settings }] = await Promise.all([
+    const invSettings = await loadInvoiceSettingsForDocument(supabase, estimate.business_id)
+    const mergedTerms = mergeQuotePdfTerms(invSettings, null)
+
+    const [{ data: items }, { data: biz }, { data: settingsRow }] = await Promise.all([
       supabase
         .from("estimate_items")
         .select("id, description, quantity, price, total, discount_amount")
@@ -120,7 +127,7 @@ export async function GET(
         .single(),
       supabase
         .from("invoice_settings")
-        .select("brand_color, bank_name, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, quote_terms_and_conditions")
+        .select("brand_color")
         .eq("business_id", estimate.business_id)
         .maybeSingle(),
     ])
@@ -129,7 +136,12 @@ export async function GET(
       estimate,
       items: items ?? [],
       business: biz ?? null,
-      settings: settings ?? null,
+      settings: {
+        brand_color: settingsRow?.brand_color ?? null,
+        quote_terms_and_conditions: mergedTerms.quote_terms,
+        payment_terms: mergedTerms.payment_terms,
+        footer_message: mergedTerms.footer_message,
+      },
     })
   } catch (err: any) {
     console.error("public/quote GET error:", err)

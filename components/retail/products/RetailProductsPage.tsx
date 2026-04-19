@@ -23,6 +23,7 @@ import {
   retailFieldClass,
   RetailMenuSelect,
 } from "@/components/retail/RetailBackofficeUi"
+import RetailBarcodeFieldWithCamera from "@/components/retail/RetailBarcodeFieldWithCamera"
 
 type Product = {
   id: string
@@ -82,6 +83,8 @@ export default function RetailProductsPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [error, setError] = useState<string>("")
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ productId: string; productName: string } | null>(null)
+  const [createVariantBarcode, setCreateVariantBarcode] = useState("")
+  const [editVariantBarcode, setEditVariantBarcode] = useState("")
 
   useEffect(() => {
     load()
@@ -307,6 +310,7 @@ export default function RetailProductsPage() {
       sku: variant.sku,
       barcode: variant.barcode,
     })
+    setEditVariantBarcode(variant.barcode?.trim() || "")
     setShowEditVariantModal(true)
   }
 
@@ -317,7 +321,8 @@ export default function RetailProductsPage() {
     const formData = new FormData(e.currentTarget)
     const newName = formData.get("variant_name")?.toString()?.trim() || ""
     const newSku = formData.get("sku")?.toString()?.trim() || ""
-    const newBarcode = formData.get("barcode")?.toString()?.trim() || ""
+    const newBarcodeNorm = editVariantBarcode.trim()
+    const prevBarcodeNorm = (editingVariant.barcode ?? "").trim()
     const priceStr = formData.get("price")?.toString() || ""
 
     if (!newName || !newName.trim()) {
@@ -338,12 +343,15 @@ export default function RetailProductsPage() {
       }
     }
 
-    if (newName.trim() === editingVariant.variantName && 
-        newPrice === editingVariant.price &&
-        newSku === editingVariant.sku &&
-        newBarcode === editingVariant.barcode) {
+    if (
+      newName.trim() === editingVariant.variantName &&
+      newPrice === editingVariant.price &&
+      newSku === editingVariant.sku &&
+      newBarcodeNorm === prevBarcodeNorm
+    ) {
       setShowEditVariantModal(false)
       setEditingVariant(null)
+      setEditVariantBarcode("")
       return // No changes
     }
 
@@ -358,13 +366,14 @@ export default function RetailProductsPage() {
       if (newSku !== editingVariant.sku) {
         updateData.sku = newSku || null
       }
-      if (newBarcode !== editingVariant.barcode) {
-        updateData.barcode = newBarcode || null
+      if (newBarcodeNorm !== prevBarcodeNorm) {
+        updateData.barcode = newBarcodeNorm || null
       }
 
       if (Object.keys(updateData).length === 0) {
         setShowEditVariantModal(false)
         setEditingVariant(null)
+        setEditVariantBarcode("")
         return
       }
 
@@ -375,6 +384,14 @@ export default function RetailProductsPage() {
         .eq("product_id", editingVariant.productId)
 
       if (error) {
+        if (error.code === "23505") {
+          setToast({
+            message:
+              "This variant barcode is already used on another variant in your business. Clear it or use a different barcode.",
+            type: "error",
+          })
+          return
+        }
         setToast({ message: `Error updating variant: ${error.message}`, type: "error" })
         return
       }
@@ -384,6 +401,7 @@ export default function RetailProductsPage() {
       setToast({ message: "Variant updated successfully", type: "success" })
       setShowEditVariantModal(false)
       setEditingVariant(null)
+      setEditVariantBarcode("")
     } catch (err: any) {
       setToast({ message: `Error updating variant: ${err.message}`, type: "error" })
     }
@@ -391,6 +409,7 @@ export default function RetailProductsPage() {
 
   const handleCreateVariant = (productId: string) => {
     setCreateVariantProductId(productId)
+    setCreateVariantBarcode("")
     setShowCreateVariantModal(true)
   }
 
@@ -399,7 +418,7 @@ export default function RetailProductsPage() {
     const formData = new FormData(e.currentTarget)
     const variantName = formData.get("variant_name")?.toString().trim()
     const sku = formData.get("sku")?.toString().trim()
-    const barcode = formData.get("barcode")?.toString().trim()
+    const barcode = createVariantBarcode.trim()
     const variantPrice = formData.get("price")?.toString()
     const initialStock = formData.get("stock")?.toString() || "0"
 
@@ -439,6 +458,14 @@ export default function RetailProductsPage() {
         .single()
 
       if (variantError) {
+        if (variantError.code === "23505") {
+          setToast({
+            message:
+              "This variant barcode is already used on another variant in your business. Clear it or use a different barcode.",
+            type: "error",
+          })
+          return
+        }
         setToast({ message: `Error creating variant: ${variantError.message}`, type: "error" })
         return
       }
@@ -471,6 +498,7 @@ export default function RetailProductsPage() {
       // Close modal and reset
       setShowCreateVariantModal(false)
       setCreateVariantProductId(null)
+      setCreateVariantBarcode("")
       setToast({ message: "Variant created successfully", type: "success" })
     } catch (err: any) {
       setToast({ message: `Error creating variant: ${err.message}`, type: "error" })
@@ -956,11 +984,12 @@ export default function RetailProductsPage() {
                   <label className="block text-sm font-medium mb-1">
                     Barcode
                   </label>
-                  <input
-                    type="text"
-                    name="barcode"
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  <RetailBarcodeFieldWithCamera
+                    value={createVariantBarcode}
+                    onChange={setCreateVariantBarcode}
+                    inputClassName="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Optional barcode"
+                    scanButtonClassName="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
                 <div>
@@ -1000,6 +1029,7 @@ export default function RetailProductsPage() {
                     onClick={() => {
                       setShowCreateVariantModal(false)
                       setCreateVariantProductId(null)
+                      setCreateVariantBarcode("")
                     }}
                     className="bg-gray-300 text-gray-800 px-6 py-2 rounded-lg hover:bg-gray-400 font-medium"
                   >
@@ -1047,12 +1077,12 @@ export default function RetailProductsPage() {
                   <label className="block text-sm font-medium mb-1">
                     Barcode
                   </label>
-                  <input
-                    type="text"
-                    name="barcode"
-                    defaultValue={editingVariant.barcode || ""}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  <RetailBarcodeFieldWithCamera
+                    value={editVariantBarcode}
+                    onChange={setEditVariantBarcode}
+                    inputClassName="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Optional barcode"
+                    scanButtonClassName="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
                 <div>
@@ -1081,6 +1111,7 @@ export default function RetailProductsPage() {
                     onClick={() => {
                       setShowEditVariantModal(false)
                       setEditingVariant(null)
+                      setEditVariantBarcode("")
                     }}
                     className="bg-gray-300 text-gray-800 px-6 py-2 rounded-lg hover:bg-gray-400 font-medium"
                   >

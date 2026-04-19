@@ -11,6 +11,11 @@ import { StatusBadge } from "@/components/ui/StatusBadge"
 import { formatMoney } from "@/lib/money"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
 
+function formatInvoiceNumberForHeader(num: string): string {
+  const s = (num || "").trim()
+  return s.startsWith("#") ? s.slice(1).trim() : s
+}
+
 export type InvoiceDocumentInvoice = {
   id: string
   invoice_number: string
@@ -65,6 +70,10 @@ export type InvoiceDocumentSettings = {
   show_tax_breakdown?: boolean
   show_business_tin?: boolean
   bank_name?: string | null
+  /** Invoice client-facing only — shown when set. */
+  bank_branch?: string | null
+  bank_swift?: string | null
+  bank_iban?: string | null
   bank_account_name?: string | null
   bank_account_number?: string | null
   momo_provider?: string | null
@@ -159,9 +168,8 @@ export function InvoiceDocument({
             />
             <div>
               <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-tight">{businessName}</h1>
-              <p className="text-xs text-slate-400 mb-1">Invoice</p>
               {businessAddress && (
-                <p className="text-xs text-slate-500">{businessAddress}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{businessAddress}</p>
               )}
               <div className="mt-1 space-y-0.5 text-xs text-slate-400">
                 {business?.phone && <p>T: {business.phone}</p>}
@@ -175,39 +183,29 @@ export function InvoiceDocument({
               </div>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-1.5 shrink-0">
-            <span className="text-xs uppercase font-bold text-slate-400 tracking-wider">Invoice Number</span>
-            <div className="text-sm font-mono text-slate-700 bg-slate-50 px-3 py-1 rounded border border-slate-200">
-              #{invoice.invoice_number}
+          <div className="flex flex-col items-end text-right shrink-0 md:min-w-[200px] space-y-0">
+            <p className="text-[13px] font-semibold text-slate-900 leading-snug tracking-tight">Invoice</p>
+            <p className="text-[15px] font-medium text-slate-600 tabular-nums leading-snug mt-1">
+              {formatInvoiceNumberForHeader(invoice.invoice_number)}
+            </p>
+            <div className="mt-3 space-y-1 text-xs text-slate-600 leading-relaxed">
+              <p>Invoice Date: {formatDate(invoice.issue_date)}</p>
+              {invoice.due_date ? <p>Due Date: {formatDate(invoice.due_date)}</p> : null}
             </div>
-            <StatusBadge status={displayStatus ?? invoice.status} />
+            <div className="mt-2.5">
+              <StatusBadge status={displayStatus ?? invoice.status} />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Bill to + dates — compact 2-col */}
-      <div className="px-6 py-4 grid grid-cols-2 gap-6 border-b border-slate-200">
-        {/* Bill To */}
-        <div>
-          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Bill To</label>
-          <p className="text-sm font-semibold text-slate-900">{invoice.customers?.name || "—"}</p>
-          {invoice.customers?.address && <p className="text-xs text-slate-500 mt-0.5">{invoice.customers.address}</p>}
-          {invoice.customers?.email && <p className="text-xs text-slate-500">{invoice.customers.email}</p>}
-          {invoice.customers?.phone && <p className="text-xs text-slate-500">{invoice.customers.phone}</p>}
-        </div>
-        {/* Dates + terms */}
-        <div className="flex flex-wrap gap-x-6 gap-y-2 content-start">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Issue Date</label>
-            <p className="text-xs text-slate-800">{formatDate(invoice.issue_date)}</p>
-          </div>
-          {invoice.due_date && (
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Due Date</label>
-              <p className="text-xs text-slate-800">{formatDate(invoice.due_date)}</p>
-            </div>
-          )}
-        </div>
+      {/* Bill to */}
+      <div className="px-6 py-4 border-b border-slate-200">
+        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Bill To</label>
+        <p className="text-sm font-semibold text-slate-900">{invoice.customers?.name || "—"}</p>
+        {invoice.customers?.address && <p className="text-xs text-slate-500 mt-0.5">{invoice.customers.address}</p>}
+        {invoice.customers?.email && <p className="text-xs text-slate-500">{invoice.customers.email}</p>}
+        {invoice.customers?.phone && <p className="text-xs text-slate-500">{invoice.customers.phone}</p>}
       </div>
 
       {/* Line items table — tighter rows */}
@@ -345,14 +343,30 @@ export function InvoiceDocument({
                   </div>
                   <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Bank Transfer</span>
                 </div>
-                <div className="space-y-1 text-sm">
+                <div className="space-y-1.5 text-sm">
                   {settings?.bank_name && (
                     <p className="font-semibold text-slate-800">{settings.bank_name}</p>
+                  )}
+                  {settings?.bank_branch?.trim() && (
+                    <p className="text-slate-500 text-xs">
+                      Branch: <span className="text-slate-700 font-medium">{settings.bank_branch.trim()}</span>
+                    </p>
+                  )}
+                  {settings?.bank_swift?.trim() && (
+                    <p className="text-slate-500 text-xs">
+                      SWIFT / BIC: <span className="text-slate-700 font-medium font-mono tracking-wide">{settings.bank_swift.trim()}</span>
+                    </p>
+                  )}
+                  {settings?.bank_iban?.trim() && (
+                    <p className="text-slate-500 text-xs">
+                      IBAN: <span className="text-slate-700 font-medium font-mono tracking-wide break-all">{settings.bank_iban.trim()}</span>
+                    </p>
                   )}
                   {settings?.bank_account_name && (
                     <p className="text-slate-500 text-xs">Account name: <span className="text-slate-700 font-medium">{settings.bank_account_name}</span></p>
                   )}
-                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block mt-1.5 text-sm tracking-widest font-bold">
+                  <p className="text-slate-500 text-xs">Account number:</p>
+                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block text-sm tracking-widest font-bold">
                     {settings?.bank_account_number}
                   </p>
                 </div>

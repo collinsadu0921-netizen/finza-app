@@ -229,14 +229,14 @@ export default function RetailOnboardingProducts({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Barcode/SKU
+              Barcode <span className="font-normal text-gray-500">(optional, unique per business)</span>
             </label>
             <input
               type="text"
               value={formData.barcode}
               onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
               className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-              placeholder="Optional"
+              placeholder="Scan or type product barcode"
             />
           </div>
         </div>

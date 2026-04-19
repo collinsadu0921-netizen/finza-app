@@ -74,6 +74,21 @@ type Item = {
   line_subtotal: number
 }
 
+type PaymentDetailsRow = {
+  bank_name?: string | null
+  bank_account_name?: string | null
+  bank_account_number?: string | null
+  momo_provider?: string | null
+  momo_name?: string | null
+  momo_number?: string | null
+}
+
+type ProformaPublicSettings = {
+  brand_color?: string | null
+  quote_terms_and_conditions?: string | null
+  payment_details?: PaymentDetailsRow | null
+}
+
 const fmt = (sym: string, n: number) => `${sym}${Number(n ?? 0).toFixed(2)}`
 
 const formatDate = (d: string | null) =>
@@ -90,6 +105,8 @@ export default function ProformaPublicPage() {
   const [items, setItems] = useState<Item[]>([])
   const [business, setBusiness] = useState<Business | null>(null)
   const [brand, setBrand] = useState("#0f172a")
+  const [quoteTermsClient, setQuoteTermsClient] = useState<string | null>(null)
+  const [paymentDetails, setPaymentDetails] = useState<PaymentDetailsRow | null>(null)
 
   // Accept modal
   const [showAccept, setShowAccept] = useState(false)
@@ -107,29 +124,48 @@ export default function ProformaPublicPage() {
   const [rejecting, setRejecting] = useState(false)
   const [rejectError, setRejectError] = useState("")
 
-  const reload = async () => {
-    const r = await fetch(`/api/public/proforma/${token}`)
-    const d = await r.json()
+  const applyPayload = (d: {
+    proforma: ProformaInvoice
+    items?: Item[]
+    business: Business | null
+    settings?: ProformaPublicSettings | null
+  }) => {
     setProforma(d.proforma)
     setItems(d.items ?? [])
     setBusiness(d.business)
+    const s = d.settings
+    if (s?.brand_color) setBrand(s.brand_color)
+    setQuoteTermsClient(s?.quote_terms_and_conditions?.trim() ? s.quote_terms_and_conditions : null)
+    setPaymentDetails(s?.payment_details ?? null)
+  }
+
+  const reload = async () => {
+    const enc = encodeURIComponent(token || "")
+    const r = await fetch(`/api/public/proforma/${enc}`)
+    const d = await r.json()
+    applyPayload(d)
   }
 
   useEffect(() => {
-    fetch(`/api/public/proforma/${token}`)
+    const enc = encodeURIComponent(token || "")
+    fetch(`/api/public/proforma/${enc}`)
       .then(r => {
         if (!r.ok) throw new Error("Proforma not found")
         return r.json()
       })
       .then(d => {
-        setProforma(d.proforma)
-        setItems(d.items ?? [])
-        setBusiness(d.business)
-        if (d.settings?.brand_color) setBrand(d.settings.brand_color)
+        applyPayload(d)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [token])
+
+  useEffect(() => {
+    if (!proforma || !business) return
+    const issuer = business.trading_name ?? business.legal_name ?? "Business"
+    const num = proforma.proforma_number ?? "Proforma"
+    document.title = `Proforma Invoice ${num} — ${issuer}`
+  }, [proforma, business])
 
   const sym = proforma?.currency_symbol ?? "₵"
 
@@ -142,7 +178,7 @@ export default function ProformaPublicPage() {
 
     setAccepting(true)
     try {
-      const res = await fetch(`/api/public/proforma/${token}/accept`, {
+      const res = await fetch(`/api/public/proforma/${encodeURIComponent(token)}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +203,7 @@ export default function ProformaPublicPage() {
     setRejectError("")
     setRejecting(true)
     try {
-      const res = await fetch(`/api/public/proforma/${token}/reject`, {
+      const res = await fetch(`/api/public/proforma/${encodeURIComponent(token)}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: rejectReason }),
@@ -220,6 +256,9 @@ export default function ProformaPublicPage() {
     .filter(Boolean).join(", ")
 
   const hasDiscounts = items.some(item => Number(item.discount_amount || 0) > 0)
+  const hasBankPay = !!(paymentDetails?.bank_account_number?.trim())
+  const hasMomoPay = !!(paymentDetails?.momo_number?.trim())
+  const hasPaymentDetails = hasBankPay || hasMomoPay
 
   // Build tax lines: prefer new tax_lines JSONB, fall back to legacy fields
   const taxLinesToShow: { key: string; label: string; amount: number }[] = []
@@ -248,12 +287,9 @@ export default function ProformaPublicPage() {
     <>
       <style dangerouslySetInnerHTML={{ __html: `@media print { .no-print { display: none !important; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }` }} />
 
-      {/* Brand accent bar */}
-      <div className="h-1 w-full no-print" style={{ backgroundColor: brand }} />
-
-      {/* Top navigation bar */}
-      <div className="no-print sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+      {/* Top toolbar — client document */}
+      <div className="no-print sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur px-4 py-2.5">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {business?.logo_url ? (
               <img src={business.logo_url} alt="" className="h-8 w-auto rounded-md shrink-0 object-contain" />
@@ -266,23 +302,34 @@ export default function ProformaPublicPage() {
               </div>
             )}
             <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Proforma Invoice</p>
               <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
-              <p className="text-xs text-slate-400 truncate">
-                Proforma Invoice · {proforma.proforma_number ?? "PRF"}
-              </p>
+              <p className="text-xs text-slate-400 truncate tabular-nums">{proforma.proforma_number ?? "—"}</p>
             </div>
           </div>
-          <a
-            href={`/api/public/proforma/${tokenEnc}/pdf`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-all"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
-            </svg>
-            Download PDF
-          </a>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={`/api/public/proforma/${tokenEnc}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+              </svg>
+              Download PDF
+            </a>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Print
+            </button>
+          </div>
         </div>
       </div>
 
@@ -298,7 +345,7 @@ export default function ProformaPublicPage() {
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800">Proforma awaiting your review</p>
+                <p className="text-sm font-semibold text-slate-800">Proforma invoice awaiting your review</p>
                 <p className="text-xs text-slate-500 mt-0.5">Please review the details below and accept or decline.</p>
               </div>
             </div>
@@ -312,7 +359,7 @@ export default function ProformaPublicPage() {
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-emerald-800 text-sm">Proforma accepted</p>
+                <p className="font-semibold text-emerald-800 text-sm">Proforma invoice accepted</p>
                 <p className="text-xs text-emerald-700 mt-0.5">
                   Signed by <strong>{proforma.client_name_signed}</strong> · {formatDate(proforma.signed_at)}
                 </p>
@@ -328,7 +375,7 @@ export default function ProformaPublicPage() {
                 </svg>
               </div>
               <div>
-                <p className="font-semibold text-rose-800 text-sm">Proforma declined</p>
+                <p className="font-semibold text-rose-800 text-sm">Proforma invoice declined</p>
                 {proforma.rejected_reason && (
                   <p className="text-xs text-rose-700 mt-0.5">{proforma.rejected_reason}</p>
                 )}
@@ -343,7 +390,7 @@ export default function ProformaPublicPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <p className="font-semibold text-violet-800 text-sm">This proforma has been converted to an invoice.</p>
+              <p className="font-semibold text-violet-800 text-sm">This proforma invoice has been converted to an invoice.</p>
             </div>
           )}
 
@@ -518,10 +565,68 @@ export default function ProformaPublicPage() {
               </div>
             )}
 
+            {/* How to pay — aligned with PDF */}
+            {hasPaymentDetails && (
+              <div className="px-8 py-5 border-b border-slate-100 bg-slate-50/50">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-3">How to pay</p>
+                <div className={`grid gap-3 ${hasBankPay && hasMomoPay ? "sm:grid-cols-2" : ""}`}>
+                  {hasBankPay && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Bank transfer</p>
+                      {paymentDetails?.bank_name && (
+                        <p className="font-semibold text-slate-800">{paymentDetails.bank_name}</p>
+                      )}
+                      {paymentDetails?.bank_account_name && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Account name: <span className="font-medium text-slate-700">{paymentDetails.bank_account_name}</span>
+                        </p>
+                      )}
+                      <p className="font-mono text-sm font-bold text-slate-900 mt-2 tracking-wide">
+                        {paymentDetails?.bank_account_number}
+                      </p>
+                    </div>
+                  )}
+                  {hasMomoPay && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
+                        {paymentDetails?.momo_provider ? `${paymentDetails.momo_provider} MoMo` : "Mobile money"}
+                      </p>
+                      {paymentDetails?.momo_name && (
+                        <p className="text-xs text-slate-500">
+                          Name: <span className="font-medium text-slate-700">{paymentDetails.momo_name}</span>
+                        </p>
+                      )}
+                      <p className="font-mono text-sm font-bold text-slate-900 mt-2 tracking-wide">
+                        {paymentDetails?.momo_number}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {proforma.payment_terms?.trim() && (
+              <div className="px-8 py-5 border-b border-slate-100">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">Payment terms</p>
+                <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{proforma.payment_terms}</p>
+              </div>
+            )}
+
+            {quoteTermsClient && (
+              <div className="px-8 py-5 border-b border-slate-100">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">
+                  Terms &amp; conditions
+                </p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-xs text-slate-600 whitespace-pre-line leading-relaxed max-h-48 overflow-y-auto">
+                  {quoteTermsClient}
+                </div>
+              </div>
+            )}
+
             {/* Footer message */}
             {proforma.footer_message && (
               <div className="px-8 py-4 border-b border-slate-100">
-                <p className="text-xs text-slate-400 italic leading-relaxed">{proforma.footer_message}</p>
+                <p className="text-xs text-slate-400 text-center leading-relaxed whitespace-pre-line">{proforma.footer_message}</p>
               </div>
             )}
 
@@ -577,15 +682,7 @@ export default function ProformaPublicPage() {
             </div>
           )}
 
-          {/* Footer */}
-          <div className="flex items-center justify-center gap-1.5 pb-6 pt-2">
-            <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-            <p className="text-xs text-slate-400">
-              Powered by <span className="font-semibold text-slate-500">Finza</span>
-            </p>
-          </div>
+          <p className="no-print text-center text-[11px] text-slate-300 pb-5">Powered by Finza</p>
 
         </div>
       </div>

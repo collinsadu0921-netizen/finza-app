@@ -14,10 +14,21 @@ function parseIsoMs(iso: string | null | undefined): number | null {
   return Number.isFinite(t) ? t : null
 }
 
+/**
+ * If end is on/before start, the row would only be "active" for an instant (or never).
+ * Treat that as a data-entry mistake: ignore the upper bound so the banner still shows after start.
+ */
+function effectiveEndMsForDisplay(start: number | null, end: number | null): number | null {
+  if (end === null) return null
+  if (start !== null && end <= start) return null
+  return end
+}
+
 export function isAnnouncementActiveForDisplay(row: PlatformAnnouncementRow, at = nowMs()): boolean {
   if (row.status !== "active") return false
   const start = parseIsoMs(row.start_at)
-  const end = parseIsoMs(row.end_at)
+  const endRaw = parseIsoMs(row.end_at)
+  const end = effectiveEndMsForDisplay(start, endRaw)
   if (start !== null && at < start) return false
   if (end !== null && at > end) return false
   return true

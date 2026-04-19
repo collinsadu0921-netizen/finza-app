@@ -33,6 +33,15 @@ type LineItem = {
   _rawDiscount?: string
 }
 
+/** Dropdown row: products_services (FK on invoices) or service_catalog (no FK — template stores null id + description/price). */
+type ProductOption = {
+  id: string
+  name: string
+  unit_price: number
+  /** When true, `id` is synthetic `cat_<uuid>` and invoice line uses product_service_id null */
+  catalogOnly?: boolean
+}
+
 const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
 
 const getDiscountAmount = (item: Pick<LineItem, "qty" | "unit_price" | "discount_type" | "discount_value">): number => {
@@ -50,7 +59,7 @@ const getDiscountAmount = (item: Pick<LineItem, "qty" | "unit_price" | "discount
 export default function CreateRecurringInvoicePage() {
   const router = useRouter()
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [products, setProducts] = useState<any[]>([])
+  const [products, setProducts] = useState<ProductOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [frequency, setFrequency] = useState<"weekly" | "biweekly" | "monthly" | "quarterly" | "yearly">("monthly")
   const [nextRunDate, setNextRunDate] = useState<string>("")
@@ -130,15 +139,87 @@ export default function CreateRecurringInvoicePage() {
 
       setCustomers(customersData || [])
 
-      // Load products/services
-      const { data: productsData } = await supabase
-        .from("products_services")
-        .select("id, name, default_price, default_apply_taxes")
-        .eq("business_id", business.id)
-        .is("deleted_at", null)
-        .order("name", { ascending: true })
+      const industry = String((business as { industry?: string | null }).industry || "").toLowerCase()
 
-      setProducts(productsData || [])
+      // Service workspace: service_catalog (same as /invoices/new) + products_services type=service
+      if (industry === "service") {
+        const merged: ProductOption[] = []
+
+        const { data: catalogData, error: catalogErr } = await supabase
+          .from("service_catalog")
+          .select("id, name, default_price")
+          .eq("business_id", business.id)
+          .eq("is_active", true)
+          .order("name", { ascending: true })
+        if (catalogErr) {
+          console.error("[recurring/create] service_catalog:", catalogErr)
+        }
+        for (const c of catalogData || []) {
+          merged.push({
+            id: `cat_${String((c as { id: string }).id)}`,
+            name: String((c as { name: string }).name),
+            unit_price: Number((c as { default_price?: number }).default_price) || 0,
+            catalogOnly: true,
+          })
+        }
+
+        const { data: psData, error: psErr } = await supabase
+          .from("products_services")
+          .select("id, name, unit_price")
+          .eq("business_id", business.id)
+          .eq("type", "service")
+          .is("deleted_at", null)
+          .order("name", { ascending: true })
+        if (psErr) {
+          console.error("[recurring/create] products_services:", psErr)
+        }
+        for (const p of psData || []) {
+          merged.push({
+            id: String((p as { id: string }).id),
+            name: String((p as { name: string }).name),
+            unit_price: Number((p as { unit_price?: number }).unit_price) || 0,
+            catalogOnly: false,
+          })
+        }
+
+        setProducts(merged)
+      } else {
+        // Non-service: products_services (canonical columns unit_price, not default_price)
+        const { data: productsData, error: psErr } = await supabase
+          .from("products_services")
+          .select("id, name, unit_price")
+          .eq("business_id", business.id)
+          .is("deleted_at", null)
+          .order("name", { ascending: true })
+        if (psErr) {
+          console.error("[recurring/create] products_services:", psErr)
+        }
+
+        if (productsData && productsData.length > 0) {
+          setProducts(
+            productsData.map((p) => ({
+              id: String((p as { id: string }).id),
+              name: String((p as { name: string }).name),
+              unit_price: Number((p as { unit_price?: number }).unit_price) || 0,
+              catalogOnly: false,
+            }))
+          )
+        } else {
+          const { data: fallbackProducts } = await supabase
+            .from("products")
+            .select("id, name, price")
+            .eq("business_id", business.id)
+            .order("name", { ascending: true })
+          setProducts(
+            (fallbackProducts || []).map((p) => ({
+              id: String((p as { id: string }).id),
+              name: String((p as { name: string }).name),
+              unit_price: Number((p as { price?: number }).price) || 0,
+              catalogOnly: false,
+            }))
+          )
+        }
+      }
 
       // Load invoice settings for defaults
       const { data: invoiceSettings } = await supabase
@@ -179,13 +260,20 @@ export default function CreateRecurringInvoicePage() {
     setItems(
       items.map((item) => {
         if (item.id === id) {
-          if (field === "product_service_id" && value) {
+          if (field === "product_service_id") {
+            if (!value) {
+              return { ...item, product_service_id: null }
+            }
             const product = products.find((p) => p.id === value)
+            if (!product) {
+              return { ...item, product_service_id: null }
+            }
+            // Keep synthetic `cat_<uuid>` in state so the dropdown stays selected; submit strips it to null for FK.
             return {
               ...item,
               product_service_id: value,
-              description: product?.name || item.description,
-              unit_price: product?.default_price || item.unit_price,
+              description: product.name || item.description,
+              unit_price: Number(product.unit_price) || item.unit_price,
             }
           }
           const updated: any = { ...item, [field]: value }
@@ -320,7 +408,10 @@ export default function CreateRecurringInvoicePage() {
 
       const invoiceTemplateData: Record<string, unknown> = {
         line_items: items.map((item) => ({
-          product_service_id: item.product_service_id,
+          product_service_id:
+            item.product_service_id && String(item.product_service_id).startsWith("cat_")
+              ? null
+              : item.product_service_id,
           description: item.description,
           qty: item.qty,
           unit_price: item.unit_price,

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import {
+  loadInvoiceSettingsForDocument,
+  mergeQuotePdfTerms,
+} from "@/lib/invoices/loadInvoiceSettingsForDocument"
 
 export const dynamic = "force-dynamic"
 
@@ -60,9 +64,20 @@ export async function GET(
       customers = cust ?? null
     }
 
-    const proforma = { ...row, customers }
+    const invSettings = await loadInvoiceSettingsForDocument(supabase, row.business_id as string)
+    const merged = mergeQuotePdfTerms(invSettings, {
+      payment_terms: row.payment_terms as string | null | undefined,
+      footer_message: row.footer_message as string | null | undefined,
+    })
 
-    const [{ data: items }, { data: biz }, { data: settings }] = await Promise.all([
+    const proforma = {
+      ...row,
+      customers,
+      payment_terms: merged.payment_terms,
+      footer_message: merged.footer_message,
+    }
+
+    const [{ data: items }, { data: biz }, { data: settingsRow }] = await Promise.all([
       supabase
         .from("proforma_invoice_items")
         .select("id, description, qty, unit_price, discount_amount, line_subtotal")
@@ -84,7 +99,11 @@ export async function GET(
       proforma,
       items: items ?? [],
       business: biz ?? null,
-      settings: settings ?? null,
+      settings: {
+        brand_color: settingsRow?.brand_color ?? null,
+        quote_terms_and_conditions: merged.quote_terms,
+        payment_details: invSettings.payment_details,
+      },
     })
   } catch (err: any) {
     console.error("public/proforma GET error:", err)

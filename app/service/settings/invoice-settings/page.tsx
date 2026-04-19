@@ -28,6 +28,9 @@ export default function ServiceInvoiceSettingsPage() {
     show_tax_breakdown: true,
     show_business_tin: true,
     bank_name: "",
+    bank_branch: "",
+    bank_swift: "",
+    bank_iban: "",
     bank_account_name: "",
     bank_account_number: "",
     momo_provider: "" as "MTN" | "Vodafone" | "AirtelTigo" | "",
@@ -65,6 +68,9 @@ export default function ServiceInvoiceSettingsPage() {
           show_tax_breakdown: settings.show_tax_breakdown !== false,
           show_business_tin: settings.show_business_tin !== false,
           bank_name: settings.bank_name || "",
+          bank_branch: settings.bank_branch || "",
+          bank_swift: settings.bank_swift || "",
+          bank_iban: settings.bank_iban || "",
           bank_account_name: settings.bank_account_name || "",
           bank_account_number: settings.bank_account_number || "",
           momo_provider: settings.momo_provider || "",
@@ -438,7 +444,8 @@ export default function ServiceInvoiceSettingsPage() {
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Bank &amp; MoMo on documents</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              Shown on invoice and quote PDFs in the &quot;How to pay&quot; section. Separate from{" "}
+              Shown in the &quot;How to pay&quot; section on documents. Branch, SWIFT/BIC, and IBAN appear only on
+              invoice PDFs and the public invoice page when filled. Separate from{" "}
               <Link href={paymentsHref} className="text-blue-600 dark:text-blue-400 font-medium underline hover:no-underline">
                 payment integrations
               </Link>{" "}
@@ -483,6 +490,47 @@ export default function ServiceInvoiceSettingsPage() {
                     onChange={(e) => setFormData({ ...formData, bank_account_number: e.target.value })}
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                     placeholder="Account number"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 mb-2">
+                Optional — for international clients (invoice PDF &amp; public invoice link only)
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    Branch
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.bank_branch}
+                    onChange={(e) => setFormData({ ...formData, bank_branch: e.target.value })}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="e.g., High Street branch"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    SWIFT / BIC
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.bank_swift}
+                    onChange={(e) => setFormData({ ...formData, bank_swift: e.target.value })}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="e.g., ABCDGHAC"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    IBAN
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.bank_iban}
+                    onChange={(e) => setFormData({ ...formData, bank_iban: e.target.value })}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="IBAN if applicable"
                   />
                 </div>
               </div>

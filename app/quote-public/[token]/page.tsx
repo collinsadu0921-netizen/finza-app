@@ -92,6 +92,8 @@ export default function QuotePublicPage() {
   const [business, setBusiness] = useState<Business | null>(null)
   const [brand, setBrand] = useState("#0f172a")
   const [quoteTerms, setQuoteTerms] = useState<string | null>(null)
+  const [paymentTermsClient, setPaymentTermsClient] = useState<string | null>(null)
+  const [footerMessageClient, setFooterMessageClient] = useState<string | null>(null)
   const [logoFailed, setLogoFailed] = useState(false)
 
   // Accept modal
@@ -129,6 +131,8 @@ export default function QuotePublicPage() {
           setBusiness(d.business)
           if (d.settings?.brand_color) setBrand(d.settings.brand_color)
           if (d.settings?.quote_terms_and_conditions) setQuoteTerms(d.settings.quote_terms_and_conditions)
+          setPaymentTermsClient(d.settings?.payment_terms ?? null)
+          setFooterMessageClient(d.settings?.footer_message ?? null)
           return
         }
         const proformaRes = await fetch(`/api/public/proforma/${enc}`, { cache: "no-store" })
@@ -145,6 +149,12 @@ export default function QuotePublicPage() {
     })()
     return () => { cancelled = true }
   }, [token, router])
+
+  useEffect(() => {
+    if (!estimate || !business) return
+    const issuer = business.trading_name ?? business.legal_name ?? "Business"
+    document.title = `Quote ${estimate.estimate_number} — ${issuer}`
+  }, [estimate, business])
 
   const logoSrc = business?.logo_url?.trim() || null
   useEffect(() => {
@@ -213,7 +223,7 @@ export default function QuotePublicPage() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-slate-200 border-t-slate-600 mx-auto" />
-          <p className="mt-3 text-slate-400 text-sm font-medium">Loading quotation…</p>
+          <p className="mt-3 text-slate-400 text-sm font-medium">Loading quote…</p>
         </div>
       </div>
     )
@@ -229,7 +239,7 @@ export default function QuotePublicPage() {
             </svg>
           </div>
           <p className="text-slate-700 font-semibold">{error || "Quote not found"}</p>
-          <p className="text-slate-400 text-sm mt-1">This link may be invalid or the quotation has been removed.</p>
+          <p className="text-slate-400 text-sm mt-1">This link may be invalid or the quote has been removed.</p>
         </div>
       </div>
     )
@@ -256,12 +266,9 @@ export default function QuotePublicPage() {
     <>
       <style dangerouslySetInnerHTML={{ __html: `@media print { .no-print { display: none !important; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }` }} />
 
-      {/* Brand accent bar */}
-      <div className="h-1 w-full no-print" style={{ backgroundColor: brand }} />
-
-      {/* Top navigation bar */}
-      <div className="no-print sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100 px-4 py-3">
-        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+      {/* Top toolbar — client document */}
+      <div className="no-print sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur px-4 py-2.5">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {logoSrc && !logoFailed ? (
               <img
@@ -279,21 +286,34 @@ export default function QuotePublicPage() {
               </div>
             )}
             <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Quote</p>
               <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
-              <p className="text-xs text-slate-400 truncate">Quotation · {estimate.estimate_number}</p>
+              <p className="text-xs text-slate-400 truncate tabular-nums">{estimate.estimate_number}</p>
             </div>
           </div>
-          <a
-            href={`/api/public/quote/${quoteTokenEnc}/pdf`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="no-print shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-all"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
-            </svg>
-            Download PDF
-          </a>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={`/api/public/quote/${quoteTokenEnc}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
+              </svg>
+              Download PDF
+            </a>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Print
+            </button>
+          </div>
         </div>
       </div>
 
@@ -309,8 +329,8 @@ export default function QuotePublicPage() {
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800">Quotation awaiting your review</p>
-                <p className="text-xs text-slate-500 mt-0.5">Please review the details below and accept or decline this quote.</p>
+                <p className="text-sm font-semibold text-slate-800">Quote awaiting your review</p>
+                <p className="text-xs text-slate-500 mt-0.5">Please review the details below and accept or decline.</p>
               </div>
             </div>
           )}
@@ -381,7 +401,7 @@ export default function QuotePublicPage() {
 
                 {/* Document identity */}
                 <div className="text-right shrink-0">
-                  <p className="text-white/50 text-xs uppercase tracking-widest font-semibold mb-1.5">Quotation</p>
+                  <p className="text-white/50 text-xs uppercase tracking-widest font-semibold mb-1.5">Quote</p>
                   <p className="text-3xl font-bold text-white tabular-nums">{estimate.estimate_number ?? "—"}</p>
                   {/* Only show badge for terminal states — never show "Sent" to clients */}
                   {isAccepted && (
@@ -529,6 +549,14 @@ export default function QuotePublicPage() {
               </div>
             )}
 
+            {/* Payment terms — same copy as PDF / business defaults */}
+            {paymentTermsClient?.trim() && (
+              <div className="px-8 py-5 border-b border-slate-100">
+                <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">Payment terms</p>
+                <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{paymentTermsClient}</p>
+              </div>
+            )}
+
             {/* Terms & Conditions */}
             {quoteTerms && (
               <div className="px-8 py-5 border-b border-slate-100">
@@ -543,6 +571,12 @@ export default function QuotePublicPage() {
                     By accepting this quote, you agree to the terms and conditions above.
                   </p>
                 )}
+              </div>
+            )}
+
+            {footerMessageClient?.trim() && (
+              <div className="px-8 py-4 border-b border-slate-100 text-center">
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{footerMessageClient}</p>
               </div>
             )}
 
@@ -598,15 +632,7 @@ export default function QuotePublicPage() {
             </div>
           )}
 
-          {/* Footer */}
-          <div className="flex items-center justify-center gap-1.5 pb-6 pt-2">
-            <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-            <p className="text-xs text-slate-400">
-              Powered by <span className="font-semibold text-slate-500">Finza</span>
-            </p>
-          </div>
+          <p className="no-print text-center text-[11px] text-slate-300 pb-5">Powered by Finza</p>
 
         </div>
       </div>
@@ -617,7 +643,7 @@ export default function QuotePublicPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
               <div>
-                <h2 className="text-base font-bold text-slate-800">Accept &amp; Sign Quotation</h2>
+                <h2 className="text-base font-bold text-slate-800">Accept &amp; sign quote</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Your signature confirms acceptance of this quote</p>
               </div>
               <button onClick={() => setShowAccept(false)} className="text-slate-400 hover:text-slate-600 p-1">
@@ -704,7 +730,7 @@ export default function QuotePublicPage() {
               )}
 
               <p className="text-xs text-slate-400 leading-relaxed">
-                By clicking "Confirm acceptance" you agree to this quotation and confirm that the identity details provided are accurate and belong to you.
+                By clicking &quot;Confirm acceptance&quot; you agree to this quote and confirm that the identity details provided are accurate and belong to you.
               </p>
 
               <div className="flex gap-3 pt-1">
@@ -734,8 +760,8 @@ export default function QuotePublicPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-slate-800">Decline this quotation</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Let the sender know why you're declining</p>
+                <h2 className="text-base font-bold text-slate-800">Decline this quote</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Let the sender know why you are declining</p>
               </div>
               <button onClick={() => setShowReject(false)} className="text-slate-400 hover:text-slate-600 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

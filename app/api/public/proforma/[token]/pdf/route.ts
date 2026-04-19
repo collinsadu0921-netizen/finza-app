@@ -81,6 +81,7 @@ export async function GET(
         payment_terms: quoteTerms.payment_terms,
         footer_message: quoteTerms.footer_message,
         quote_terms: quoteTerms.quote_terms,
+        payment_details: invSettings.payment_details,
       })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to build document"
@@ -106,7 +107,7 @@ export async function GET(
     }
 
     const { contentDisposition } = buildFinancialDocumentPdfDisposition({
-      label: "Proforma",
+      label: "Proforma Invoice",
       documentNumber: proforma.proforma_number,
       fallbackId: proforma.id,
     })

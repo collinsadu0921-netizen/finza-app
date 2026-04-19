@@ -372,6 +372,12 @@ export default function InternalAnnouncementsPage() {
               />
             </label>
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Leave <strong>start</strong> empty to show immediately. Leave <strong>end</strong> empty for no expiry.{" "}
+            <strong>End must be after start</strong> — if start and end are the same, tenants would almost never see it
+            (we now treat equal times as &quot;no end&quot; after deploy, but use a later end or clear end for clarity).
+            If you set a <strong>future start</strong>, the banner stays hidden until that time (UTC on the server).
+          </p>
           <div className="flex flex-wrap gap-2">
             {editingId ? (
               <>

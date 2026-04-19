@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
@@ -29,6 +29,7 @@ import Modal from "@/components/ui/Modal"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { printRetailSaleReceiptInBrowser } from "@/app/retail/lib/printRetailSaleReceiptBrowser"
 import BarcodeMatchSelector from "@/components/BarcodeMatchSelector"
+import RetailPosCameraBarcodeModal from "@/components/retail/pos/RetailPosCameraBarcodeModal"
 import LoadingSpinner from "@/components/LoadingSpinner"
 import ErrorAlert from "@/components/ErrorAlert"
 import { debounce } from "@/lib/debounce"
@@ -212,6 +213,7 @@ export default function RetailPosPage() {
   /** Below ~900px: catalog-first + cart sheet; wide viewports use split columns. */
   const [mobilePosPane, setMobilePosPane] = useState<"catalog" | "cart">("catalog")
   const [isWideSplitLayout, setIsWideSplitLayout] = useState(true)
+  const [showCameraBarcodeScanner, setShowCameraBarcodeScanner] = useState(false)
 
   useEffect(() => {
     /** Two-column POS from ~tablet landscape; below this, catalog-first + cart sheet. */
@@ -225,6 +227,61 @@ export default function RetailPosPage() {
     mq.addEventListener("change", sync)
     return () => mq.removeEventListener("change", sync)
   }, [])
+
+  const focusRetailPosSearchInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        productSearchInputRef.current?.focus({ preventScroll: true })
+      }, 10)
+    })
+  }, [])
+
+  /** When true, the main POS scan/search field may take focus without fighting modals or cart discount inputs. */
+  const posCatalogEligibleForScanFocus = useCallback(() => {
+    if (loading || loadingProducts || registerStatusLoading || !businessId || !registerSession) return false
+    if (
+      showPaymentModal ||
+      saleSuccess ||
+      showParkedSales ||
+      showVariantModal ||
+      barcodeMatches !== null ||
+      showStorePicker ||
+      showChangeTerminalModal ||
+      showCustomerSelector ||
+      showCreateCustomer ||
+      showCartDiscount ||
+      showCameraBarcodeScanner
+    ) {
+      return false
+    }
+    if (!isWideSplitLayout && mobilePosPane !== "catalog") return false
+    return true
+  }, [
+    loading,
+    loadingProducts,
+    registerStatusLoading,
+    businessId,
+    registerSession,
+    showPaymentModal,
+    saleSuccess,
+    showParkedSales,
+    showVariantModal,
+    barcodeMatches,
+    showStorePicker,
+    showChangeTerminalModal,
+    showCustomerSelector,
+    showCreateCustomer,
+    showCartDiscount,
+    showCameraBarcodeScanner,
+    isWideSplitLayout,
+    mobilePosPane,
+  ])
+
+  useLayoutEffect(() => {
+    if (posCatalogEligibleForScanFocus()) {
+      focusRetailPosSearchInput()
+    }
+  }, [posCatalogEligibleForScanFocus, focusRetailPosSearchInput])
 
   useEffect(() => {
     if (!businessId) return
@@ -1486,6 +1543,9 @@ export default function RetailPosPage() {
       }
       setCart((prev) => [...prev, newCartItem])
     }
+    if (posCatalogEligibleForScanFocus()) {
+      focusRetailPosSearchInput()
+    }
   }
 
   // Handle variant selection from modal
@@ -1500,49 +1560,73 @@ export default function RetailPosPage() {
     addProductToCart(selectedProductForVariant, variantId, variantName, variantPrice, modifiers)
     setShowVariantModal(false)
     setSelectedProductForVariant(null)
+    setSearchQuery("")
   }
 
-  // Handle barcode scan
-  const handleBarcodeScan = async (barcode: string) => {
-    if (!barcode || barcode.trim().length === 0) return
+  // Handle barcode / variant SKU scan (Enter on main POS field)
+  const handleBarcodeScan = async (codeRaw: string) => {
+    const code = codeRaw.trim()
+    if (!code) return
 
     try {
-      // First, check variants by barcode (need to join with products to filter by business_id)
-      const { data: allVariants, error: variantError } = await supabase
-        .from("products_variants")
-        .select("id, product_id, variant_name, price, stock_quantity, stock, barcode")
-        .eq("barcode", barcode.trim())
-
-      // Filter variants by business_id through products
-      let variantMatches: any[] = []
-      if (allVariants && allVariants.length > 0) {
-        const productIds = allVariants.map((v) => v.product_id)
+      /**
+       * Exact code resolution order for checkout (USB / Bluetooth scanners behave like keyboard + Enter):
+       * 1) Variant barcode — `products_variants.barcode`
+       * 2) Base product barcode — `products.barcode` (only products without variants; avoids parent/child ambiguity)
+       * 3) Variant SKU — `products_variants.sku` (rows not already matched in step 1)
+       *
+       * Multiple rows across these steps → cashier picks in `BarcodeMatchSelector`.
+       */
+      const filterVariantsToBusiness = async (
+        rows: Array<{
+          id: string
+          product_id: string
+          variant_name: string
+          price: number | null
+          stock_quantity: number | null
+          stock: number | null
+          barcode: string | null
+          sku: string | null
+        }> | null
+      ) => {
+        if (!rows?.length) return []
+        const productIds = [...new Set(rows.map((v) => v.product_id))]
         const { data: variantProducts } = await supabase
           .from("products")
           .select("id")
           .eq("business_id", businessId)
           .in("id", productIds)
-
-        if (variantProducts) {
-          const validProductIds = new Set(variantProducts.map((p) => p.id))
-          variantMatches = allVariants.filter((v) => validProductIds.has(v.product_id))
-        }
+        const valid = new Set((variantProducts ?? []).map((p) => p.id))
+        return rows.filter((v) => valid.has(v.product_id))
       }
 
-      if (variantError) {
-        console.error("Error searching variants:", variantError)
-      }
+      const { data: variantsByBarcodeRaw, error: variantBarcodeErr } = await supabase
+        .from("products_variants")
+        .select("id, product_id, variant_name, price, stock_quantity, stock, barcode, sku")
+        .eq("barcode", code)
 
-      // Then, check products by barcode
+      if (variantBarcodeErr) console.error("Error searching variants by barcode:", variantBarcodeErr)
+
+      const variantsByBarcode = await filterVariantsToBusiness(variantsByBarcodeRaw ?? null)
+      const matchedVariantIds = new Set(variantsByBarcode.map((v) => v.id))
+
       const { data: productMatches, error: productError } = await supabase
         .from("products")
         .select("id, name, price, stock_quantity, stock")
         .eq("business_id", businessId)
-        .eq("barcode", barcode.trim())
+        .eq("barcode", code)
 
-      if (productError) {
-        console.error("Error searching products:", productError)
-      }
+      if (productError) console.error("Error searching products:", productError)
+
+      const { data: variantsBySkuRaw, error: variantSkuErr } = await supabase
+        .from("products_variants")
+        .select("id, product_id, variant_name, price, stock_quantity, stock, barcode, sku")
+        .eq("sku", code)
+
+      if (variantSkuErr) console.error("Error searching variants by SKU:", variantSkuErr)
+
+      const variantsBySkuAll = await filterVariantsToBusiness(variantsBySkuRaw ?? null)
+      const variantsBySku = variantsBySkuAll.filter((v) => !matchedVariantIds.has(v.id))
 
       const allMatches: Array<{
         id: string
@@ -1554,30 +1638,24 @@ export default function RetailPosPage() {
         variantId?: string
       }> = []
 
-      // Add variant matches
-      if (variantMatches && variantMatches.length > 0) {
-        for (const variant of variantMatches) {
-          // Get product info for this variant
-          const product = products.find((p) => p.id === variant.product_id)
-          if (product) {
-            const variantPrice = variant.price !== null ? variant.price : product.price
-            allMatches.push({
-              id: variant.id,
-              name: product.name,
-              price: variantPrice,
-              type: "variant",
-              variantName: variant.variant_name,
-              productId: product.id,
-              variantId: variant.id,
-            })
-          }
+      for (const variant of variantsByBarcode) {
+        const product = products.find((p) => p.id === variant.product_id)
+        if (product) {
+          const variantPrice = variant.price !== null ? variant.price : product.price
+          allMatches.push({
+            id: variant.id,
+            name: product.name,
+            price: variantPrice,
+            type: "variant",
+            variantName: variant.variant_name,
+            productId: product.id,
+            variantId: variant.id,
+          })
         }
       }
 
-      // Add product matches (only if no variants matched, or if we want to show both)
       if (productMatches && productMatches.length > 0) {
         for (const product of productMatches) {
-          // Only add if product doesn't have variants (to avoid duplicates)
           const hasVariants = await checkProductVariants(product.id)
           if (!hasVariants) {
             allMatches.push({
@@ -1591,20 +1669,37 @@ export default function RetailPosPage() {
         }
       }
 
-      // Handle matches
+      for (const variant of variantsBySku) {
+        const product = products.find((p) => p.id === variant.product_id)
+        if (product) {
+          const variantPrice = variant.price !== null ? variant.price : product.price
+          allMatches.push({
+            id: variant.id,
+            name: product.name,
+            price: variantPrice,
+            type: "variant",
+            variantName: variant.variant_name,
+            productId: product.id,
+            variantId: variant.id,
+          })
+        }
+      }
+
       if (allMatches.length === 0) {
-        setToast({ message: `No product found for barcode: ${barcode}`, type: "error" })
+        setToast({
+          message: `No matching product, variant barcode, or variant SKU for "${code}"`,
+          type: "error",
+        })
         return
       }
 
       if (allMatches.length === 1) {
-        // Single match - add directly to cart
         const match = allMatches[0]
         await addBarcodeMatchToCart(match)
+        setSearchQuery("")
       } else {
-        // Multiple matches - show selector
         setBarcodeMatches(allMatches)
-        setScannedBarcode(barcode)
+        setScannedBarcode(code)
       }
     } catch (err: any) {
       console.error("Error handling barcode scan:", err)
@@ -1643,9 +1738,11 @@ export default function RetailPosPage() {
           // Show variant selector modal (which will handle modifiers too)
           setSelectedProductForVariant(product)
           setShowVariantModal(true)
+          setSearchQuery("")
         } else {
           // No modifiers, add variant directly
           addProductToCart(product, match.variantId || null, match.variantName || match.name, match.price, [])
+          setSearchQuery("")
           setToast({ message: `Added ${match.name} to cart`, type: "success" })
         }
       } else {
@@ -1655,9 +1752,11 @@ export default function RetailPosPage() {
           // Show variant selector modal
           setSelectedProductForVariant(product)
           setShowVariantModal(true)
+          setSearchQuery("")
         } else {
           // No variants/modifiers, add directly
           addProductToCart(product, null, match.name, match.price, [])
+          setSearchQuery("")
           setToast({ message: `Added ${match.name} to cart`, type: "success" })
         }
       }
@@ -1680,6 +1779,7 @@ export default function RetailPosPage() {
     setBarcodeMatches(null)
     setScannedBarcode("")
     await addBarcodeMatchToCart(match)
+    setSearchQuery("")
   }
 
   // Update quantity for a specific cart item
@@ -2171,14 +2271,17 @@ export default function RetailPosPage() {
 
             <div className="sticky top-0 z-20 border-t border-slate-100 bg-white px-2 pb-1 pt-1 sm:px-2.5">
               <label className="sr-only" htmlFor="pos-product-search">
-                Scan or search products
+                Search products or scan barcode or variant SKU
               </label>
               <div className="flex gap-1.5">
                 <input
                   id="pos-product-search"
+                  data-retail-pos-scan-input
                   ref={productSearchInputRef}
                   type="text"
-                  placeholder="Scan barcode or search…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Search products or scan barcode / variant SKU"
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value)
@@ -2193,9 +2296,45 @@ export default function RetailPosPage() {
                   }}
                   className="min-h-[48px] flex-1 touch-manipulation rounded-lg border-2 border-slate-300 bg-slate-50/50 px-3 text-base font-medium text-slate-900 shadow-inner placeholder:text-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-[900px]:min-h-[52px] min-[900px]:text-lg dark:border-gray-600 dark:bg-gray-800 dark:text-white"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowCameraBarcodeScanner(true)}
+                  disabled={
+                    !registerSession ||
+                    registerStatusLoading ||
+                    (!isWideSplitLayout && mobilePosPane !== "catalog")
+                  }
+                  title="Scan with camera (phone/tablet)"
+                  className="flex min-h-[48px] shrink-0 touch-manipulation flex-col items-center justify-center gap-0 rounded-lg border-2 border-slate-300 bg-slate-50 px-2 text-slate-800 shadow-inner hover:border-blue-500 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 min-[900px]:min-h-[52px] min-[900px]:w-[52px] min-[900px]:px-0 dark:border-gray-600 dark:bg-gray-800 dark:text-slate-100 dark:hover:border-blue-400"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5 min-[900px]:h-6 min-[900px]:w-6"
+                    aria-hidden
+                  >
+                    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                    <circle cx="12" cy="13" r="3" />
+                  </svg>
+                  <span className="max-[899px]:mt-0.5 max-[899px]:text-[9px] max-[899px]:font-bold max-[899px]:leading-none min-[900px]:sr-only">
+                    Camera
+                  </span>
+                  <span className="sr-only">Scan with camera</span>
+                </button>
               </div>
               <p className="mt-0.5 hidden text-[9px] leading-tight text-slate-500 min-[900px]:block">
-                <span className="font-semibold text-slate-600">Enter</span> adds scanned SKU.
+                <span className="font-semibold text-slate-600">Enter</span> runs an exact match on product barcode, variant barcode, or variant SKU.
+                <span className="text-slate-400"> · </span>
+                <span className="font-semibold text-slate-600">Camera</span> opens the scanner on this device.
+              </p>
+              <p className="mt-0.5 text-[9px] leading-tight text-slate-500 min-[900px]:hidden">
+                Tap <span className="font-semibold text-slate-700">Camera</span> to scan with the device camera, or type and press{" "}
+                <span className="font-semibold text-slate-700">Enter</span>.
               </p>
             </div>
 
@@ -3108,7 +3247,7 @@ export default function RetailPosPage() {
                 type="button"
                 onClick={() => {
                   setMobilePosPane("catalog")
-                  window.setTimeout(() => productSearchInputRef.current?.focus(), 50)
+                  window.setTimeout(() => focusRetailPosSearchInput(), 50)
                 }}
                 className={`min-h-[44px] flex-1 touch-manipulation rounded-lg text-sm font-extrabold transition ${
                   mobilePosPane === "catalog"
@@ -3336,9 +3475,32 @@ export default function RetailPosPage() {
             onClose={() => {
               setShowVariantModal(false)
               setSelectedProductForVariant(null)
+              setSearchQuery("")
             }}
           />
         )}
+
+        {barcodeMatches && barcodeMatches.length > 0 && (
+          <BarcodeMatchSelector
+            matches={barcodeMatches}
+            barcode={scannedBarcode}
+            currencyCode={currencyCode}
+            onSelect={(m) => void handleBarcodeMatchSelect(m)}
+            onClose={() => {
+              setBarcodeMatches(null)
+              setScannedBarcode("")
+              setSearchQuery("")
+            }}
+          />
+        )}
+
+        <RetailPosCameraBarcodeModal
+          open={showCameraBarcodeScanner}
+          onClose={() => setShowCameraBarcodeScanner(false)}
+          onCode={async (code) => {
+            await handleBarcodeScan(code)
+          }}
+        />
         
         {/* Store Picker Modal - shown when no valid store */}
         <StorePickerModal

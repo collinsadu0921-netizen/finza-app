@@ -17,18 +17,7 @@ export type InvoicePreviewLoadResult =
   | { ok: true; html: string; invoiceNumber: string | null; invoiceId: string }
   | { ok: false; status: number; error: string }
 
-/**
- * Loads invoice + relations and returns the same HTML as GET /api/invoices/[id]/pdf-preview.
- * Used by pdf-preview and export-pdf routes.
- */
-export async function buildInvoicePreviewHtmlForId(
-  supabase: SupabaseClient,
-  invoiceId: string
-): Promise<InvoicePreviewLoadResult> {
-  const { data: invoice, error: invoiceError } = await supabase
-    .from("invoices")
-    .select(
-      `
+const INVOICE_PREVIEW_SELECT = `
         *,
         customers (
           id,
@@ -60,16 +49,15 @@ export async function buildInvoicePreviewHtmlForId(
           line_subtotal
         )
       `
-    )
-    .eq("id", invoiceId)
-    .single()
 
-  if (invoiceError || !invoice) {
-    return { ok: false, status: 404, error: "Invoice not found" }
-  }
-
-  const inv = invoice as Record<string, any>
-
+/**
+ * Builds invoice PDF/preview HTML from an invoice row that already includes
+ * `customers`, `businesses`, and `invoice_items` (same shape as preview queries).
+ */
+async function buildInvoicePreviewHtmlFromLoadedInvoice(
+  supabase: SupabaseClient,
+  inv: Record<string, any>
+): Promise<InvoicePreviewLoadResult> {
   const business: BusinessInfo = {
     name: inv.businesses?.name,
     legal_name: inv.businesses?.legal_name,
@@ -192,4 +180,56 @@ export async function buildInvoicePreviewHtmlForId(
     invoiceNumber: inv.invoice_number ?? null,
     invoiceId: inv.id,
   }
+}
+
+/**
+ * Loads invoice + relations and returns the same HTML as GET /api/invoices/[id]/pdf-preview.
+ * Used by pdf-preview and export-pdf routes.
+ */
+export async function buildInvoicePreviewHtmlForId(
+  supabase: SupabaseClient,
+  invoiceId: string
+): Promise<InvoicePreviewLoadResult> {
+  const { data: invoice, error: invoiceError } = await supabase
+    .from("invoices")
+    .select(INVOICE_PREVIEW_SELECT)
+    .eq("id", invoiceId)
+    .single()
+
+  if (invoiceError || !invoice) {
+    return { ok: false, status: 404, error: "Invoice not found" }
+  }
+
+  return buildInvoicePreviewHtmlFromLoadedInvoice(supabase, invoice as Record<string, any>)
+}
+
+/**
+ * Same HTML pipeline as authenticated export-pdf, resolved by `invoices.public_token`.
+ * Used by GET /api/invoices/public/[token]/pdf (service role / admin client).
+ */
+export async function buildInvoicePreviewHtmlForPublicToken(
+  supabase: SupabaseClient,
+  rawToken: string
+): Promise<InvoicePreviewLoadResult> {
+  const token = decodeURIComponent((rawToken || "").trim())
+  if (!token) {
+    return { ok: false, status: 400, error: "Public token is required" }
+  }
+
+  const { data: invoice, error: invoiceError } = await supabase
+    .from("invoices")
+    .select(INVOICE_PREVIEW_SELECT)
+    .eq("public_token", token)
+    .is("deleted_at", null)
+    .maybeSingle()
+
+  if (invoiceError || !invoice) {
+    return { ok: false, status: 404, error: "Invoice not found" }
+  }
+
+  if ((invoice as { status?: string }).status === "cancelled") {
+    return { ok: false, status: 404, error: "Invoice not found" }
+  }
+
+  return buildInvoicePreviewHtmlFromLoadedInvoice(supabase, invoice as Record<string, any>)
 }

@@ -7,10 +7,15 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
-    const { token } = await params
+    const { token: rawToken } = await params
+    const token = decodeURIComponent((rawToken || "").trim())
 
     // Use admin client so RLS does not block reads on customers/businesses for public tokens
     const supabase = createSupabaseAdminClient()
+
+    if (!token) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 })
+    }
 
     // Get invoice by public token
     const { data: invoice, error: invoiceError } = await supabase

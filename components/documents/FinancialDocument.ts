@@ -2,7 +2,7 @@
  * Shared Financial Document Component
  * 
  * Renders a unified HTML template for:
- * - Estimates
+ * - Quotes (estimates in the data model)
  * - Proforma invoices
  * - Orders
  * - Invoices
@@ -86,6 +86,10 @@ export interface DocumentTotals {
 /** Bank / mobile money lines from invoice_settings (client-facing documents). */
 export interface DocumentPaymentDetails {
   bank_name?: string | null
+  /** Shown when present (optional DB field — may be undefined). */
+  bank_branch?: string | null
+  bank_swift?: string | null
+  bank_iban?: string | null
   bank_account_name?: string | null
   bank_account_number?: string | null
   momo_provider?: string | null
@@ -129,6 +133,18 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;")
 }
 
+/** Header display: drop a leading "#" so numbers read as INV-000016, not #INV-000016. */
+function formatDocumentNumberForHeader(num: unknown): string {
+  const s = String(num ?? "").trim()
+  return s.startsWith("#") ? s.slice(1).trim() : s
+}
+
+function paymentDetailRow(label: string, value: string | null | undefined): string {
+  const v = value?.trim()
+  if (!v) return ""
+  return `<div class="payment-row"><span class="payment-row__k">${escapeHtml(label)}</span><span class="payment-row__v">${escapeHtml(v)}</span></div>`
+}
+
 /**
  * Get document-specific labels and titles
  */
@@ -136,14 +152,14 @@ function getDocumentLabels(documentType: DocumentType) {
   switch (documentType) {
     case "estimate":
       return {
-        title: "ESTIMATE",
-        numberLabel: "Estimate No.",
+        title: "Quote",
+        numberLabel: "Quote No.",
         dateLabel: "Issue Date",
-        secondaryDateLabel: "Expiry Date",
+        secondaryDateLabel: "Valid until",
       }
     case "proforma":
       return {
-        title: "PROFORMA INVOICE",
+        title: "Proforma Invoice",
         numberLabel: "Proforma No.",
         dateLabel: "Issue Date",
         secondaryDateLabel: "Validity Date",
@@ -157,7 +173,7 @@ function getDocumentLabels(documentType: DocumentType) {
       }
     case "invoice":
       return {
-        title: "INVOICE",
+        title: "Invoice",
         numberLabel: "Invoice No.",
         dateLabel: "Invoice Date",
         secondaryDateLabel: "Due Date",
@@ -300,7 +316,13 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   }
 
   const businessName = business.trading_name || business.legal_name || business.name || "Business"
+  const businessNameHtml = escapeHtml(businessName)
   const customerName = customer.name || "Customer"
+  const hasLogo = Boolean(business.logo_url && String(business.logo_url).trim())
+  const phoneRaw = (business.phone || "").trim()
+  const whatsappRaw = (business.whatsapp_phone || "").trim()
+  const showWhatsappLine = whatsappRaw.length > 0 && whatsappRaw !== phoneRaw
+  const safeLogoSrc = hasLogo ? escapeHtml(String(business.logo_url).trim()) : ""
 
   const termsTrimmed = payment_terms?.trim() ?? ""
   /** Full text (newlines preserved) — not limited to first sentence (matches on-screen copy). */
@@ -328,7 +350,8 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   const pd = payment_details
   const hasBank = Boolean(pd?.bank_account_number && String(pd.bank_account_number).trim())
   const hasMomo = Boolean(pd?.momo_number && String(pd.momo_number).trim())
-  const hasPaymentHowTo = documentType === "invoice" && (hasBank || hasMomo)
+  const hasPaymentHowTo =
+    (documentType === "invoice" || documentType === "proforma") && (hasBank || hasMomo)
 
   // Slate palette (matches create invoice page): slate-50 #f8fafc, slate-100 #f1f5f9, slate-200 #e2e8f0, slate-500 #64748b, slate-600 #475569, slate-700 #334155, slate-900 #0f172a
   // Invoice PDFs omit workflow status (Sent/Paid/etc.); the app UI shows payment state.
@@ -343,13 +366,83 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       symbolNumberGlue: "\u00A0",
     })
 
+  let headerSecondaryLabel: string | null = null
+  let headerSecondaryDate: string | null = null
+  if (meta.due_date && labels.secondaryDateLabel === "Due Date") {
+    headerSecondaryLabel = labels.secondaryDateLabel
+    headerSecondaryDate = formatDate(meta.due_date)
+  } else if (
+    meta.expiry_date &&
+    labels.secondaryDateLabel &&
+    labels.secondaryDateLabel !== "Due Date"
+  ) {
+    headerSecondaryLabel = labels.secondaryDateLabel
+    headerSecondaryDate = formatDate(meta.expiry_date)
+  }
+
+  const issueDateStr = formatDate(meta.issue_date)
+
+  const footerContactParts: string[] = []
+  if (business.email?.trim()) footerContactParts.push(escapeHtml(business.email.trim()))
+  if (phoneRaw) footerContactParts.push(escapeHtml(phoneRaw))
+  if (business.website?.trim()) footerContactParts.push(escapeHtml(business.website.trim()))
+  const footerContactLine = footerContactParts.join(" · ")
+
+  const taxTotalsExplainer =
+    showTaxBreakdown && apply_taxes && !hasStoredTaxLines
+      ? `<p class="totals-explainer">Amounts are <strong>tax-inclusive</strong>. The lines below split your total into the amount before taxes and each tax component, without changing what you pay.</p>`
+      : showTaxBreakdown
+        ? `<p class="totals-explainer">The <strong>total</strong> is the amount payable. The lines below show how that total is built from the amount before taxes plus each tax.</p>`
+        : ""
+
+  const subtotalBreakdownLabel = showTaxBreakdown
+    ? showDiscountSummary
+      ? "Net amount (excluding taxes)"
+      : "Amount before taxes"
+    : showDiscountSummary
+      ? "Subtotal (excl. tax)"
+      : "Subtotal"
+
+  /** Bank rows: branch / SWIFT / IBAN only on invoice PDFs when filled (not quote/proforma). */
+  const paymentBankRowsHtml =
+    hasBank && pd
+      ? [
+          paymentDetailRow("Bank name", pd.bank_name),
+          ...(documentType === "invoice"
+            ? [
+                paymentDetailRow("Branch", pd.bank_branch),
+                paymentDetailRow("SWIFT / BIC", pd.bank_swift),
+                paymentDetailRow("IBAN", pd.bank_iban),
+              ]
+            : []),
+          paymentDetailRow("Account name", pd.bank_account_name),
+          paymentDetailRow("Account number", pd.bank_account_number),
+        ]
+          .filter(Boolean)
+          .join("")
+      : ""
+
+  const paymentMomoRowsHtml =
+    hasMomo && pd
+      ? [
+          paymentDetailRow("MoMo provider", pd.momo_provider),
+          paymentDetailRow("MoMo number", pd.momo_number),
+          paymentDetailRow("Recipient / account name", pd.momo_name),
+        ]
+          .filter(Boolean)
+          .join("")
+      : ""
+
+  const finalTotalLabel =
+    documentType === "invoice" || documentType === "proforma" ? "Total due" : "Total"
+
   return `
 <!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${labels.title} - ${meta.document_number}</title>
+    <title>${escapeHtml(labels.title)} - ${escapeHtml(String(meta.document_number))}</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -369,6 +462,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         border: 1px solid #e2e8f0;
       }
       .doc-top-grid { margin-bottom: 24px; }
+      .doc-top-grid--bill-only { max-width: 100%; }
       .bill-to-block { margin-bottom: 0; }
       .header {
         display: flex;
@@ -379,9 +473,64 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         padding-bottom: 24px;
         border-bottom: 1px solid #e2e8f0;
       }
-      .header-brand { flex-shrink: 0; }
-      .header-info { flex: 1; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
-      .header-doc { text-align: right; flex-shrink: 0; }
+      .header-left {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: break-word;
+      }
+      .header-logo { flex-shrink: 0; line-height: 0; }
+      .header-issuer { flex: 1; min-width: 0; }
+      .header-doc {
+        flex-shrink: 0;
+        text-align: right;
+        min-width: 0;
+        max-width: 320px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .doc-title {
+        margin: 0 0 4px 0;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        color: #0f172a;
+        line-height: 1.25;
+      }
+      .doc-number {
+        margin: 0 0 14px 0;
+        font-size: 15px;
+        font-weight: 500;
+        color: #334155;
+        line-height: 1.3;
+        font-variant-numeric: tabular-nums;
+      }
+      .header-doc-meta {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .doc-meta-line {
+        margin: 0 0 5px 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #475569;
+        font-weight: 400;
+      }
+      .doc-meta-line:last-child { margin-bottom: 0; }
+      .header-doc-status { margin-top: 10px; }
+      .issuer-name-compact {
+        font-size: 16px;
+        font-weight: 600;
+        color: #0f172a;
+        margin: 0 0 6px 0;
+        line-height: 1.25;
+      }
       .logo {
         max-width: 200px;
         max-height: 100px;
@@ -411,13 +560,6 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         line-height: 1.5;
       }
       .business-contact p { margin: 2px 0; }
-      .doc-title {
-        font-size: 24px;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 4px;
-      }
-      .doc-number { font-size: 14px; color: #64748b; }
       .section-label {
         font-size: 12px;
         font-weight: 700;
@@ -428,15 +570,6 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       }
       .bill-to-name { font-size: 16px; font-weight: 600; color: #0f172a; margin: 0 0 4px 0; }
       .bill-to-detail { font-size: 14px; color: #475569; margin: 2px 0; }
-      .meta-grid {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 8px 24px;
-        margin-bottom: 0;
-        font-size: 14px;
-      }
-      .meta-label { color: #64748b; }
-      .meta-value { color: #0f172a; font-weight: 500; }
       table.line-items {
         width: 100%;
         border-collapse: collapse;
@@ -477,6 +610,19 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         font-variant-numeric: tabular-nums;
       }
       td.text-right { text-align: right; }
+      .totals-explainer {
+        margin: 0 0 10px 0;
+        padding: 8px 10px;
+        font-size: 11px;
+        line-height: 1.45;
+        color: #475569;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        max-width: 420px;
+        margin-left: auto;
+      }
+      .totals-explainer strong { color: #0f172a; }
       .totals-wrap {
         margin-left: auto;
         width: 320px;
@@ -545,6 +691,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       .doc-section-how-to-pay h4 {
         margin-top: 0;
       }
+      .doc-section-how-to-pay__intro {
+        margin: 0 0 12px 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #64748b;
+      }
       .doc-payment-terms {
         margin-top: 12px;
         padding-top: 10px;
@@ -565,14 +717,31 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         margin: 0;
         color: #334155;
       }
-      .doc-footer-message {
-        margin-top: 10px;
-        padding-top: 8px;
-        border-top: 1px solid #f1f5f9;
-        font-size: 11px;
-        line-height: 1.4;
-        color: #94a3b8;
+      .doc-page-footer {
+        margin-top: 28px;
+        padding-top: 20px;
+        border-top: 2px solid #e2e8f0;
         text-align: center;
+      }
+      .doc-page-footer__message {
+        margin: 0 auto 12px;
+        max-width: 520px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #475569;
+      }
+      .doc-page-footer__thanks {
+        margin: 0 0 6px 0;
+        font-size: 12px;
+        font-weight: 600;
+        color: #334155;
+        letter-spacing: 0.02em;
+      }
+      .doc-page-footer__contact {
+        margin: 0;
+        font-size: 11px;
+        color: #64748b;
+        line-height: 1.45;
       }
       .payment-cards {
         display: flex;
@@ -597,24 +766,31 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         letter-spacing: 0.06em;
         color: #64748b;
       }
-      .payment-card__title {
-        margin: 0 0 4px 0;
-        font-size: 13px;
+      .payment-card__rows {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .payment-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .payment-row__k {
+        flex-shrink: 0;
+        font-weight: 600;
+        color: #64748b;
+        min-width: 120px;
+        text-align: left;
+      }
+      .payment-row__v {
+        text-align: right;
         font-weight: 600;
         color: #0f172a;
-      }
-      .payment-card__sub {
-        margin: 0 0 6px 0;
-        font-size: 11px;
-        color: #475569;
-      }
-      .payment-card__mono {
-        margin: 0;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 12px;
-        font-weight: 700;
-        color: #0f172a;
-        letter-spacing: 0.03em;
+        word-break: break-word;
       }
       @page {
         size: A4 portrait;
@@ -638,27 +814,28 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           padding-bottom: 10px;
           gap: 12px;
         }
+        .header-left { gap: 10px; }
         .logo { max-height: 44px; max-width: 120px; }
         .logo-initials { width: 40px; height: 40px; font-size: 16px; border-radius: 6px; }
         .business-name { font-size: 15pt; margin: 0 0 3px 0; }
+        .issuer-name-compact { font-size: 11pt; margin: 0 0 3px 0; }
         .business-contact { font-size: 8.5pt; line-height: 1.35; }
         .business-contact p { margin: 1px 0; }
-        .doc-title { font-size: 15pt; margin-bottom: 2px; }
-        .doc-number { font-size: 9pt; }
+        .header-doc { min-width: 0; max-width: 240px; }
+        .doc-title { font-size: 10pt; margin-bottom: 2px; }
+        .doc-number { font-size: 11pt; margin-bottom: 8px; }
+        .doc-meta-line { font-size: 8.5pt; margin-bottom: 3px; }
+        .header-doc-status { margin-top: 6px; }
         .doc-top-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1.15fr) minmax(130px, 0.85fr);
-          gap: 8px 16px;
-          align-items: start;
           margin-bottom: 10px;
         }
         .section-label { font-size: 8pt; margin-bottom: 4px; }
         .bill-to-name { font-size: 10pt; }
         .bill-to-detail { font-size: 8.5pt; margin: 1px 0; }
-        .meta-grid {
-          gap: 3px 12px;
-          font-size: 8.5pt;
-          break-inside: avoid;
+        .totals-explainer {
+          font-size: 7.5pt;
+          padding: 5px 7px;
+          max-width: 100%;
         }
         table.line-items {
           margin-bottom: 8px;
@@ -717,12 +894,10 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           break-inside: auto;
           page-break-inside: auto;
         }
-        .doc-footer-message {
-          margin-top: 4px;
-          padding-top: 4px;
-          font-size: 6.5pt;
-          line-height: 1.35;
-        }
+        .doc-page-footer { margin-top: 14px; padding-top: 12px; }
+        .doc-page-footer__message { font-size: 8pt; margin-bottom: 8px; }
+        .doc-page-footer__thanks { font-size: 8.5pt; }
+        .doc-page-footer__contact { font-size: 7.5pt; }
         .payment-cards { gap: 6px; margin-top: 4px; }
         .payment-card {
           min-width: 0;
@@ -732,58 +907,60 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           border-radius: 6px;
         }
         .payment-card__label { font-size: 7pt; margin-bottom: 4px; }
-        .payment-card__title { font-size: 9pt; }
-        .payment-card__sub { font-size: 8pt; margin-bottom: 4px; }
-        .payment-card__mono { font-size: 9pt; }
+        .payment-row { font-size: 8.5pt; gap: 8px; }
+        .payment-row__k { min-width: 92px; font-size: 8pt; }
+        .doc-section-how-to-pay__intro { font-size: 8pt; margin-bottom: 6px; }
       }
     </style>
   </head>
   <body>
     <div class="document-container">
       <div class="header">
-        <div class="header-brand">
-          ${business.logo_url
-            ? `<img src="${business.logo_url}" alt="Logo" class="logo" />`
-            : `<span class="logo-initials">${(businessName || business.name || "B").charAt(0).toUpperCase()}</span>`}
-        </div>
-        <div class="header-info">
-          <p class="business-name">${businessName}</p>
-          <div class="business-contact">
-            ${business.address ? `<p>${business.address}</p>` : ""}
-            ${business.phone ? `<p>${business.phone}</p>` : ""}
-            ${business.whatsapp_phone ? `<p>${business.whatsapp_phone}</p>` : ""}
-            ${business.email ? `<p>${business.email}</p>` : ""}
-            ${business.website ? `<p>${business.website}</p>` : ""}
-            ${business.tax_id ? `<p>${business.tax_id}</p>` : ""}
-            ${business.registration_number ? `<p>${business.registration_number}</p>` : ""}
+        <div class="header-left">
+          <div class="header-logo">
+            ${hasLogo
+              ? `<img src="${safeLogoSrc}" alt="" class="logo" role="presentation" />`
+              : `<span class="logo-initials">${escapeHtml((businessName || business.name || "B").charAt(0).toUpperCase())}</span>`}
+          </div>
+          <div class="header-issuer">
+            ${
+              hasLogo
+                ? `<p class="issuer-name-compact">${businessNameHtml}</p>`
+                : `<p class="business-name">${businessNameHtml}</p>`
+            }
+            <div class="business-contact">
+              ${business.address ? `<p>${escapeHtml(String(business.address)).replace(/\n/g, "<br>")}</p>` : ""}
+              ${phoneRaw ? `<p>${escapeHtml(phoneRaw)}</p>` : ""}
+              ${showWhatsappLine ? `<p>${escapeHtml(whatsappRaw)}</p>` : ""}
+              ${business.email ? `<p>${escapeHtml(String(business.email))}</p>` : ""}
+              ${business.website ? `<p>${escapeHtml(String(business.website))}</p>` : ""}
+              ${business.tax_id ? `<p>${escapeHtml(String(business.tax_id))}</p>` : ""}
+              ${business.registration_number ? `<p>${escapeHtml(String(business.registration_number))}</p>` : ""}
+            </div>
           </div>
         </div>
         <div class="header-doc">
-          <div class="doc-title">${labels.title}</div>
-          <div class="doc-number">#${meta.document_number}</div>
-          ${statusBadgeHtml ? `<div style="margin-top:8px">${statusBadgeHtml}</div>` : ""}
+          <p class="doc-title">${escapeHtml(labels.title)}</p>
+          <p class="doc-number">${escapeHtml(formatDocumentNumberForHeader(meta.document_number))}</p>
+          <div class="header-doc-meta">
+            <p class="doc-meta-line">${escapeHtml(labels.dateLabel)}: ${escapeHtml(issueDateStr)}</p>
+            ${
+              headerSecondaryLabel && headerSecondaryDate
+                ? `<p class="doc-meta-line">${escapeHtml(headerSecondaryLabel)}: ${escapeHtml(headerSecondaryDate)}</p>`
+                : ""
+            }
+          </div>
+          ${statusBadgeHtml ? `<div class="header-doc-status">${statusBadgeHtml}</div>` : ""}
         </div>
       </div>
 
-      <div class="doc-top-grid">
+      <div class="doc-top-grid doc-top-grid--bill-only">
         <div class="bill-to-block">
           <div class="section-label">Bill to</div>
-          <p class="bill-to-name">${customerName}</p>
-          ${customer.address ? `<p class="bill-to-detail">${customer.address}</p>` : ""}
-          ${customer.email ? `<p class="bill-to-detail">${customer.email}</p>` : ""}
-          ${customer.phone ? `<p class="bill-to-detail">${customer.phone}</p>` : ""}
-        </div>
-        <div class="meta-grid">
-          <span class="meta-label">${labels.dateLabel}</span>
-          <span class="meta-value">${formatDate(meta.issue_date)}</span>
-          ${meta.expiry_date && labels.secondaryDateLabel && labels.secondaryDateLabel !== "Due Date" ? `
-          <span class="meta-label">${labels.secondaryDateLabel}</span>
-          <span class="meta-value">${formatDate(meta.expiry_date)}</span>
-          ` : ""}
-          ${meta.due_date && labels.secondaryDateLabel === "Due Date" ? `
-          <span class="meta-label">${labels.secondaryDateLabel}</span>
-          <span class="meta-value">${formatDate(meta.due_date)}</span>
-          ` : ""}
+          <p class="bill-to-name">${escapeHtml(String(customerName))}</p>
+          ${customer.address ? `<p class="bill-to-detail">${escapeHtml(String(customer.address))}</p>` : ""}
+          ${customer.email ? `<p class="bill-to-detail">${escapeHtml(String(customer.email))}</p>` : ""}
+          ${customer.phone ? `<p class="bill-to-detail">${escapeHtml(String(customer.phone))}</p>` : ""}
         </div>
       </div>
 
@@ -801,7 +978,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
             <th class="text-right">Qty</th>
             <th class="text-right">Unit Price</th>
             <th class="text-right">Discount</th>
-            <th class="text-right">Total</th>
+            <th class="text-right">Line amount</th>
           </tr>
         </thead>
         <tbody>
@@ -821,6 +998,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         </tbody>
       </table>
 
+      ${taxTotalsExplainer}
       <div class="totals-wrap">
         ${showDiscountSummary
           ? `
@@ -837,7 +1015,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         ${showTaxBreakdown
           ? `
         <div class="total-row">
-          <span>${showDiscountSummary ? "Subtotal (excl. tax)" : "Subtotal"}</span>
+          <span>${subtotalBreakdownLabel}</span>
           <span>${fmtMoney(baseAmount)}</span>
         </div>
         ` +
@@ -845,7 +1023,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
               .map(
                 (line) => `
         <div class="total-row">
-          <span>${line.name || line.code}</span>
+          <span>${escapeHtml(String(line.name || line.code || "Tax"))}</span>
           <span>${fmtMoney(Number(line.amount))}</span>
         </div>
         `
@@ -853,20 +1031,20 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
               .join("") +
             `
         <div class="total-row">
-          <span>Total tax</span>
+          <span>Taxes (total)</span>
           <span>${fmtMoney(calculatedTotalTax)}</span>
         </div>
         `
           : !showDiscountSummary
             ? `
         <div class="total-row">
-          <span>Subtotal</span>
+          <span>${subtotalBreakdownLabel}</span>
           <span>${fmtMoney(subtotal)}</span>
         </div>
         `
             : ""}
         <div class="total-row final">
-          <span>Total</span>
+          <span>${finalTotalLabel}</span>
           <span>${fmtMoney(total)}</span>
         </div>
         ${totals.wht_applicable && totals.wht_amount ? `
@@ -901,20 +1079,18 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       ${hasPaymentHowTo ? `
       <div class="footer doc-section-how-to-pay">
         <h4>How to pay</h4>
+        <p class="doc-section-how-to-pay__intro">Use the details below. Please include your document number as the payment reference where possible.</p>
         <div class="payment-cards">
           ${hasBank ? `
           <div class="payment-card">
             <p class="payment-card__label">Bank transfer</p>
-            ${pd?.bank_name ? `<p class="payment-card__title">${escapeHtml(String(pd.bank_name))}</p>` : ""}
-            ${pd?.bank_account_name ? `<p class="payment-card__sub">Account name: <strong style="font-weight:600;color:#334155">${escapeHtml(String(pd.bank_account_name))}</strong></p>` : ""}
-            <p class="payment-card__mono">${escapeHtml(String(pd?.bank_account_number ?? ""))}</p>
+            <div class="payment-card__rows">${paymentBankRowsHtml}</div>
           </div>
           ` : ""}
           ${hasMomo ? `
           <div class="payment-card">
-            <p class="payment-card__label">${pd?.momo_provider ? `${escapeHtml(String(pd.momo_provider))} MoMo` : "Mobile money"}</p>
-            ${pd?.momo_name ? `<p class="payment-card__sub">Name: <strong style="font-weight:600;color:#334155">${escapeHtml(String(pd.momo_name))}</strong></p>` : ""}
-            <p class="payment-card__mono">${escapeHtml(String(pd?.momo_number ?? ""))}</p>
+            <p class="payment-card__label">Mobile money</p>
+            <div class="payment-card__rows">${paymentMomoRowsHtml}</div>
           </div>
           ` : ""}
         </div>
@@ -935,13 +1111,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       </div>
       ` : ""}
 
-      ${documentType === "invoice" && hasFooterBottom ? `
-      <div class="doc-footer-message">${footerBottomHtml}</div>
-      ` : documentType !== "invoice" && rawFooter ? `
-      <div class="footer">
-        <p>${escapeHtml(rawFooter).replace(/\n/g, "<br>")}</p>
+      <div class="doc-page-footer">
+        ${documentType === "invoice" && hasFooterBottom ? `<div class="doc-page-footer__message">${footerBottomHtml}</div>` : ""}
+        ${documentType !== "invoice" && rawFooter ? `<div class="doc-page-footer__message">${escapeHtml(rawFooter).replace(/\n/g, "<br>")}</div>` : ""}
+        <p class="doc-page-footer__thanks">Thank you for your business.</p>
+        ${footerContactLine ? `<p class="doc-page-footer__contact">${footerContactLine}</p>` : ""}
       </div>
-      ` : ""}
     </div>
   </body>
 </html>

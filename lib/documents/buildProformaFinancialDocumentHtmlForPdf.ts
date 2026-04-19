@@ -4,6 +4,7 @@ import {
   type CustomerInfo,
   type DocumentItem,
   type DocumentMeta,
+  type DocumentPaymentDetails,
   type DocumentTotals,
 } from "@/components/documents/FinancialDocument"
 import { getCurrencySymbol } from "@/lib/currency"
@@ -43,8 +44,10 @@ export function buildProformaFinancialDocumentHtmlForPdf(params: {
   payment_terms?: string | null
   footer_message?: string | null
   quote_terms?: string | null
+  /** Bank / MoMo — same visibility as invoice PDF when provided. */
+  payment_details?: DocumentPaymentDetails | null
 }): string {
-  const { proforma, business, customer, items, payment_terms, footer_message, quote_terms } =
+  const { proforma, business, customer, items, payment_terms, footer_message, quote_terms, payment_details } =
     params
   const p = proforma as Record<string, any>
 
@@ -127,6 +130,7 @@ export function buildProformaFinancialDocumentHtmlForPdf(params: {
     payment_terms: payment_terms ?? null,
     footer_message: footer_message ?? null,
     quote_terms: quote_terms ?? null,
+    payment_details: payment_details ?? null,
     apply_taxes: Boolean(p.apply_taxes),
     currency_code: currencyCode,
     currency_symbol: currencySymbol,

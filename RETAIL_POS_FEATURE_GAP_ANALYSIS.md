@@ -232,7 +232,7 @@
 **Missing:**
 - ❌ Cash drawer integration (automatic open on sale)
 - ❌ Receipt printer auto-detection (manual selection required)
-- ❌ Barcode scanner integration (beyond manual entry)
+- ⚠️ **Barcode** – USB/Bluetooth **keyboard-wedge** scanners supported via main POS field + **Enter**; autofocus on Retail POS when modals are closed. **Camera / imager** scanning not implemented (see `RETAIL_BARCODE_UPDATE.md`).
 - ❌ Customer display (second screen)
 - ❌ Scale integration (for weight-based products)
 - ❌ Payment terminal integration (card readers)

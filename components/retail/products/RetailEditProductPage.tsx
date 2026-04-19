@@ -8,6 +8,7 @@ import { retailPaths } from "@/lib/retail/routes"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { processProductImage } from "@/lib/imageProcessing"
 import { cn } from "@/lib/utils"
+import RetailBarcodeFieldWithCamera from "@/components/retail/RetailBarcodeFieldWithCamera"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import {
   RetailBackofficeAlert,
@@ -589,11 +590,10 @@ export default function RetailEditProductPage() {
             <label className={retailLabelClass}>
               Barcode (unique per business when set)
             </label>
-            <input
-              type="text"
+            <RetailBarcodeFieldWithCamera
               value={formData.barcode}
-              onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-              className={retailFieldClass}
+              onChange={(barcode) => setFormData({ ...formData, barcode })}
+              inputClassName={retailFieldClass}
               placeholder="Optional"
             />
           </div>

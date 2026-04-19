@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
@@ -203,6 +203,55 @@ export default function POSPage() {
       sessionStorage.removeItem('finza_selected_register_session_id')
     }
   }
+
+  const focusPosProductSearchInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        productSearchInputRef.current?.focus({ preventScroll: true })
+      }, 10)
+    })
+  }, [])
+
+  const posCatalogEligibleForScanFocus = useCallback(() => {
+    if (loading || loadingProducts || registerStatusLoading || !businessId || !registerSession) return false
+    if (
+      showPaymentModal ||
+      saleSuccess ||
+      showParkedSales ||
+      showVariantModal ||
+      barcodeMatches !== null ||
+      showStorePicker ||
+      showRegisterPicker ||
+      showCustomerSelector ||
+      showCreateCustomer ||
+      showCartDiscount
+    ) {
+      return false
+    }
+    return true
+  }, [
+    loading,
+    loadingProducts,
+    registerStatusLoading,
+    businessId,
+    registerSession,
+    showPaymentModal,
+    saleSuccess,
+    showParkedSales,
+    showVariantModal,
+    barcodeMatches,
+    showStorePicker,
+    showRegisterPicker,
+    showCustomerSelector,
+    showCreateCustomer,
+    showCartDiscount,
+  ])
+
+  useLayoutEffect(() => {
+    if (posCatalogEligibleForScanFocus()) {
+      focusPosProductSearchInput()
+    }
+  }, [posCatalogEligibleForScanFocus, focusPosProductSearchInput])
 
   useEffect(() => {
     if (!businessId) return
@@ -1359,6 +1408,9 @@ export default function POSPage() {
       }
       setCart((prev) => [...prev, newCartItem])
     }
+    if (posCatalogEligibleForScanFocus()) {
+      focusPosProductSearchInput()
+    }
   }
 
   // Handle variant selection from modal
@@ -1373,49 +1425,73 @@ export default function POSPage() {
     addProductToCart(selectedProductForVariant, variantId, variantName, variantPrice, modifiers)
     setShowVariantModal(false)
     setSelectedProductForVariant(null)
+    setSearchQuery("")
   }
 
-  // Handle barcode scan
-  const handleBarcodeScan = async (barcode: string) => {
-    if (!barcode || barcode.trim().length === 0) return
+  // Handle barcode / variant SKU scan (Enter on main POS field)
+  const handleBarcodeScan = async (codeRaw: string) => {
+    const code = codeRaw.trim()
+    if (!code) return
 
     try {
-      // First, check variants by barcode (need to join with products to filter by business_id)
-      const { data: allVariants, error: variantError } = await supabase
-        .from("products_variants")
-        .select("id, product_id, variant_name, price, stock_quantity, stock, barcode")
-        .eq("barcode", barcode.trim())
-
-      // Filter variants by business_id through products
-      let variantMatches: any[] = []
-      if (allVariants && allVariants.length > 0) {
-        const productIds = allVariants.map((v) => v.product_id)
+      /**
+       * Exact code resolution order for checkout (USB / Bluetooth scanners behave like keyboard + Enter):
+       * 1) Variant barcode — `products_variants.barcode`
+       * 2) Base product barcode — `products.barcode` (only products without variants; avoids parent/child ambiguity)
+       * 3) Variant SKU — `products_variants.sku` (rows not already matched in step 1)
+       *
+       * Multiple rows across these steps → cashier picks in `BarcodeMatchSelector`.
+       */
+      const filterVariantsToBusiness = async (
+        rows: Array<{
+          id: string
+          product_id: string
+          variant_name: string
+          price: number | null
+          stock_quantity: number | null
+          stock: number | null
+          barcode: string | null
+          sku: string | null
+        }> | null
+      ) => {
+        if (!rows?.length) return []
+        const productIds = [...new Set(rows.map((v) => v.product_id))]
         const { data: variantProducts } = await supabase
           .from("products")
           .select("id")
           .eq("business_id", businessId)
           .in("id", productIds)
-
-        if (variantProducts) {
-          const validProductIds = new Set(variantProducts.map((p) => p.id))
-          variantMatches = allVariants.filter((v) => validProductIds.has(v.product_id))
-        }
+        const valid = new Set((variantProducts ?? []).map((p) => p.id))
+        return rows.filter((v) => valid.has(v.product_id))
       }
 
-      if (variantError) {
-        console.error("Error searching variants:", variantError)
-      }
+      const { data: variantsByBarcodeRaw, error: variantBarcodeErr } = await supabase
+        .from("products_variants")
+        .select("id, product_id, variant_name, price, stock_quantity, stock, barcode, sku")
+        .eq("barcode", code)
 
-      // Then, check products by barcode
+      if (variantBarcodeErr) console.error("Error searching variants by barcode:", variantBarcodeErr)
+
+      const variantsByBarcode = await filterVariantsToBusiness(variantsByBarcodeRaw ?? null)
+      const matchedVariantIds = new Set(variantsByBarcode.map((v) => v.id))
+
       const { data: productMatches, error: productError } = await supabase
         .from("products")
         .select("id, name, price, stock_quantity, stock")
         .eq("business_id", businessId)
-        .eq("barcode", barcode.trim())
+        .eq("barcode", code)
 
-      if (productError) {
-        console.error("Error searching products:", productError)
-      }
+      if (productError) console.error("Error searching products:", productError)
+
+      const { data: variantsBySkuRaw, error: variantSkuErr } = await supabase
+        .from("products_variants")
+        .select("id, product_id, variant_name, price, stock_quantity, stock, barcode, sku")
+        .eq("sku", code)
+
+      if (variantSkuErr) console.error("Error searching variants by SKU:", variantSkuErr)
+
+      const variantsBySkuAll = await filterVariantsToBusiness(variantsBySkuRaw ?? null)
+      const variantsBySku = variantsBySkuAll.filter((v) => !matchedVariantIds.has(v.id))
 
       const allMatches: Array<{
         id: string
@@ -1427,30 +1503,24 @@ export default function POSPage() {
         variantId?: string
       }> = []
 
-      // Add variant matches
-      if (variantMatches && variantMatches.length > 0) {
-        for (const variant of variantMatches) {
-          // Get product info for this variant
-          const product = products.find((p) => p.id === variant.product_id)
-          if (product) {
-            const variantPrice = variant.price !== null ? variant.price : product.price
-            allMatches.push({
-              id: variant.id,
-              name: product.name,
-              price: variantPrice,
-              type: "variant",
-              variantName: variant.variant_name,
-              productId: product.id,
-              variantId: variant.id,
-            })
-          }
+      for (const variant of variantsByBarcode) {
+        const product = products.find((p) => p.id === variant.product_id)
+        if (product) {
+          const variantPrice = variant.price !== null ? variant.price : product.price
+          allMatches.push({
+            id: variant.id,
+            name: product.name,
+            price: variantPrice,
+            type: "variant",
+            variantName: variant.variant_name,
+            productId: product.id,
+            variantId: variant.id,
+          })
         }
       }
 
-      // Add product matches (only if no variants matched, or if we want to show both)
       if (productMatches && productMatches.length > 0) {
         for (const product of productMatches) {
-          // Only add if product doesn't have variants (to avoid duplicates)
           const hasVariants = await checkProductVariants(product.id)
           if (!hasVariants) {
             allMatches.push({
@@ -1464,20 +1534,37 @@ export default function POSPage() {
         }
       }
 
-      // Handle matches
+      for (const variant of variantsBySku) {
+        const product = products.find((p) => p.id === variant.product_id)
+        if (product) {
+          const variantPrice = variant.price !== null ? variant.price : product.price
+          allMatches.push({
+            id: variant.id,
+            name: product.name,
+            price: variantPrice,
+            type: "variant",
+            variantName: variant.variant_name,
+            productId: product.id,
+            variantId: variant.id,
+          })
+        }
+      }
+
       if (allMatches.length === 0) {
-        setToast({ message: `No product found for barcode: ${barcode}`, type: "error" })
+        setToast({
+          message: `No matching product, variant barcode, or variant SKU for "${code}"`,
+          type: "error",
+        })
         return
       }
 
       if (allMatches.length === 1) {
-        // Single match - add directly to cart
         const match = allMatches[0]
         await addBarcodeMatchToCart(match)
+        setSearchQuery("")
       } else {
-        // Multiple matches - show selector
         setBarcodeMatches(allMatches)
-        setScannedBarcode(barcode)
+        setScannedBarcode(code)
       }
     } catch (err: any) {
       console.error("Error handling barcode scan:", err)
@@ -1516,9 +1603,11 @@ export default function POSPage() {
           // Show variant selector modal (which will handle modifiers too)
           setSelectedProductForVariant(product)
           setShowVariantModal(true)
+          setSearchQuery("")
         } else {
           // No modifiers, add variant directly
           addProductToCart(product, match.variantId || null, match.variantName || match.name, match.price, [])
+          setSearchQuery("")
           setToast({ message: `Added ${match.name} to cart`, type: "success" })
         }
       } else {
@@ -1528,9 +1617,11 @@ export default function POSPage() {
           // Show variant selector modal
           setSelectedProductForVariant(product)
           setShowVariantModal(true)
+          setSearchQuery("")
         } else {
           // No variants/modifiers, add directly
           addProductToCart(product, null, match.name, match.price, [])
+          setSearchQuery("")
           setToast({ message: `Added ${match.name} to cart`, type: "success" })
         }
       }
@@ -1553,6 +1644,7 @@ export default function POSPage() {
     setBarcodeMatches(null)
     setScannedBarcode("")
     await addBarcodeMatchToCart(match)
+    setSearchQuery("")
   }
 
   // Update quantity for a specific cart item
@@ -2001,13 +2093,16 @@ export default function POSPage() {
 
             <div className="sticky top-0 z-20 border-t border-slate-100 bg-white px-4 pb-3 pt-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Search or scan
+                Main scan / search
               </label>
               <div className="flex gap-2">
                 <input
                   ref={productSearchInputRef}
+                  data-retail-pos-scan-input
                   type="text"
-                  placeholder="Name, SKU, or scan barcode…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Search products or scan barcode / variant SKU"
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value)
@@ -2024,7 +2119,8 @@ export default function POSPage() {
                 />
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                Tip: focus this field and scan or type a barcode, then press Enter to add the line.
+                Type to filter by product name or product barcode. Press Enter for an exact match on product barcode,
+                variant barcode, or variant SKU.
               </p>
             </div>
           </div>
@@ -2193,7 +2289,7 @@ export default function POSPage() {
                           <div className="font-semibold text-sm line-clamp-2">{product.name}</div>
                           {product.barcode && (
                             <div className="text-xs text-gray-500 mt-0.5">
-                              SKU: {product.barcode}
+                              Barcode: {product.barcode}
                             </div>
                           )}
                         </div>
@@ -2963,6 +3059,21 @@ export default function POSPage() {
             onClose={() => {
               setShowVariantModal(false)
               setSelectedProductForVariant(null)
+              setSearchQuery("")
+            }}
+          />
+        )}
+
+        {barcodeMatches && barcodeMatches.length > 0 && (
+          <BarcodeMatchSelector
+            matches={barcodeMatches}
+            barcode={scannedBarcode}
+            currencyCode={currencyCode}
+            onSelect={(m) => void handleBarcodeMatchSelect(m)}
+            onClose={() => {
+              setBarcodeMatches(null)
+              setScannedBarcode("")
+              setSearchQuery("")
             }}
           />
         )}

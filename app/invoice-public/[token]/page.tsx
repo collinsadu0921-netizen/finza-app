@@ -73,7 +73,8 @@ export default function PublicInvoicePage() {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    fetch(`/api/invoices/public/${token}`)
+    const enc = encodeURIComponent(token)
+    fetch(`/api/invoices/public/${enc}`)
       .then(r => {
         if (!r.ok) throw new Error("Invoice not found")
         return r.json()
@@ -87,6 +88,12 @@ export default function PublicInvoicePage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [token])
+
+  useEffect(() => {
+    if (!invoice) return
+    const issuer = business?.trading_name ?? business?.legal_name ?? "Business"
+    document.title = `Invoice ${invoice.invoice_number} — ${issuer}`
+  }, [invoice, business])
 
   const handleCopyPayLink = () => {
     if (!invoice) return
@@ -159,55 +166,59 @@ export default function PublicInvoicePage() {
         }
       ` }} />
 
-      <div className="min-h-screen bg-slate-100 py-6 px-4">
-        <div className="max-w-3xl mx-auto space-y-4">
+      <div className="min-h-screen bg-slate-50 py-5 px-4 print:bg-white print:py-0">
+        <div className="max-w-3xl mx-auto space-y-3">
 
-          {/* ── Top bar ─────────────────────────────────────── */}
-          <div className="no-print flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+          {/* Client toolbar — minimal */}
+          <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5 shadow-sm">
+            <div className="flex items-center gap-2 min-w-0">
               {business?.logo_url ? (
-                <img src={business.logo_url} alt="" className="h-7 w-7 rounded-lg object-cover" />
+                <img src={business.logo_url} alt="" className="h-8 w-8 rounded-lg object-cover shrink-0" />
               ) : (
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: brand }}>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ backgroundColor: brand }}>
                   {bizName.charAt(0).toUpperCase()}
                 </div>
               )}
-              <span className="font-semibold text-slate-700 text-sm">{bizName}</span>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Invoice</p>
+                <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 shrink-0">
               <a
                 href={`/api/invoices/public/${encodeURIComponent(token)}/pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
                 </svg>
-                Open PDF View
+                Download PDF
               </a>
               <button
+                type="button"
                 onClick={() => window.print()}
-                className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                 </svg>
-                Print / Save PDF
+                Print
               </button>
             </div>
           </div>
 
           {/* ── Status banner ──────────────────────────────── */}
-          <div className={`no-print rounded-2xl border p-4 flex items-center gap-3 ${bannerClass}`}>
+          <div className={`no-print rounded-xl border p-3.5 flex items-center gap-3 ${bannerClass}`}>
             {bannerIcon}
             <div className="flex-1 min-w-0">
               <p className={`font-semibold text-sm ${bannerTextClass}`}>
                 {isPaid
                   ? "This invoice has been paid — thank you!"
                   : isOverdue
-                  ? `Invoice #${invoice.invoice_number} is overdue`
-                  : `Invoice #${invoice.invoice_number} is awaiting payment`}
+                  ? `Invoice ${invoice.invoice_number} is overdue`
+                  : `Invoice ${invoice.invoice_number} — payment due`}
               </p>
               {!isPaid && invoice.due_date && (
                 <p className={`text-xs mt-0.5 ${bannerTextClass} opacity-70`}>
@@ -309,12 +320,7 @@ export default function PublicInvoicePage() {
             </div>
           )}
 
-          <div className="no-print flex items-center justify-center gap-1.5 pb-4">
-            <svg className="w-3.5 h-3.5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-            <p className="text-xs text-slate-400">Powered by <span className="font-semibold text-slate-500">Finza</span></p>
-          </div>
+          <p className="no-print text-center text-[11px] text-slate-300 pb-3">Powered by Finza</p>
         </div>
       </div>
     </>
