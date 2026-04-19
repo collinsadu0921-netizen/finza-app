@@ -224,20 +224,39 @@ export default function ProformaViewPage() {
   }
 
   const handleEmail = async () => {
+    if (!proforma?.business_id) {
+      setToast({ message: "Missing workspace context. Reload and try again.", type: "error" })
+      return
+    }
+    if (!proforma.customers?.email?.trim()) {
+      setToast({ message: "Add a customer email on this proforma’s customer before sending by email.", type: "error" })
+      return
+    }
     try {
       setSending(true)
-      const tok = await ensureSentAndGetPublicToken()
-      const link = buildClientUrl(tok)
-      const subject = encodeURIComponent(
-        `Proforma Invoice${proforma?.proforma_number ? ` ${proforma.proforma_number}` : ""}`
-      )
-      const body = encodeURIComponent(
-        `Hi${proforma?.customers?.name ? ` ${proforma.customers.name}` : ""},\n\nPlease review your proforma invoice using the link below:\n\n${link}\n\nKindly accept or decline at your earliest convenience.\n\nThank you.`
-      )
-      const email = proforma?.customers?.email ?? ""
-      window.location.href = `mailto:${email}?subject=${subject}&body=${body}`
+      const isDraft = proforma.status === "draft"
+      const response = await fetch(`/api/proforma/${proformaId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: proforma.business_id,
+          ...(isDraft ? { send_email: true } : { email_only: true }),
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.error || data.message || "Failed to send email")
+      }
+      if (data.emailWarning) {
+        setToast({ message: String(data.emailWarning), type: "info" })
+      } else if (data.emailed) {
+        setToast({ message: "Email sent to your client.", type: "success" })
+      } else {
+        setToast({ message: data.message || "Done.", type: "success" })
+      }
+      await loadProforma()
     } catch (err: any) {
-      setToast({ message: err.message || "Failed to open email", type: "error" })
+      setToast({ message: err.message || "Failed to send email", type: "error" })
     } finally {
       setSending(false)
     }

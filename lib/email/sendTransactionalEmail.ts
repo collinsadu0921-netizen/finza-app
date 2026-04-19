@@ -14,6 +14,11 @@ export interface SendTransactionalEmailParams {
   replyTo?: string
   /** Business display name — shown as "Business Name via Finza" in the From field */
   fromName?: string
+  /**
+   * Full Resend `from` header (e.g. `Finza Documents <documents@mail.finza.africa>`).
+   * When set, overrides `RESEND_FROM` / `fromName` composition.
+   */
+  fromOverride?: string
 }
 
 export type SendTransactionalEmailResult =
@@ -31,13 +36,16 @@ export async function sendTransactionalEmail(
     return { success: false, reason: "no_api_key" }
   }
 
-  // Extract just the email address from RESEND_FROM (e.g. "Finza <no-reply@finza.app>" → "no-reply@finza.app")
-  const resendFrom = process.env.RESEND_FROM ?? "Finza <onboarding@resend.dev>"
-  const emailMatch = resendFrom.match(/<([^>]+)>/)
-  const fromEmail = emailMatch ? emailMatch[1] : resendFrom
-  // Show "Business Name via Finza" so the client knows who sent it
-  const displayName = params.fromName ? `${params.fromName} via Finza` : "Finza"
-  const from = `${displayName} <${fromEmail}>`
+  const from =
+    params.fromOverride?.trim() ||
+    (() => {
+      // Extract just the email address from RESEND_FROM (e.g. "Finza <no-reply@finza.app>" → "no-reply@finza.app")
+      const resendFrom = process.env.RESEND_FROM ?? "Finza <onboarding@resend.dev>"
+      const emailMatch = resendFrom.match(/<([^>]+)>/)
+      const fromEmail = emailMatch ? emailMatch[1] : resendFrom
+      const displayName = params.fromName ? `${params.fromName} via Finza` : "Finza"
+      return `${displayName} <${fromEmail}>`
+    })()
 
   const body: Record<string, unknown> = {
     from,

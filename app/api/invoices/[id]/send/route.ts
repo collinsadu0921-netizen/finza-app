@@ -7,6 +7,7 @@ import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { getBusinessWhatsAppTemplate } from "@/lib/communication/getBusinessWhatsAppTemplate"
 import { renderWhatsAppTemplate } from "@/lib/communication/renderWhatsAppTemplate"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
+import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
 import { buildInvoiceEmailHtml } from "@/lib/email/templates/invoice"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
@@ -142,7 +143,8 @@ export async function POST(
           trading_name,
           phone,
           whatsapp_phone,
-          email
+          email,
+          industry
         ),
         invoice_items (
           id,
@@ -391,20 +393,37 @@ export async function POST(
       const payUrlForEmail = `${baseUrl}/pay/${invoiceId}`
       const invoiceForEmail = { ...invoice, invoice_items: invoice.invoice_items }
       const customerName = (invoice.customers as { name?: string } | null)?.name
-      const html = buildInvoiceEmailHtml(invoiceForEmail, businessName, {
-        publicViewUrl: effectivePublicToken ? publicInvoiceUrlForEmail : undefined,
-        payUrl: payUrlForEmail,
-        customerName: customerName ?? undefined,
-      })
       const docLabel = invoice.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice"
       const businessEmail = (invoice.businesses as { email?: string } | null)?.email ?? undefined
-      const result = await sendTransactionalEmail({
-        to: toEmail,
-        subject: `${docLabel} from ${businessName}`,
-        html,
-        fromName: businessName,
-        replyTo: businessEmail,
-      })
+      const businessIndustry = (invoice.businesses as { industry?: string | null } | null)?.industry ?? null
+      const isServiceWorkspace = businessIndustry === "service"
+
+      const result = isServiceWorkspace
+        ? await sendServiceWorkspaceDocumentEmail({
+            to: toEmail,
+            replyTo: businessEmail ?? "",
+            subject: `${invoice.invoice_number ? `Invoice #${invoice.invoice_number}` : "Invoice"} from ${businessName}`,
+            kind: "invoice",
+            businessName,
+            customerName,
+            documentTitleLine: invoice.invoice_number ? `Invoice #${invoice.invoice_number}` : "Invoice",
+            contextLine: invoice.due_date
+              ? `Due: ${new Date(invoice.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`
+              : invoice.payment_terms?.trim() || null,
+            publicUrl: effectivePublicToken ? publicInvoiceUrlForEmail : "",
+            meta: { documentType: "invoice", documentId: invoiceId, businessId: invoice.business_id },
+          })
+        : await sendTransactionalEmail({
+            to: toEmail,
+            subject: `${docLabel} from ${businessName}`,
+            html: buildInvoiceEmailHtml(invoiceForEmail, businessName, {
+              publicViewUrl: effectivePublicToken ? publicInvoiceUrlForEmail : undefined,
+              payUrl: payUrlForEmail,
+              customerName: customerName ?? undefined,
+            }),
+            fromName: businessName,
+            replyTo: businessEmail,
+          })
       if (!result.success) {
         const noKey = result.reason === "no_api_key"
         const userMessage = noKey
@@ -447,6 +466,8 @@ export async function POST(
           newValues: {
             recipient_email: email,
             invoice_number: updatedInvoice.invoice_number ?? invoice.invoice_number,
+            resend_message_id: result.success ? result.id : undefined,
+            email_channel: isServiceWorkspace ? "service_documents" : "legacy",
           },
           ipAddress: getIpAddress(request),
           userAgent: getUserAgent(request),
