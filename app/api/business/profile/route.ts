@@ -93,10 +93,13 @@ export async function PUT(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const body = await request.json()
     const preferredId = (body.business_id ?? null) as string | null
-    const business = await getBusinessForProfile(supabase, user?.id || "", preferredId ? String(preferredId).trim() : null)
+    const business = await getBusinessForProfile(supabase, user.id, preferredId ? String(preferredId).trim() : null)
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
