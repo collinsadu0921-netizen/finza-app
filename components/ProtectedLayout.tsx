@@ -20,6 +20,7 @@ import {
   type WorkspaceBusiness,
   type WorkspaceSessionUser,
 } from "@/components/WorkspaceBusinessContext"
+import PlatformAnnouncementsHost from "@/components/platform/PlatformAnnouncementsHost"
 
 const ProtectedLayoutContext = createContext(false)
 
@@ -672,7 +673,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
                   : "min-h-[calc(100vh-4rem)]"
             }
           >
-            {children}
+            <PlatformAnnouncementsHost businessIndustry={workspaceBusiness?.industry}>
+              {children}
+            </PlatformAnnouncementsHost>
             {!hideFloatingAssistant && (
               <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)]">
                 <AiAssistant

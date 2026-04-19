@@ -5,6 +5,7 @@ import { ToastProvider } from '@/components/ui/ToastProvider'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import NumberInputGuard from '@/components/NumberInputGuard'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const metadata: Metadata = {
   title: 'FINZA',
@@ -43,6 +44,7 @@ export default function RootLayout({
             </ToastProvider>
           </ThemeProvider>
         </Suspense>
+        <SpeedInsights />
       </body>
     </html>
   )
