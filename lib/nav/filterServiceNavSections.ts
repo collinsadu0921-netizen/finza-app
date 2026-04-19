@@ -6,6 +6,8 @@ export type ServiceNavMenuItem = {
   label: string
   route: string
   minTier?: ServiceSubscriptionTier
+  /** Same URL as another item — do not show selected state (avoids multiple highlights). */
+  skipActiveHighlight?: boolean
 }
 
 export type ServiceNavSection = { title: string; items: ServiceNavMenuItem[] }
