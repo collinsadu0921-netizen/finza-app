@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react"
 import SendMethodDropdown, { SendMethod } from "./SendMethodDropdown"
 import { normalizePhoneForWaMe } from "@/lib/communication/whatsappLink"
-import { openWhatsAppUrlInBrowser } from "@/lib/communication/openWhatsAppClient"
+import {
+  convertWaMeToApiSendUrl,
+  openWhatsAppUrlInBrowser,
+} from "@/lib/communication/openWhatsAppClient"
 import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
 
 type Invoice = {
@@ -124,13 +127,18 @@ export default function SendInvoiceModal({
 
       if (data.whatsappUrl && /^https:\/\/wa\.me\//i.test(String(data.whatsappUrl))) {
         const url = String(data.whatsappUrl)
-        const opened = openWhatsAppUrlInBrowser(url, waPrepWindow)
-        if (opened) {
+        const result = openWhatsAppUrlInBrowser(url, waPrepWindow, {
+          preferSameTabOnMobile: true,
+          onBeforeSameTabNavigate: () => onSuccess(),
+        })
+        if (result === "same-tab") {
+          // onSuccess already ran; tab is navigating to WhatsApp
+        } else if (result === true) {
           onSuccess()
         } else {
           closePrep()
           setError("")
-          setWaOpenLinkUrl(url)
+          setWaOpenLinkUrl(convertWaMeToApiSendUrl(url))
         }
       } else {
         closePrep()

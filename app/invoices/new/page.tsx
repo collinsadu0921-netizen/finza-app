@@ -1310,8 +1310,9 @@ export default function NewInvoicePage() {
                   if (needsWaPrep) {
                     const waUrl = typeof data.whatsappUrl === "string" ? data.whatsappUrl : ""
                     if (waUrl) {
-                      const opened = openWhatsAppUrlInBrowser(waUrl, waPrep)
-                      if (!opened) {
+                      const result = openWhatsAppUrlInBrowser(waUrl, waPrep)
+                      const whatsappOpened = result !== false
+                      if (!whatsappOpened) {
                         setToast({
                           message:
                             "Invoice sent. If WhatsApp did not open, your browser may have blocked it — open the invoice and use Send / WhatsApp from there.",
