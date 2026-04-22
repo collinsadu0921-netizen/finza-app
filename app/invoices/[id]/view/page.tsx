@@ -285,12 +285,6 @@ Thank you.`
 
   const currency = resolveCurrencyDisplay(invoice)
 
-  const copyReceiptLink = (payment: Payment) => {
-    const receiptUrl = `${window.location.origin}/receipt-public/${payment.public_token}`
-    navigator.clipboard.writeText(receiptUrl)
-    setToast({ message: "Receipt link copied to clipboard!", type: "success" })
-  }
-
   const handleDeleteInvoice = () => {
     openConfirm({
       title: "Delete draft invoice",
@@ -311,9 +305,18 @@ Thank you.`
     })
   }
 
-  const downloadReceiptPDF = async (payment: Payment) => {
-    const receiptUrl = `${window.location.origin}/receipt-public/${payment.public_token}`
-    window.open(receiptUrl, "_blank")
+  const openPaymentReceipt = (payment: Payment, opts?: { savePdf?: boolean }) => {
+    const tok = payment.public_token
+    if (!tok) {
+      setToast({ message: "Receipt link is not available for this payment yet.", type: "info" })
+      return
+    }
+    const qs = opts?.savePdf ? "?savePdf=1" : ""
+    window.open(
+      `${window.location.origin}/receipt-public/${encodeURIComponent(tok)}${qs}`,
+      "_blank",
+      "noopener,noreferrer"
+    )
   }
 
   // Format method helper for payment history
@@ -844,11 +847,34 @@ Thank you.`
                             {formatMethod(payment.method)}
                             {payment.reference && <span className="ml-1 opacity-70">#{payment.reference}</span>}
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
                             <button
+                              type="button"
+                              onClick={() => openPaymentReceipt(payment)}
+                              disabled={!payment.public_token}
+                              className="text-[10px] uppercase font-bold text-slate-700 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={payment.public_token ? "Open receipt in a new tab" : "Receipt link not available"}
+                            >
+                              View receipt
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openPaymentReceipt(payment, { savePdf: true })}
+                              disabled={!payment.public_token}
+                              className="text-[10px] uppercase font-bold text-slate-700 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={
+                                payment.public_token
+                                  ? "Opens receipt then print dialog — choose Save as PDF"
+                                  : "Receipt link not available"
+                              }
+                            >
+                              Download
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => sendReceiptViaWhatsApp(payment)}
-                              className="text-[10px] uppercase font-bold text-emerald-600 hover:text-emerald-700"
-                              title="Send Receipt"
+                              className="text-[10px] uppercase font-bold text-emerald-700 hover:text-emerald-800"
+                              title="Send receipt link via WhatsApp"
                             >
                               WhatsApp
                             </button>

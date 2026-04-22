@@ -164,6 +164,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  const { data: tokenData } = await supabase.rpc("generate_public_token")
+  const publicToken =
+    (typeof tokenData === "string" && tokenData) ||
+    Buffer.from(`${invoice.business_id}-${invoice_id}-${Date.now()}`).toString("base64url")
+
   // ── 6. Create pending payment record ────────────────────────────────────────
   const { data: payment, error: payErr } = await supabase
     .from("payments")
@@ -175,8 +180,9 @@ export async function POST(request: NextRequest) {
       method: "momo",
       reference,
       notes: `Paystack MoMo — ${provider.toUpperCase()} — ${chargeStatus}`,
+      public_token: publicToken,
     })
-    .select("id")
+    .select("id, public_token")
     .single()
 
   if (payErr) {
@@ -191,6 +197,7 @@ export async function POST(request: NextRequest) {
     success: true,
     reference,
     payment_id: payment.id,
+    public_token: payment.public_token ?? null,
     status: chargeStatus,                      // "pay_offline" | "send_otp" | "success"
     otp_required: chargeStatus === "send_otp", // Vodafone needs OTP step
     display_text: psData.data?.display_text ?? null,

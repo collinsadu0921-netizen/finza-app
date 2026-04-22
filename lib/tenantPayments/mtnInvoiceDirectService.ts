@@ -217,6 +217,11 @@ async function ensureMtnInvoicePaymentRow(
     throw new Error("Invalid MTN transaction amount")
   }
 
+  const { data: tokenData } = await supabase.rpc("generate_public_token")
+  const publicToken =
+    (typeof tokenData === "string" && tokenData) ||
+    Buffer.from(`${txn.business_id}-${txn.invoice_id}-${Date.now()}`).toString("base64url")
+
   const { data: created, error: insErr } = await supabase
     .from("payments")
     .insert({
@@ -227,6 +232,7 @@ async function ensureMtnInvoicePaymentRow(
       method: "momo",
       reference: txn.reference,
       notes: `MTN MoMo direct — successful (tx ${financialTransactionId ?? "n/a"})`,
+      public_token: publicToken,
     })
     .select("id")
     .single()

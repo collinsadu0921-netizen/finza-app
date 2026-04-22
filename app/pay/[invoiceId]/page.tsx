@@ -17,6 +17,16 @@ type Invoice = {
   businesses?: { id: string; address_country: string | null } | null
 }
 
+type InvoicePaymentRow = {
+  id: string
+  amount: number
+  date: string
+  method: string
+  notes?: string | null
+  reference?: string | null
+  public_token?: string | null
+}
+
 /** Customer-facing manual wallet instructions (public invoice API). */
 type ManualWalletPayment = {
   provider_type: "manual_wallet"
@@ -56,7 +66,7 @@ export default function PayInvoicePage() {
   const invoiceId = (params?.invoiceId as string) || ""
 
   const [invoice,          setInvoice]          = useState<Invoice | null>(null)
-  const [payments,         setPayments]          = useState<any[]>([])
+  const [payments,         setPayments]          = useState<InvoicePaymentRow[]>([])
   const [loading,          setLoading]           = useState(true)
   const [error,            setError]             = useState("")
   const [selectedProvider, setSelectedProvider]  = useState<ProviderId | null>(null)
@@ -69,6 +79,8 @@ export default function PayInvoicePage() {
   const [businessCountry,  setBusinessCountry]   = useState<string | null>(null)
   const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
   const [paymentFlow, setPaymentFlow] = useState<"manual_wallet" | "mtn_momo_direct" | "paystack_momo">("paystack_momo")
+  /** Paystack MoMo: token returned from /charge (same row as poll/verify). MTN: filled from refreshed `payments` after success. */
+  const [chargePublicToken, setChargePublicToken] = useState<string | null>(null)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
 
   // ── Load invoice ─────────────────────────────────────────────────────────────
@@ -95,7 +107,7 @@ export default function PayInvoicePage() {
       const data = await res.json()
       if (!data.invoice) throw new Error("Invoice data not available")
       setInvoice(data.invoice)
-      setPayments(data.payments || [])
+      setPayments((data.payments || []) as InvoicePaymentRow[])
       setManualWalletPayment(data.manual_wallet_payment ?? null)
       setPaymentFlow(data.invoice_payment_flow ?? "paystack_momo")
       const country = data.invoice.businesses?.address_country || null
@@ -124,6 +136,7 @@ export default function PayInvoicePage() {
         } else if (data.success && data.status === "failed") {
           if (pollRef.current) clearInterval(pollRef.current)
           setPaymentStatus("failed")
+          setChargePublicToken(null)
           setError(data.message || "Payment was not completed")
         }
         return
@@ -138,6 +151,7 @@ export default function PayInvoicePage() {
       } else if (data.status === "failed" || data.status === "abandoned") {
         if (pollRef.current) clearInterval(pollRef.current)
         setPaymentStatus("failed")
+        setChargePublicToken(null)
         setError(data.gateway_response || "Payment was not completed")
       }
     } catch {}
@@ -146,6 +160,7 @@ export default function PayInvoicePage() {
   const handlePayMtnDirect = async () => {
     if (phone.replace(/\D/g, "").length < 10) return
     setError("")
+    setChargePublicToken(null)
     setPaymentStatus("initiating")
     try {
       const res = await fetch("/api/payments/momo/tenant/invoice/initiate", {
@@ -160,6 +175,7 @@ export default function PayInvoicePage() {
       setPaymentStatus("pending")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Payment initiation failed")
+      setChargePublicToken(null)
       setPaymentStatus("idle")
     }
   }
@@ -167,7 +183,9 @@ export default function PayInvoicePage() {
   // ── Initiate charge ───────────────────────────────────────────────────────
   const handlePay = async () => {
     if (!selectedProvider || phone.replace(/\D/g, "").length < 10) return
-    setError(""); setPaymentStatus("initiating")
+    setError("")
+    setChargePublicToken(null)
+    setPaymentStatus("initiating")
     try {
       const res  = await fetch("/api/payments/paystack/charge", {
         method:  "POST",
@@ -183,6 +201,9 @@ export default function PayInvoicePage() {
 
       setPaymentRef(data.reference)
       setDisplayText(data.display_text || "")
+      if (typeof data.public_token === "string" && data.public_token) {
+        setChargePublicToken(data.public_token)
+      }
 
       if (data.otp_required) {
         setPaymentStatus("otp")  // Vodafone — OTP step
@@ -191,6 +212,7 @@ export default function PayInvoicePage() {
       }
     } catch (err: any) {
       setError(err.message || "Payment initiation failed")
+      setChargePublicToken(null)
       setPaymentStatus("idle")
     }
   }
@@ -259,6 +281,26 @@ export default function PayInvoicePage() {
   const countryCode    = normalizeCountry(businessCountry)
   const isGhana        = countryCode === "GH"
 
+  const receiptPublicToken =
+    chargePublicToken ||
+    (paymentRef
+      ? payments.find((p) => p.reference && paymentRef && p.reference === paymentRef)?.public_token
+      : null) ||
+    (invoice.status === "paid" && payments.length > 0
+      ? [...payments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]?.public_token
+      : null) ||
+    null
+
+  const openReceipt = (opts?: { savePdf?: boolean }) => {
+    if (!receiptPublicToken) return
+    const qs = opts?.savePdf ? "?savePdf=1" : ""
+    window.open(
+      `${window.location.origin}/receipt-public/${encodeURIComponent(receiptPublicToken)}${qs}`,
+      "_blank",
+      "noopener,noreferrer"
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       <div className="max-w-lg mx-auto px-4 py-8">
@@ -289,8 +331,28 @@ export default function PayInvoicePage() {
           )}
 
           {invoice.status === "paid" && (
-            <div className="mt-4 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-800 font-medium">
-              ✓ This invoice has been paid
+            <div className="mt-4 space-y-2">
+              <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-800 font-medium">
+                ✓ This invoice has been paid
+              </div>
+              {paymentStatus !== "success" && receiptPublicToken && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => openReceipt()}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-green-700 bg-white px-4 py-2.5 text-sm font-semibold text-green-900 shadow-sm hover:bg-green-50 transition-colors"
+                  >
+                    View receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReceipt({ savePdf: true })}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 transition-colors"
+                  >
+                    Download receipt
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -301,9 +363,34 @@ export default function PayInvoicePage() {
             <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-semibold">Payment Successful!</p>
-              <p className="text-sm mt-0.5">You will receive a receipt shortly.</p>
+              <p className="text-sm mt-0.5">
+                {receiptPublicToken
+                  ? "You can open your payment receipt below."
+                  : "Your receipt will appear here once payment details have synced — refresh the page in a moment if needed."}
+              </p>
+              {receiptPublicToken && (
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => openReceipt()}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg border border-green-700 bg-white px-4 py-2.5 text-sm font-semibold text-green-900 shadow-sm hover:bg-green-100 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    View receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReceipt({ savePdf: true })}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 transition-colors"
+                  >
+                    Download receipt
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -324,7 +411,14 @@ export default function PayInvoicePage() {
           <div className="bg-red-50 border-l-4 border-red-400 text-red-800 p-4 rounded-lg mb-5">
             <p className="font-semibold">Payment Failed</p>
             <p className="text-sm mt-0.5">{error || "Please try again or use a different provider."}</p>
-            <button onClick={() => { setPaymentStatus("idle"); setError("") }} className="mt-2 text-sm underline font-medium">
+            <button
+              onClick={() => {
+                setPaymentStatus("idle")
+                setError("")
+                setChargePublicToken(null)
+              }}
+              className="mt-2 text-sm underline font-medium"
+            >
               Try again
             </button>
           </div>
