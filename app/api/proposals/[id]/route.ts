@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { assertProposalSections } from "@/lib/proposals/schema"
+import { assertProposalSections, type PricingMode } from "@/lib/proposals/schema"
 import { validateAndNormalizePricingForDb } from "@/lib/proposals/pricingForDb"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
@@ -266,7 +266,7 @@ export async function PUT(
       patch.pricing_payload = normalized.pricing_payload
     } else if (body.data.pricing_payload !== undefined) {
       const normalized = validateAndNormalizePricingForDb(
-        (existing.pricing_mode as string) || "none",
+        (existing.pricing_mode ?? "none") as PricingMode,
         body.data.pricing_payload
       )
       patch.pricing_mode = normalized.pricing_mode

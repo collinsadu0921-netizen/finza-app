@@ -15,6 +15,7 @@ import {
 import type { ProposalMessagingContext } from "@/lib/proposals/proposalSendMessaging"
 import {
   buildProposalDocumentTitleLine,
+  buildProposalEmailContextLine,
   buildProposalEmailSubject,
   buildProposalTransactionalEmailHtml,
   buildProposalWhatsAppMessage,
@@ -108,8 +109,11 @@ export async function POST(
       return NextResponse.json({ success: false, error: "Proposal not found" }, { status: 404 })
     }
 
-    const status = normalizeProposalStatus(row.status as string)
-    const public_url = `${origin}/proposal-public/${encodeURIComponent(row.public_token as string)}`
+    const proposalRow = row
+    const editorUserId = user.id
+
+    const status = normalizeProposalStatus(proposalRow.status as string)
+    const public_url = `${origin}/proposal-public/${encodeURIComponent(proposalRow.public_token as string)}`
 
     if (proposalStatusIsTerminal(status)) {
       return terminalError(status)
@@ -139,11 +143,11 @@ export async function POST(
       phone: string | null
       whatsapp_phone: string | null
     } | null = null
-    if (row.customer_id) {
+    if (proposalRow.customer_id) {
       const { data: cust } = await supabase
         .from("customers")
         .select("id, name, email, phone, whatsapp_phone")
-        .eq("id", row.customer_id as string)
+        .eq("id", proposalRow.customer_id as string)
         .eq("business_id", businessId)
         .is("deleted_at", null)
         .maybeSingle()
@@ -152,26 +156,28 @@ export async function POST(
 
     const messagingCtx: ProposalMessagingContext = {
       businessDisplayName: bizName,
-      proposalTitle: (row.title as string) || "",
-      proposalNumber: (row.proposal_number as string | null) ?? null,
+      proposalTitle: (proposalRow.title as string) || "",
+      proposalNumber: (proposalRow.proposal_number as string | null) ?? null,
       customerName: customer?.name ?? null,
       publicProposalUrl: public_url,
-      expiresAtIso: (row.expires_at as string | null) ?? null,
+      expiresAtIso: (proposalRow.expires_at as string | null) ?? null,
     }
 
     const isFirstSendTransition = proposalStaffSendInitialAllowed(status)
 
-    async function transitionDraftToSentIfNeeded(): Promise<{ ok: true; sent_at: string } | { ok: false; message: string }> {
+    const transitionDraftToSentIfNeeded = async (): Promise<
+      { ok: true; sent_at: string } | { ok: false; message: string }
+    > => {
       if (!isFirstSendTransition) {
-        return { ok: true, sent_at: (row.sent_at as string) || new Date().toISOString() }
+        return { ok: true, sent_at: (proposalRow.sent_at as string) || new Date().toISOString() }
       }
       const now = new Date().toISOString()
       const { data: updated, error: upErr } = await supabase
         .from("proposals")
         .update({
           status: "sent",
-          sent_at: (row.sent_at as string) || now,
-          updated_by_user_id: user.id,
+          sent_at: (proposalRow.sent_at as string) || now,
+          updated_by_user_id: editorUserId,
         })
         .eq("id", proposalId)
         .eq("business_id", businessId)
@@ -195,7 +201,7 @@ export async function POST(
     }
 
     /** Reload proposal row for response (minimal fields). */
-    async function loadProposalSnapshot() {
+    const loadProposalSnapshot = async () => {
       const { data: snap } = await supabase
         .from("proposals")
         .select("id, status, public_token, sent_at, title")
@@ -215,7 +221,7 @@ export async function POST(
           public_url,
           whatsapp_url: null,
           email_delivery_status: null,
-          proposal: snap || row,
+          proposal: snap || proposalRow,
           already_marked_sent: true,
         })
       }
@@ -228,7 +234,7 @@ export async function POST(
       const snap = await loadProposalSnapshot()
       await createAuditLog({
         businessId,
-        userId: user.id,
+        userId: editorUserId,
         actionType: "proposal.sent",
         entityType: "proposal",
         entityId: proposalId,
@@ -334,7 +340,7 @@ export async function POST(
       const snap = await loadProposalSnapshot()
       await createAuditLog({
         businessId,
-        userId: user.id,
+        userId: editorUserId,
         actionType: isFirstSendTransition ? "proposal.email_sent" : "proposal.email_resent",
         entityType: "proposal",
         entityId: proposalId,
@@ -386,7 +392,7 @@ export async function POST(
       const snap = await loadProposalSnapshot()
       await createAuditLog({
         businessId,
-        userId: user.id,
+        userId: editorUserId,
         actionType: isFirstSendTransition ? "proposal.whatsapp_shared" : "proposal.whatsapp_reshared",
         entityType: "proposal",
         entityId: proposalId,

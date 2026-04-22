@@ -497,8 +497,8 @@ Thank you.`
 
                 <div className="flex w-full shrink-0 sm:w-auto">
                   {invoice.status === "draft" ? (
-                    {/* No overflow-hidden: it clips SendMethodDropdown’s absolute menu; modal has no such wrapper so choices work there. */}
                     <div className="flex w-full rounded-xl border border-slate-200 shadow-sm dark:border-slate-600 sm:w-auto [&>div>button]:h-10 [&>div>button]:rounded-l-xl [&>div>button]:rounded-r-none [&>div>button]:border-0 [&>div>button]:border-r [&>div>button]:border-slate-200 dark:[&>div>button]:border-slate-600">
+                      {/* No overflow-hidden: it clips SendMethodDropdown’s absolute menu; modal has no such wrapper so choices work there. */}
                       <SendMethodDropdown
                         value={sendMethod}
                         onChange={setSendMethod}

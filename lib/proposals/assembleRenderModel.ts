@@ -55,8 +55,9 @@ export async function assembleProposalRenderModel(
     })
     .map((a) => ({ id: a.id, storage_path: a.storage_path }))
 
-  const assetUrlById: Record<string, string> = input.publicAssetUrlForId
-    ? Object.fromEntries(signRows.map((r) => [r.id, input.publicAssetUrlForId(r.id)]))
+  const publicAssetUrlForId = input.publicAssetUrlForId
+  const assetUrlById: Record<string, string> = publicAssetUrlForId
+    ? Object.fromEntries(signRows.map((r) => [r.id, publicAssetUrlForId(r.id)]))
     : await signProposalAssetPaths(supabase, signRows, input.signTtlSec)
 
   const sections = parseProposalSections(input.proposal.sections)
