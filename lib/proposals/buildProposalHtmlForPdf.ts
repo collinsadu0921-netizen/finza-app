@@ -111,10 +111,17 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
     ? `<div class="meta-block"><div class="meta-label">Prepared for</div><div class="meta-value">${escapeHtml(
         c.name
       )}</div>${c.email ? `<div class="meta-sub">${escapeHtml(c.email)}</div>` : ""}</div>`
-    : ""
+    : `<div class="meta-block meta-block--empty" aria-hidden="true"></div>`
 
   const logoUrl = model.business.logo_url ? safeAttrUrl(model.business.logo_url) : ""
   const logo = logoUrl ? `<img class="logo" src="${logoUrl}" alt="" />` : ""
+
+  const refLine = model.proposal_number
+    ? `<p class="doc-ref">Ref ${escapeHtml(model.proposal_number)}</p>`
+    : ""
+
+  const brandBlock = `<div class="doc-brand">${logo ? `<div class="doc-brand-logo">${logo}</div>` : ""}<div class="doc-brand-text"><div class="meta-label">Prepared by</div><div class="biz-name">${bizName}</div></div></div>`
+  const titleBlock = `<div class="doc-title-block"><h1 class="doc-title-h1">${title}</h1>${refLine}</div>`
 
   const { lead, investment, tail } = splitForInvestmentPlacement(model.sections)
   const showPricingInBody = model.pricing.mode !== "none"
@@ -160,9 +167,30 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
     body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
       color: #0f172a; font-size: 11pt; line-height: 1.5; margin: 0; padding: 0; }
     .page { padding: 8mm 10mm; max-width: 190mm; margin: 0 auto; }
-    .doc-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
-    .brand { display: flex; gap: 12px; align-items: center; }
-    .logo { max-height: 88px; max-width: 280px; object-fit: contain; }
+    .doc-header {
+      display: grid;
+      grid-template-columns: minmax(0, 0.93fr) minmax(0, 2.07fr) minmax(0, 0.82fr);
+      gap: 10px 16px;
+      align-items: center;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e2e8f0;
+      page-break-inside: avoid;
+    }
+    .doc-brand { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .doc-brand-logo .logo { display: block; }
+    .logo { max-height: 114px; max-width: 320px; object-fit: contain; }
+    .biz-name { font-size: 11.5pt; font-weight: 600; color: #0f172a; line-height: 1.28; margin-top: 3px; }
+    .doc-title-block { text-align: center; min-width: 0; padding: 0 6px; }
+    .doc-title-h1 {
+      margin: 0;
+      font-size: 16.75pt;
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      text-wrap: balance;
+    }
+    .doc-ref { margin: 5px 0 0; font-size: 8pt; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8; }
     h1 { font-size: 20pt; margin: 0 0 4px; letter-spacing: -0.02em; }
     h2 { font-size: 14pt; margin: 16px 0 8px; letter-spacing: -0.02em; }
     h2.inv-h2 { margin-top: 0; border: none; padding: 0; }
@@ -171,9 +199,10 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
     .doc-ul { margin: 0 0 12px 20px; padding: 0; }
     .muted { color: #64748b; }
     .small { font-size: 9pt; }
-    .meta-block { text-align: right; font-size: 10pt; }
-    .meta-label { text-transform: uppercase; letter-spacing: 0.06em; font-size: 8pt; color: #64748b; }
-    .meta-value { font-weight: 600; }
+    .meta-block { text-align: right; font-size: 10pt; min-width: 0; }
+    .meta-block--empty { visibility: hidden; pointer-events: none; }
+    .meta-label { text-transform: uppercase; letter-spacing: 0.06em; font-size: 8pt; color: #64748b; font-weight: 600; }
+    .meta-value { font-weight: 600; margin-top: 3px; }
     .meta-sub { color: #475569; }
     .main-doc { max-width: 100%; }
     .investment-shell {
@@ -272,13 +301,8 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
 <body>
   <div class="page">
     <header class="doc-header">
-      <div class="brand">
-        ${logo}
-        <div>
-          <h1>${title}</h1>
-          <div class="muted small">${bizName}</div>
-        </div>
-      </div>
+      ${brandBlock}
+      ${titleBlock}
       ${customerMetaHtml}
     </header>
     <div class="main-doc">

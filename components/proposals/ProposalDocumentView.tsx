@@ -329,38 +329,76 @@ export function ProposalDocumentView({
   return (
     <article className={`${wrap} ${inner} ${printSurface}`.trim()}>
       <header
-        className={`mb-8 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between ${unifiedDocument ? "border-b border-slate-100 pb-8" : ""}`}
+        className={
+          unifiedDocument
+            ? "mb-8 grid grid-cols-1 gap-5 border-b border-slate-100 pb-8 sm:grid-cols-[minmax(0,0.93fr)_minmax(0,2.07fr)_minmax(0,0.82fr)] sm:items-center sm:gap-x-6 sm:gap-y-5 lg:gap-x-9"
+            : "mb-8 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between"
+        }
       >
-        <div className="flex items-start gap-4">
-          {model.business.logo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={model.business.logo_url}
-              alt=""
-              className={
-                unifiedDocument
-                  ? "h-20 w-auto max-w-[min(280px,100%)] object-contain sm:h-24 sm:max-w-[320px]"
-                  : "h-16 w-auto max-w-[220px] object-contain"
-              }
-            />
-          ) : null}
-          <div>
-            <h1 className={`font-bold tracking-tight text-slate-900 ${unifiedDocument ? "text-3xl sm:text-4xl" : "text-2xl"}`}>
-              {model.title || "Proposal"}
-            </h1>
-            <p className={`mt-2 text-slate-500 ${unifiedDocument ? "text-base" : "text-sm"}`}>{bizLabel}</p>
-            {model.proposal_number ? (
-              <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Ref {model.proposal_number}</p>
+        {unifiedDocument ? (
+          <>
+            <div className="flex min-w-0 flex-col gap-1.5 sm:min-w-[8.5rem]">
+              {model.business.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={model.business.logo_url}
+                  alt=""
+                  className="h-[6.5rem] w-auto max-w-[min(320px,100%)] object-contain sm:h-[7.5rem] sm:max-w-full"
+                />
+              ) : null}
+              <div className={model.business.logo_url ? "" : "sm:pt-0.5"}>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared by</p>
+                <p className="mt-1 text-lg font-semibold leading-snug tracking-tight text-slate-900 sm:text-xl lg:whitespace-nowrap">
+                  {bizLabel}
+                </p>
+              </div>
+            </div>
+            <div className="min-w-0 sm:px-2 sm:text-center">
+              <h1 className="text-balance text-[1.375rem] font-bold leading-snug tracking-tight text-slate-900 sm:text-[1.625rem] sm:leading-tight lg:text-[1.6875rem]">
+                {model.title || "Proposal"}
+              </h1>
+              {model.proposal_number ? (
+                <p className="mt-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">Ref {model.proposal_number}</p>
+              ) : null}
+            </div>
+            {model.customer ? (
+              <div className="min-w-0 text-left sm:justify-self-end sm:self-center sm:text-right">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared for</p>
+                <p className="mt-1 text-base font-semibold leading-snug text-slate-900">{model.customer.name}</p>
+                {model.customer.email ? <p className="mt-0.5 text-sm leading-snug text-slate-600">{model.customer.email}</p> : null}
+              </div>
+            ) : (
+              <div className="hidden min-h-0 sm:block" aria-hidden />
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex items-start gap-3.5">
+              {model.business.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={model.business.logo_url}
+                  alt=""
+                  className="h-[4.25rem] w-auto max-w-[240px] object-contain"
+                />
+              ) : null}
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">{model.title || "Proposal"}</h1>
+                <p className="mt-1.5 text-sm font-semibold text-slate-800">{bizLabel}</p>
+                {model.proposal_number ? (
+                  <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Ref {model.proposal_number}</p>
+                ) : null}
+              </div>
+            </div>
+            {model.customer ? (
+              <div className="text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared for</p>
+                <p className="font-semibold text-slate-900">{model.customer.name}</p>
+                {model.customer.email ? <p className="text-slate-600">{model.customer.email}</p> : null}
+              </div>
             ) : null}
-          </div>
-        </div>
-        {model.customer ? (
-          <div className={`text-right ${unifiedDocument ? "text-base" : "text-sm"}`}>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared for</p>
-            <p className="font-semibold text-slate-900">{model.customer.name}</p>
-            {model.customer.email ? <p className="text-slate-600">{model.customer.email}</p> : null}
-          </div>
-        ) : null}
+          </>
+        )}
       </header>
 
       <ProposalDocumentBody model={model} docTypography />
