@@ -24,6 +24,7 @@ export const ROUTE_PERMISSION_RULES: Array<{ prefix: string; permission: Permiss
   { prefix: "/service/payments", permission: "invoices.view" },
   { prefix: "/service/invoices", permission: "invoices.view" },
   { prefix: "/service/estimates", permission: "estimates.view" },
+  { prefix: "/service/proposals", permission: "estimates.view" },
   { prefix: "/service/customers", permission: "customers.view" },
   { prefix: "/service/jobs", permission: "jobs.view" },
   { prefix: "/service/services", permission: "jobs.view" },

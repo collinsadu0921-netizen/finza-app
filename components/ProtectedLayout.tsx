@@ -683,7 +683,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
               {children}
             </PlatformAnnouncementsHost>
             {!hideFloatingAssistant && (
-              <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)]">
+              <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)] print-hide">
                 <AiAssistant
                   onPanelOpen={() => setAiContextRefreshKey((k) => k + 1)}
                   context={{

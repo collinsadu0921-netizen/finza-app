@@ -87,6 +87,14 @@ input[type="number"] {
    they do not appear in preview, export, or print output.
    ========================================================================== */
 @media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
   .print-hide,
   .no-print,
   .export-hide {
@@ -103,9 +111,19 @@ input[type="number"] {
   [class*="pl-64"] {
     padding-left: 0 !important;
   }
+  /* Proposal / document print: single column, no fake “screen” depth */
+  .proposal-print-document,
+  .proposal-print-document * {
+    box-shadow: none !important;
+  }
 }
 
 [data-export-mode="true"] .export-hide {
   display: none !important;
   visibility: hidden !important;
+}
+
+/* Full-width content when sidebar is hidden via export mode (e.g. proposal preview) */
+[data-export-mode="true"] [class*="pl-64"] {
+  padding-left: 0 !important;
 }

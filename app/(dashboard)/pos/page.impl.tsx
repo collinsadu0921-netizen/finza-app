@@ -1359,20 +1359,25 @@ export default function POSPage() {
     finalPrice: number,
     modifiers: Array<{ id: string; name: string; price: number }>
   ) => {
-    // Check if exact same item (same product, variant, and modifiers) exists in cart
-    const existingItem = cart.find(
-      (item) =>
-        item.product.id === product.id &&
-        item.variantId === variantId &&
-        JSON.stringify(item.modifiers || []) === JSON.stringify(modifiers)
-    )
+    const variantKey = variantId ?? null
+    const modsKey = JSON.stringify(modifiers)
 
-    if (existingItem) {
-      // Increment quantity
-      updateQuantity(existingItem.id, existingItem.quantity + 1)
-    } else {
-      const lineStockQty = variantId
-        ? Math.floor(variantStockById[variantId] ?? 0)
+    setCart((prev) => {
+      const existingItem = prev.find(
+        (item) =>
+          item.product.id === product.id &&
+          (item.variantId ?? null) === variantKey &&
+          JSON.stringify(item.modifiers || []) === modsKey
+      )
+
+      if (existingItem) {
+        return prev.map((item) =>
+          item.id === existingItem.id ? { ...item, quantity: item.quantity + 1 } : item
+        )
+      }
+
+      const lineStockQty = variantKey
+        ? Math.floor(variantStockById[variantKey] ?? 0)
         : Math.floor(
             product.stock_quantity != null && product.stock_quantity !== undefined
               ? Number(product.stock_quantity)
@@ -1384,13 +1389,13 @@ export default function POSPage() {
         product.low_stock_threshold != null && product.low_stock_threshold !== undefined
           ? Number(product.low_stock_threshold)
           : 5
-      // Add new item
+
       const newCartItem: CartItem = {
-        id: `${product.id}-${variantId || 'base'}-${Date.now()}-${Math.random()}`, // Unique ID
+        id: `${product.id}-${variantKey || "base"}-${Date.now()}-${Math.random()}`,
         product: {
           id: product.id,
-          name: displayName, // Use variant name if selected
-          price: finalPrice, // Use variant price if selected
+          name: displayName,
+          price: finalPrice,
           stock: lineStockQty,
           stock_quantity: lineStockQty,
           low_stock_threshold: thresh,
@@ -1401,13 +1406,14 @@ export default function POSPage() {
         },
         quantity: 1,
         note: undefined,
-        variantId: variantId,
-        variantName: variantId ? displayName : undefined,
-        variantPrice: variantId ? finalPrice : undefined,
+        variantId: variantKey,
+        variantName: variantKey ? displayName : undefined,
+        variantPrice: variantKey ? finalPrice : undefined,
         modifiers: modifiers.length > 0 ? modifiers : undefined,
       }
-      setCart((prev) => [...prev, newCartItem])
-    }
+      return [...prev, newCartItem]
+    })
+
     if (posCatalogEligibleForScanFocus()) {
       focusPosProductSearchInput()
     }
@@ -2136,8 +2142,9 @@ export default function POSPage() {
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
                 {quickKeys.map((product) => {
-                  const cartItem = cart.find((item) => item.product.id === product.id)
-                  const quantity = cartItem?.quantity || 0
+                  const quantity = cart
+                    .filter((item) => item.product.id === product.id)
+                    .reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
 
                   return (
                     <button
@@ -2153,7 +2160,7 @@ export default function POSPage() {
                         {formatMoney(product.price, currencyCode)}
                       </div>
                       {quantity > 0 && (
-                        <div className="mt-1 text-xs font-bold text-emerald-700">In cart: {quantity}</div>
+                        <div className="mt-1 text-xs font-bold tabular-nums text-emerald-700">In cart: {quantity}</div>
                       )}
                     </button>
                   )

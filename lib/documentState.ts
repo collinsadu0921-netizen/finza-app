@@ -9,12 +9,19 @@
 // ESTIMATE STATES
 // ============================================================================
 
-export type EstimateStatus = "draft" | "sent" | "accepted" | "expired" | "converted"
+export type EstimateStatus =
+  | "draft"
+  | "sent"
+  | "accepted"
+  | "rejected"
+  | "expired"
+  | "converted"
 
 export const ESTIMATE_STATES = {
   draft: "draft",
   sent: "sent",
   accepted: "accepted",
+  rejected: "rejected",
   expired: "expired",
   converted: "converted",
 } as const
@@ -24,6 +31,7 @@ export const ESTIMATE_ACTIONS = {
   draft: ["send", "edit", "delete"] as const,
   sent: ["resend", "edit", "convert_to_order", "convert_to_invoice"] as const,
   accepted: ["convert_to_order", "convert_to_invoice"] as const,
+  rejected: ["duplicate"] as const,
   expired: ["duplicate"] as const,
   converted: [] as const, // View only
 } as const
@@ -31,8 +39,10 @@ export const ESTIMATE_ACTIONS = {
 // State transitions for estimates
 export const ESTIMATE_TRANSITIONS = {
   draft: ["sent"] as const,
-  sent: [], // No state change on resend
+  // Public accept/decline and tenant accept/reject APIs move sent → accepted | rejected
+  sent: ["accepted", "rejected"] as const,
   accepted: [] as const,
+  rejected: [] as const,
   expired: [] as const,
   converted: [] as const,
 } as const

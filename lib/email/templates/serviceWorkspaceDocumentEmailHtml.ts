@@ -14,12 +14,13 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (m) => map[m])
 }
 
-export type ServiceWorkspaceDocumentEmailKind = "invoice" | "quote" | "proforma"
+export type ServiceWorkspaceDocumentEmailKind = "invoice" | "quote" | "proforma" | "proposal"
 
 const CTA_LABEL: Record<ServiceWorkspaceDocumentEmailKind, string> = {
   invoice: "View invoice",
   quote: "View quote",
   proforma: "View proforma",
+  proposal: "View proposal",
 }
 
 export function buildServiceWorkspaceDocumentEmailHtml(opts: {

@@ -497,7 +497,8 @@ Thank you.`
 
                 <div className="flex w-full shrink-0 sm:w-auto">
                   {invoice.status === "draft" ? (
-                    <div className="flex w-full overflow-hidden rounded-xl border border-slate-200 shadow-sm dark:border-slate-600 sm:w-auto [&>div>button]:h-10 [&>div>button]:rounded-none [&>div>button]:border-0 [&>div>button]:border-r [&>div>button]:border-slate-200 dark:[&>div>button]:border-slate-600">
+                    {/* No overflow-hidden: it clips SendMethodDropdown’s absolute menu; modal has no such wrapper so choices work there. */}
+                    <div className="flex w-full rounded-xl border border-slate-200 shadow-sm dark:border-slate-600 sm:w-auto [&>div>button]:h-10 [&>div>button]:rounded-l-xl [&>div>button]:rounded-r-none [&>div>button]:border-0 [&>div>button]:border-r [&>div>button]:border-slate-200 dark:[&>div>button]:border-slate-600">
                       <SendMethodDropdown
                         value={sendMethod}
                         onChange={setSendMethod}
@@ -507,7 +508,7 @@ Thank you.`
                       <button
                         type="button"
                         onClick={() => setShowSendModal(true)}
-                        className="inline-flex h-10 shrink-0 items-center gap-2 bg-slate-900 px-4 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+                        className="inline-flex h-10 shrink-0 items-center gap-2 rounded-r-xl rounded-l-none bg-slate-900 px-4 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
                       >
                         Send
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

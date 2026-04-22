@@ -1,11 +1,22 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import { retailPaths } from "@/lib/retail/routes"
 import { getStockStatus } from "@/lib/inventory"
+import {
+  loadRetailInventoryPageData,
+  DEFAULT_RETAIL_INVENTORY_PAGE_SIZE,
+  type InventoryCategory,
+  type InventoryProduct,
+} from "@/lib/inventory/loadRetailInventoryPageData"
+import {
+  describeInventoryVariantDeleteError,
+  inventoryNavigatedFromAddStockToList,
+  resolveInventoryRepageAfterFetch,
+} from "@/lib/inventory/inventoryListUiHelpers"
 import { getActiveStoreId } from "@/lib/storeSession"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useToast } from "@/components/ui/ToastProvider"
@@ -23,36 +34,14 @@ import {
   type MenuSelectOption,
 } from "@/components/retail/RetailBackofficeUi"
 
-type Category = {
-  id: string
-  name: string
-}
-
-type InventoryProduct = {
-  id: string
-  name: string
-  price: number
-  stock: number
-  stock_quantity?: number
-  low_stock_threshold?: number
-  track_stock?: boolean
-  category_id?: string
-  hasVariants?: boolean
-  variants?: Array<{
-    id: string
-    variant_name: string
-    stock: number
-    price?: number
-  }>
-}
-
 export default function RetailInventoryPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const { currencyCode, format, ready: currencyReady } = useBusinessCurrency()
   const toast = useToast()
   const { openConfirm } = useConfirm()
   const [products, setProducts] = useState<InventoryProduct[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
+  const [categories, setCategories] = useState<InventoryCategory[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
 
   const categoryFilterMenuOptions = useMemo(() => {
@@ -60,186 +49,159 @@ export default function RetailInventoryPage() {
     return head.concat(categories.map((c) => ({ value: c.id, label: c.name })))
   }, [categories])
   const [loading, setLoading] = useState(true)
+  const [listLoading, setListLoading] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
+  const [page, setPage] = useState(0)
+  const [totalProductCount, setTotalProductCount] = useState(0)
+  const [inventoryVersion, setInventoryVersion] = useState(0)
+  /** Full-screen loading only for the first successful load (or after store change). */
+  const firstPaintRef = useRef(true)
+  /** Suppresses applying stale fetch results when page, filters, or version change mid-request. */
+  const fetchGenerationRef = useRef(0)
+  const prevPathnameRef = useRef<string | null>(null)
+
+  const bumpReload = useCallback(() => {
+    setInventoryVersion((v) => v + 1)
+  }, [])
 
   useEffect(() => {
-    loadInventory()
+    const prev = prevPathnameRef.current
+    if (prev != null && inventoryNavigatedFromAddStockToList(pathname, prev, retailPaths.inventory)) {
+      bumpReload()
+    }
+    prevPathnameRef.current = pathname
+  }, [pathname, bumpReload])
 
-    // Reload when store changes
+  useEffect(() => {
     const handleStoreChange = () => {
-      loadInventory()
+      firstPaintRef.current = true
+      setSelectedCategory(null)
+      setPage(0)
+      setInventoryVersion((v) => v + 1)
     }
 
-    window.addEventListener('storeChanged', handleStoreChange)
+    window.addEventListener("storeChanged", handleStoreChange)
 
     return () => {
-      window.removeEventListener('storeChanged', handleStoreChange)
+      window.removeEventListener("storeChanged", handleStoreChange)
     }
   }, [])
 
-  const loadInventory = async () => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
+  useEffect(() => {
+    let cancelled = false
+    const gen = ++fetchGenerationRef.current
+
+    const run = async () => {
+      if (firstPaintRef.current) {
+        setLoading(true)
+      } else {
+        setListLoading(true)
       }
+      setError("")
+      try {
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser()
+        if (authError) {
+          throw new Error(authError.message || "Could not verify your session.")
+        }
+        if (!user) {
+          if (!cancelled && gen === fetchGenerationRef.current) {
+            setError("You need to be signed in to view inventory.")
+            setProducts([])
+            setCategories([])
+            setTotalProductCount(0)
+          }
+          return
+        }
 
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setLoading(false)
-        return
-      }
+        const business = await getCurrentBusiness(supabase, user.id)
+        if (!business) {
+          if (!cancelled && gen === fetchGenerationRef.current) {
+            setError("We could not find a business for your account. Check your workspace selection.")
+            setProducts([])
+            setCategories([])
+            setTotalProductCount(0)
+          }
+          return
+        }
 
-      setBusinessId(business.id)
+        if (!cancelled && gen === fetchGenerationRef.current) setBusinessId(business.id)
 
-      // Get active store - inventory MUST be store-specific
-      const activeStoreId = getActiveStoreId()
+        const activeStoreId = getActiveStoreId()
 
-      if (!activeStoreId || activeStoreId === 'all') {
-        setError("Please select a store before viewing inventory. Go to Stores page and click 'Open Store'.")
+        if (!activeStoreId || activeStoreId === "all") {
+          if (!cancelled && gen === fetchGenerationRef.current) {
+            setError("Please select a store before viewing inventory. Go to Stores page and click 'Open Store'.")
+            setProducts([])
+            setCategories([])
+            setTotalProductCount(0)
+          }
+          return
+        }
+
+        const { categories: nextCategories, products: nextProducts, totalProductCount: nextTotal } =
+          await loadRetailInventoryPageData(supabase, business.id, activeStoreId, {
+            page,
+            pageSize: DEFAULT_RETAIL_INVENTORY_PAGE_SIZE,
+            categoryId: selectedCategory,
+          })
+
+        if (cancelled || gen !== fetchGenerationRef.current) return
+
+        if (nextTotal <= 0) {
+          setCategories(nextCategories)
+          setProducts([])
+          setTotalProductCount(0)
+          if (page !== 0) setPage(0)
+          return
+        }
+
+        const repage = resolveInventoryRepageAfterFetch({
+          currentPage: page,
+          nextTotal,
+          nextProductsLength: nextProducts.length,
+          pageSize: DEFAULT_RETAIL_INVENTORY_PAGE_SIZE,
+        })
+        if (repage !== null) {
+          setPage(repage)
+          return
+        }
+
+        setCategories(nextCategories)
+        setProducts(nextProducts)
+        setTotalProductCount(nextTotal)
+      } catch (err: unknown) {
+        if (cancelled || gen !== fetchGenerationRef.current) return
+        const message =
+          err instanceof Error
+            ? err.message
+            : "We couldn't load inventory. Please check your connection and try again."
+        console.error("[RetailInventoryPage] loadInventory failed", err)
+        setError(message)
         setProducts([])
         setCategories([])
-        setLoading(false)
-        return
-      }
-
-      // Load categories
-      const { data: cats } = await supabase
-        .from("categories")
-        .select("id, name")
-        .eq("business_id", business.id)
-        .order("name", { ascending: true })
-
-      setCategories(cats || [])
-
-      // Load products
-      const { data: prods } = await supabase
-        .from("products")
-        .select("*")
-        .eq("business_id", business.id)
-        .order("name", { ascending: true })
-
-      if (!prods || prods.length === 0) {
-        setProducts([])
-        setLoading(false)
-        return
-      }
-
-      // Load stock from products_stock for active store (base products only)
-      const { data: stockData } = await supabase
-        .from("products_stock")
-        .select("product_id, variant_id, stock")
-        .eq("store_id", activeStoreId)
-        .is("variant_id", null)
-        .in("product_id", prods.map((p: any) => p.id))
-
-      // Create stock map for base products
-      const stockMap = new Map<string, number>()
-      if (stockData) {
-        stockData.forEach((record: any) => {
-          stockMap.set(record.product_id, Number(record.stock || 0))
-        })
-      }
-
-      // Check which products have variants
-      const productsWithVariants = new Set<string>()
-      const productVariantsMap = new Map<string, Array<{ id: string; variant_name: string; price?: number }>>()
-      
-      try {
-        const { data: variantsData } = await supabase
-          .from("products_variants")
-          .select("id, product_id, variant_name, price")
-          .in("product_id", prods.map((p: any) => p.id))
-
-        if (variantsData) {
-          variantsData.forEach((v: any) => {
-            productsWithVariants.add(v.product_id)
-            if (!productVariantsMap.has(v.product_id)) {
-              productVariantsMap.set(v.product_id, [])
-            }
-            productVariantsMap.get(v.product_id)!.push({
-              id: v.id,
-              variant_name: v.variant_name,
-              price: v.price ? Number(v.price) : undefined,
-            })
-          })
-        }
-      } catch (err: any) {
-        // If table doesn't exist or permission denied, continue without variants
-        if (
-          err?.code !== "42P01" &&
-          err?.code !== "42501" &&
-          !err?.message?.includes("does not exist") &&
-          !err?.message?.includes("schema cache")
-        ) {
-          console.error("Error checking variants:", err)
+        setTotalProductCount(0)
+      } finally {
+        if (cancelled || gen !== fetchGenerationRef.current) return
+        setListLoading(false)
+        if (firstPaintRef.current) {
+          setLoading(false)
+          firstPaintRef.current = false
         }
       }
-
-      // Load variant stock
-      const variantStockMap = new Map<string, number>()
-      if (productsWithVariants.size > 0) {
-        const variantIds = Array.from(productVariantsMap.values()).flat().map(v => v.id)
-        if (variantIds.length > 0) {
-          try {
-            const { data: variantStockData } = await supabase
-              .from("products_stock")
-              .select("variant_id, stock")
-              .eq("store_id", activeStoreId)
-              .in("variant_id", variantIds)
-              .not("variant_id", "is", null)
-
-            if (variantStockData) {
-              variantStockData.forEach((record: any) => {
-                variantStockMap.set(record.variant_id, Number(record.stock || 0))
-              })
-            }
-          } catch (err: any) {
-            console.error("Error loading variant stock:", err)
-          }
-        }
-      }
-
-      const inventoryProducts: InventoryProduct[] = (prods || []).map((p) => {
-        // Use stock from products_stock for active store
-        const storeStock = stockMap.get(p.id) ?? 0
-        const stockQty = Math.floor(storeStock)
-        const hasVariants = productsWithVariants.has(p.id)
-
-        // Load variants with stock if product has variants
-        let variants: Array<{ id: string; variant_name: string; stock: number; price?: number }> | undefined
-        if (hasVariants) {
-          const variantList = productVariantsMap.get(p.id) || []
-          variants = variantList.map(v => ({
-            ...v,
-            stock: Math.floor(variantStockMap.get(v.id) ?? 0),
-          }))
-        }
-
-        return {
-          id: p.id,
-          name: p.name,
-          price: Number(p.price),
-          stock: stockQty,
-          stock_quantity: stockQty,
-          low_stock_threshold: p.low_stock_threshold ? Number(p.low_stock_threshold) : undefined,
-          track_stock: p.track_stock !== undefined ? p.track_stock : true,
-          category_id: p.category_id || undefined,
-          hasVariants: hasVariants,
-          variants: variants,
-        }
-      })
-
-      setProducts(inventoryProducts)
-      setLoading(false)
-    } catch (err: any) {
-      setLoading(false)
     }
-  }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [page, selectedCategory, inventoryVersion])
+
+  const totalPages = Math.max(1, Math.ceil(totalProductCount / DEFAULT_RETAIL_INVENTORY_PAGE_SIZE))
+  const showPagination = totalProductCount > DEFAULT_RETAIL_INVENTORY_PAGE_SIZE
 
   const formatNumber = (num: number): string => {
     return num.toLocaleString('en-US', {
@@ -324,24 +286,37 @@ export default function RetailInventoryPage() {
         />
 
         {error ? (
-          <RetailBackofficeAlert tone="warning" className="mb-6">
-            {error}
+          <RetailBackofficeAlert tone="error" className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{error}</span>
+            <RetailBackofficeButton type="button" variant="secondary" className="shrink-0" onClick={() => bumpReload()}>
+              Try again
+            </RetailBackofficeButton>
           </RetailBackofficeAlert>
         ) : null}
 
-        {products.length === 0 ? (
+        {error ? null : totalProductCount === 0 ? (
           <RetailBackofficeEmpty
-            title="No products in this store"
-            description="Add products to the catalog, then return here to manage stock and variants."
+            title={selectedCategory ? "Nothing in this category" : "No products in this store"}
+            description={
+              selectedCategory
+                ? "Choose another category or clear the filter."
+                : "Add products to the catalog, then return here to manage stock and variants."
+            }
             action={
-              <RetailBackofficeButton variant="primary" onClick={() => router.push(retailPaths.products)}>
-                Go to products
-              </RetailBackofficeButton>
+              !selectedCategory ? (
+                <RetailBackofficeButton variant="primary" onClick={() => router.push(retailPaths.products)}>
+                  Go to products
+                </RetailBackofficeButton>
+              ) : undefined
             }
           />
         ) : (
           <>
-            {/* Stock Value Summary */}
+            {listLoading && !loading ? (
+              <p className="mb-4 text-sm text-slate-500">Updating inventory…</p>
+            ) : null}
+
+            {/* Stock Value Summary — figures are for the current page only when paginated */}
             {(() => {
               let totalStockValue = 0
               let totalItems = 0
@@ -358,7 +333,7 @@ export default function RetailInventoryPage() {
                   totalItems += product.stock
                 }
               }
-              const totalProducts = products.length
+              const pageSliceNote = showPagination ? "This page only." : ""
 
               return (
                 <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -369,6 +344,7 @@ export default function RetailInventoryPage() {
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Selling price × on hand (variant products use each variant&apos;s price and quantity)
+                      {pageSliceNote ? ` ${pageSliceNote}` : ""}
                     </p>
                   </RetailBackofficeCard>
                   <RetailBackofficeCard className="border-slate-200/90 bg-white" padding="p-5">
@@ -378,14 +354,18 @@ export default function RetailInventoryPage() {
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Sum of sellable units (each variant counted separately)
+                      {pageSliceNote ? ` ${pageSliceNote}` : ""}
                     </p>
                   </RetailBackofficeCard>
                   <RetailBackofficeCard className="border-slate-200/90 bg-white" padding="p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">SKU count</p>
                     <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">
-                      {formatInteger(totalProducts)}
+                      {formatInteger(totalProductCount)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">Products in catalog</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Products matching this view
+                      {showPagination ? ` · ${products.length} on this page` : ""}
+                    </p>
                   </RetailBackofficeCard>
                 </div>
               )
@@ -398,30 +378,57 @@ export default function RetailInventoryPage() {
                 <RetailMenuSelect
                   wrapperClassName="max-w-xs"
                   value={selectedCategory || ""}
-                  onValueChange={(v) => setSelectedCategory(v || null)}
+                  onValueChange={(v) => {
+                    setSelectedCategory(v || null)
+                    setPage(0)
+                  }}
                   options={categoryFilterMenuOptions}
                 />
               </RetailBackofficeCard>
             )}
 
-            {(() => {
-              // Filter products by category
-              const filteredProducts = selectedCategory
-                ? products.filter((p) => p.category_id === selectedCategory)
-                : products
+            {showPagination ? (
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-600">
+                  Page <span className="font-semibold tabular-nums">{page + 1}</span> of{" "}
+                  <span className="font-semibold tabular-nums">{totalPages}</span>
+                  <span className="text-slate-400"> · </span>
+                  <span className="tabular-nums text-slate-500">{totalProductCount} products</span>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <RetailBackofficeButton
+                    type="button"
+                    variant="secondary"
+                    disabled={listLoading || page <= 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Previous
+                  </RetailBackofficeButton>
+                  <RetailBackofficeButton
+                    type="button"
+                    variant="secondary"
+                    disabled={listLoading || page >= totalPages - 1}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </RetailBackofficeButton>
+                </div>
+              </div>
+            ) : null}
 
-              if (filteredProducts.length === 0) {
-                return (
-                  <RetailBackofficeEmpty
-                    title="Nothing in this category"
-                    description="Choose another category or clear the filter."
-                  />
-                )
-              }
-
-                return (
-                  <div className="space-y-3">
-                  {filteredProducts.map((product) => {
+            {products.length === 0 && totalProductCount > 0 ? (
+              <RetailBackofficeEmpty
+                title="No products on this page"
+                description="Try the previous page or reload."
+                action={
+                  <RetailBackofficeButton type="button" variant="secondary" onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                    Go to previous page
+                  </RetailBackofficeButton>
+                }
+              />
+            ) : (
+              <div className={`space-y-3 ${listLoading && !loading ? "opacity-60" : ""}`}>
+                {products.map((product) => {
                     const categoryName = product.category_id
                       ? categories.find((c) => c.id === product.category_id)?.name
                       : null
@@ -539,12 +546,17 @@ export default function RetailInventoryPage() {
                                                 .delete()
                                                 .eq("id", variant.id)
                                               if (error) {
-                                                toast.showToast(`Error deleting variant: ${error.message}`, "error")
+                                                toast.showToast(describeInventoryVariantDeleteError(error), "error")
                                               } else {
-                                                loadInventory()
+                                                bumpReload()
                                               }
-                                            } catch (err: any) {
-                                              toast.showToast(`Error deleting variant: ${err.message}`, "error")
+                                            } catch (err: unknown) {
+                                              toast.showToast(
+                                                describeInventoryVariantDeleteError(
+                                                  err && typeof err === "object" ? (err as { message?: string }) : null,
+                                                ),
+                                                "error",
+                                              )
                                             }
                                           },
                                         })
@@ -562,9 +574,8 @@ export default function RetailInventoryPage() {
                       </RetailBackofficeCard>
                     )
                   })}
-                </div>
-              )
-            })()}
+              </div>
+            )}
           </>
         )}
       </RetailBackofficeMain>

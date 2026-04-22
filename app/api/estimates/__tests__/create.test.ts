@@ -96,9 +96,14 @@ jest.mock('@/lib/archivedBusiness', () => ({
 describe('POST /api/estimates/create - Canonical Tax Engine', () => {
   let mockSupabase: any
   let estimatesTableMock: any
+  let estimateItemsInsertMock: jest.Mock
 
   beforeEach(() => {
     jest.clearAllMocks()
+
+    estimateItemsInsertMock = jest.fn(() => ({
+      select: jest.fn(() => Promise.resolve({ data: [], error: null })),
+    }))
 
     const quoteNumberChain: any = {
       eq: jest.fn(function (this: any) {
@@ -176,9 +181,7 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
         }
         if (table === 'estimate_items') {
           return {
-            insert: jest.fn(() => ({
-              select: jest.fn(() => Promise.resolve({ data: [], error: null })),
-            })),
+            insert: estimateItemsInsertMock,
           }
         }
         return {} as any
@@ -441,6 +444,29 @@ describe('POST /api/estimates/create - Canonical Tax Engine', () => {
     expect(configCall.effectiveDate).toBe(issueDate)
     expect(configCall.jurisdiction).toBe('GH')
     expect(configCall.taxInclusive).toBe(true)
+  })
+
+  it('persists product_service_id on estimate_items when provided on line items', async () => {
+    const svcId = 'f6666666-6666-4666-8666-666666666666'
+    const request = new NextRequest('http://localhost/api/estimates/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        issue_date: '2025-12-31',
+        items: [
+          { qty: 1, unit_price: 121.9, description: 'Catalog', product_service_id: svcId },
+          { qty: 1, unit_price: 10, description: 'Manual' },
+        ],
+        apply_taxes: true,
+      }),
+    })
+
+    await POST(request)
+
+    expect(estimateItemsInsertMock).toHaveBeenCalled()
+    const rows = estimateItemsInsertMock.mock.calls[0][0] as Array<{ product_service_id?: string }>
+    expect(rows[0].product_service_id).toBe(svcId)
+    expect(rows[1].product_service_id).toBeUndefined()
   })
 
   it('returns 400 when business_id is missing', async () => {

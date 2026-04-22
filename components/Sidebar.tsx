@@ -234,10 +234,23 @@ export default function Sidebar() {
         path.startsWith("/payments") ||
         path.startsWith("/customers") ||
         path.startsWith("/projects")
-      const resolvedBusinessIdForBranding =
+      const isRetailPath = path.startsWith("/retail/")
+      let resolvedBusinessIdForBranding =
         accountingBusinessId ||
         (isReportishPath ? getSelectedBusinessId() : null) ||
-        (billingScopedPath ? getSelectedBusinessId() : null)
+        (billingScopedPath ? getSelectedBusinessId() : null) ||
+        (isRetailPath ? getSelectedBusinessId() : null)
+
+      // Retail deep links often omit ?business_id= — resolve current workspace so logo/name never fall back to "Dashboard".
+      if (isRetailPath && !resolvedBusinessIdForBranding) {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (user) {
+          const business = await getCurrentBusiness(supabase, user.id)
+          resolvedBusinessIdForBranding = business?.id ?? null
+        }
+      }
 
       // Service routes without business_id: keep sidebar branding — filled by getCurrentBusiness effect (avoid logo/name flash on refresh).
       if (isServicePath && !accountingBusinessId) {
@@ -324,6 +337,7 @@ export default function Sidebar() {
             { label: "Dashboard", route: "/service/dashboard", minTier: "starter" },
             { label: "Customers", route: "/service/customers", minTier: "starter" },
             { label: "Quotes", route: "/service/estimates", minTier: "starter" },
+            { label: "Proposals", route: "/service/proposals", minTier: "starter" },
             { label: "Projects", route: "/service/jobs", minTier: "professional" },
           ],
         },

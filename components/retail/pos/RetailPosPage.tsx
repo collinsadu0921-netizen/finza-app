@@ -1601,20 +1601,25 @@ export default function RetailPosPage() {
     finalPrice: number,
     modifiers: Array<{ id: string; name: string; price: number }>
   ) => {
-    // Check if exact same item (same product, variant, and modifiers) exists in cart
-    const existingItem = cart.find(
-      (item) =>
-        item.product.id === product.id &&
-        item.variantId === variantId &&
-        JSON.stringify(item.modifiers || []) === JSON.stringify(modifiers)
-    )
+    const variantKey = variantId ?? null
+    const modsKey = JSON.stringify(modifiers)
 
-    if (existingItem) {
-      // Increment quantity
-      updateQuantity(existingItem.id, existingItem.quantity + 1)
-    } else {
-      const lineStockQty = variantId
-        ? Math.floor(variantStockById[variantId] ?? 0)
+    setCart((prev) => {
+      const existingItem = prev.find(
+        (item) =>
+          item.product.id === product.id &&
+          (item.variantId ?? null) === variantKey &&
+          JSON.stringify(item.modifiers || []) === modsKey
+      )
+
+      if (existingItem) {
+        return prev.map((item) =>
+          item.id === existingItem.id ? { ...item, quantity: item.quantity + 1 } : item
+        )
+      }
+
+      const lineStockQty = variantKey
+        ? Math.floor(variantStockById[variantKey] ?? 0)
         : Math.floor(
             product.stock_quantity != null && product.stock_quantity !== undefined
               ? Number(product.stock_quantity)
@@ -1626,13 +1631,13 @@ export default function RetailPosPage() {
         product.low_stock_threshold != null && product.low_stock_threshold !== undefined
           ? Number(product.low_stock_threshold)
           : 5
-      // Add new item
+
       const newCartItem: CartItem = {
-        id: `${product.id}-${variantId || 'base'}-${Date.now()}-${Math.random()}`, // Unique ID
+        id: `${product.id}-${variantKey || "base"}-${Date.now()}-${Math.random()}`,
         product: {
           id: product.id,
-          name: displayName, // Use variant name if selected
-          price: finalPrice, // Use variant price if selected
+          name: displayName,
+          price: finalPrice,
           stock: lineStockQty,
           stock_quantity: lineStockQty,
           low_stock_threshold: thresh,
@@ -1643,13 +1648,14 @@ export default function RetailPosPage() {
         },
         quantity: 1,
         note: undefined,
-        variantId: variantId,
-        variantName: variantId ? displayName : undefined,
-        variantPrice: variantId ? finalPrice : undefined,
+        variantId: variantKey,
+        variantName: variantKey ? displayName : undefined,
+        variantPrice: variantKey ? finalPrice : undefined,
         modifiers: modifiers.length > 0 ? modifiers : undefined,
       }
-      setCart((prev) => [...prev, newCartItem])
-    }
+      return [...prev, newCartItem]
+    })
+
     if (posCatalogEligibleForScanFocus()) {
       focusRetailPosSearchInput()
     }
@@ -2601,10 +2607,11 @@ export default function RetailPosPage() {
               <div className="mb-0.5 flex items-center justify-between gap-2 px-0.5">
                 <span className="text-[8px] font-extrabold uppercase tracking-wider text-amber-950/90">Quick keys</span>
               </div>
-              <div className="flex snap-x snap-mandatory gap-1.5 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
+              <div className="flex snap-x snap-mandatory gap-1.5 overflow-x-auto pb-0.5 pl-0.5 pr-1 pt-2 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
                 {quickKeys.map((product) => {
-                  const cartItem = cart.find((item) => item.product.id === product.id)
-                  const quantity = cartItem?.quantity || 0
+                  const quantity = cart
+                    .filter((item) => item.product.id === product.id)
+                    .reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
 
                   return (
                     <button
@@ -2614,7 +2621,7 @@ export default function RetailPosPage() {
                       className="relative min-h-0 w-[5.75rem] shrink-0 snap-start touch-manipulation rounded-lg border border-amber-300/90 bg-white px-1.5 py-1 text-center shadow-sm transition hover:border-amber-500 hover:bg-amber-50/50 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-amber-400/80 focus:ring-offset-0 min-[900px]:w-[6.25rem]"
                     >
                       {quantity > 0 ? (
-                        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-0.5 text-[9px] font-bold text-white ring-1 ring-white">
+                        <span className="absolute -right-0.5 -top-0.5 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white">
                           {quantity > 99 ? "99" : quantity}
                         </span>
                       ) : null}

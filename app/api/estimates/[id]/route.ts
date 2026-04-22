@@ -5,8 +5,77 @@ import { createAuditLog } from "@/lib/auditLog"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { getCurrencySymbol } from "@/lib/currency"
+import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { canEditEstimate, shouldCreateRevision } from "@/lib/documentState"
+import { pickEstimateItemProductServiceId } from "@/lib/estimates/pickEstimateItemProductServiceId"
+
+/** Fields PUT overwrites on the estimate row — used to restore draft header after failed line replace. */
+const ESTIMATE_PUT_REVERT_KEYS = [
+  "customer_id",
+  "estimate_number",
+  "issue_date",
+  "expiry_date",
+  "notes",
+  "currency_code",
+  "currency_symbol",
+  "fx_rate",
+  "home_currency_code",
+  "home_currency_total",
+  "subtotal",
+  "total_tax_amount",
+  "total_amount",
+  "subtotal_before_tax",
+  "nhil_amount",
+  "getfund_amount",
+  "covid_amount",
+  "vat_amount",
+  "tax",
+  "tax_lines",
+  "tax_engine_code",
+  "tax_engine_effective_from",
+  "tax_jurisdiction",
+] as const
+
+function estimateHeaderRevertFromSnapshot(snapshot: Record<string, unknown>) {
+  const out: Record<string, unknown> = {}
+  for (const k of ESTIMATE_PUT_REVERT_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(snapshot, k)) {
+      out[k] = snapshot[k]
+    }
+  }
+  return out
+}
+
+function mapSnapshotRowToEstimateItemInsert(
+  estimateIdForRows: string,
+  row: Record<string, unknown>
+) {
+  const qty = Number(row.quantity ?? row.qty) || 0
+  const price = Number(row.price ?? row.unit_price) || 0
+  const discount = Number(row.discount_amount) || 0
+  const totalRaw = row.total ?? row.line_total
+  const total =
+    totalRaw != null && totalRaw !== ""
+      ? Number(totalRaw)
+      : Math.round(Math.max(0, qty * price - discount) * 100) / 100
+  const out: Record<string, unknown> = {
+    estimate_id: estimateIdForRows,
+    description: String(row.description ?? ""),
+    quantity: qty,
+    price,
+    total: Math.round(Math.max(0, total) * 100) / 100,
+    discount_amount: discount,
+  }
+  const productServiceId = pickEstimateItemProductServiceId(
+    row as { product_service_id?: unknown; product_id?: unknown }
+  )
+  if (productServiceId) {
+    out.product_service_id = productServiceId
+  }
+  return out
+}
 
 export async function GET(
   request: NextRequest,
@@ -135,6 +204,8 @@ export async function PUT(
       notes,
       items,
       apply_taxes = true,
+      currency_code,
+      fx_rate,
     } = body
 
     const scope = await requireBusinessScopeForUser(supabase, user.id, bodyBusinessId)
@@ -148,6 +219,7 @@ export async function PUT(
       .select("id, status, business_id, revision_number, estimate_number")
       .eq("id", estimateId)
       .eq("business_id", scopedBusinessId)
+      .is("deleted_at", null)
       .single()
 
     if (checkError || !existingEstimate) {
@@ -168,15 +240,13 @@ export async function PUT(
     const businessId = existingEstimate.business_id
     const shouldCreateNewRevision = shouldCreateRevision("estimate", existingEstimate.status)
 
-    // Get business country for tax jurisdiction
-    // CRITICAL: Fetch country - required for tax calculation
+    // Business country + home currency (align with POST /api/estimates/create for tax + FX)
     const { data: businessRecord } = await supabase
       .from("businesses")
-      .select("address_country")
+      .select("address_country, default_currency")
       .eq("id", businessId)
       .single()
 
-    // BLOCK estimate update if business country is missing (no silent fallback)
     if (!businessRecord?.address_country) {
       return NextResponse.json(
         { 
@@ -187,6 +257,51 @@ export async function PUT(
         { status: 400 }
       )
     }
+
+    const homeCurrencyCode = businessRecord.default_currency || null
+    if (!homeCurrencyCode) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Business currency is required. Please set your default currency in Business Profile settings.",
+          message: "Currency required for estimate update",
+        },
+        { status: 400 }
+      )
+    }
+
+    const countryCode = normalizeCountry(businessRecord.address_country)
+    try {
+      assertCountryCurrency(countryCode, homeCurrencyCode)
+    } catch (error: any) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: error?.message || "Currency does not match business country.",
+          message: error?.message || "Currency-country mismatch",
+        },
+        { status: 400 }
+      )
+    }
+
+    const estimateCurrencyCode = currency_code || homeCurrencyCode
+    const isFxEstimate = !!(
+      estimateCurrencyCode &&
+      homeCurrencyCode &&
+      estimateCurrencyCode.toUpperCase() !== homeCurrencyCode.toUpperCase()
+    )
+    const parsedFxRate = fx_rate != null && fx_rate !== "" ? Number(fx_rate) : null
+    if (isFxEstimate && (!parsedFxRate || parsedFxRate <= 0 || Number.isNaN(parsedFxRate))) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Exchange rate is required when quoting in ${estimateCurrencyCode}. Please provide the rate (e.g. 1 ${estimateCurrencyCode} = X ${homeCurrencyCode}).`,
+          message: "FX rate required for foreign currency quote",
+        },
+        { status: 400 }
+      )
+    }
+    const estimateCurrencySymbol = getCurrencySymbol(estimateCurrencyCode || "")
 
     // Prepare line items for tax calculation
     const lineItems = items.map((item: any) => ({
@@ -217,7 +332,7 @@ export async function PUT(
     const effectiveDate = issue_date || new Date().toISOString().split('T')[0]
 
     // Recompute taxes canonically on every update (overwrite tax_lines and totals)
-    const jurisdiction = normalizeCountry(businessRecord.address_country)
+    const jurisdiction = countryCode
     if (!jurisdiction) {
       return NextResponse.json({ error: "Jurisdiction required", message: "Business country could not be resolved for tax calculation." }, { status: 400 })
     }
@@ -285,13 +400,21 @@ export async function PUT(
       }
     }
 
-    // Prepare estimate update/insert data
+    // Prepare estimate update/insert data (currency/FX mirror POST /api/estimates/create)
     const estimateData = {
       customer_id: customer_id || null,
       estimate_number,
       issue_date,
       expiry_date: expiry_date || null,
       notes: notes || null,
+      currency_code: estimateCurrencyCode || null,
+      currency_symbol: estimateCurrencySymbol || null,
+      fx_rate: isFxEstimate ? parsedFxRate : null,
+      home_currency_code: isFxEstimate ? homeCurrencyCode : null,
+      home_currency_total:
+        isFxEstimate && parsedFxRate
+          ? Math.round(estimateTotal * parsedFxRate * 100) / 100
+          : null,
       // Canonical tax values from TaxResult (already rounded to 2dp)
       subtotal: baseSubtotal,
       total_tax_amount: taxResult ? Math.round(taxResult.total_tax * 100) / 100 : 0,
@@ -312,6 +435,11 @@ export async function PUT(
 
     let finalEstimateId = estimateId
     let finalEstimate: any
+    /** Draft only: snapshot before destructive replace so we can restore header + lines if insert fails. */
+    let draftRollback: {
+      estimateRow: Record<string, unknown>
+      items: Record<string, unknown>[]
+    } | null = null
 
     if (shouldCreateNewRevision) {
       // Editing a sent estimate: Create new draft revision
@@ -321,6 +449,7 @@ export async function PUT(
         .select("*")
         .eq("id", estimateId)
         .eq("business_id", scopedBusinessId)
+        .is("deleted_at", null)
         .single()
 
       if (origError || !originalEstimate) {
@@ -358,27 +487,32 @@ export async function PUT(
 
       finalEstimateId = newRevision.id
       finalEstimate = newRevision
+      // Line items: insert only from request payload (below). Do not copy prior revision rows —
+      // that duplicated lines and desynced totals from stored items.
+    } else {
+      // Editing a draft: capture DB state before destructive line replace (insert failure compensation).
+      const { data: draftRowSnapshot, error: draftSnapErr } = await supabase
+        .from("estimates")
+        .select("*")
+        .eq("id", estimateId)
+        .eq("business_id", scopedBusinessId)
+        .is("deleted_at", null)
+        .single()
 
-      // Copy estimate items to new revision
-      const { data: originalItems } = await supabase
+      if (draftSnapErr || !draftRowSnapshot) {
+        return NextResponse.json({ error: "Estimate not found" }, { status: 404 })
+      }
+
+      const { data: draftItemsSnapshot } = await supabase
         .from("estimate_items")
         .select("*")
         .eq("estimate_id", estimateId)
 
-      if (originalItems && originalItems.length > 0) {
-        const newItems = originalItems.map((item: any) => ({
-          estimate_id: finalEstimateId,
-          description: item.description,
-          quantity: item.quantity || item.qty || 0,
-          price: item.price || item.unit_price || 0,
-          total: item.total || item.line_total || 0,
-          discount_amount: Number(item.discount_amount) || 0,
-        }))
-
-        await supabase.from("estimate_items").insert(newItems)
+      draftRollback = {
+        estimateRow: draftRowSnapshot as Record<string, unknown>,
+        items: (draftItemsSnapshot || []) as Record<string, unknown>[],
       }
-    } else {
-      // Editing a draft: Update in place
+
       const { data: updatedEstimate, error: updateError } = await supabase
         .from("estimates")
         .update(estimateData)
@@ -396,7 +530,7 @@ export async function PUT(
 
       finalEstimate = updatedEstimate
 
-      // Delete existing items and insert new ones
+      // Delete existing items; new rows inserted below (rollback restores snapshot if insert fails).
       await supabase.from("estimate_items").delete().eq("estimate_id", estimateId)
     }
 
@@ -406,8 +540,9 @@ export async function PUT(
       const price = Number(item.unit_price || item.price) || 0
       const discount = Number(item.discount_amount) || 0
       const total = Math.round(Math.max(0, (qty * price) - discount) * 100) / 100
+      const productServiceId = pickEstimateItemProductServiceId(item)
 
-      return {
+      const row: Record<string, unknown> = {
         estimate_id: finalEstimateId,
         description: item.description || "",
         quantity: qty,
@@ -415,6 +550,10 @@ export async function PUT(
         total: total,
         discount_amount: discount,
       }
+      if (productServiceId) {
+        row.product_service_id = productServiceId
+      }
+      return row
     })
 
     // Insert new items (or update if creating revision)
@@ -423,6 +562,32 @@ export async function PUT(
       .insert(estimateItems)
 
     if (itemsError) {
+      // Not a single DB transaction — compensate so we do not leave orphaned revisions or header/line mismatch.
+      if (shouldCreateNewRevision && finalEstimateId !== estimateId) {
+        await supabase.from("estimate_items").delete().eq("estimate_id", finalEstimateId)
+        await supabase
+          .from("estimates")
+          .delete()
+          .eq("id", finalEstimateId)
+          .eq("business_id", scopedBusinessId)
+      } else if (draftRollback) {
+        const revertHeader = estimateHeaderRevertFromSnapshot(draftRollback.estimateRow)
+        await supabase
+          .from("estimates")
+          .update(revertHeader)
+          .eq("id", estimateId)
+          .eq("business_id", scopedBusinessId)
+        const restoredRows = draftRollback.items.map((row) =>
+          mapSnapshotRowToEstimateItemInsert(estimateId, row)
+        )
+        if (restoredRows.length > 0) {
+          const { error: restoreErr } = await supabase.from("estimate_items").insert(restoredRows)
+          if (restoreErr) {
+            console.error("estimate PUT: draft rollback re-insert failed", restoreErr)
+          }
+        }
+      }
+
       return NextResponse.json(
         { error: itemsError.message },
         { status: 500 }

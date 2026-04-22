@@ -6,7 +6,7 @@ import { pathnameIsExportRoute, searchParamsIndicateExport } from "@/lib/exportM
 
 /**
  * Returns true when the current view is for export/print/preview:
- * - Route is /preview/*, /export/*, /print/*, /pdf/*
+ * - Route is /preview/*, /export/*, /print/*, /pdf/*, or /service/proposals/[id]/preview
  * - Query has ?print=true, ?export=true, or ?pdf=true
  *
  * Use to hide layout chrome (sidebar, nav) and UI controls so only document
