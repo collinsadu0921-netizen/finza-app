@@ -44,6 +44,7 @@ export async function GET(
       notes, footer_message, currency_code, currency_symbol,
       subtotal, nhil, getfund, covid, vat, total_tax, total,
       apply_taxes, status, public_token, sent_at, tax_lines,
+      wht_receivable_applicable, wht_receivable_rate, wht_receivable_amount,
       customers (
         id, name, email, phone, address
       ),

@@ -45,6 +45,9 @@ export async function GET(
           total,
           apply_taxes,
           tax_lines,
+          wht_receivable_applicable,
+          wht_receivable_rate,
+          wht_receivable_amount,
           customers (
             id,
             name,

@@ -36,6 +36,9 @@ type InvoiceDoc = {
   total: number
   apply_taxes?: boolean | null
   tax_lines?: unknown | null
+  wht_receivable_applicable?: boolean | null
+  wht_receivable_rate?: number | null
+  wht_receivable_amount?: number | null
   customers: InvoiceCustomer | null
 }
 
@@ -52,6 +55,7 @@ type InvoiceItemRow = {
 type Payment = {
   id: string
   amount: number
+  wht_amount?: number | null
   date: string
   method: string
   reference: string | null
@@ -249,6 +253,14 @@ export default function PublicReceiptPage() {
 
   const paidInFull = remainingBalance <= 0.005
 
+  const whtThisPayment = payment ? Math.max(0, Number(payment.wht_amount ?? 0)) : 0
+  const showWhtOnReceipt = whtThisPayment > 0.005
+  const cashReceivedThisPayment = payment ? Number(payment.amount) - whtThisPayment : 0
+  const whtWithheldLabel =
+    invoice?.wht_receivable_applicable && Number(invoice.wht_receivable_rate ?? 0) > 0
+      ? `Less WHT (${(Number(invoice.wht_receivable_rate) * 100).toFixed(0)}% withheld by customer)`
+      : "Less WHT withheld"
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center print:bg-white">
@@ -413,7 +425,9 @@ export default function PublicReceiptPage() {
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-2 gap-y-1 text-[11px] print:gap-x-2.5 print:gap-y-1.5 print:text-xs">
                 <div className="flex flex-col min-w-0">
-                  <span className="text-slate-500 truncate">This payment</span>
+                  <span className="text-slate-500 truncate">
+                    {showWhtOnReceipt ? "Settlement this payment" : "This payment"}
+                  </span>
                   <span className="font-bold text-slate-900 tabular-nums">{formatMoney(Number(payment.amount), currencyCode)}</span>
                 </div>
                 <div className="flex flex-col min-w-0">
@@ -449,6 +463,18 @@ export default function PublicReceiptPage() {
                   ) : null}
                 </div>
               </div>
+              {showWhtOnReceipt ? (
+                <div className="mt-1.5 space-y-1 border-t border-slate-200/90 pt-1.5 text-[11px] print:mt-2 print:space-y-1 print:border-slate-200 print:pt-2 print:text-xs receipt-avoid-break">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                    <span className="text-slate-600">{whtWithheldLabel}</span>
+                    <span className="font-semibold text-amber-900 tabular-nums">−{formatMoney(whtThisPayment, currencyCode)}</span>
+                  </div>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                    <span className="font-medium text-slate-800">Cash received</span>
+                    <span className="font-bold text-slate-900 tabular-nums">{formatMoney(cashReceivedThisPayment, currencyCode)}</span>
+                  </div>
+                </div>
+              ) : null}
               {payment.method === "momo" ? (
                 <p className="text-[9px] text-slate-600 mt-1 leading-tight print:text-[10px] print:mt-1.5 border-t border-slate-200/80 pt-1.5 print:pt-2">
                   E-Levy (1.5%) may apply to mobile money per network rules.

@@ -35,6 +35,10 @@ export type InvoiceDocumentInvoice = {
   nhil?: number
   getfund?: number
   vat?: number
+  /** Matches invoice PDF / buildInvoicePreviewHtml (FinancialDocument totals). */
+  wht_receivable_applicable?: boolean | null
+  wht_receivable_rate?: number | null
+  wht_receivable_amount?: number | null
   customers: {
     name: string
     email: string | null
@@ -150,6 +154,18 @@ export function InvoiceDocument({
   const hasBank = !!(settings?.bank_account_number)
   const hasMomo = !!(settings?.momo_number)
   const hasPaymentDetails = hasBank || hasMomo
+
+  // WHT on customer invoices — same rule as lib/invoices/buildInvoicePreviewHtml → FinancialDocument
+  const whtApplicable = Boolean(invoice.wht_receivable_applicable)
+  const whtRate = Number(invoice.wht_receivable_rate || 0)
+  const whtAmount = Number(invoice.wht_receivable_amount || 0)
+  const invoiceTotal = Number(invoice.total ?? 0)
+  const showWhtSummary = whtApplicable && whtAmount > 0
+  const netPayable = showWhtSummary ? Math.round((invoiceTotal - whtAmount) * 100) / 100 : invoiceTotal
+  const whtLineLabel =
+    whtRate > 0
+      ? `Less WHT (${(whtRate * 100).toFixed(0)}% withheld by customer)`
+      : "Less WHT (withheld by customer)"
 
   return (
     <div className={`bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden ${className}`}>
@@ -309,12 +325,31 @@ export function InvoiceDocument({
               </div>
             </>
           )}
-          <div className="flex justify-between items-center pt-2.5 border-t-2 border-slate-800">
-            <span className="text-base font-bold text-slate-900">Total</span>
-            <span className="text-xl font-bold text-slate-900">
-              {formatMoney(Number(invoice.total ?? 0), invoice.currency_code)}
-            </span>
-          </div>
+          {showWhtSummary ? (
+            <>
+              <div className="flex justify-between items-center pt-2.5 border-t-2 border-slate-800">
+                <span className="text-base font-bold text-slate-900">Total</span>
+                <span className="text-xl font-bold text-slate-900 tabular-nums">
+                  {formatMoney(invoiceTotal, invoice.currency_code)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm text-amber-900">
+                <span>{whtLineLabel}</span>
+                <span className="font-medium tabular-nums">({formatMoney(whtAmount, invoice.currency_code)})</span>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t-2 border-blue-900/80 text-blue-950">
+                <span className="text-base font-bold">Net payable to us</span>
+                <span className="text-lg font-bold tabular-nums">{formatMoney(netPayable, invoice.currency_code)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between items-center pt-2.5 border-t-2 border-slate-800">
+              <span className="text-base font-bold text-slate-900">Total</span>
+              <span className="text-xl font-bold text-slate-900 tabular-nums">
+                {formatMoney(Number(invoice.total ?? 0), invoice.currency_code)}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

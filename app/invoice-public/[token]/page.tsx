@@ -25,6 +25,9 @@ type Invoice = {
   status: string
   apply_taxes: boolean
   tax_lines?: unknown
+  wht_receivable_applicable?: boolean | null
+  wht_receivable_rate?: number | null
+  wht_receivable_amount?: number | null
   customers: {
     name: string
     email: string | null

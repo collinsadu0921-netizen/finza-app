@@ -43,6 +43,9 @@ type Invoice = {
   apply_taxes: boolean
   status: string
   tax_lines: any
+  wht_receivable_applicable?: boolean | null
+  wht_receivable_rate?: number | null
+  wht_receivable_amount?: number | null
   customers: Customer | null
   businesses: Business | null
 }
@@ -153,6 +156,17 @@ export default function InvoiceViewPage() {
   const customer = invoice.customers
   const isPaid   = invoice.status === "paid"
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+
+  const whtApplicable = Boolean(invoice.wht_receivable_applicable)
+  const whtAmount = Number(invoice.wht_receivable_amount || 0)
+  const whtRate = Number(invoice.wht_receivable_rate || 0)
+  const showWhtSummary = whtApplicable && whtAmount > 0
+  const invoiceTotal = Number(invoice.total)
+  const netPayable = showWhtSummary ? Math.round((invoiceTotal - whtAmount) * 100) / 100 : invoiceTotal
+  const whtLineLabel =
+    whtRate > 0
+      ? `Less WHT (${(whtRate * 100).toFixed(0)}% withheld by customer)`
+      : "Less WHT (withheld by customer)"
 
   // Tax breakdown lines (new tax engine)
   const taxLines: { name: string; amount: number }[] = []
@@ -323,10 +337,31 @@ export default function InvoiceViewPage() {
                 </div>
               )}
 
-              <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
-                <span className="font-bold text-gray-900 text-base">Total</span>
-                <span className="font-bold text-gray-900 text-lg tabular-nums">{formatMoney(invoice.total, invoice.currency_code)}</span>
-              </div>
+              {showWhtSummary ? (
+                <>
+                  <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
+                    <span className="font-bold text-gray-900 text-base">Total</span>
+                    <span className="font-bold text-gray-900 text-lg tabular-nums">
+                      {formatMoney(invoiceTotal, invoice.currency_code)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-amber-900 text-sm">
+                    <span>{whtLineLabel}</span>
+                    <span className="tabular-nums font-medium">({formatMoney(whtAmount, invoice.currency_code)})</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t-2 border-blue-900/70 text-blue-950">
+                    <span className="font-bold text-base">Net payable to us</span>
+                    <span className="font-bold text-lg tabular-nums">{formatMoney(netPayable, invoice.currency_code)}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between items-center pt-2 border-t-2 border-gray-900">
+                  <span className="font-bold text-gray-900 text-base">Total</span>
+                  <span className="font-bold text-gray-900 text-lg tabular-nums">
+                    {formatMoney(invoice.total, invoice.currency_code)}
+                  </span>
+                </div>
+              )}
 
               {totalPaid > 0 && (
                 <>
