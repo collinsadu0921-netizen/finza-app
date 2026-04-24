@@ -316,7 +316,13 @@ export default function PublicReceiptPage() {
             <div className="grid grid-cols-1 gap-2 lg:grid-cols-12 lg:gap-x-2 lg:gap-y-0 items-start print:gap-x-3 print:gap-y-2.5">
               {/* self-start + h-fit: never stretch to match taller right columns */}
               <div className="lg:col-span-5 flex items-start gap-1.5 min-w-0 self-start h-fit">
-                <BusinessLogoDisplay logoUrl={business?.logo_url} businessName={businessName} size="sm" rounded="lg" />
+                <BusinessLogoDisplay
+                  logoUrl={business?.logo_url}
+                  businessName={businessName}
+                  size="sm"
+                  rounded="lg"
+                  surface="document"
+                />
                 <div className="min-w-0 pt-0.5">
                   <p className="text-[8px] font-bold uppercase tracking-wider text-emerald-800 leading-none print:text-[9px] print:tracking-wide">
                     Payment receipt

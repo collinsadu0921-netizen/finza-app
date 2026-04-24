@@ -178,7 +178,13 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
       page-break-inside: avoid;
     }
     .doc-brand { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .doc-brand-logo .logo { display: block; }
+    /* finza-regression:pdf-logo-white-backing — same Chromium transparent-PNG issue as financial documents */
+    .doc-brand-logo {
+      display: inline-block;
+      line-height: 0;
+      background-color: #ffffff;
+    }
+    .doc-brand-logo .logo { display: block; background-color: #ffffff; }
     .logo { max-height: 114px; max-width: 320px; object-fit: contain; }
     .biz-name { font-size: 11.5pt; font-weight: 600; color: #0f172a; line-height: 1.28; margin-top: 3px; }
     .doc-title-block { text-align: center; min-width: 0; padding: 0 6px; }

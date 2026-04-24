@@ -13,6 +13,11 @@ export type BusinessLogoDisplayProps = {
   className?: string
   /** Whether to use a rounded-full circle (default true for avatar-style). */
   rounded?: "full" | "lg" | "none"
+  /**
+   * `app` — sidebar / chrome (neutral gray tile; respects dark mode).
+   * `document` — invoice, receipt, credit note sheets (white tile so transparent PNGs match the page).
+   */
+  surface?: "app" | "document"
 }
 
 const sizeMap = {
@@ -28,6 +33,7 @@ export default function BusinessLogoDisplay({
   size = "md",
   className = "",
   rounded = "full",
+  surface = "app",
 }: BusinessLogoDisplayProps) {
   const [imgFailed, setImgFailed] = useState(false)
   const showImage = Boolean(logoUrl && !imgFailed)
@@ -42,9 +48,14 @@ export default function BusinessLogoDisplay({
         ? "rounded-lg"
         : "rounded"
 
+  const surfaceClass =
+    surface === "document"
+      ? "bg-white"
+      : "bg-gray-100 dark:bg-gray-700"
+
   return (
     <div
-      className={`flex-shrink-0 overflow-hidden bg-gray-100 dark:bg-gray-700 ${roundedClass} ${sizeMap[size]} ${className}`}
+      className={`flex-shrink-0 overflow-hidden ${surfaceClass} ${roundedClass} ${sizeMap[size]} ${className}`}
       style={{ aspectRatio: "1" }}
     >
       {showImage ? (

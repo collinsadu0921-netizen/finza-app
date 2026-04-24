@@ -189,27 +189,169 @@ function extractTotal(text: string): { value: number; confidence: ConfidenceLeve
 /** City/country line (e.g. ACCRA, GHANA) — not the trading name */
 const ADDRESS_LINE_GHANA = /^\s*[A-Z][A-Z\s]{2,},\s*GHANA\s*$/i
 
+/** Legal / business entity markers (do NOT include bare country names — they match addresses). */
+const COMPANY_LEGAL_MARKERS =
+  /\b(LTD|LIMITED|LLC|L\.L\.C\.|INC\.?|PLC|G\.?L\.?T\.?C\.|ENTERPRISE|ENTERPRISES|CORPORATION|CORP\.|GROUP|HOLDINGS|HOLDING|SERVICES|SERVICE|CONSULT|CONSULTANTS|PARTNERS|PARTNERSHIP|CO\.|COMPANY|STORES?|SHOP|TRADING|SUPPLIES|WORKS|AGENCY|VENTURES)\b/i
+
+const STREET_ADDRESS_HINT =
+  /\b(street|st\.|road|rd\.|avenue|ave\.|boulevard|blvd|close|lane|ln\.|drive|dr\.|highway|hwy|crescent|cr\.|junction|jcn|plot|p\/lot|ring\s+road|spintex|n1\s|motorway|way|court|place|terrace|estate|area|zone|district|region|gps\s*address|digital\s*address)\b/i
+
+const PO_BOX = /\bP\.?\s*O\.?\s*BOX|POST\s*OFFICE\s*BOX|POB\s*#?\s*\d|\bBOX\s*\d+\b/i
+
+const PHONE_LINE =
+  /^(?:\+|00)?[\d\s().-]{10,}$|^(?:tel|phone|mobile|cell|momo|whatsapp|fax)\s*[:#]?\s*[\d+]/i
+
+const EMAIL_OR_URL = /@\S+\.\S+|https?:\/\/\S+/i
+
+const POSTAL_CODE_LIKE = /\b(?:GA|GX)[- ]?\d{3}[- ]?\d{4}\b|\b\d{5}(?:-\d{4})?\b/
+
+const TRADING_OR_PARTY_LABEL =
+  /^(?:merchant|supplier|business|vendor|sold\s+by|from|bill\s*to|customer|client|payee|trading\s+name)\s*[:#.\-]\s*(.+)$/i
+
+const FINZA_BOILERPLATE_LINE =
+  /^\s*(finza|finza\s+service|powered\s+by\s+finza|www\.finza|app\.finza|receipt\s*#|payment\s+receipt)\s*$/i
+
+/** Single-line tax / subtotal fragments (not a supplier). */
+const TAX_OR_FIGURE_HEAD_LINE =
+  /^(?:VAT|NHIL|GET\s*Fund|GETFund|COVID|SUB-?TOTAL|TOTAL|AMOUNT|GHS|₵|NGN|KES)\b/i
+
+function digitAndPunctRatio(t: string): number {
+  const compact = t.replace(/\s/g, "")
+  if (!compact.length) return 1
+  let n = 0
+  for (const ch of compact) {
+    if (/[\d.,#\-/():]/.test(ch)) n++
+  }
+  return n / compact.length
+}
+
+function isLikelyAddressOrContactLine(t: string): boolean {
+  const s = t.trim()
+  if (s.length < 3) return true
+  if (ADDRESS_LINE_GHANA.test(s)) return true
+  if (EMAIL_OR_URL.test(s)) return true
+  if (PHONE_LINE.test(s)) return true
+  if (PO_BOX.test(s)) return true
+  if (POSTAL_CODE_LIKE.test(s)) return true
+  if (digitAndPunctRatio(s) >= 0.55) return true
+
+  // Numbered / plot / No. lines with a street cue (e.g. "12 Independence Ave", "Plot 15 Ring Road", "No. 8 Highway")
+  if (
+    STREET_ADDRESS_HINT.test(s) &&
+    (/^\d+[A-Za-z]?\s+/.test(s) || /\bplot\s+\d+/i.test(s) || /\bno\.?\s*\d+/i.test(s))
+  ) {
+    return true
+  }
+  // Multi-clause address blocks: several commas + location words
+  const commaCount = (s.match(/,/g) ?? []).length
+  if (commaCount >= 2 && (STREET_ADDRESS_HINT.test(s) || /\b(accra|kumasi|tema|takoradi|lagos|nairobi)\b/i.test(s))) {
+    return true
+  }
+  // "City, Country" without matching strict ACCRA, GHANA pattern
+  if (commaCount >= 1 && /\b(ghana|nigeria|kenya|uganda|tanzania|south africa)\b/i.test(s) && !COMPANY_LEGAL_MARKERS.test(s)) {
+    return true
+  }
+  return false
+}
+
+function trySupplierFromLabeledLine(lines: string[]): string | undefined {
+  for (let i = 0; i < Math.min(8, lines.length); i++) {
+    const raw = lines[i]!.trim()
+    const m = raw.match(TRADING_OR_PARTY_LABEL)
+    if (!m?.[1]) continue
+    const v = m[1].trim()
+    if (v.length < 2 || v.length > 120) continue
+    if (isLikelyAddressOrContactLine(v)) continue
+    return v
+  }
+  return undefined
+}
+
+function textLooksFinzaServiceReceipt(lines: string[]): boolean {
+  const head = lines.slice(0, 15).join("\n").toLowerCase()
+  if (!/\bfinza\b/.test(head)) return false
+  return /\b(receipt|payment|invoice|service)\b/.test(head)
+}
+
+function scoreSupplierCandidate(t: string, lineIndex: number, lines: string[]): number {
+  if (t.length < 3 || t.length > 120) return -1e6
+  if (NOISE_WORDS.test(t)) return -1e6
+  if (SUPPLIER_NOISE.test(t)) return -1e6
+  if (/^\d+$/.test(t)) return -1e6
+  if (/^#\s*:|RECEIPT\s*#|DATE\s*:|AMOUNT\s*:/i.test(t)) return -1e6
+  if (FINZA_BOILERPLATE_LINE.test(t)) return -1e6
+  if (TAX_OR_FIGURE_HEAD_LINE.test(t)) return -1e6
+  if (isLikelyAddressOrContactLine(t)) return -1e6
+
+  let score = 0
+  // Earlier lines are more likely to be the legal/trading header.
+  score += Math.max(0, 14 - lineIndex) * 3
+
+  const hasCompanyMarker = COMPANY_LEGAL_MARKERS.test(t)
+  if (hasCompanyMarker) score += 40
+
+  const isAllCaps = t === t.toUpperCase() && /[A-Z]/.test(t) && /[A-Z]{3,}/.test(t)
+  const hasMixedCaseBusinessShape = /[a-z]/.test(t) && /[A-Z]/.test(t) && /[A-Za-z]{3,}/.test(t)
+  if (isAllCaps && hasCompanyMarker) score += 15
+  if (hasMixedCaseBusinessShape && !isLikelyAddressOrContactLine(t)) score += 8
+
+  const wordCount = t.split(/\s+/).filter(Boolean).length
+  if (wordCount >= 2 && wordCount <= 10) score += 5
+  if (wordCount > 14) score -= 10
+
+  if (textLooksFinzaServiceReceipt(lines)) {
+    if (lineIndex <= 2 && !/\bfinza\b/i.test(t)) score += 18
+    if (/\bfinza\b/i.test(t)) score -= 25
+  }
+
+  return score
+}
+
+function confidenceFromScore(score: number, hasCompanyMarker: boolean): ConfidenceLevel {
+  if (score >= 75) return "HIGH"
+  if (score >= 50 || hasCompanyMarker) return "MEDIUM"
+  return "LOW"
+}
+
 function extractSupplierName(lines: string[]): { value: string; confidence: ConfidenceLevel } | undefined {
-  const top = lines.slice(0, 10)
-  const strong = /(?:LIMITED|LTD|COMPANY|GHANA|ENTERPRISE|CORPORATION|CO\.)/i
-  let best: { value: string; confidence: ConfidenceLevel } | undefined
-  for (const line of top) {
-    const t = line.trim()
-    if (t.length < 3) continue
-    if (NOISE_WORDS.test(t)) continue
-    if (SUPPLIER_NOISE.test(t)) continue
-    if (/^\d+$/.test(t)) continue
-    if (t.length > 120) continue
-    if (/^#\s*:|RECEIPT\s*#|DATE\s*:|AMOUNT\s*:/i.test(t)) continue
-    if (ADDRESS_LINE_GHANA.test(t)) continue
-    const isAllCaps = t === t.toUpperCase() && /[A-Z]/.test(t)
-    const hasStrong = strong.test(t)
-    const conf: ConfidenceLevel = isAllCaps && hasStrong ? "HIGH" : hasStrong ? "MEDIUM" : "LOW"
-    if (!best || (hasStrong && t.length > best.value.length) || (conf === "HIGH" && best.confidence !== "HIGH")) {
-      best = { value: t, confidence: conf }
+  const labeled = trySupplierFromLabeledLine(lines)
+  if (labeled) {
+    const conf: ConfidenceLevel = COMPANY_LEGAL_MARKERS.test(labeled) ? "HIGH" : "MEDIUM"
+    return { value: labeled, confidence: conf }
+  }
+
+  const scan = lines.slice(0, 14)
+  let bestLine: string | null = null
+  let bestScore = -Infinity
+
+  for (let i = 0; i < scan.length; i++) {
+    const t = scan[i]!.trim()
+    const s = scoreSupplierCandidate(t, i, lines)
+    if (s > bestScore) {
+      bestScore = s
+      bestLine = t
     }
   }
-  return best
+
+  if (bestLine && bestScore > -1e5) {
+    return {
+      value: bestLine,
+      confidence: confidenceFromScore(bestScore, COMPANY_LEGAL_MARKERS.test(bestLine)),
+    }
+  }
+
+  // Weak fallback: first short non-excluded line (e.g. sole proprietor without LTD).
+  for (const line of lines.slice(0, 8)) {
+    const t = line.trim()
+    if (t.length < 3 || t.length > 100) continue
+    if (NOISE_WORDS.test(t) || SUPPLIER_NOISE.test(t)) continue
+    if (TAX_OR_FIGURE_HEAD_LINE.test(t)) continue
+    if (isLikelyAddressOrContactLine(t)) continue
+    if (FINZA_BOILERPLATE_LINE.test(t)) continue
+    return { value: t, confidence: "LOW" }
+  }
+
+  return undefined
 }
 
 function extractDocumentNumber(text: string): string | undefined {

@@ -7,7 +7,7 @@ import {
   executeFinzaAssistTool,
   checkAiRateLimit,
 } from "@/lib/ai/finzaAssistTools"
-import { performReceiptOcr } from "@/lib/receipt/performReceiptOcr"
+import { runPersistedReceiptOcr } from "@/lib/documents/runPersistedReceiptOcr"
 import type { DocumentType } from "@/lib/receipt/receiptOcr"
 
 /** Receipt OCR + LLM can exceed default serverless limits; align with /api/receipt-ocr. */
@@ -200,24 +200,29 @@ export async function POST(request: NextRequest) {
     if (receiptPath) {
       const docType: DocumentType =
         receiptDocRaw === "supplier_bill" ? "supplier_bill" : "expense"
-      const ocr = await performReceiptOcr(supabase, {
+      const run = await runPersistedReceiptOcr({
+        supabase,
         userId: user.id,
         businessId: business.id,
         receiptPath,
         documentType: docType,
+        sourceType: "manual_upload",
       })
+      const ocr = run.ocr
       if (ocr.ok) {
         receiptOcrPrefix = `[Attached receipt OCR — suggestion only, not booked]\n${JSON.stringify({
           suggestions: ocr.suggestions,
           confidence: ocr.confidence,
           receipt_path: receiptPath,
           document_type: docType,
+          document_id: run.documentId || null,
         })}\n\n`
       } else {
         receiptOcrPrefix = `[Attached receipt OCR failed]\n${JSON.stringify({
           error: ocr.error,
           code: ocr.code,
           receipt_path: receiptPath,
+          document_id: run.documentId || null,
         })}\n\n`
       }
     }

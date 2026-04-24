@@ -482,7 +482,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         overflow-wrap: break-word;
         word-break: break-word;
       }
-      .header-logo { flex-shrink: 0; line-height: 0; }
+      /* finza-regression:pdf-logo-white-backing — Headless Chromium page.pdf() can flatten PNG alpha to black without an opaque paint layer behind the bitmap. */
+      .header-logo {
+        flex-shrink: 0;
+        line-height: 0;
+        background-color: #ffffff;
+      }
       .header-issuer { flex: 1; min-width: 0; }
       .header-doc {
         flex-shrink: 0;
@@ -535,6 +540,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         max-width: 200px;
         max-height: 100px;
         object-fit: contain;
+        background-color: #ffffff;
       }
       .logo-initials {
         display: inline-flex;
@@ -815,7 +821,8 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
           gap: 12px;
         }
         .header-left { gap: 10px; }
-        .logo { max-height: 44px; max-width: 120px; }
+        .header-logo { background-color: #ffffff; }
+        .logo { max-height: 44px; max-width: 120px; background-color: #ffffff; }
         .logo-initials { width: 40px; height: 40px; font-size: 16px; border-radius: 6px; }
         .business-name { font-size: 15pt; margin: 0 0 3px 0; }
         .issuer-name-compact { font-size: 11pt; margin: 0 0 3px 0; }

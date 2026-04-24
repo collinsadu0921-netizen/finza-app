@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
@@ -40,6 +40,7 @@ export default function CreateExpensePage() {
   const [ocrError, setOcrError] = useState("")
   const [ocrSuggestedFields, setOcrSuggestedFields] = useState<{ supplier?: boolean; date?: boolean; amount?: boolean }>({})
   const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null)
+  const [incomingDocumentId, setIncomingDocumentId] = useState<string | null>(null)
 
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [showCategoryModal, setShowCategoryModal] = useState(false)
@@ -69,6 +70,44 @@ export default function CreateExpensePage() {
     const dd = searchParams.get("draft_date")
     if (dd && /^\d{4}-\d{2}-\d{2}$/.test(dd)) setDate(dd)
   }, [searchParams])
+
+  const incomingPrefillKeyRef = useRef<string>("")
+  useEffect(() => {
+    const fid = searchParams.get("from_incoming_doc")?.trim()
+    if (!fid || !businessId) return
+    const dedupeKey = `${businessId}:${fid}`
+    if (incomingPrefillKeyRef.current === dedupeKey) return
+    incomingPrefillKeyRef.current = dedupeKey
+    let cancelled = false
+    ;(async () => {
+      const res = await fetch(
+        `/api/incoming-documents/${encodeURIComponent(fid)}/effective-fields?business_id=${encodeURIComponent(businessId)}`
+      )
+      const j = (await res.json().catch(() => null)) as Record<string, unknown> | null
+      if (cancelled || !res.ok || !j || typeof j.effective_fields !== "object" || j.effective_fields === null) return
+      const ef = j.effective_fields as Record<string, unknown>
+      setIncomingDocumentId(fid)
+      if (typeof ef.supplier_name === "string" && ef.supplier_name.trim()) {
+        setSupplier(ef.supplier_name.trim())
+        setOcrSuggestedFields((p) => ({ ...p, supplier: true }))
+      }
+      if (ef.document_date != null && String(ef.document_date).trim()) {
+        setDate(String(ef.document_date))
+        setOcrSuggestedFields((p) => ({ ...p, date: true }))
+      }
+      if (ef.total != null && Number(ef.total) > 0) {
+        setAmount(String(ef.total))
+        setOcrSuggestedFields((p) => ({ ...p, amount: true }))
+      }
+      if (typeof ef.document_number === "string" && ef.document_number.trim()) {
+        const bit = `Ref: ${ef.document_number.trim()}`
+        setNotes((prev) => (prev?.includes(bit) ? prev : (prev ? `${prev}\n` : "") + bit))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [businessId, searchParams])
 
   const loadData = async () => {
     try {
@@ -163,25 +202,39 @@ export default function CreateExpensePage() {
     const file = e.target.files?.[0]
     if (file) {
       setReceiptFile(file)
+      setIncomingDocumentId(null)
       setOcrError("")
       setOcrSuggestedFields({})
       if (file.type.startsWith("image/")) {
+        setReceiptPreview((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev)
+          return null
+        })
         const reader = new FileReader()
         reader.onloadend = () => {
           setReceiptPreview(reader.result as string)
         }
         reader.readAsDataURL(file)
+      } else if (file.type === "application/pdf") {
+        setReceiptPreview((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev)
+          return URL.createObjectURL(file)
+        })
       } else {
-        setReceiptPreview(null)
+        setReceiptPreview((prev) => {
+          if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev)
+          return null
+        })
       }
     }
   }
 
   const handleExtractFromReceipt = async () => {
     if (!receiptFile || !businessId) return
-    const isImage = receiptFile.type.startsWith("image/")
-    if (!isImage) {
-      setOcrError("OCR is available for image files (JPG, PNG). PDF support may be added later.")
+    const canExtract =
+      receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf"
+    if (!canExtract) {
+      setOcrError("Use a JPG, PNG, WebP, or PDF receipt file.")
       return
     }
     setOcrError("")
@@ -194,12 +247,46 @@ export default function CreateExpensePage() {
         return
       }
       setUploadedReceiptPath(receiptPath)
+
+      const reg = await fetch("/api/incoming-documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: businessId,
+          storage_bucket: "receipts",
+          storage_path: receiptPath,
+          source_type: "expense_form_upload",
+          document_kind: "expense_receipt",
+          file_name: receiptFile?.name ?? null,
+          mime_type: receiptFile?.type ?? null,
+          file_size: receiptFile?.size ?? null,
+        }),
+      })
+      const regParsed = await readApiJson<{ document_id?: string; error?: string }>(reg)
+      if (!regParsed.ok) {
+        setOcrError("Could not register receipt document (invalid response).")
+        setOcrLoading(false)
+        return
+      }
+      if (!reg.ok) {
+        setOcrError(regParsed.data?.error || "Could not register receipt document.")
+        setOcrLoading(false)
+        return
+      }
+      const docId = regParsed.data?.document_id
+      if (!docId) {
+        setOcrError("Could not register receipt document.")
+        setOcrLoading(false)
+        return
+      }
+      setIncomingDocumentId(docId)
+
       const res = await fetch("/api/receipt-ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           business_id: businessId,
-          receipt_path: receiptPath,
+          document_id: docId,
           document_type: "expense",
         }),
       })
@@ -362,6 +449,7 @@ export default function CreateExpensePage() {
           date,
           notes: notes || null,
           receipt_path: receiptPath,
+          ...(incomingDocumentId ? { incoming_document_id: incomingDocumentId } : {}),
           ...(fxEnabled && fxCurrencyCode && fxRate ? {
             currency_code: fxCurrencyCode,
             fx_rate: parseFloat(fxRate),
@@ -576,7 +664,8 @@ export default function CreateExpensePage() {
                   onChange={handleFileChange}
                   className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                 />
-                {receiptPreview && receiptFile?.type.startsWith("image/") && (
+                {receiptFile &&
+                  (receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf") && (
                   <div className="mt-3 flex flex-col gap-2">
                     <button
                       type="button"
@@ -604,6 +693,16 @@ export default function CreateExpensePage() {
                     <p className="text-xs text-slate-500">
                       Pre-fills supplier, date, and amount. You must still click &quot;Create Expense&quot; to save.
                     </p>
+                    {incomingDocumentId && businessId && (
+                      <p className="text-xs text-slate-600">
+                        <a
+                          className="text-blue-700 underline"
+                          href={`/service/incoming-documents/${encodeURIComponent(incomingDocumentId)}/review?business_id=${encodeURIComponent(businessId)}`}
+                        >
+                          Review and correct extraction
+                        </a>
+                      </p>
+                    )}
                   </div>
                 )}
                 {ocrError && (
@@ -611,9 +710,14 @@ export default function CreateExpensePage() {
                     {ocrError}
                   </p>
                 )}
-                {receiptPreview && (
+                {receiptPreview && receiptFile?.type.startsWith("image/") && (
                   <div className="mt-4">
                     <img src={receiptPreview} alt="Receipt preview" className="max-w-xs rounded-xl border border-slate-200" />
+                  </div>
+                )}
+                {receiptPreview && receiptFile?.type === "application/pdf" && (
+                  <div className="mt-4 h-64 w-full max-w-md rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                    <iframe title="Receipt PDF preview" src={receiptPreview} className="w-full h-full" />
                   </div>
                 )}
               </div>

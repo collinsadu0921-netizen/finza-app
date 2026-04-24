@@ -1,51 +1,30 @@
 /**
  * Receipt OCR API route tests.
  * - 401 when no user
- * - 403 when not business member
- * - 400 when external URL (SSRF guard)
- * - 200 with ok:true and suggestions shape (mock provider)
- * - No DB writes (route is read-only)
+ * - 403 when persisted OCR returns forbidden
+ * - 200 with ok:true and suggestions + document_id (mocked persisted pipeline)
  */
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals"
 import { NextRequest } from "next/server"
 import { POST } from "../route"
+import { runPersistedReceiptOcr } from "@/lib/documents/runPersistedReceiptOcr"
 
 const mockGetUser = jest.fn()
-const mockGetUserRole = jest.fn()
-const mockFrom = jest.fn()
-const mockAuth = { getUser: mockGetUser }
-const mockStorageFrom = jest.fn()
 
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(() =>
     Promise.resolve({
-      auth: mockAuth,
-      storage: { from: mockStorageFrom },
-      from: mockFrom,
+      auth: { getUser: mockGetUser },
     })
   ),
 }))
 
-jest.mock("@/lib/userRoles", () => ({
-  getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
+jest.mock("@/lib/documents/runPersistedReceiptOcr", () => ({
+  runPersistedReceiptOcr: jest.fn(),
 }))
 
-const mockParseReceiptText = jest.fn(() => ({
-  suggestions: {
-    supplier_name: "Test Supplier",
-    document_date: "2026-01-29",
-    total: 100,
-  },
-  confidence: { supplier_name: "HIGH", document_date: "HIGH", total: "HIGH" },
-}))
-
-jest.mock("@/lib/receipt/receiptOcr", () => ({
-  getReceiptOcrProvider: jest.fn(() => ({
-    extractText: jest.fn(() => Promise.resolve("TOTAL GHS 100\nTest Supplier\n2026-01-29")),
-  })),
-  parseReceiptText: (...args: unknown[]) => mockParseReceiptText(...args),
-}))
+const mockRunPersisted = jest.mocked(runPersistedReceiptOcr)
 
 function jsonBody(body: object): NextRequest {
   return new NextRequest("http://localhost/api/receipt-ocr", {
@@ -58,16 +37,23 @@ function jsonBody(body: object): NextRequest {
 describe("POST /api/receipt-ocr", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    mockStorageFrom.mockReturnValue({
-      createSignedUrl: jest.fn(() => Promise.resolve({ data: { signedUrl: "https://allowed.storage/image.jpg" } })),
-    })
-    mockFrom.mockReturnValue({
-      select: jest.fn().mockReturnValue({
-        eq: jest.fn().mockReturnValue({
-          single: jest.fn(() => Promise.resolve({ data: { default_currency: "GHS" } })),
-          maybeSingle: jest.fn(() => Promise.resolve({ data: { default_currency: "GHS" } })),
-        }),
-      }),
+    mockRunPersisted.mockResolvedValue({
+      ocr: {
+        ok: true,
+        suggestions: {
+          supplier_name: "Test Supplier",
+          document_date: "2026-01-29",
+          total: 100,
+        },
+        confidence: { supplier_name: "HIGH", document_date: "HIGH", total: "HIGH" },
+        diagnostics: {
+          raw_ocr_text: "TOTAL GHS 100",
+          provider: "tesseract",
+          provider_version: "tesseract.js@7",
+          parser_version: "receiptOcr_parseReceiptText@v1",
+        },
+      },
+      documentId: "doc-persisted-1",
     })
   })
 
@@ -83,12 +69,20 @@ describe("POST /api/receipt-ocr", () => {
     expect(res.status).toBe(401)
     const data = await res.json()
     expect(data.error).toBe("Unauthorized")
-    expect(mockGetUserRole).not.toHaveBeenCalled()
+    expect(mockRunPersisted).not.toHaveBeenCalled()
   })
 
-  it("returns 403 when user is not business member", async () => {
+  it("returns 403 when persisted pipeline reports forbidden", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u" } } })
-    mockGetUserRole.mockResolvedValue(null)
+    mockRunPersisted.mockResolvedValueOnce({
+      ocr: {
+        ok: false,
+        error: "Unauthorized",
+        code: "OCR_FORBIDDEN",
+        httpStatus: 403,
+      },
+      documentId: "",
+    })
     const res = await POST(
       jsonBody({
         business_id: "b",
@@ -97,89 +91,82 @@ describe("POST /api/receipt-ocr", () => {
       })
     )
     expect(res.status).toBe(403)
-    const data = await res.json()
-    expect(data.error).toBe("Unauthorized")
+    expect(mockRunPersisted).toHaveBeenCalled()
   })
 
-  it("rejects external URL origin (SSRF guard)", async () => {
+  it("returns ok:true with suggestions and document_id when pipeline succeeds", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u" } } })
-    mockGetUserRole.mockResolvedValue("owner")
     const res = await POST(
       jsonBody({
         business_id: "b",
-        receipt_path: "https://evil.com/image.jpg",
+        receipt_path: "bills/b/1.jpg",
+        document_type: "supplier_bill",
+      })
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.ok).toBe(true)
+    expect(data.document_id).toBe("doc-persisted-1")
+    expect(data.suggestions.supplier_name).toBe("Test Supplier")
+    expect(data.suggestions.total).toBe(100)
+    expect(mockRunPersisted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "u",
+        businessId: "b",
+        receiptPath: "bills/b/1.jpg",
+        documentType: "supplier_bill",
+        sourceType: "manual_upload",
+      })
+    )
+  })
+
+  it("supports document_id path (forwards to runPersistedReceiptOcr)", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u" } } })
+    await POST(
+      jsonBody({
+        business_id: "b",
+        document_id: "incoming-uuid",
         document_type: "expense",
       })
     )
-    expect(res.status).toBe(400)
+    expect(mockRunPersisted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingDocumentId: "incoming-uuid",
+        receiptPath: "",
+      })
+    )
+  })
+
+  it("returns parse-empty shape with document_id when pipeline returns OCR_PARSE_EMPTY", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u" } } })
+    mockRunPersisted.mockResolvedValueOnce({
+      ocr: {
+        ok: false,
+        error: "Could not extract details from this receipt. Please fill manually.",
+        code: "OCR_PARSE_EMPTY",
+        httpStatus: 200,
+        suggestions: {},
+        confidence: {},
+        diagnostics: {
+          raw_ocr_text: "noise only",
+          provider: "tesseract",
+          provider_version: "tesseract.js@7",
+          parser_version: "receiptOcr_parseReceiptText@v1",
+        },
+      },
+      documentId: "doc-parse-empty",
+    })
+    const res = await POST(
+      jsonBody({
+        business_id: "b",
+        receipt_path: "expenses/b/1.jpg",
+        document_type: "expense",
+      })
+    )
+    expect(res.status).toBe(200)
     const data = await res.json()
-    expect(data.error).toBe("External URLs not allowed")
-  })
-
-  it("returns ok:true with suggestions shape when authorized and path provided", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: { id: "u" } } })
-    mockGetUserRole.mockResolvedValue("owner")
-    const origFetch = globalThis.fetch
-    globalThis.fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        headers: new Headers({ "content-type": "image/jpeg" }),
-        blob: () =>
-          Promise.resolve(
-            new Blob(["x"], { type: "image/jpeg" })
-          ),
-      } as Response)
-    ) as jest.Mock
-
-    try {
-      const res = await POST(
-        jsonBody({
-          business_id: "b",
-          receipt_path: "bills/b/1.jpg",
-          document_type: "supplier_bill",
-        })
-      )
-      expect(res.status).toBe(200)
-      const data = await res.json()
-      expect(data.ok).toBe(true)
-      expect(data.suggestions).toBeDefined()
-      expect(typeof data.suggestions).toBe("object")
-      expect(data.confidence).toBeDefined()
-      expect(data.suggestions.supplier_name).toBe("Test Supplier")
-      expect(data.suggestions.total).toBe(100)
-    } finally {
-      globalThis.fetch = origFetch
-    }
-  })
-
-  it("does not call ledger or write tables (read-only)", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: { id: "u" } } })
-    mockGetUserRole.mockResolvedValue("owner")
-    const origFetch = globalThis.fetch
-    globalThis.fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        headers: new Headers({ "content-type": "image/jpeg" }),
-        blob: () => Promise.resolve(new Blob(["x"], { type: "image/jpeg" })),
-      } as Response)
-    ) as jest.Mock
-
-    try {
-      await POST(
-        jsonBody({
-          business_id: "b",
-          receipt_path: "bills/b/1.jpg",
-          document_type: "expense",
-        })
-      )
-      const fromCalls = mockFrom.mock.calls.map((c: unknown[]) => c[0] as string)
-      expect(fromCalls).toContain("businesses")
-      expect(fromCalls).not.toContain("journal_entries")
-      expect(fromCalls).not.toContain("journal_entry_lines")
-      expect(fromCalls).not.toContain("expenses")
-      expect(fromCalls).not.toContain("bills")
-    } finally {
-      globalThis.fetch = origFetch
-    }
+    expect(data.ok).toBe(false)
+    expect(data.code).toBe("OCR_PARSE_EMPTY")
+    expect(data.document_id).toBe("doc-parse-empty")
   })
 })

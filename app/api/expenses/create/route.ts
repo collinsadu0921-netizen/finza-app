@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { insertExpenseForBusiness } from "@/lib/expenses/insertExpenseForBusiness"
+import {
+  getIncomingDocumentForBusiness,
+  linkIncomingDocumentToEntity,
+} from "@/lib/documents/incomingDocumentsService"
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +32,7 @@ export async function POST(request: NextRequest) {
       date,
       notes,
       receipt_path,
+      incoming_document_id,
       currency_code,
       fx_rate,
     } = body
@@ -78,6 +83,29 @@ export async function POST(request: NextRequest) {
         },
         { status: result.status }
       )
+    }
+
+    const expense = result.expense as { id: string }
+    const incomingDocId =
+      typeof incoming_document_id === "string" ? incoming_document_id.trim() : ""
+    if (incomingDocId) {
+      const doc = await getIncomingDocumentForBusiness(supabase, incomingDocId, business_id)
+      const rp = typeof receipt_path === "string" ? receipt_path.trim() : ""
+      if (doc && (!rp || doc.storage_path === rp)) {
+        const linkRes = await linkIncomingDocumentToEntity(supabase, {
+          documentId: incomingDocId,
+          businessId: business_id,
+          linkedEntityType: "expense",
+          linkedEntityId: expense.id,
+          expectedStoragePath: rp || doc.storage_path,
+          actualFilePath: rp || doc.storage_path,
+        })
+        if (!linkRes.ok) {
+          console.warn("[expenses/create] incoming document link skipped:", linkRes.error)
+        }
+      } else if (doc && rp && doc.storage_path !== rp) {
+        console.warn("[expenses/create] incoming_document_id ignored: receipt_path does not match document")
+      }
     }
 
     return NextResponse.json({

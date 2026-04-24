@@ -1,6 +1,6 @@
 /**
  * Shared receipt OCR pipeline for /api/receipt-ocr and Finza Assist tool.
- * Read-only; no ledger writes.
+ * Read-only; no ledger writes. Supports images and PDFs (Stage 2).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -8,6 +8,8 @@ import { getUserRole } from "@/lib/userRoles"
 import { downscaleReceiptDataUrlForOcr } from "@/lib/receipt/downscaleReceiptImageForOcr"
 import { getReceiptOcrProvider, parseReceiptText } from "@/lib/receipt/receiptOcr"
 import type { DocumentType, ReceiptOcrConfidence, ReceiptOcrSuggestions } from "@/lib/receipt/receiptOcr"
+import { RECEIPT_OCR_PARSER_VERSION, TESSERACT_PROVIDER_VERSION } from "@/lib/documents/constants"
+import { PDF_EXTRACTION_PROVIDER_LABEL, type PdfExtractionMode } from "@/lib/receipt/extractReceiptPdf"
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
 const DEV = process.env.NODE_ENV === "development"
@@ -19,7 +21,10 @@ export const RECEIPT_OCR_ERROR_CODES = {
   OCR_PROVIDER_EMPTY_TEXT: "OCR_PROVIDER_EMPTY_TEXT",
   OCR_PARSE_EMPTY: "OCR_PARSE_EMPTY",
   OCR_FORBIDDEN: "OCR_FORBIDDEN",
+  OCR_PDF_EXTRACT_FAILED: "OCR_PDF_EXTRACT_FAILED",
 } as const
+
+export type ReceiptExtractionMode = PdfExtractionMode | "image_ocr"
 
 function isAllowedReceiptUrl(url: string): boolean {
   if (!SUPABASE_URL) return false
@@ -35,40 +40,91 @@ function isAllowedReceiptUrl(url: string): boolean {
   }
 }
 
-async function fetchImageAsDataUrl(
-  url: string
-): Promise<{ dataUrl: string; contentType: string } | { error: string; code: string }> {
+function isPdfBuffer(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 5) return false
+  const head = new Uint8Array(buf.slice(0, 5))
+  const sig = String.fromCharCode(...head)
+  return sig.startsWith("%PDF")
+}
+
+type FetchedAsset =
+  | { ok: true; kind: "image"; dataUrl: string; contentType: string }
+  | { ok: true; kind: "pdf"; buffer: ArrayBuffer; contentType: string }
+  | { ok: false; error: string; code: string }
+
+async function fetchReceiptAsset(url: string): Promise<FetchedAsset> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) })
     const contentType = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase()
     if (DEV) {
-      console.debug(
-        "[performReceiptOcr] fetch status=%s content-type=%s",
-        res.status,
-        contentType
-      )
+      console.debug("[performReceiptOcr] fetch status=%s content-type=%s", res.status, contentType)
     }
     if (!res.ok) {
-      return { error: "Could not load receipt image", code: RECEIPT_OCR_ERROR_CODES.OCR_FETCH_FAILED }
+      return { ok: false, error: "Could not load receipt file", code: RECEIPT_OCR_ERROR_CODES.OCR_FETCH_FAILED }
     }
-    if (contentType === "application/pdf") {
-      return { error: "Upload an image (jpg/png) for now.", code: RECEIPT_OCR_ERROR_CODES.OCR_PDF_NOT_SUPPORTED_YET }
+
+    const buf = await res.arrayBuffer()
+    const pdfByMime = contentType === "application/pdf" || contentType.includes("application/pdf")
+    const pdfByMagic = isPdfBuffer(buf)
+
+    if (pdfByMime || pdfByMagic) {
+      return { ok: true, kind: "pdf", buffer: buf, contentType: "application/pdf" }
     }
+
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]
     if (!allowedTypes.some((t) => contentType === t || contentType.startsWith(t + ";"))) {
       return {
-        error: "Unsupported content type. Use jpg or png.",
+        ok: false,
+        error: "Unsupported file type. Use PDF, JPG, PNG, or WebP.",
         code: RECEIPT_OCR_ERROR_CODES.OCR_UNSUPPORTED_CONTENT_TYPE,
       }
     }
-    const blob = await res.blob()
-    const buf = await blob.arrayBuffer()
+
+    // Body was already consumed as arrayBuffer above; do not call res.blob() (single-use stream).
     const base64 = Buffer.from(buf).toString("base64")
-    const mime = blob.type || "image/jpeg"
+    const mime =
+      allowedTypes.find((t) => contentType === t || contentType.startsWith(`${t};`)) || "image/jpeg"
     const dataUrl = `data:${mime};base64,${base64}`
-    return { dataUrl, contentType }
+    return { ok: true, kind: "image", dataUrl, contentType: mime }
   } catch {
-    return { error: "Failed to fetch receipt image", code: RECEIPT_OCR_ERROR_CODES.OCR_FETCH_FAILED }
+    return { ok: false, error: "Failed to fetch receipt file", code: RECEIPT_OCR_ERROR_CODES.OCR_FETCH_FAILED }
+  }
+}
+
+export type ReceiptOcrDiagnostics = {
+  raw_ocr_text: string
+  provider: "tesseract" | "pdfjs+tesseract"
+  provider_version: string | null
+  parser_version: string
+  extraction_mode?: ReceiptExtractionMode
+  page_count?: number
+  warnings?: string[]
+  source_mime?: string
+}
+
+function buildDiagnostics(
+  rawText: string,
+  extra?: Partial<
+    Pick<
+      ReceiptOcrDiagnostics,
+      | "extraction_mode"
+      | "page_count"
+      | "warnings"
+      | "source_mime"
+      | "provider"
+      | "provider_version"
+    >
+  >
+): ReceiptOcrDiagnostics {
+  return {
+    raw_ocr_text: rawText,
+    provider: extra?.provider ?? "tesseract",
+    provider_version: extra?.provider_version ?? TESSERACT_PROVIDER_VERSION,
+    parser_version: RECEIPT_OCR_PARSER_VERSION,
+    extraction_mode: extra?.extraction_mode,
+    page_count: extra?.page_count,
+    warnings: extra?.warnings,
+    source_mime: extra?.source_mime,
   }
 }
 
@@ -86,6 +142,7 @@ export type PerformReceiptOcrSuccess = {
   ok: true
   suggestions: ReceiptOcrSuggestions
   confidence: ReceiptOcrConfidence
+  diagnostics: ReceiptOcrDiagnostics
 }
 
 export type PerformReceiptOcrFailure = {
@@ -95,6 +152,7 @@ export type PerformReceiptOcrFailure = {
   httpStatus: number
   suggestions?: Record<string, unknown>
   confidence?: Record<string, string>
+  diagnostics?: ReceiptOcrDiagnostics
 }
 
 export type PerformReceiptOcrResult = PerformReceiptOcrSuccess | PerformReceiptOcrFailure
@@ -129,7 +187,7 @@ export async function performReceiptOcr(
     }
   }
 
-  let imageUrl: string | null = null
+  let asset: FetchedAsset
   if (trimmedPath.startsWith("http://") || trimmedPath.startsWith("https://")) {
     if (!isAllowedReceiptUrl(trimmedPath)) {
       return {
@@ -139,15 +197,10 @@ export async function performReceiptOcr(
         httpStatus: 400,
       }
     }
-    const result = await fetchImageAsDataUrl(trimmedPath)
-    if ("error" in result) {
-      const status = result.code === RECEIPT_OCR_ERROR_CODES.OCR_PDF_NOT_SUPPORTED_YET ? 400 : 400
-      return { ok: false, error: result.error, code: result.code, httpStatus: status }
-    }
-    imageUrl = result.dataUrl
+    asset = await fetchReceiptAsset(trimmedPath)
   } else {
     const path = trimmedPath.startsWith("receipts/") ? trimmedPath.replace(/^receipts\//, "") : trimmedPath
-    const { data: signed } = await supabase.storage.from("receipts").createSignedUrl(path, 60)
+    const { data: signed } = await supabase.storage.from("receipts").createSignedUrl(path, 120)
     if (DEV) console.debug("[performReceiptOcr] signed_url_created=%s", !!signed?.signedUrl)
     if (!signed?.signedUrl) {
       return {
@@ -157,21 +210,11 @@ export async function performReceiptOcr(
         httpStatus: 400,
       }
     }
-    const result = await fetchImageAsDataUrl(signed.signedUrl)
-    if ("error" in result) {
-      const status = result.code === RECEIPT_OCR_ERROR_CODES.OCR_PDF_NOT_SUPPORTED_YET ? 400 : 400
-      return { ok: false, error: result.error, code: result.code, httpStatus: status }
-    }
-    imageUrl = result.dataUrl
+    asset = await fetchReceiptAsset(signed.signedUrl)
   }
 
-  if (!imageUrl) {
-    return {
-      ok: false,
-      error: "Could not load receipt image for OCR",
-      code: RECEIPT_OCR_ERROR_CODES.OCR_FETCH_FAILED,
-      httpStatus: 400,
-    }
+  if (!asset.ok) {
+    return { ok: false, error: asset.error, code: asset.code, httpStatus: 400 }
   }
 
   let businessCurrency: string | undefined
@@ -182,20 +225,58 @@ export async function performReceiptOcr(
     .maybeSingle()
   if (biz?.default_currency) businessCurrency = biz.default_currency as string
 
-  const ocrInput = await downscaleReceiptDataUrlForOcr(imageUrl)
-  const provider = getReceiptOcrProvider()
-  if (DEV) console.debug("[performReceiptOcr] provider active=%s", !!provider)
-  const rawText = await provider.extractText(ocrInput)
+  let rawText: string
+  let diagnosticsBase: Partial<ReceiptOcrDiagnostics>
+
+  if (asset.kind === "pdf") {
+    try {
+      const { extractReceiptPdf } = await import("@/lib/receipt/extractReceiptPdf")
+      const pdf = await extractReceiptPdf(asset.buffer)
+      rawText = pdf.rawText
+      diagnosticsBase = {
+        provider: "pdfjs+tesseract",
+        provider_version: PDF_EXTRACTION_PROVIDER_LABEL,
+        extraction_mode: pdf.extraction_mode,
+        page_count: pdf.page_count,
+        warnings: pdf.warnings,
+        source_mime: asset.contentType,
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (DEV) console.error("[performReceiptOcr] PDF extract failed:", e)
+      return {
+        ok: false,
+        error: msg || "Could not read this PDF.",
+        code: RECEIPT_OCR_ERROR_CODES.OCR_PDF_EXTRACT_FAILED,
+        httpStatus: 400,
+      }
+    }
+  } else {
+    const ocrInput = await downscaleReceiptDataUrlForOcr(asset.dataUrl)
+    const provider = getReceiptOcrProvider()
+    if (DEV) console.debug("[performReceiptOcr] provider active=%s", !!provider)
+    try {
+      rawText = await provider.extractText(ocrInput)
+    } catch (e) {
+      if (DEV) console.error("[performReceiptOcr] image OCR failed:", e)
+      rawText = ""
+    }
+    diagnosticsBase = {
+      extraction_mode: "image_ocr",
+      source_mime: asset.contentType,
+    }
+  }
 
   if (!rawText || rawText.trim().length === 0) {
     return {
       ok: false,
-      error: "Receipt image could not be read. Try a clearer image.",
+      error: "Receipt could not be read. Try a clearer file.",
       code: RECEIPT_OCR_ERROR_CODES.OCR_PROVIDER_EMPTY_TEXT,
       httpStatus: 400,
     }
   }
 
+  const diagnostics = buildDiagnostics(rawText, diagnosticsBase)
   const parsed = parseReceiptText(rawText, documentType, businessCurrency)
   if (!hasMeaningfulSuggestions(parsed.suggestions as Record<string, unknown>)) {
     if (DEV) console.debug("[performReceiptOcr] parse produced no meaningful suggestions")
@@ -206,6 +287,7 @@ export async function performReceiptOcr(
       httpStatus: 200,
       suggestions: {},
       confidence: {},
+      diagnostics,
     }
   }
 
@@ -213,5 +295,6 @@ export async function performReceiptOcr(
     ok: true,
     suggestions: parsed.suggestions,
     confidence: parsed.confidence,
+    diagnostics,
   }
 }

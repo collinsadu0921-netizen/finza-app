@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { performReceiptOcr } from "@/lib/receipt/performReceiptOcr"
+import { runPersistedReceiptOcr } from "@/lib/documents/runPersistedReceiptOcr"
 import type { DocumentType } from "@/lib/receipt/receiptOcr"
 import { gateAccountingReportRead } from "@/lib/ai/finzaAssistAccountingGate"
 import { getProfitAndLossReport, type PnLReportResponse } from "@/lib/accounting/reports/getProfitAndLossReport"
@@ -1123,12 +1123,15 @@ export async function executeFinzaAssistTool(
         if (!receiptPath) return { ok: false, error: "receipt_path required" }
         const docRaw = String(args.document_type ?? "expense").toLowerCase()
         const documentType: DocumentType = docRaw === "supplier_bill" ? "supplier_bill" : "expense"
-        const ocr = await performReceiptOcr(supabase, {
+        const run = await runPersistedReceiptOcr({
+          supabase,
           userId,
           businessId,
           receiptPath,
           documentType,
+          sourceType: "manual_upload",
         })
+        const ocr = run.ocr
         if (!ocr.ok) {
           return {
             ok: true,
@@ -1139,6 +1142,7 @@ export async function executeFinzaAssistTool(
               code: ocr.code,
               suggestions: ocr.suggestions ?? null,
               confidence: ocr.confidence ?? null,
+              document_id: run.documentId || null,
               note: "OCR is suggestion-only; user should confirm before booking.",
             }),
           }
@@ -1150,6 +1154,7 @@ export async function executeFinzaAssistTool(
             ok: true,
             suggestions: ocr.suggestions,
             confidence: ocr.confidence,
+            document_id: run.documentId || null,
             note: "Figures are read from the receipt image heuristically — not posted to the ledger. To record: Go to: /service/expenses/create or /bills/create",
           }),
         }

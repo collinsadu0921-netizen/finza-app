@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import {
+  getIncomingDocumentForBusiness,
+  linkIncomingDocumentToEntity,
+} from "@/lib/documents/incomingDocumentsService"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
 import { getCurrencySymbol } from "@/lib/currency"
@@ -54,6 +58,7 @@ export async function POST(request: NextRequest) {
       // Import bill inventory linkage
       material_id: import_material_id = null,
       quantity: import_quantity = 1,
+      incoming_document_id,
     } = body
 
     // Validate required fields
@@ -343,6 +348,28 @@ export async function POST(request: NextRequest) {
       newValues: bill,
       request,
     })
+
+    const incomingDocId =
+      typeof incoming_document_id === "string" ? incoming_document_id.trim() : ""
+    if (incomingDocId) {
+      const doc = await getIncomingDocumentForBusiness(supabase, incomingDocId, business_id)
+      const ap = typeof attachment_path === "string" ? attachment_path.trim() : ""
+      if (doc && (!ap || doc.storage_path === ap)) {
+        const linkRes = await linkIncomingDocumentToEntity(supabase, {
+          documentId: incomingDocId,
+          businessId: business_id,
+          linkedEntityType: "bill",
+          linkedEntityId: bill.id,
+          expectedStoragePath: ap || doc.storage_path,
+          actualFilePath: ap || doc.storage_path,
+        })
+        if (!linkRes.ok) {
+          console.warn("[bills/create] incoming document link skipped:", linkRes.error)
+        }
+      } else if (doc && ap && doc.storage_path !== ap) {
+        console.warn("[bills/create] incoming_document_id ignored: attachment_path does not match document")
+      }
+    }
 
     return NextResponse.json({ 
       success: true,

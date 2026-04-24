@@ -69,8 +69,10 @@ export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) 
         setError("Receipt scan needs a loaded workspace. Wait for the page to finish loading, then try again.")
         return
       }
-      if (!receiptFile.type.startsWith("image/")) {
-        setError("Attach an image receipt (JPG, PNG, WebP). PDF is not supported for OCR yet.")
+      const canScan =
+        receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf"
+      if (!canScan) {
+        setError("Attach a receipt image (JPG, PNG, WebP) or a PDF.")
         return
       }
     }

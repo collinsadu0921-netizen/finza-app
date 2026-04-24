@@ -181,6 +181,7 @@ export function InvoiceDocument({
               businessName={businessName}
               size="lg"
               rounded="lg"
+              surface="document"
             />
             <div>
               <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-tight">{businessName}</h1>

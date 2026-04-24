@@ -624,6 +624,8 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
       width: auto;
       height: auto;
       object-fit: contain;
+      /* Same transparent-PNG / print flattening issue as invoice PDFs — keep logo on white thermal paper */
+      background-color: #ffffff;
     }
     .customer-block {
       text-align: left;

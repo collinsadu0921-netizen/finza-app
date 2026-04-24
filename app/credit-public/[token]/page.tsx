@@ -126,6 +126,7 @@ export default function PublicCreditNotePage() {
                   businessName={businessName}
                   size="xl"
                   rounded="lg"
+                  surface="document"
                 />
               </div>
               <h1 className="text-2xl font-bold text-gray-900">{businessName}</h1>
