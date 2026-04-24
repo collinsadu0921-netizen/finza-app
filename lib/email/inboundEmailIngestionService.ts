@@ -404,7 +404,7 @@ export async function ingestNormalizedInboundEmail(
         userId: "",
         businessId,
         receiptPath: storagePath,
-        documentType: "expense_receipt",
+        documentType: "expense",
         existingDocumentId: created.id,
         sourceType: "email_inbound",
         skipUserAuthorization: true,
