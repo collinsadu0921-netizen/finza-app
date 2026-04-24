@@ -30,6 +30,9 @@ type SettingsResponse = {
 
 const ENV = "live"
 
+/** Hubtel collection API returns HTTP 501; keep credentials in DB but do not save updates from this form until implemented. */
+const HUBTEL_COLLECTION_IMPLEMENTED = false
+
 export default function ServicePaymentSettingsPage() {
   const router = useRouter()
   const [businessId, setBusinessId] = useState("")
@@ -211,7 +214,7 @@ export default function ServicePaymentSettingsPage() {
         hubtelPosKey.trim().length > 0 ||
         hubtelSecret.trim().length > 0
 
-      if (shouldSaveHubtel) {
+      if (HUBTEL_COLLECTION_IMPLEMENTED && shouldSaveHubtel) {
         const hubSecrets: Record<string, string> = {}
         if (hubtelPosKey.trim()) hubSecrets.pos_key = hubtelPosKey.trim()
         if (hubtelSecret.trim()) hubSecrets.secret = hubtelSecret.trim()
@@ -516,22 +519,33 @@ export default function ServicePaymentSettingsPage() {
             </div>
           </div>
 
-          {/* Hubtel Section */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Hubtel Credentials (Optional)</h2>
+          {/* Hubtel Section — collection not implemented (API returns 501) */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-amber-200 dark:border-amber-900/50">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Hubtel</h2>
+              <span className="text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                Not available
+              </span>
+            </div>
+            <p className="text-sm text-amber-900 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-4">
+              Hubtel in-app payment collection is not active. Existing saved credentials (if any) remain stored but cannot be
+              edited here until the integration is released. Use MTN MoMo, Paystack, or manual wallet instructions to collect
+              payments.
+            </p>
             {hubtelSecretPresent && (
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                POS key and secret are stored securely. Leave those fields blank to keep existing values, or enter new values
-                to replace them.
+                Credentials are on file but cannot be updated while Hubtel is disabled.
               </p>
             )}
-            <div className="space-y-4">
+            <div className="space-y-4 opacity-70">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Hubtel POS Key</label>
                 <input
                   type="text"
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder={hubtelSecretPresent ? "Leave blank to keep current key" : "Enter POS Key"}
+                  disabled
+                  readOnly
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                  placeholder={hubtelSecretPresent ? "On file (hidden)" : "Not configured"}
                   value={hubtelPosKey}
                   onChange={(e) => setHubtelPosKey(e.target.value)}
                   autoComplete="off"
@@ -541,8 +555,10 @@ export default function ServicePaymentSettingsPage() {
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Hubtel Secret</label>
                 <input
                   type="password"
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder={hubtelSecretPresent ? "Leave blank to keep current secret" : "Enter Secret"}
+                  disabled
+                  readOnly
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                  placeholder={hubtelSecretPresent ? "On file (hidden)" : "Not configured"}
                   value={hubtelSecret}
                   onChange={(e) => setHubtelSecret(e.target.value)}
                   autoComplete="off"
@@ -552,8 +568,10 @@ export default function ServicePaymentSettingsPage() {
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Hubtel Merchant Account Number</label>
                 <input
                   type="text"
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="Enter Merchant Account Number"
+                  disabled
+                  readOnly
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400 cursor-not-allowed"
+                  placeholder="Not editable"
                   value={hubtelMerchantAccount}
                   onChange={(e) => setHubtelMerchantAccount(e.target.value)}
                 />

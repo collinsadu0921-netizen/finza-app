@@ -336,7 +336,11 @@ export default function Sidebar() {
           items: [
             { label: "Dashboard", route: "/service/dashboard", minTier: "starter" },
             { label: "Customers", route: "/service/customers", minTier: "starter" },
-            { label: "Quotes", route: "/service/estimates", minTier: "starter" },
+            {
+              label: "Quotes",
+              route: buildServiceRoute("/service/quotes", effectiveServiceBusinessId ?? undefined),
+              minTier: "starter",
+            },
             { label: "Proposals", route: "/service/proposals", minTier: "starter" },
             { label: "Projects", route: "/service/jobs", minTier: "professional" },
           ],
@@ -388,8 +392,16 @@ export default function Sidebar() {
           items: [
             { label: "VAT Report", route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
             { label: "VAT Returns", route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
-            { label: "WHT Returns", route: "/service/accounting/wht", minTier: "professional" },
-            { label: "CIT Provisions", route: "/service/accounting/cit", minTier: "business" },
+            {
+              label: "Withholding Tax",
+              route: buildServiceRoute("/service/accounting/wht", effectiveServiceBusinessId ?? undefined),
+              minTier: "professional",
+            },
+            {
+              label: "CIT Provisions",
+              route: buildServiceRoute("/service/accounting/cit", effectiveServiceBusinessId ?? undefined),
+              minTier: "business",
+            },
           ],
         })
       }
@@ -586,6 +598,14 @@ export default function Sidebar() {
     const pathOnly = route.split("?")[0]
     if (pathOnly === "/dashboard" || pathOnly === "/retail/dashboard") {
       return pathname === "/dashboard" || pathname === "/retail/dashboard"
+    }
+    // Quotes nav uses /service/quotes (alias); estimates are the internal model for quotes.
+    if (pathOnly === "/service/quotes") {
+      return (
+        pathname === "/service/quotes" ||
+        pathname === "/service/estimates" ||
+        pathname?.startsWith("/service/estimates/")
+      )
     }
     return pathname === pathOnly || (pathOnly !== "/" && pathname?.startsWith(pathOnly + "/"))
   }

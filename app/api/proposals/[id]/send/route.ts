@@ -3,6 +3,7 @@ import { z } from "zod"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
+import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import {
@@ -302,6 +303,12 @@ export async function POST(
             ...buildProposalTransactionalEmailHtml(messagingCtx),
             fromName: bizName,
             replyTo: businessEmail || undefined,
+            finza: {
+              businessId,
+              documentId: proposalId,
+              documentType: "proposal",
+              workspace: inferFinzaWorkspaceFromIndustry(businessRow?.industry),
+            },
           })
 
       if (!emailResult.success) {
@@ -359,7 +366,8 @@ export async function POST(
         channel: "email",
         public_url,
         whatsapp_url: null,
-        email_delivery_status: "delivered",
+        /** Resend accepted the message; not the same as mailbox delivery (no webhooks yet). */
+        email_delivery_status: "accepted",
         resend_message_id: "id" in emailResult ? emailResult.id : undefined,
         proposal: snap,
         already_marked_sent: !isFirstSendTransition,

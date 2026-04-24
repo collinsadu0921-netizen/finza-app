@@ -6,6 +6,7 @@ import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { getBusinessWhatsAppTemplate } from "@/lib/communication/getBusinessWhatsAppTemplate"
 import { renderWhatsAppTemplate } from "@/lib/communication/renderWhatsAppTemplate"
 import { isValidEstimateTransition } from "@/lib/documentState"
+import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
 import { buildEstimateEmailHtml } from "@/lib/email/templates/estimate"
@@ -291,6 +292,12 @@ export async function POST(
             }),
             fromName: businessName,
             replyTo: businessEmail,
+            finza: {
+              businessId: estimate.business_id,
+              documentId: estimateId,
+              documentType: "quote",
+              workspace: inferFinzaWorkspaceFromIndustry(businessIndustry),
+            },
           })
 
       if (!result.success) {

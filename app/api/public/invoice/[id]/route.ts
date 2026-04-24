@@ -73,7 +73,7 @@ export async function GET(
 
   const { data: payments } = await supabase
     .from("payments")
-    .select("id, amount, date, method, notes, reference, public_token")
+    .select("id, amount, wht_amount, date, method, notes, reference, public_token")
     .eq("invoice_id", invoiceId)
     .is("deleted_at", null)
     .order("date", { ascending: false })

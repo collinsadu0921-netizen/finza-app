@@ -1,10 +1,11 @@
 /**
  * Send credit note by email.
- * Uses Resend API when RESEND_API_KEY is set; otherwise logs (same pattern as invoice send).
+ * Uses shared `sendTransactionalEmail` (Resend) when RESEND_API_KEY is set; otherwise no-op in prod / logs in dev.
  * Server-side only.
  */
 
-const RESEND_API = "https://api.resend.com/emails"
+import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
+import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 
 export interface SendCreditNoteEmailParams {
   to: string
@@ -15,6 +16,10 @@ export interface SendCreditNoteEmailParams {
   reason: string
   customerName: string
   publicUrl: string
+  businessId: string
+  creditNoteId: string
+  /** Used for `finza_workspace` on outbound Resend tags. */
+  industry?: string | null
 }
 
 function escapeHtmlText(text: string): string {
@@ -88,40 +93,37 @@ function buildCreditNoteEmailText(params: SendCreditNoteEmailParams): string {
 
 /**
  * Send credit note email. Uses Resend when RESEND_API_KEY is set; otherwise no-op (logs in dev).
- * Does not throw; returns void.
+ * Does not throw; returns void (same contract as before — callers do not branch on success).
  */
 export async function sendCreditNoteEmail(params: SendCreditNoteEmailParams): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY
-  if (!apiKey) {
+  if (!process.env.RESEND_API_KEY) {
     if (process.env.NODE_ENV === "development") {
       console.log("[sendCreditNoteEmail] RESEND_API_KEY not set; would send to:", params.to)
     }
     return
   }
-  const from = process.env.RESEND_FROM ?? "Finza <onboarding@resend.dev>"
+
+  const fromOverride =
+    (process.env.RESEND_FROM ?? "Finza <onboarding@resend.dev>").trim() || "Finza <onboarding@resend.dev>"
   const subject = `Credit Note #${params.creditNumber} from ${params.businessName}`
   const html = buildCreditNoteEmailHtml(params)
   const text = buildCreditNoteEmailText(params)
-  try {
-    const res = await fetch(RESEND_API, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        from,
-        to: [params.to],
-        subject,
-        html,
-        text,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.text()
-      console.error("[sendCreditNoteEmail] Resend failed:", res.status, err)
-    }
-  } catch (err) {
-    console.error("[sendCreditNoteEmail] Error:", err)
+
+  const result = await sendTransactionalEmail({
+    to: params.to.trim(),
+    subject,
+    html,
+    text,
+    fromOverride,
+    finza: {
+      businessId: params.businessId,
+      documentId: params.creditNoteId,
+      documentType: "credit_note",
+      workspace: inferFinzaWorkspaceFromIndustry(params.industry),
+    },
+  })
+
+  if (!result.success) {
+    console.error("[sendCreditNoteEmail] Send failed:", result.reason)
   }
 }

@@ -93,10 +93,10 @@ export default function ServiceAccountingPage() {
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 text-xs font-bold">W</span>
-                <span className="font-semibold text-gray-900 dark:text-gray-100">WHT Register</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">WHT register</span>
               </div>
               <span className="text-sm text-gray-500 dark:text-gray-400">
-                Track withholding tax deducted from supplier payments and remit to GRA
+                Supplier WHT payable (remit to GRA) and customer WHT receivable on sales invoices
               </span>
             </Link>
             <Link

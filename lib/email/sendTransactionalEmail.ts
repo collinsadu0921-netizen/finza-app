@@ -4,7 +4,21 @@
  * Server-side only.
  */
 
+import {
+  buildFinzaResendTags,
+  mergeFinzaWithOtherTags,
+  type BuildFinzaResendTagsInput,
+} from "@/lib/email/buildFinzaResendTags"
+
 const RESEND_API = "https://api.resend.com/emails"
+
+/** Resend email tags (analytics / filtering). Optional; omitted when empty. */
+export type TransactionalEmailTag = { name: string; value: string }
+
+export type { BuildFinzaResendTagsInput }
+
+/** Resend allows a limited number of tags per message; extra entries are dropped. */
+const MAX_RESEND_TAGS = 10
 
 export interface SendTransactionalEmailParams {
   to: string
@@ -19,6 +33,16 @@ export interface SendTransactionalEmailParams {
    * When set, overrides `RESEND_FROM` / `fromName` composition.
    */
   fromOverride?: string
+  /**
+   * Optional Resend tags (name/value). Passed through to the API when non-empty.
+   * Callers may adopt gradually; not required for any flow.
+   */
+  tags?: TransactionalEmailTag[]
+  /**
+   * Finza correlation tags for Resend webhooks (`finza_business_id`, etc.).
+   * Built and merged ahead of `tags` (Finza keys win on name collision).
+   */
+  finza?: BuildFinzaResendTagsInput
 }
 
 export type SendTransactionalEmailResult =
@@ -56,6 +80,14 @@ export async function sendTransactionalEmail(
   if (params.text) body.text = params.text
   // Allow replies to go to the business directly
   if (params.replyTo) body.reply_to = params.replyTo
+
+  const finzaBuilt = params.finza ? buildFinzaResendTags(params.finza) : []
+  const merged = mergeFinzaWithOtherTags(finzaBuilt, params.tags ?? [], MAX_RESEND_TAGS)
+  const tags = merged
+    .filter((t) => t && typeof t.name === "string" && typeof t.value === "string")
+    .map((t) => ({ name: t.name.trim(), value: t.value.trim() }))
+    .filter((t) => t.name.length > 0 && t.value.length > 0)
+  if (tags.length > 0) body.tags = tags
 
   try {
     const res = await fetch(RESEND_API, {

@@ -6,6 +6,7 @@ import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { getBusinessWhatsAppTemplate } from "@/lib/communication/getBusinessWhatsAppTemplate"
 import { renderWhatsAppTemplate } from "@/lib/communication/renderWhatsAppTemplate"
+import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
 import { buildInvoiceEmailHtml } from "@/lib/email/templates/invoice"
@@ -423,6 +424,12 @@ export async function POST(
             }),
             fromName: businessName,
             replyTo: businessEmail,
+            finza: {
+              businessId: invoice.business_id,
+              documentId: invoiceId,
+              documentType: "invoice",
+              workspace: inferFinzaWorkspaceFromIndustry(businessIndustry),
+            },
           })
       if (!result.success) {
         const noKey = result.reason === "no_api_key"

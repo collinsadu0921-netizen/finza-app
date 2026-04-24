@@ -61,11 +61,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Hubtel implementation not yet available
-    return NextResponse.json({
-      status: "not_implemented_yet",
-      message: "Hubtel payment integration coming soon",
-    })
+    // Hubtel collection is not implemented — do not imply success.
+    return NextResponse.json(
+      {
+        status: "unavailable",
+        success: false,
+        message:
+          "Hubtel payment collection is not currently available in Finza. Use another payment method or record payments manually.",
+      },
+      { status: 501 }
+    )
   } catch (error: any) {
     return NextResponse.json(
       { status: "failed", message: error.message || "Internal server error" },

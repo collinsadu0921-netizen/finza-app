@@ -1,3 +1,4 @@
+import type { FinzaDocumentTagType } from "@/lib/email/buildFinzaResendTags"
 import { sendTransactionalEmail, type SendTransactionalEmailResult } from "@/lib/email/sendTransactionalEmail"
 import { SERVICE_DOCUMENTS_RESEND_FROM } from "@/lib/email/serviceDocumentsConstants"
 import {
@@ -6,6 +7,13 @@ import {
 } from "@/lib/email/templates/serviceWorkspaceDocumentEmailHtml"
 
 export type { ServiceWorkspaceDocumentEmailKind }
+
+const DOCUMENT_TYPE_BY_KIND: Record<ServiceWorkspaceDocumentEmailKind, FinzaDocumentTagType> = {
+  invoice: "invoice",
+  quote: "quote",
+  proforma: "proforma",
+  proposal: "proposal",
+}
 
 export type SendServiceWorkspaceDocumentEmailParams = {
   to: string
@@ -62,6 +70,16 @@ export async function sendServiceWorkspaceDocumentEmail(
     replyTo: reply,
   })
 
+  const finza =
+    params.meta?.businessId && params.meta?.documentId
+      ? {
+          businessId: params.meta.businessId,
+          documentId: params.meta.documentId,
+          documentType: DOCUMENT_TYPE_BY_KIND[params.kind],
+          workspace: "service" as const,
+        }
+      : undefined
+
   const result = await sendTransactionalEmail({
     to,
     subject: params.subject,
@@ -69,6 +87,7 @@ export async function sendServiceWorkspaceDocumentEmail(
     text,
     replyTo: reply,
     fromOverride: SERVICE_DOCUMENTS_RESEND_FROM,
+    finza,
   })
 
   if (result.success) {

@@ -143,6 +143,9 @@ export async function POST(
       reason,
       customerName: customer?.name ?? "Customer",
       publicUrl: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/credit-public/${creditNote.public_token ?? ""}`,
+      businessId: business.id,
+      creditNoteId,
+      industry: (business as { industry?: string | null }).industry ?? null,
     })
 
     // Update status to issued only if currently draft (idempotent: issued → issued is no-op)

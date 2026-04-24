@@ -65,8 +65,15 @@ export async function GET(request: NextRequest) {
       return next
     }
 
-    const applySearch = async (q: any) => {
-      if (!search) return q
+    let listQuery: any = applyStatus(
+      supabase
+        .from("estimates")
+        .select("id, estimate_number, customer_id, total_amount, status, expiry_date, created_at", {
+          count: "exact",
+        })
+    )
+
+    if (search) {
       const { data: matchingCustomers } = await supabase
         .from("customers")
         .select("id")
@@ -79,17 +86,8 @@ export async function GET(request: NextRequest) {
       if (matchingCustomerIds.length > 0) {
         parts.push(`customer_id.in.(${matchingCustomerIds.join(",")})`)
       }
-      return q.or(parts.join(","))
+      listQuery = listQuery.or(parts.join(","))
     }
-
-    let listQuery: any = applyStatus(
-      supabase
-        .from("estimates")
-        .select("id, estimate_number, customer_id, total_amount, status, expiry_date, created_at", {
-          count: "exact",
-        })
-    )
-    listQuery = await applySearch(listQuery)
 
     const { data: rows, error: listError, count } = await listQuery
       .order("created_at", { ascending: false })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabaseClient"
 import { generateEmailReceipt, generateSMSReceipt, type ReceiptData } from "@/lib/receipts/template"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
+import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 
 export async function POST(request: NextRequest) {
@@ -55,7 +56,8 @@ export async function POST(request: NextRequest) {
           name,
           legal_name,
           trading_name,
-          default_currency
+          default_currency,
+          industry
         )
       `)
       .eq("id", sale_id)
@@ -204,10 +206,17 @@ export async function POST(request: NextRequest) {
     // Send receipt based on channel
     if (channel === "email") {
       const emailContent = generateEmailReceipt(receiptData)
+      const bizIndustry = (sale.businesses as { industry?: string | null } | null)?.industry ?? null
       const result = await sendTransactionalEmail({
         to: destination,
         subject: `Receipt from ${businessName} - ${receiptData.receiptNumber}`,
         html: emailContent,
+        finza: {
+          businessId: saleBusinessId,
+          documentId: sale_id,
+          documentType: "receipt",
+          workspace: inferFinzaWorkspaceFromIndustry(bizIndustry),
+        },
       })
       sendResult = result.success
         ? { success: true, providerResponse: { id: result.id } }

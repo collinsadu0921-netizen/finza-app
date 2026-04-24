@@ -14,6 +14,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { buildPayslipEmailHtml } from "@/lib/email/templates/payslip"
 import { getCurrencySymbol } from "@/lib/currency"
@@ -151,6 +152,12 @@ export async function POST(
             html,
             fromName: businessName,
             replyTo: bizProfile?.email ?? undefined,
+            finza: {
+              businessId: business.id,
+              documentId: String(payslip.id),
+              documentType: "account",
+              workspace: inferFinzaWorkspaceFromIndustry((business as { industry?: string | null }).industry),
+            },
           })
 
           if (result.success) {

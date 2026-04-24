@@ -62,6 +62,7 @@ type LineItem = {
 type Payment = {
   id: string
   amount: number
+  wht_amount?: number | null
   date: string
   method: string
   notes: string | null
@@ -83,6 +84,7 @@ const METHOD_LABELS: Record<string, string> = {
   card: "Card",
   bank: "Bank Transfer",
   cheque: "Cheque",
+  paystack: "Paystack",
   other: "Other",
 }
 
@@ -385,22 +387,42 @@ export default function InvoiceViewPage() {
             <div className="px-8 py-5 border-b border-gray-100 bg-gray-50/60">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Payment History</p>
               <div className="space-y-2">
-                {payments.map(p => (
-                  <div key={p.id} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-3">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                      <div>
-                        <span className="font-medium text-gray-800">{METHOD_LABELS[p.method] || p.method}</span>
-                        {p.reference && <span className="text-gray-400 ml-2 text-xs">ref: {p.reference}</span>}
-                        {p.notes && <p className="text-gray-400 text-xs">{p.notes}</p>}
+                {payments.map((p) => {
+                  const wht = Number(p.wht_amount ?? 0) || 0
+                  const applied = Number(p.amount ?? 0)
+                  const cashReceived = Math.round((applied - wht) * 100) / 100
+                  const showWhtBreakdown = wht > 0
+                  return (
+                    <div key={p.id} className="flex items-start justify-between gap-4 text-sm border-b border-gray-100 last:border-0 pb-3 last:pb-0">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 mt-1.5" />
+                        <div>
+                          <span className="font-medium text-gray-800">{METHOD_LABELS[p.method] || p.method}</span>
+                          {p.reference && <span className="text-gray-400 ml-2 text-xs">ref: {p.reference}</span>}
+                          {p.notes && <p className="text-gray-400 text-xs">{p.notes}</p>}
+                          <p className="text-xs text-gray-400 mt-0.5">{fmtDate(p.date)}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 space-y-0.5">
+                        {showWhtBreakdown ? (
+                          <>
+                            <p className="text-xs text-gray-500">Applied to invoice</p>
+                            <p className="font-semibold text-gray-900 tabular-nums">{formatMoney(applied, invoice.currency_code)}</p>
+                            <p className="text-xs text-gray-500 pt-1">WHT withheld</p>
+                            <p className="font-medium text-amber-700 tabular-nums">({formatMoney(wht, invoice.currency_code)})</p>
+                            <p className="text-xs text-gray-500 pt-1">Cash / transfer received</p>
+                            <p className="font-semibold text-emerald-600 tabular-nums">{formatMoney(cashReceived, invoice.currency_code)}</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold text-emerald-600 tabular-nums">{formatMoney(applied, invoice.currency_code)}</p>
+                            <p className="text-xs text-gray-400">{fmtDate(p.date)}</p>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-emerald-600 tabular-nums">{formatMoney(p.amount, invoice.currency_code)}</p>
-                      <p className="text-xs text-gray-400">{fmtDate(p.date)}</p>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}

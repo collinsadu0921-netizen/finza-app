@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 type Payment = {
   id: string
   amount: number
+  wht_amount?: number | null
   date: string
   method: string
   reference: string | null
@@ -172,6 +173,14 @@ export default function ServicePaymentsPage() {
           excelType: "number",
           width: 15,
         },
+        {
+          header: "WHT withheld",
+          accessor: (p) => Number(p.wht_amount || 0),
+          formatter: (val) =>
+            currencyCode ? formatMoney(Number(val), currencyCode) : formatCurrencyRaw(val),
+          excelType: "number",
+          width: 14,
+        },
         { header: "Payment Method", accessor: (p) => formatMethod(p.method), width: 20 },
       ]
 
@@ -207,6 +216,14 @@ export default function ServicePaymentsPage() {
             currencyCode ? formatMoney(Number(val), currencyCode) : formatCurrencyRaw(val),
           excelType: "number",
           width: 15,
+        },
+        {
+          header: "WHT withheld",
+          accessor: (p) => Number(p.wht_amount || 0),
+          formatter: (val) =>
+            currencyCode ? formatMoney(Number(val), currencyCode) : formatCurrencyRaw(val),
+          excelType: "number",
+          width: 14,
         },
         { header: "Payment Method", accessor: (p) => formatMethod(p.method), width: 20 },
       ]
@@ -349,6 +366,7 @@ export default function ServicePaymentsPage() {
                     <th className="px-6 py-3 text-left font-medium">Invoice</th>
                     <th className="px-6 py-3 text-left font-medium">Method</th>
                     <th className="px-6 py-3 text-right font-medium">Amount</th>
+                    <th className="px-6 py-3 text-right font-medium">WHT</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -391,6 +409,13 @@ export default function ServicePaymentsPage() {
                       </td>
                       <td className="px-6 py-3 whitespace-nowrap text-right">
                         <Money amount={payment.amount} currencyCode={currencyCode} className="font-bold text-slate-900 dark:text-white" />
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap text-right text-slate-600 dark:text-slate-300 tabular-nums text-sm">
+                        {Number(payment.wht_amount || 0) > 0 ? (
+                          <Money amount={Number(payment.wht_amount)} currencyCode={currencyCode} />
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -39,7 +39,7 @@ const SETTING_GROUPS: SettingsGroup[] = [
       { label: "Payment integrations", path: "/service/settings/payments" },
       {
         label: "WhatsApp message templates",
-        path: "/settings/communication/whatsapp",
+        path: "/service/settings/communication/whatsapp",
       },
     ],
   },
