@@ -24,6 +24,14 @@ function normalizeText(s: string): string {
   return s.replace(/\s+/g, " ").trim()
 }
 
+/** pdfjs `getTextContent().items` entries are TextItem | TextMarkedContent — only TextItem has `str`. */
+function pdfTextItemStr(it: unknown): string {
+  if (it === null || typeof it !== "object") return ""
+  if (!("str" in it)) return ""
+  const s = (it as { str?: unknown }).str
+  return typeof s === "string" ? s : ""
+}
+
 async function extractTextWithPdfParse(buffer: Buffer): Promise<{ text: string; numpages: number }> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require("pdf-parse") as (b: Buffer) => Promise<{ text: string; numpages: number }>
@@ -46,9 +54,7 @@ async function extractTextWithPdfJs(buffer: ArrayBuffer): Promise<{ text: string
   for (let p = 1; p <= max; p++) {
     const page = await doc.getPage(p)
     const tc = await page.getTextContent()
-    const line = tc.items
-      .map((it: { str?: string }) => ("str" in it && typeof it.str === "string" ? it.str : ""))
-      .join(" ")
+    const line = tc.items.map(pdfTextItemStr).join(" ")
     parts.push(line)
   }
   if (numPages > max) {
