@@ -443,7 +443,7 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
           <RecentActivityFeed
             items={activityItems}
             currencyCode={currencyCode}
-            emptyMessage="No journal entries yet"
+            emptyMessage="No recent activity"
           />
         </div>
       </div>

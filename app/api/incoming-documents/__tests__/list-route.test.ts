@@ -37,6 +37,8 @@ describe("GET /api/incoming-documents", () => {
           display_name: "receipt.pdf",
           document_kind: "expense_receipt",
           source_type: "expense_form_upload",
+          source_email_sender: null,
+          source_email_subject: null,
           status: "extracted",
           review_status: "none",
           created_at: "2026-01-01T00:00:00Z",

@@ -22,12 +22,14 @@ type Invoice = {
 
 function sendPayload(
   businessId: string | null | undefined,
-  extra: Record<string, unknown>
+  extra: Record<string, unknown>,
+  resendOnly: boolean
 ): string {
   const bid =
     typeof businessId === "string" && businessId.trim().length > 0 ? businessId.trim() : ""
   return JSON.stringify({
     ...extra,
+    ...(resendOnly ? { resend_only: true } : {}),
     ...(bid ? { business_id: bid } : {}),
   })
 }
@@ -39,6 +41,7 @@ export default function SendInvoiceModal({
   onClose,
   onSuccess,
   defaultMethod = "whatsapp",
+  variant = "send",
 }: {
   invoice: Invoice
   invoiceId: string
@@ -47,6 +50,8 @@ export default function SendInvoiceModal({
   onClose: () => void
   onSuccess: (opts?: { issuedViaDownload?: boolean }) => void
   defaultMethod?: SendMethod
+  /** `resend` — communication only; same invoice and public link, no draft→sent transition. */
+  variant?: "send" | "resend"
 }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -56,10 +61,17 @@ export default function SendInvoiceModal({
   const [waOpenLinkUrl, setWaOpenLinkUrl] = useState<string | null>(null)
 
   const resolvedBusinessId = businessId ?? invoice.business_id ?? null
+  const resendOnly = variant === "resend"
 
   useEffect(() => {
     setWaOpenLinkUrl(null)
   }, [sendMethod])
+
+  useEffect(() => {
+    if (variant === "resend") {
+      setSendMethod((m) => (m === "download" ? "whatsapp" : m))
+    }
+  }, [variant])
 
   const publicInvoiceUrl = invoice.public_token
     ? `${window.location.origin}/invoice-public/${invoice.public_token}`
@@ -104,10 +116,14 @@ export default function SendInvoiceModal({
         response = await fetch(`/api/invoices/${invoiceId}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: sendPayload(resolvedBusinessId, {
-            sendWhatsApp: true,
-            sendMethod: sendMethod,
-          }),
+          body: sendPayload(
+            resolvedBusinessId,
+            {
+              sendWhatsApp: true,
+              sendMethod: sendMethod,
+            },
+            resendOnly
+          ),
         })
       } catch (fetchError: any) {
         console.error("Fetch error:", fetchError)
@@ -167,11 +183,15 @@ export default function SendInvoiceModal({
         response = await fetch(`/api/invoices/${invoiceId}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: sendPayload(resolvedBusinessId, {
-            sendEmail: true,
-            email: email,
-            sendMethod: sendMethod,
-          }),
+          body: sendPayload(
+            resolvedBusinessId,
+            {
+              sendEmail: true,
+              email: email,
+              sendMethod: sendMethod,
+            },
+            resendOnly
+          ),
         })
       } catch (fetchError: any) {
         console.error("Fetch error:", fetchError)
@@ -204,10 +224,14 @@ export default function SendInvoiceModal({
       const response = await fetch(`/api/invoices/${invoiceId}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: sendPayload(resolvedBusinessId, {
-          issueAndDownload: true,
-          sendMethod: "download",
-        }),
+        body: sendPayload(
+          resolvedBusinessId,
+          {
+            issueAndDownload: true,
+            sendMethod: "download",
+          },
+          false
+        ),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -237,10 +261,14 @@ export default function SendInvoiceModal({
         const response = await fetch(`/api/invoices/${invoiceId}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: sendPayload(resolvedBusinessId, {
-            copyLink: true,
-            sendMethod: sendMethod,
-          }),
+          body: sendPayload(
+            resolvedBusinessId,
+            {
+              copyLink: true,
+              sendMethod: sendMethod,
+            },
+            resendOnly
+          ),
         })
 
         if (!response.ok) {
@@ -272,6 +300,12 @@ export default function SendInvoiceModal({
 
     try {
       setLoading(true)
+
+      if (resendOnly && sendMethod === "download") {
+        setError("Issue & download is not available when resending. Choose email, WhatsApp, link, or both.")
+        setLoading(false)
+        return
+      }
 
       if (sendMethod === "link") {
         await handleCopyLink()
@@ -355,7 +389,9 @@ export default function SendInvoiceModal({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold text-gray-900">Send Invoice</h2>
+          <h2 className="text-2xl font-bold text-gray-900">
+            {resendOnly ? "Resend invoice" : "Send Invoice"}
+          </h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
@@ -405,7 +441,7 @@ export default function SendInvoiceModal({
               value={sendMethod}
               onChange={setSendMethod}
               className="flex-1"
-              showIssueAndDownloadOption
+              showIssueAndDownloadOption={!resendOnly}
             />
             <button
               onClick={handleSendInvoice}
@@ -425,7 +461,9 @@ export default function SendInvoiceModal({
                   : "Sending..."
                 : sendMethod === "download"
                   ? "Issue & download"
-                  : "Send Invoice"}
+                  : resendOnly
+                    ? "Resend"
+                    : "Send Invoice"}
             </button>
           </div>
 

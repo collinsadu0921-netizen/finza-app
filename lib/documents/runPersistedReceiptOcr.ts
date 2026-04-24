@@ -32,7 +32,9 @@ export type RunPersistedReceiptOcrParams = {
   /** When set, OCR uses this row's storage_path (must belong to business_id). */
   existingDocumentId?: string | null
   /** Used only when creating a new row (no existingDocumentId). */
-  sourceType?: "manual_upload" | "expense_form_upload" | "bill_form_upload"
+  sourceType?: "manual_upload" | "expense_form_upload" | "bill_form_upload" | "email_inbound"
+  /** Trusted inbound pipeline only — bypasses workspace role checks for OCR. */
+  skipUserAuthorization?: boolean
   legacyFileMeta?: {
     file_name?: string | null
     mime_type?: string | null
@@ -56,19 +58,22 @@ export async function runPersistedReceiptOcr(
     documentType,
     existingDocumentId,
     sourceType = "manual_upload",
+    skipUserAuthorization = false,
     legacyFileMeta,
   } = params
 
-  const role = await getUserRole(supabase, userId, businessId)
-  if (!role) {
-    return {
-      ocr: {
-        ok: false,
-        error: "Unauthorized",
-        code: RECEIPT_OCR_ERROR_CODES.OCR_FORBIDDEN,
-        httpStatus: 403,
-      },
-      documentId: "",
+  if (!skipUserAuthorization) {
+    const role = await getUserRole(supabase, userId, businessId)
+    if (!role) {
+      return {
+        ocr: {
+          ok: false,
+          error: "Unauthorized",
+          code: RECEIPT_OCR_ERROR_CODES.OCR_FORBIDDEN,
+          httpStatus: 403,
+        },
+        documentId: "",
+      }
     }
   }
 
@@ -162,6 +167,7 @@ export async function runPersistedReceiptOcr(
       businessId,
       receiptPath: receiptPathForOcr,
       documentType,
+      skipUserAuthorization,
     })
     await finishIncomingDocumentExtraction(supabase, {
       documentId: persistenceDocumentId,

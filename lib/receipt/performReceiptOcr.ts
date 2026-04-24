@@ -164,9 +164,11 @@ export async function performReceiptOcr(
     businessId: string
     receiptPath: string
     documentType: DocumentType
+    /** Trusted server ingestion (e.g. inbound email); never set from user-facing routes. */
+    skipUserAuthorization?: boolean
   }
 ): Promise<PerformReceiptOcrResult> {
-  const { userId, businessId, receiptPath, documentType } = params
+  const { userId, businessId, receiptPath, documentType, skipUserAuthorization } = params
   const trimmedPath = receiptPath.trim()
   if (!trimmedPath) {
     return {
@@ -177,13 +179,15 @@ export async function performReceiptOcr(
     }
   }
 
-  const role = await getUserRole(supabase, userId, businessId)
-  if (!role) {
-    return {
-      ok: false,
-      error: "Unauthorized",
-      code: RECEIPT_OCR_ERROR_CODES.OCR_FORBIDDEN,
-      httpStatus: 403,
+  if (!skipUserAuthorization) {
+    const role = await getUserRole(supabase, userId, businessId)
+    if (!role) {
+      return {
+        ok: false,
+        error: "Unauthorized",
+        code: RECEIPT_OCR_ERROR_CODES.OCR_FORBIDDEN,
+        httpStatus: 403,
+      }
     }
   }
 

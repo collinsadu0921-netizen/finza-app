@@ -15,6 +15,9 @@ type DocRow = {
   reviewed_by?: string | null
   mime_type?: string | null
   file_name?: string | null
+  source_type?: string | null
+  source_email_sender?: string | null
+  source_email_subject?: string | null
 }
 
 type ExtractionRow = {
@@ -268,6 +271,26 @@ export default function IncomingDocumentReviewPage() {
                   <dt className="font-medium text-slate-500 inline">File: </dt>
                   <dd className="inline">{document.file_name}</dd>
                 </div>
+              )}
+              {document.source_type === "email_inbound" && (
+                <>
+                  <div>
+                    <dt className="font-medium text-slate-500 inline">Source: </dt>
+                    <dd className="inline">Email</dd>
+                  </div>
+                  {document.source_email_sender && (
+                    <div>
+                      <dt className="font-medium text-slate-500 inline">From: </dt>
+                      <dd className="inline break-all">{document.source_email_sender}</dd>
+                    </div>
+                  )}
+                  {document.source_email_subject && (
+                    <div>
+                      <dt className="font-medium text-slate-500 inline">Subject: </dt>
+                      <dd className="inline break-all">{document.source_email_subject}</dd>
+                    </div>
+                  )}
+                </>
               )}
               {latestExtraction?.extraction_mode && (
                 <div>

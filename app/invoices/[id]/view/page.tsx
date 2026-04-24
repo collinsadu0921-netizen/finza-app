@@ -128,6 +128,7 @@ export default function InvoiceViewPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
   const [showSendModal, setShowSendModal] = useState(false)
+  const [sendModalVariant, setSendModalVariant] = useState<"send" | "resend">("send")
   const [showPreviewModal, setShowPreviewModal] = useState(false)
   const [downloadDocLoading, setDownloadDocLoading] = useState(false)
   const [sendMethod, setSendMethod] = useState<SendMethod>("whatsapp")
@@ -510,7 +511,10 @@ Thank you.`
                       />
                       <button
                         type="button"
-                        onClick={() => setShowSendModal(true)}
+                        onClick={() => {
+                          setSendModalVariant("send")
+                          setShowSendModal(true)
+                        }}
                         className="inline-flex h-10 shrink-0 items-center gap-2 rounded-r-xl rounded-l-none bg-slate-900 px-4 text-sm font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
                       >
                         Send
@@ -519,20 +523,37 @@ Thank you.`
                         </svg>
                       </button>
                     </div>
-                  ) : remainingBalance > 0.01 ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowPaymentModal(true)}
-                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-500 sm:w-auto"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                      </svg>
-                      Record payment
-                    </button>
                   ) : (
-                    <div className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-emerald-200/80 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 select-none dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 sm:w-auto">
-                      Paid in full
+                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:w-auto sm:items-stretch">
+                      {remainingBalance > 0.01 ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowPaymentModal(true)}
+                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-500 sm:w-auto"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                          Record payment
+                        </button>
+                      ) : (
+                        <div className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-emerald-200/80 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 select-none dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 sm:w-auto">
+                          Paid in full
+                        </div>
+                      )}
+                      {invoice.invoice_number &&
+                        !["draft", "void", "cancelled"].includes(String(invoice.status || "").toLowerCase()) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSendModalVariant("resend")
+                              setShowSendModal(true)
+                            }}
+                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 sm:w-auto"
+                          >
+                            Resend
+                          </button>
+                        )}
                     </div>
                   )}
                 </div>
@@ -935,6 +956,7 @@ Thank you.`
       {showSendModal && invoice && (
         <SendInvoiceModal
           businessId={invoice.business_id}
+          variant={sendModalVariant}
           invoice={{
             ...invoice,
             public_token: invoice.public_token || "",
@@ -953,7 +975,9 @@ Thank you.`
             setToast({
               message: opts?.issuedViaDownload
                 ? "Invoice issued — document downloaded."
-                : "Invoice sent successfully!",
+                : sendModalVariant === "resend"
+                  ? "Invoice resent successfully."
+                  : "Invoice sent successfully!",
               type: "success",
             })
             setTimeout(() => {

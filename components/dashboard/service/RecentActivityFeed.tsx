@@ -4,7 +4,7 @@ import { formatMoney } from "@/lib/money"
 
 export type ActivityItem = {
   id: string
-  type: "invoice" | "expense" | "payment" | "customer"
+  type: "invoice" | "expense" | "payment" | "customer" | "email"
   description: string
   amount?: number | null
   currencyCode?: string
@@ -25,6 +25,7 @@ const TYPE_DOT: Record<string, string> = {
   payment: "bg-emerald-500",
   expense: "bg-amber-500",
   customer: "bg-purple-500",
+  email: "bg-sky-500",
 }
 
 export default function RecentActivityFeed({

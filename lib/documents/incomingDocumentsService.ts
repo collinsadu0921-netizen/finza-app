@@ -24,6 +24,9 @@ export async function createIncomingDocumentRow(
     fileName?: string | null
     mimeType?: string | null
     fileSize?: number | null
+    inboundEmailMessageId?: string | null
+    sourceEmailSender?: string | null
+    sourceEmailSubject?: string | null
   }
 ): Promise<{ id: string } | { error: string }> {
   const { data, error } = await supabase
@@ -39,6 +42,9 @@ export async function createIncomingDocumentRow(
       mime_type: input.mimeType ?? null,
       file_size: input.fileSize ?? null,
       status: "uploaded",
+      inbound_email_message_id: input.inboundEmailMessageId ?? null,
+      source_email_sender: input.sourceEmailSender ?? null,
+      source_email_subject: input.sourceEmailSubject ?? null,
     })
     .select("id")
     .single()

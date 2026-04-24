@@ -34,6 +34,7 @@ const SOURCE_LABEL: Record<string, string> = {
   manual_upload: "Manual",
   expense_form_upload: "Expense form",
   bill_form_upload: "Bill form",
+  email_inbound: "Email",
 }
 
 function formatDate(iso: string): string {
@@ -167,7 +168,13 @@ export default function IncomingDocumentsListPage() {
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Incoming documents</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Uploads, extraction, and review — newest first unless you change sort.
+            Uploads, extraction, and review — newest first unless you change sort.{" "}
+            <Link
+              href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
+              className="text-blue-700 hover:underline font-medium"
+            >
+              Inbound email settings
+            </Link>
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -324,8 +331,8 @@ export default function IncomingDocumentsListPage() {
 
       {!loading && !error && rows.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center text-sm text-slate-600">
-          No incoming documents yet. Upload a receipt from an expense, bill, or scanner flow — they will appear
-          here.
+          No incoming documents yet. Upload a receipt from an expense, bill, or scanner flow, or send to your
+          workspace inbound address — documents will appear here.
         </div>
       )}
 
@@ -383,6 +390,14 @@ export default function IncomingDocumentsListPage() {
                         {r.id}
                       </div>
                       <div className="text-[11px] text-slate-500">{SOURCE_LABEL[r.source_type] ?? r.source_type}</div>
+                      {r.source_type === "email_inbound" && (r.source_email_sender || r.source_email_subject) ? (
+                        <div
+                          className="text-[11px] text-slate-600 truncate max-w-[220px] mt-0.5"
+                          title={[r.source_email_sender, r.source_email_subject].filter(Boolean).join(" — ")}
+                        >
+                          {[r.source_email_sender, r.source_email_subject].filter(Boolean).join(" · ")}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 align-top text-slate-700">
                       {KIND_LABEL[r.document_kind] ?? r.document_kind}

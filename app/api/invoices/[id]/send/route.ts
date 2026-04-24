@@ -111,6 +111,8 @@ export async function POST(
     const body = await request.json().catch(() => ({}))
     const { email, sendEmail, sendWhatsApp, copyLink, sendMethod } = body
     const issueAndDownload = body.issueAndDownload === true
+    /** Communication-only resend: do not run draft→sent transition or re-assign numbers. */
+    const resendOnly = body.resend_only === true || body.resendOnly === true
 
     const requestedBusinessId =
       (typeof body.business_id === "string" && body.business_id.trim()) ||
@@ -178,6 +180,56 @@ export async function POST(
         { success: false, error: e?.message || "Business is archived" },
         { status: 403 }
       )
+    }
+
+    if (resendOnly) {
+      if (String(invoice.status || "").toLowerCase() === "draft") {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Resend is for issued invoices only. Use Send while the invoice is still a draft.",
+            message: "Invalid state for resend",
+          },
+          { status: 400 }
+        )
+      }
+      if (!String(invoice.invoice_number || "").trim()) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "This invoice has no invoice number yet. Issue it first, then use Resend.",
+            message: "Invoice not issued",
+          },
+          { status: 400 }
+        )
+      }
+      const terminal = new Set(["void", "cancelled"])
+      if (terminal.has(String(invoice.status || "").toLowerCase())) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "This invoice cannot be resent in its current state.",
+            message: "Invalid state for resend",
+          },
+          { status: 400 }
+        )
+      }
+      if (!(sendEmail || sendWhatsApp || copyLink)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Choose email, WhatsApp, or copy link to resend the invoice.",
+            message: "Missing resend channel",
+          },
+          { status: 400 }
+        )
+      }
+      if (issueAndDownload) {
+        return NextResponse.json(
+          { success: false, error: "Issue & download is not available when resending.", message: "Invalid request" },
+          { status: 400 }
+        )
+      }
     }
 
     // Use request origin so email links match the host the user is on (avoids localhost in prod emails)
@@ -255,43 +307,47 @@ export async function POST(
         (invoice.businesses as { legal_name?: string } | null)?.legal_name ||
         "Our Business"
 
-      // Run the send transition FIRST so the invoice number is assigned before we build the message
-      const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
-      if (bootstrapErr) {
-        return NextResponse.json(
-          { success: false, error: bootstrapErr, message: bootstrapErr },
-          { status: 500 }
+      let updatedInvoice: typeof invoice = invoice
+      if (!resendOnly) {
+        // Run the send transition FIRST so the invoice number is assigned before we build the message
+        const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
+        if (bootstrapErr) {
+          return NextResponse.json(
+            { success: false, error: bootstrapErr, message: bootstrapErr },
+            { status: 500 }
+          )
+        }
+        const { ready: accountingReady } = await checkAccountingReadiness(supabase, invoice.business_id)
+        if (!accountingReady) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Accounting is not set up for this business. Please complete accounting setup before sending invoices.",
+              message: "Accounting not ready"
+            },
+            { status: 400 }
+          )
+        }
+        const { data: transitioned, error: transitionError } = await performSendTransition(
+          supabase,
+          invoiceId,
+          invoice,
+          sendMethod
         )
-      }
-      const { ready: accountingReady } = await checkAccountingReadiness(supabase, invoice.business_id)
-      if (!accountingReady) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Accounting is not set up for this business. Please complete accounting setup before sending invoices.",
-            message: "Accounting not ready"
-          },
-          { status: 400 }
-        )
-      }
-      const { data: updatedInvoice, error: transitionError } = await performSendTransition(
-        supabase,
-        invoiceId,
-        invoice,
-        sendMethod
-      )
-      if (transitionError || !updatedInvoice) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: transitionError?.message ?? "We couldn't update the invoice status. Please try again.",
-            message: transitionError?.message ?? "Update failed",
-          },
-          { status: 500 }
-        )
+        if (transitionError || !transitioned) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: transitionError?.message ?? "We couldn't update the invoice status. Please try again.",
+              message: transitionError?.message ?? "Update failed",
+            },
+            { status: 500 }
+          )
+        }
+        updatedInvoice = transitioned
       }
 
-      // Build message AFTER transition so the assigned invoice number is used
+      // Build message AFTER transition (first send) or from existing row (resend)
       const invoiceNumberForMsg = updatedInvoice.invoice_number ?? invoice.invoice_number
       const template = await getBusinessWhatsAppTemplate(supabase, invoice.business_id, "invoice")
       const message = renderWhatsAppTemplate(template, {
@@ -319,16 +375,19 @@ export async function POST(
         await createAuditLog({
           businessId: invoice.business_id || "00000000-0000-0000-0000-000000000000",
           userId: user?.id || "00000000-0000-0000-0000-000000000000",
-          actionType: "invoice.sent_whatsapp",
+          actionType: resendOnly ? "invoice.resent_whatsapp" : "invoice.sent_whatsapp",
           entityType: "invoice",
           entityId: invoiceId,
           newValues: {
             invoice_number: invoiceNumberForMsg,
             recipient_phone: e164Phone,
+            resend_only: resendOnly,
           },
           ipAddress: getIpAddress(request),
           userAgent: getUserAgent(request),
-          description: `Invoice sent via WhatsApp to ${e164Phone}`,
+          description: resendOnly
+            ? `Invoice resent via WhatsApp to ${e164Phone}`
+            : `Invoice sent via WhatsApp to ${e164Phone}`,
         })
       } catch (auditError) {
         console.error("Error logging audit:", auditError)
@@ -365,23 +424,25 @@ export async function POST(
           { status: 400 }
         )
       }
-      const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
-      if (bootstrapErr) {
-        return NextResponse.json(
-          { success: false, error: bootstrapErr, message: bootstrapErr },
-          { status: 500 }
-        )
-      }
-      const { ready: accountingReady } = await checkAccountingReadiness(supabase, invoice.business_id)
-      if (!accountingReady) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Accounting is not set up for this business. Please complete accounting setup before sending invoices.",
-            message: "Accounting not ready"
-          },
-          { status: 400 }
-        )
+      if (!resendOnly) {
+        const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
+        if (bootstrapErr) {
+          return NextResponse.json(
+            { success: false, error: bootstrapErr, message: bootstrapErr },
+            { status: 500 }
+          )
+        }
+        const { ready: accountingReady } = await checkAccountingReadiness(supabase, invoice.business_id)
+        if (!accountingReady) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Accounting is not set up for this business. Please complete accounting setup before sending invoices.",
+              message: "Accounting not ready"
+            },
+            { status: 400 }
+          )
+        }
       }
 
       // Send email first. Only mark as sent and post to ledger after email succeeds,
@@ -446,28 +507,32 @@ export async function POST(
         )
       }
 
-      const { data: updatedInvoice, error: transitionError } = await performSendTransition(
-        supabase,
-        invoiceId,
-        invoice,
-        sendMethod
-      )
-      if (transitionError || !updatedInvoice) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: transitionError?.message ?? "We couldn't update the invoice status. Please try again.",
-            message: transitionError?.message ?? "Update failed",
-          },
-          { status: 500 }
+      let updatedInvoice = invoice
+      if (!resendOnly) {
+        const { data: transitioned, error: transitionError } = await performSendTransition(
+          supabase,
+          invoiceId,
+          invoice,
+          sendMethod
         )
+        if (transitionError || !transitioned) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: transitionError?.message ?? "We couldn't update the invoice status. Please try again.",
+              message: transitionError?.message ?? "Update failed",
+            },
+            { status: 500 }
+          )
+        }
+        updatedInvoice = transitioned
       }
 
       try {
         await createAuditLog({
           businessId: invoice.business_id || "00000000-0000-0000-0000-000000000000",
           userId: user?.id || "00000000-0000-0000-0000-000000000000",
-          actionType: "invoice.sent_email",
+          actionType: resendOnly ? "invoice.resent_email" : "invoice.sent_email",
           entityType: "invoice",
           entityId: invoiceId,
           newValues: {
@@ -475,10 +540,13 @@ export async function POST(
             invoice_number: updatedInvoice.invoice_number ?? invoice.invoice_number,
             resend_message_id: result.success ? result.id : undefined,
             email_channel: isServiceWorkspace ? "service_documents" : "legacy",
+            resend_only: resendOnly,
           },
           ipAddress: getIpAddress(request),
           userAgent: getUserAgent(request),
-          description: `Invoice sent via email to ${email}`,
+          description: resendOnly
+            ? `Invoice resent via email to ${email}`
+            : `Invoice sent via email to ${email}`,
         })
       } catch (auditError) {
         console.error("Error logging audit:", auditError)
@@ -487,7 +555,7 @@ export async function POST(
       return NextResponse.json({
         success: true,
         invoice: updatedInvoice,
-        message: "Invoice sent via email",
+        message: resendOnly ? "Invoice resent via email" : "Invoice sent via email",
       })
     }
 
@@ -576,21 +644,38 @@ export async function POST(
         )
       }
       // Update sent_via_method but don't mark as sent (link copy is not a send)
-      // Only update if column exists (graceful fallback)
-      try {
-        const { error: updateError } = await supabase
-          .from("invoices")
-          .update({
-            sent_via_method: sendMethod,
-          })
-          .eq("id", invoiceId)
+      // Only update if column exists (graceful fallback). Skip on resend-only (communication-only).
+      if (!resendOnly) {
+        try {
+          const { error: updateError } = await supabase
+            .from("invoices")
+            .update({
+              sent_via_method: sendMethod,
+            })
+            .eq("id", invoiceId)
 
-        if (updateError && (updateError.message?.includes("sent_via_method") || updateError.message?.includes("column"))) {
-          // Column doesn't exist, skip update
-          console.log("sent_via_method column not found, skipping update")
+          if (updateError && (updateError.message?.includes("sent_via_method") || updateError.message?.includes("column"))) {
+            console.log("sent_via_method column not found, skipping update")
+          }
+        } catch (e) {
+          /* ignore */
         }
-      } catch (e) {
-        // Column might not exist, continue
+      }
+
+      try {
+        await createAuditLog({
+          businessId: invoice.business_id || "00000000-0000-0000-0000-000000000000",
+          userId: user?.id || "00000000-0000-0000-0000-000000000000",
+          actionType: resendOnly ? "invoice.resent_copy_link" : "invoice.copy_link",
+          entityType: "invoice",
+          entityId: invoiceId,
+          newValues: { resend_only: resendOnly },
+          ipAddress: getIpAddress(request),
+          userAgent: getUserAgent(request),
+          description: resendOnly ? "Invoice public link copied (resend)" : "Invoice public link copied",
+        })
+      } catch (auditError) {
+        console.error("Error logging audit:", auditError)
       }
 
       return NextResponse.json({
@@ -598,6 +683,17 @@ export async function POST(
         publicUrl: publicInvoiceUrl,
         message: "Link copied to clipboard",
       })
+    }
+
+    if (resendOnly) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid resend request. Use email, WhatsApp, or copy link.",
+          message: "Invalid request",
+        },
+        { status: 400 }
+      )
     }
 
     // Default: just mark as sent (same SEND transition as email/WhatsApp)

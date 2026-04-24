@@ -43,6 +43,11 @@ const SETTING_GROUPS: SettingsGroup[] = [
       },
     ],
   },
+  {
+    title: "Documents",
+    description: "Bring files into Finza without uploading from the app.",
+    links: [{ label: "Inbound email for documents", path: "/service/settings/inbound-email" }],
+  },
 ]
 
 function Chevron() {

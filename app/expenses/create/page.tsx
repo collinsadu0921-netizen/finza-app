@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
@@ -72,6 +72,35 @@ export default function CreateExpensePage() {
   }, [searchParams])
 
   const incomingPrefillKeyRef = useRef<string>("")
+  const receiptFileInputRef = useRef<HTMLInputElement>(null)
+
+  const removeReceiptAttachment = useCallback(async () => {
+    setOcrError("")
+    if (receiptPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(receiptPreview)
+    }
+    if (incomingDocumentId && businessId) {
+      try {
+        const res = await fetch(
+          `/api/incoming-documents/${encodeURIComponent(incomingDocumentId)}?business_id=${encodeURIComponent(businessId)}`,
+          { method: "DELETE" }
+        )
+        if (!res.ok && res.status !== 404) {
+          const j = await res.json().catch(() => ({}))
+          console.warn("Could not delete draft incoming document:", j?.error || res.status)
+        }
+      } catch (e) {
+        console.warn("Could not delete draft incoming document:", e)
+      }
+    }
+    setReceiptFile(null)
+    setReceiptPreview(null)
+    setUploadedReceiptPath(null)
+    setIncomingDocumentId(null)
+    setOcrSuggestedFields({})
+    setOcrLoading(false)
+    if (receiptFileInputRef.current) receiptFileInputRef.current.value = ""
+  }, [receiptPreview, incomingDocumentId, businessId])
   useEffect(() => {
     const fid = searchParams.get("from_incoming_doc")?.trim()
     if (!fid || !businessId) return
@@ -201,6 +230,14 @@ export default function CreateExpensePage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
+      const prevIncoming = incomingDocumentId
+      const bid = businessId
+      if (prevIncoming && bid) {
+        void fetch(
+          `/api/incoming-documents/${encodeURIComponent(prevIncoming)}?business_id=${encodeURIComponent(bid)}`,
+          { method: "DELETE" }
+        ).catch(() => {})
+      }
       setReceiptFile(file)
       setIncomingDocumentId(null)
       setOcrError("")
@@ -659,11 +696,24 @@ export default function CreateExpensePage() {
                   Receipt (Image/PDF)
                 </label>
                 <input
+                  ref={receiptFileInputRef}
                   type="file"
                   accept="image/*,.pdf"
                   onChange={handleFileChange}
                   className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                 />
+                {(receiptFile || receiptPreview || uploadedReceiptPath || incomingDocumentId) && (
+                  <button
+                    type="button"
+                    onClick={() => void removeReceiptAttachment()}
+                    className="mt-2 inline-flex items-center gap-2 self-start rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-800 hover:bg-rose-100"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Remove file
+                  </button>
+                )}
                 {receiptFile &&
                   (receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf") && (
                   <div className="mt-3 flex flex-col gap-2">

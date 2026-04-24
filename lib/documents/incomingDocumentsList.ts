@@ -26,6 +26,8 @@ export type IncomingDocumentListSummary = {
   display_name: string
   document_kind: string
   source_type: string
+  source_email_sender: string | null
+  source_email_subject: string | null
   status: string
   review_status: string
   created_at: string
@@ -183,7 +185,7 @@ export async function listIncomingDocumentSummaries(
   let q = supabase
     .from("incoming_documents")
     .select(
-      "id, file_name, document_kind, status, review_status, source_type, storage_path, linked_entity_type, linked_entity_id, latest_extraction_id, created_at, mime_type",
+      "id, file_name, document_kind, status, review_status, source_type, source_email_sender, source_email_subject, storage_path, linked_entity_type, linked_entity_id, latest_extraction_id, created_at, mime_type",
       { count: "exact" }
     )
     .eq("business_id", params.businessId)
@@ -221,9 +223,13 @@ export async function listIncomingDocumentSummaries(
     if (safe.length > 0) {
       const pattern = `%${safe}%`
       if (UUID_RE.test(safe)) {
-        q = q.or(`file_name.ilike.${pattern},storage_path.ilike.${pattern},id.eq.${safe}`)
+        q = q.or(
+          `file_name.ilike.${pattern},storage_path.ilike.${pattern},source_email_subject.ilike.${pattern},source_email_sender.ilike.${pattern},id.eq.${safe}`
+        )
       } else {
-        q = q.or(`file_name.ilike.${pattern},storage_path.ilike.${pattern}`)
+        q = q.or(
+          `file_name.ilike.${pattern},storage_path.ilike.${pattern},source_email_subject.ilike.${pattern},source_email_sender.ilike.${pattern}`
+        )
       }
     }
   }
@@ -246,6 +252,8 @@ export async function listIncomingDocumentSummaries(
     status: string
     review_status: string | null
     source_type: string
+    source_email_sender: string | null
+    source_email_subject: string | null
     storage_path: string | null
     linked_entity_type: string | null
     linked_entity_id: string | null
@@ -291,6 +299,8 @@ export async function listIncomingDocumentSummaries(
       display_name: displayName(row),
       document_kind: row.document_kind,
       source_type: row.source_type,
+      source_email_sender: row.source_email_sender ?? null,
+      source_email_subject: row.source_email_subject ?? null,
       status: row.status,
       review_status: row.review_status ?? "none",
       created_at: row.created_at,
