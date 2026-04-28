@@ -25,6 +25,7 @@ test.describe("Service API smoke (/api/service/*)", () => {
     const fromEnv = process.env.E2E_SERVICE_BUSINESS_ID?.trim()
     const businessId = fromEnv || (await readBusinessIdFromDashboard(page))
     test.skip(!businessId, "Could not resolve business_id (set E2E_SERVICE_BUSINESS_ID or ensure dashboard has quick-action links)")
+    if (!businessId) return
 
     const res = await request.get(
       `/api/service/expenses/activity?businessId=${encodeURIComponent(businessId)}`

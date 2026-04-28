@@ -445,7 +445,7 @@ export async function ingestNormalizedInboundEmail(
         businessId,
         createdDocumentIds,
         fileNames: ingestedFileNames,
-        senderAddress: payload.senderAddress,
+        senderAddress: payload.senderAddress ?? "",
         subject: payload.subject,
       })
     }

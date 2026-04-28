@@ -60,7 +60,7 @@ export async function resolveInboundDocumentsNotificationRecipient(
   if (ownerId) {
     const { data: owner } = await supabase.from("users").select("email").eq("id", ownerId).maybeSingle()
     if (looksLikeEmail(owner?.email as string | null)) {
-      return { to: String(owner.email).trim(), businessName }
+      return { to: String(owner?.email).trim(), businessName }
     }
   }
 
