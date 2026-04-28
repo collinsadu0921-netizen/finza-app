@@ -246,17 +246,17 @@ export default function RetailDashboardPage() {
               }}
               className="w-full cursor-pointer rounded-lg border border-gray-200 bg-white p-6 text-left shadow-sm transition-shadow hover:border-gray-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600"
             >
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
                     Sales today
                   </p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-white mt-2">
+                  <p className="mt-2 text-xl font-bold tabular-nums leading-tight text-gray-900 [overflow-wrap:anywhere] dark:text-white sm:text-2xl md:text-3xl">
                     {stats.salesToday}
                   </p>
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">View in sales history</p>
                 </div>
-                <div className="rounded-lg bg-blue-50 p-2.5 dark:bg-blue-950/50">
+                <div className="shrink-0 rounded-lg bg-blue-50 p-2.5 dark:bg-blue-950/50">
                   <svg
                     className="h-7 w-7 text-blue-600 dark:text-blue-400"
                     fill="none"
@@ -276,16 +276,16 @@ export default function RetailDashboardPage() {
 
             {/* Revenue Today Card */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
                     Revenue today
                   </p>
-                  <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">
+                  <p className="mt-2 text-base font-bold tabular-nums leading-tight text-gray-900 [overflow-wrap:anywhere] dark:text-white sm:text-lg md:text-2xl lg:text-3xl">
                     {formatCurrency(stats.revenueToday)}
                   </p>
                 </div>
-                <div className="rounded-lg bg-emerald-50 p-2.5 dark:bg-emerald-950/40">
+                <div className="shrink-0 rounded-lg bg-emerald-50 p-2.5 dark:bg-emerald-950/40">
                   <svg
                     className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
                     fill="none"
@@ -305,7 +305,7 @@ export default function RetailDashboardPage() {
 
             {/* Register Status Card */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
                     Till status

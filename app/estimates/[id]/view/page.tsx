@@ -427,10 +427,10 @@ export default function EstimateViewPage() {
                     Converted
                   </div>
                 )}
-                {/* Send / Resend */}
+                {/* Send / send again */}
                 {!estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
                   <button onClick={() => setShowSendModal(true)} className="px-3 py-2 text-sm font-semibold text-white bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors">
-                    {estimate.status === "sent" ? "Resend" : "Send Quote"}
+                    {estimate.status === "sent" ? "Send again" : "Send Quote"}
                   </button>
                 )}
                 {/* Client link */}

@@ -717,9 +717,13 @@ function SummaryCard({
     orange: "text-orange-700 dark:text-orange-300",
   }
   return (
-    <div className={`rounded-xl border p-4 ${accentClasses[accent]}`}>
-      <div className={`text-2xl font-bold ${valueClasses[accent]}`}>{value}</div>
-      <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mt-1">{label}</div>
+    <div className={`min-w-0 rounded-xl border p-4 ${accentClasses[accent]}`}>
+      <div
+        className={`text-xl font-bold tabular-nums leading-tight [overflow-wrap:anywhere] sm:text-2xl ${valueClasses[accent]}`}
+      >
+        {value}
+      </div>
+      <div className="mt-1 text-xs font-medium text-gray-600 dark:text-gray-400">{label}</div>
     </div>
   )
 }

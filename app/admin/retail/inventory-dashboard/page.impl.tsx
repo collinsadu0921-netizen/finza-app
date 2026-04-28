@@ -64,7 +64,10 @@ type InventoryKPIs = {
   totalProducts: number
   totalCategories: number
   totalStockUnits: number
-  totalInventoryValue: number
+  /** Stock × selling price (retail extension). */
+  totalRetailInventoryValue: number
+  /** Sum of on-hand extended cost at AVCO (per stock row: qty × average_cost). */
+  totalCostInventoryValue: number
   outOfStockCount: number
   lowStockCount: number
 }
@@ -82,7 +85,8 @@ export default function InventoryDashboardPage() {
     totalProducts: 0,
     totalCategories: 0,
     totalStockUnits: 0,
-    totalInventoryValue: 0,
+    totalRetailInventoryValue: 0,
+    totalCostInventoryValue: 0,
     outOfStockCount: 0,
     lowStockCount: 0,
   })
@@ -198,7 +202,7 @@ export default function InventoryDashboardPage() {
       // Use active_store_id from session
       let stockQuery = supabase
         .from("products_stock")
-        .select("product_id, variant_id, stock, stock_quantity, store_id")
+        .select("product_id, variant_id, stock, stock_quantity, store_id, average_cost")
         .in("product_id", productsData.map((p: any) => p.id))
 
       if (storeIdForStock) {
@@ -238,6 +242,8 @@ export default function InventoryDashboardPage() {
 
       const parentStockMap: Record<string, number> = {}
       const variantStockMap: Record<string, number> = {}
+      const parentExtendedCostMap: Record<string, number> = {}
+      const variantExtendedCostMap: Record<string, number> = {}
       if (stockData) {
         stockData.forEach((s: any) => {
           const rowQty =
@@ -246,16 +252,21 @@ export default function InventoryDashboardPage() {
               : s.stock !== null && s.stock !== undefined
                 ? Number(s.stock)
                 : 0
+          const rowAvgCost = Number(s.average_cost ?? 0) || 0
+          const rowExtendedCost = rowQty * rowAvgCost
           if (s.variant_id) {
             variantStockMap[s.variant_id] = (variantStockMap[s.variant_id] || 0) + rowQty
+            variantExtendedCostMap[s.variant_id] = (variantExtendedCostMap[s.variant_id] || 0) + rowExtendedCost
           } else {
             parentStockMap[s.product_id] = (parentStockMap[s.product_id] || 0) + rowQty
+            parentExtendedCostMap[s.product_id] = (parentExtendedCostMap[s.product_id] || 0) + rowExtendedCost
           }
         })
       }
 
       // Calculate KPIs
-      let totalInventoryValue = 0
+      let totalRetailInventoryValue = 0
+      let totalCostInventoryValue = 0
       let totalStockUnits = 0
       let outOfStock = 0
       let lowStock = 0
@@ -275,7 +286,8 @@ export default function InventoryDashboardPage() {
             const unitPrice = v.price != null && !Number.isNaN(v.price) ? Number(v.price) : basePrice
 
             if (p.track_stock !== false) {
-              totalInventoryValue += stockQty * unitPrice
+              totalRetailInventoryValue += stockQty * unitPrice
+              totalCostInventoryValue += variantExtendedCostMap[v.id] ?? 0
               totalStockUnits += stockQty
             }
 
@@ -313,7 +325,8 @@ export default function InventoryDashboardPage() {
         const price = basePrice
 
         if (p.track_stock !== false) {
-          totalInventoryValue += stockQty * price
+          totalRetailInventoryValue += stockQty * price
+          totalCostInventoryValue += parentExtendedCostMap[p.id] ?? 0
           totalStockUnits += stockQty
         }
 
@@ -338,7 +351,8 @@ export default function InventoryDashboardPage() {
         totalProducts: productsData.length,
         totalCategories: categoriesData?.length || 0,
         totalStockUnits,
-        totalInventoryValue,
+        totalRetailInventoryValue,
+        totalCostInventoryValue,
         outOfStockCount: outOfStock,
         lowStockCount: lowStock,
       })
@@ -632,7 +646,7 @@ export default function InventoryDashboardPage() {
         <RetailBackofficePageHeader
           eyebrow="Product & inventory"
           title="Inventory overview"
-          description="Stock health, value at retail prices, and recent operational signals for the selected store."
+          description="Stock health, retail and cost value (AVCO), and recent operational signals for the selected store."
           actions={
             business?.default_currency ? (
               <span className="text-xs font-medium text-slate-500">All amounts · {business.default_currency}</span>
@@ -670,9 +684,22 @@ export default function InventoryDashboardPage() {
                 padding="p-6"
                 className="border-slate-300/90 bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-md md:col-span-2 lg:col-span-1"
               >
-                <p className="text-xs font-medium uppercase tracking-wide text-white/70">Inventory value</p>
-                <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{formatCurrency(kpis.totalInventoryValue)}</p>
-                <p className="mt-3 text-sm text-white/75">At current on-hand quantity × selling price</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-white/70">Retail inventory value</p>
+                <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">
+                  {formatCurrency(kpis.totalRetailInventoryValue)}
+                </p>
+                <p className="mt-3 text-sm text-white/75">On-hand quantity × selling price</p>
+                <div className="mt-5 border-t border-white/15 pt-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-white/70">Cost inventory value</p>
+                  <p
+                    className={`mt-2 text-2xl font-semibold tracking-tight tabular-nums ${
+                      kpis.totalCostInventoryValue === 0 ? "text-white/50" : ""
+                    }`}
+                  >
+                    {formatCurrency(kpis.totalCostInventoryValue)}
+                  </p>
+                  <p className="mt-2 text-sm text-white/75">Extended at average cost (AVCO) per stock row</p>
+                </div>
               </RetailBackofficeCard>
 
               <RetailBackofficeCard>

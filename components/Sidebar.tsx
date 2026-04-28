@@ -377,6 +377,7 @@ export default function Sidebar() {
           title: "PAYROLL",
           items: [
             { label: "Payroll", route: "/service/payroll", minTier: "professional" },
+            { label: "Employees", route: "/service/settings/staff", minTier: "professional" },
             { label: "Salary Advances", route: "/service/payroll/advances", minTier: "professional" },
           ],
         },

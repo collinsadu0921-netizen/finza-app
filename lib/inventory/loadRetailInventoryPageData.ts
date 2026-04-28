@@ -11,6 +11,7 @@ export type InventoryProduct = {
   price: number
   stock: number
   stock_quantity?: number
+  average_cost?: number
   low_stock_threshold?: number
   track_stock?: boolean
   category_id?: string
@@ -19,6 +20,7 @@ export type InventoryProduct = {
     id: string
     variant_name: string
     stock: number
+    average_cost?: number
     price?: number
   }>
 }
@@ -111,16 +113,23 @@ export async function loadRetailInventoryPageData(
 
   const { data: stockData, error: stockErr } = await supabase
     .from("products_stock")
-    .select("product_id, variant_id, stock")
+    .select("product_id, variant_id, stock, stock_quantity, average_cost")
     .eq("store_id", activeStoreId)
     .is("variant_id", null)
     .in("product_id", productIds)
 
   throwIfError("inventory.products_stock", stockErr)
 
-  const stockMap = new Map<string, number>()
+  const stockMap = new Map<string, { qty: number; averageCost: number }>()
   for (const record of stockData || []) {
-    stockMap.set(record.product_id, Number(record.stock || 0))
+    const qty =
+      record.stock_quantity !== null && record.stock_quantity !== undefined
+        ? Number(record.stock_quantity)
+        : Number(record.stock || 0)
+    stockMap.set(record.product_id, {
+      qty,
+      averageCost: Number(record.average_cost || 0),
+    })
   }
 
   const productsWithVariants = new Set<string>()
@@ -145,7 +154,7 @@ export async function loadRetailInventoryPageData(
     })
   }
 
-  const variantStockMap = new Map<string, number>()
+  const variantStockMap = new Map<string, { qty: number; averageCost: number }>()
   if (productsWithVariants.size > 0) {
     const variantIds = Array.from(productVariantsMap.values())
       .flat()
@@ -153,7 +162,7 @@ export async function loadRetailInventoryPageData(
     if (variantIds.length > 0) {
       const { data: variantStockData, error: variantStockErr } = await supabase
         .from("products_stock")
-        .select("variant_id, stock")
+        .select("variant_id, stock, stock_quantity, average_cost")
         .eq("store_id", activeStoreId)
         .in("variant_id", variantIds)
         .not("variant_id", "is", null)
@@ -161,14 +170,21 @@ export async function loadRetailInventoryPageData(
       throwIfError("inventory.products_stock_variants", variantStockErr)
 
       for (const record of variantStockData || []) {
-        variantStockMap.set(record.variant_id, Number(record.stock || 0))
+        const qty =
+          record.stock_quantity !== null && record.stock_quantity !== undefined
+            ? Number(record.stock_quantity)
+            : Number(record.stock || 0)
+        variantStockMap.set(record.variant_id, {
+          qty,
+          averageCost: Number(record.average_cost || 0),
+        })
       }
     }
   }
 
   const inventoryProducts: InventoryProduct[] = productRows.map((p) => {
-    const storeStock = stockMap.get(p.id) ?? 0
-    const stockQty = Math.floor(storeStock)
+    const storeStock = stockMap.get(p.id) ?? { qty: 0, averageCost: 0 }
+    const stockQty = Math.floor(storeStock.qty)
     const hasVariants = productsWithVariants.has(p.id)
 
     let variants: Array<{ id: string; variant_name: string; stock: number; price?: number }> | undefined
@@ -176,7 +192,8 @@ export async function loadRetailInventoryPageData(
       const variantList = productVariantsMap.get(p.id) || []
       variants = variantList.map((v) => ({
         ...v,
-        stock: Math.floor(variantStockMap.get(v.id) ?? 0),
+        stock: Math.floor((variantStockMap.get(v.id)?.qty ?? 0)),
+        average_cost: variantStockMap.get(v.id)?.averageCost ?? 0,
       }))
     }
 
@@ -184,8 +201,9 @@ export async function loadRetailInventoryPageData(
       id: p.id,
       name: p.name,
       price: Number(p.price),
-      stock: stockQty,
+      stock: Math.floor(storeStock.qty),
       stock_quantity: stockQty,
+      average_cost: storeStock.averageCost,
       low_stock_threshold: p.low_stock_threshold != null ? Number(p.low_stock_threshold) : undefined,
       track_stock: p.track_stock !== undefined && p.track_stock !== null ? p.track_stock : true,
       category_id: p.category_id || undefined,

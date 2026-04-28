@@ -24,6 +24,18 @@ function normalizeText(s: string): string {
   return s.replace(/\s+/g, " ").trim()
 }
 
+/**
+ * Server / Vercel: never spin up pdf.worker.mjs (not bundled on Lambda). Fake-worker fallback also fails there.
+ */
+export function pdfjsServerGetDocumentParams(data: Uint8Array) {
+  return {
+    data,
+    useSystemFonts: true,
+    verbosity: 0,
+    disableWorker: true,
+  } as const
+}
+
 /** pdfjs `getTextContent().items` entries are TextItem | TextMarkedContent — only TextItem has `str`. */
 function pdfTextItemStr(it: unknown): string {
   if (it === null || typeof it !== "object") return ""
@@ -42,11 +54,7 @@ async function extractTextWithPdfParse(buffer: Buffer): Promise<{ text: string; 
 async function extractTextWithPdfJs(buffer: ArrayBuffer): Promise<{ text: string; numPages: number }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
   const data = new Uint8Array(buffer)
-  const loadingTask = pdfjs.getDocument({
-    data,
-    useSystemFonts: true,
-    verbosity: 0,
-  })
+  const loadingTask = pdfjs.getDocument(pdfjsServerGetDocumentParams(data))
   const doc = await loadingTask.promise
   const numPages = doc.numPages
   const max = Math.min(numPages, pdfMaxPages())
@@ -69,7 +77,7 @@ async function ocrPdfPagesRaster(buffer: ArrayBuffer): Promise<{ text: string; p
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
   const { extractTextWithTesseract } = await import("@/lib/receipt/tesseractReceiptOcr")
   const data = new Uint8Array(buffer)
-  const loadingTask = pdfjs.getDocument({ data, useSystemFonts: true, verbosity: 0 })
+  const loadingTask = pdfjs.getDocument(pdfjsServerGetDocumentParams(data))
   const doc = await loadingTask.promise
   const numPages = doc.numPages
   const max = Math.min(numPages, pdfMaxPages())
@@ -114,12 +122,16 @@ export async function extractReceiptPdf(buffer: ArrayBuffer): Promise<ExtractRec
   }
 
   let digitalFromJs = ""
-  try {
-    const js = await extractTextWithPdfJs(buffer)
-    digitalFromJs = js.text
-    if (!pageCount) pageCount = js.numPages
-  } catch (e) {
-    warnings.push(`pdfjs_text_failed: ${e instanceof Error ? e.message : String(e)}`)
+  const parseNormLen = normalizeText(digitalFromParse).length
+  // Prefer pdf-parse when it already carries enough digital text — avoids pdfjs main-thread path on server.
+  if (parseNormLen < PDF_MIN_DIGITAL_TEXT_CHARS) {
+    try {
+      const js = await extractTextWithPdfJs(buffer)
+      digitalFromJs = js.text
+      if (!pageCount) pageCount = js.numPages
+    } catch (e) {
+      warnings.push(`pdfjs_text_failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   const digitalCombined = [digitalFromParse, digitalFromJs].filter(Boolean).join("\n\n").trim()

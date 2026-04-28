@@ -90,6 +90,7 @@ export function checkRouteAccess(
       "/inventory",
       "/staff",
       "/payroll",
+      "/service/payroll",
     ]
 
     for (const blocked of blockedRoutes) {

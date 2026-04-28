@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
+import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 
 type Staff = {
   id: string
@@ -41,6 +42,8 @@ type Deduction = {
 
 export default function StaffViewPage() {
   const router = useRouter()
+  const payrollBase = usePayrollBasePath()
+  const settingsStaffPath = payrollBase.startsWith("/service") ? "/service/settings/staff" : "/settings/staff"
   const params = useParams()
   const staffId = params.id as string
   const toast = useToast()
@@ -246,7 +249,7 @@ export default function StaffViewPage() {
     return (
       <div className="p-6">
         <p className="text-red-500">{error || "Staff not found"}</p>
-        <button onClick={() => router.push("/settings/staff")} className="mt-4 text-blue-600 hover:underline">
+        <button onClick={() => router.push(settingsStaffPath)} className="mt-4 text-blue-600 hover:underline">
           ← Back to Staff List
         </button>
       </div>
@@ -259,7 +262,7 @@ export default function StaffViewPage() {
         <div className="max-w-7xl mx-auto">
           <div className="mb-6">
             <button
-              onClick={() => router.push("/settings/staff")}
+              onClick={() => router.push(settingsStaffPath)}
               className="text-blue-600 dark:text-blue-400 hover:underline mb-2"
             >
               ← Back to Staff List
@@ -270,7 +273,7 @@ export default function StaffViewPage() {
                 <p className="text-gray-600 dark:text-gray-400">{staff.position || "No position"}</p>
               </div>
               <button
-                onClick={() => router.push(`/payroll/staff/${staffId}/edit`)}
+                onClick={() => router.push(`${payrollBase}/staff/${staffId}/edit`)}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
               >
                 Edit Staff

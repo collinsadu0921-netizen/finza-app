@@ -9,6 +9,7 @@ import {
   effectiveMimeForStorage,
   isSupportedInboundAttachmentMime,
 } from "@/lib/email/inboundEmailMime"
+import { notifyInboundDocumentsCreated } from "@/lib/email/sendInboundDocumentsReceivedNotification"
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
@@ -267,6 +268,8 @@ export async function ingestNormalizedInboundEmail(
   }
 
   let attachmentsIngested = 0
+  const createdDocumentIds: string[] = []
+  const ingestedFileNames: string[] = []
 
   try {
     for (const att of payload.attachments) {
@@ -431,7 +434,20 @@ export async function ingestNormalizedInboundEmail(
         })
         .eq("id", attRow.id)
 
+      createdDocumentIds.push(created.id)
+      ingestedFileNames.push(att.fileName?.trim() || safeName)
       attachmentsIngested += 1
+    }
+
+    if (attachmentsIngested > 0) {
+      await notifyInboundDocumentsCreated(supabase, {
+        messageId,
+        businessId,
+        createdDocumentIds,
+        fileNames: ingestedFileNames,
+        senderAddress: payload.senderAddress,
+        subject: payload.subject,
+      })
     }
 
     await supabase

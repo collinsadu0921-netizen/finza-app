@@ -256,7 +256,7 @@ export default function ProposalPreviewPage() {
               onClick={() => void sendProposal("email")}
               className="rounded-lg bg-blue-800 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:opacity-40"
             >
-              {sendBusy ? "…" : st === "draft" ? "Send by email" : "Resend email"}
+              {sendBusy ? "…" : st === "draft" ? "Send by email" : "Send email again"}
             </button>
             <button
               type="button"
@@ -264,7 +264,7 @@ export default function ProposalPreviewPage() {
               onClick={() => void sendProposal("whatsapp")}
               className="rounded-lg bg-green-700 px-3 py-2 text-xs font-semibold text-white hover:bg-green-800 disabled:opacity-40"
             >
-              {sendBusy ? "…" : st === "draft" ? "Share via WhatsApp" : "Resend via WhatsApp"}
+              {sendBusy ? "…" : st === "draft" ? "Share via WhatsApp" : "Send via WhatsApp again"}
             </button>
             <button
               type="button"

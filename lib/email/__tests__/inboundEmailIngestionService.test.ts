@@ -2,12 +2,17 @@
  * Routing, unknown recipient, and idempotent completed-message short-circuit.
  */
 
-import { describe, it, expect } from "@jest/globals"
+jest.mock("@/lib/email/sendInboundDocumentsReceivedNotification", () => ({
+  notifyInboundDocumentsCreated: jest.fn().mockResolvedValue({ ok: true, sent: true }),
+}))
+
+import { describe, it, expect, jest, beforeEach } from "@jest/globals"
 import {
   ingestNormalizedInboundEmail,
   resolveInboundEmailRouting,
 } from "@/lib/email/inboundEmailIngestionService"
 import type { NormalizedInboundEmailPayload } from "@/lib/email/inboundEmailNormalizedPayload"
+import { notifyInboundDocumentsCreated } from "@/lib/email/sendInboundDocumentsReceivedNotification"
 
 function routesChain(result: { data: unknown; error: unknown }) {
   return {
@@ -61,6 +66,10 @@ describe("resolveInboundEmailRouting", () => {
 })
 
 describe("ingestNormalizedInboundEmail", () => {
+  beforeEach(() => {
+    jest.mocked(notifyInboundDocumentsCreated).mockClear()
+  })
+
   const minimalPayload: NormalizedInboundEmailPayload = {
     provider: "resend",
     providerMessageId: "email-uuid-1",
@@ -83,6 +92,7 @@ describe("ingestNormalizedInboundEmail", () => {
     expect(r).toEqual({ ok: true, ignored: true, reason: "unknown_recipient", attachmentsIngested: 0 })
     expect(from).toHaveBeenCalledTimes(1)
     expect(from).toHaveBeenCalledWith("business_inbound_email_routes")
+    expect(notifyInboundDocumentsCreated).not.toHaveBeenCalled()
   })
 
   it("short-circuits when inbound message is already completed (idempotent retry)", async () => {
@@ -110,5 +120,6 @@ describe("ingestNormalizedInboundEmail", () => {
       expect(r.messageId).toBe("msg-1")
       expect(r.attachmentsIngested).toBe(0)
     }
+    expect(notifyInboundDocumentsCreated).not.toHaveBeenCalled()
   })
 })

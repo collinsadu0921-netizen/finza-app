@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
+import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
 
 export async function GET(
   request: NextRequest,
@@ -71,9 +72,51 @@ export async function GET(
       console.error("Error fetching payroll entries:", entriesError)
     }
 
+    const { data: payrollPayments, error: paymentsError } = await supabase
+      .from("payroll_payments")
+      .select(
+        `
+        id,
+        payroll_run_id,
+        payment_date,
+        amount,
+        payment_account_id,
+        reference,
+        notes,
+        journal_entry_id,
+        created_at,
+        payment_account:payment_account_id (
+          id,
+          name,
+          code,
+          sub_type,
+          type
+        )
+      `
+      )
+      .eq("business_id", business.id)
+      .eq("payroll_run_id", runId)
+      .is("deleted_at", null)
+      .order("payment_date", { ascending: false })
+      .order("created_at", { ascending: false })
+
+    if (paymentsError) {
+      console.error("Error fetching payroll payments:", paymentsError)
+    }
+
+    const paidAmount = (payrollPayments || []).reduce((sum, payment: any) => sum + Number(payment.amount || 0), 0)
+    const latestPaymentDate = (payrollPayments || [])[0]?.payment_date ?? null
+    const paymentSummary = derivePayrollPaymentSummary(
+      Number(payrollRun.total_net_salary || 0),
+      paidAmount,
+      latestPaymentDate
+    )
+
     return NextResponse.json({
       payrollRun,
       entries: entries || [],
+      payments: payrollPayments || [],
+      paymentSummary,
     })
   } catch (error: any) {
     console.error("Error fetching payroll run:", error)

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { KpiStatCard } from "@/components/ui/KpiStatCard"
 
 type JobRow = {
   id: string
@@ -162,30 +163,34 @@ export default function ServiceJobsPage() {
         )}
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {[
-            { label: "Total", value: total,       icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2", bg: "bg-slate-100", iconColor: "text-slate-600" },
-            { label: "In Progress", value: inProgress, icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", bg: "bg-blue-100", iconColor: "text-blue-600", status: "in_progress" },
-            { label: "Completed",   value: completed,  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", bg: "bg-emerald-100", iconColor: "text-emerald-600", status: "completed" },
-            { label: "Cancelled",   value: cancelled,  icon: "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z", bg: "bg-red-100", iconColor: "text-red-500", status: "cancelled" },
+            { label: "Total", value: total, icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2", bg: "bg-slate-100", iconColor: "text-slate-600" },
+            { label: "In Progress", value: inProgress, icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", bg: "bg-blue-100", iconColor: "text-blue-600", status: "in_progress" as const },
+            { label: "Completed", value: completed, icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", bg: "bg-emerald-100", iconColor: "text-emerald-600", status: "completed" as const },
+            { label: "Cancelled", value: cancelled, icon: "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z", bg: "bg-red-100", iconColor: "text-red-500", status: "cancelled" as const },
           ].map((card) => (
-            <div
+            <KpiStatCard
               key={card.label}
-              className={`bg-white rounded-xl border border-slate-200 shadow-sm p-5 ${"status" in card ? "cursor-pointer hover:bg-slate-50 transition-colors" : ""}`}
-              onClick={() => "status" in card && setFilterStatus(filterStatus === card.status ? "all" : card.status!)}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-xl ${card.bg} flex items-center justify-center flex-shrink-0`}>
-                  <svg className={`w-5 h-5 ${card.iconColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={card.icon} />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{card.value}</p>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide">{card.label}</p>
-                </div>
-              </div>
-            </div>
+              icon={
+                <svg className={`h-5 w-5 ${card.iconColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={card.icon} />
+                </svg>
+              }
+              iconWrapperClassName={card.bg}
+              value={card.value}
+              label={card.label}
+              className={"status" in card ? "hover:bg-slate-50" : undefined}
+              onClick={
+                "status" in card
+                  ? () => {
+                      const st = card.status
+                      if (!st) return
+                      setFilterStatus(filterStatus === st ? "all" : st)
+                    }
+                  : undefined
+              }
+            />
           ))}
         </div>
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
@@ -20,7 +20,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const REVIEW_LABEL: Record<string, string> = {
   none: "Not reviewed",
-  draft: "Draft edits",
+  draft: "Draft",
   accepted: "Accepted",
 }
 
@@ -46,6 +46,62 @@ function formatDate(iso: string): string {
   }
 }
 
+function isLinked(r: IncomingDocumentListSummary): boolean {
+  return !!(r.linked_entity_id && r.linked_entity_type)
+}
+
+function needsAttentionVisual(r: IncomingDocumentListSummary): boolean {
+  if (r.status === "failed") return true
+  if (r.status === "needs_review") return true
+  if (r.status === "extracting" || r.status === "uploaded") return true
+  if (r.status === "extracted" && r.review_status !== "accepted" && !isLinked(r)) return true
+  return false
+}
+
+function extractionSummary(r: IncomingDocumentListSummary): string {
+  const ext = r.latest_extraction
+  if (!ext) return r.status === "failed" ? "Extraction failed" : "No extraction yet"
+  if (ext.extraction_failed || r.status === "failed") {
+    return ext.error_snippet ? `Failed · ${ext.error_snippet}` : "Failed"
+  }
+  return [
+    ext.extraction_mode ?? "—",
+    ext.page_count != null ? `${ext.page_count} pg` : null,
+    ext.has_warnings ? "Warnings" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+function nextStepHint(r: IncomingDocumentListSummary): string {
+  if (isLinked(r)) return "View linked record"
+  if (r.status === "failed") return "Review & fix or re-upload"
+  if (r.status === "uploaded" || r.status === "extracting") return "Wait for extraction"
+  if (r.status === "needs_review" || (r.status === "extracted" && r.review_status !== "accepted"))
+    return "Review & accept fields"
+  if (r.review_status === "draft") return "Continue review"
+  if (r.status === "reviewed" && !isLinked(r)) return "Create expense or bill"
+  return "Open"
+}
+
+function buildListQuery(businessId: string, extra: Record<string, string>): string {
+  const qs = new URLSearchParams()
+  qs.set("business_id", businessId)
+  qs.set("limit", "1")
+  qs.set("offset", "0")
+  for (const [k, v] of Object.entries(extra)) {
+    if (v) qs.set(k, v)
+  }
+  return qs.toString()
+}
+
+type SummaryCounts = {
+  needs_review: number | null
+  failed: number | null
+  reviewed: number | null
+  linked: number | null
+}
+
 export default function IncomingDocumentsListPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -55,6 +111,18 @@ export default function IncomingDocumentsListPage() {
   const [rows, setRows] = useState<IncomingDocumentListSummary[]>([])
   const [total, setTotal] = useState(0)
   const [searchDraft, setSearchDraft] = useState("")
+  const [summary, setSummary] = useState<SummaryCounts>({
+    needs_review: null,
+    failed: null,
+    reviewed: null,
+    linked: null,
+  })
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [inboundHint, setInboundHint] = useState<{
+    loaded: boolean
+    hasRoute: boolean
+    domainConfigured: boolean
+  }>({ loaded: false, hasRoute: false, domainConfigured: false })
 
   const setParam = useCallback(
     (updates: Record<string, string | null>) => {
@@ -148,14 +216,116 @@ export default function IncomingDocumentsListPage() {
     void load()
   }, [load])
 
+  const loadSummary = useCallback(async () => {
+    if (!effectiveBusinessId) return
+    setSummaryLoading(true)
+    try {
+      const base = effectiveBusinessId
+      const fetches = [
+        fetch(`/api/incoming-documents?${buildListQuery(base, { status: "needs_review" })}`).then((r) => r.json()),
+        fetch(`/api/incoming-documents?${buildListQuery(base, { status: "failed" })}`).then((r) => r.json()),
+        fetch(`/api/incoming-documents?${buildListQuery(base, { reviewed: "1" })}`).then((r) => r.json()),
+        fetch(`/api/incoming-documents?${buildListQuery(base, { linked: "linked" })}`).then((r) => r.json()),
+      ]
+      const [nr, fd, rv, lk] = await Promise.all(fetches)
+      setSummary({
+        needs_review: typeof nr?.total === "number" ? nr.total : null,
+        failed: typeof fd?.total === "number" ? fd.total : null,
+        reviewed: typeof rv?.total === "number" ? rv.total : null,
+        linked: typeof lk?.total === "number" ? lk.total : null,
+      })
+    } catch {
+      setSummary({ needs_review: null, failed: null, reviewed: null, linked: null })
+    } finally {
+      setSummaryLoading(false)
+    }
+  }, [effectiveBusinessId])
+
+  useEffect(() => {
+    void loadSummary()
+  }, [loadSummary])
+
+  useEffect(() => {
+    if (!effectiveBusinessId) return
+    let cancelled = false
+    void fetch(`/api/business/inbound-email?business_id=${encodeURIComponent(effectiveBusinessId)}`)
+      .then((r) => r.json().catch(() => ({})))
+      .then((data: { domain_configured?: boolean; route?: unknown }) => {
+        if (cancelled) return
+        setInboundHint({
+          loaded: true,
+          hasRoute: !!data?.route,
+          domainConfigured: !!data?.domain_configured,
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setInboundHint({ loaded: true, hasRoute: false, domainConfigured: false })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveBusinessId])
+
   const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10) || 0)
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50", 10) || 50))
   const hasPrev = offset > 0
   const hasNext = offset + rows.length < total
 
+  const hasActiveFilters = useMemo(() => {
+    const sp = searchParams
+    return !!(
+      sp.get("q")?.trim() ||
+      sp.get("status")?.trim() ||
+      sp.get("review_status")?.trim() ||
+      sp.get("document_kind")?.trim() ||
+      sp.get("attention")?.trim() ||
+      sp.get("reviewed")?.trim() ||
+      (sp.get("linked")?.trim() && sp.get("linked") !== "all")
+    )
+  }, [searchParams])
+
+  const activeQuick = useMemo(() => {
+    const sp = searchParams
+    if (sp.get("attention") === "1") return "attention"
+    if (sp.get("status") === "failed") return "failed"
+    if (sp.get("reviewed") === "1") return "reviewed"
+    if (sp.get("linked") === "unlinked") return "unlinked"
+    if (sp.get("linked") === "linked") return "linked"
+    return "all"
+  }, [searchParams])
+
+  const chipClass = (active: boolean) =>
+    [
+      "rounded-md px-2.5 py-1 text-xs font-medium border transition-colors",
+      active
+        ? "border-slate-800 bg-slate-900 text-white shadow-sm"
+        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+    ].join(" ")
+
+  const applyQuickFilter = (key: typeof activeQuick) => {
+    const next = new URLSearchParams(searchParams.toString())
+    const clear = [
+      "attention",
+      "status",
+      "reviewed",
+      "linked",
+      "review_status",
+      "document_kind",
+      "q",
+    ] as const
+    for (const c of clear) next.delete(c)
+    if (key === "attention") next.set("attention", "1")
+    else if (key === "failed") next.set("status", "failed")
+    else if (key === "reviewed") next.set("reviewed", "1")
+    else if (key === "unlinked") next.set("linked", "unlinked")
+    else if (key === "linked") next.set("linked", "linked")
+    next.delete("offset")
+    router.replace(`/service/incoming-documents?${next.toString()}`)
+  }
+
   if (!effectiveBusinessId && !loading) {
     return (
-      <main className="max-w-6xl mx-auto p-4 md:p-6">
+      <main className="mx-auto max-w-6xl p-4 md:p-6">
         <h1 className="text-lg font-semibold text-slate-900">Incoming documents</h1>
         <p className="mt-2 text-sm text-slate-600">Select or load a workspace business to see uploads.</p>
       </main>
@@ -163,15 +333,18 @@ export default function IncomingDocumentsListPage() {
   }
 
   return (
-    <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-4">
+    <main className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Incoming documents</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Uploads, extraction, and review — newest first unless you change sort.{" "}
+          <p className="mt-0.5 max-w-xl text-xs text-slate-500">
+            Operational inbox for uploads and email — triage, review, then link to expenses or bills.{" "}
+            <span className="text-slate-600">
+              Email supplier invoices and receipts into Finza from your workspace inbound address.
+            </span>{" "}
             <Link
               href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
-              className="text-blue-700 hover:underline font-medium"
+              className="font-medium text-blue-700 hover:underline"
             >
               Inbound email settings
             </Link>
@@ -179,57 +352,102 @@ export default function IncomingDocumentsListPage() {
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
+            href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Inbound email
+          </Link>
+          <Link
             href={buildServiceRoute("/service/expenses/create", effectiveBusinessId ?? undefined)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
           >
             New expense
           </Link>
           <Link
             href={buildServiceRoute("/bills/create", effectiveBusinessId ?? undefined)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
           >
             New bill
           </Link>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Quick</span>
+      {inboundHint.loaded && inboundHint.domainConfigured && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2 text-xs text-slate-600">
+          <p>
+            <span className="font-medium text-slate-700">By email:</span> forward or BCC invoices and receipts to your
+            Finza address.{" "}
+            {inboundHint.hasRoute ? (
+              <Link
+                href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
+                className="font-medium text-blue-700 hover:underline"
+              >
+                Manage inbound email
+              </Link>
+            ) : (
+              <Link
+                href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
+                className="font-medium text-blue-700 hover:underline"
+              >
+                Set up inbound email
+              </Link>
+            )}
+          </p>
+        </div>
+      )}
+
+      {/* Summary strip */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {(
           [
-            { label: "Needs attention", attention: "1", clear: ["status", "review_status", "reviewed"] },
-            { label: "Failed", status: "failed", clear: ["attention", "reviewed"] },
-            { label: "Reviewed", reviewed: "1", clear: ["attention", "status"] },
-            { label: "Unlinked", linked: "unlinked", clear: ["attention", "reviewed", "status"] },
-            { label: "Linked", linked: "linked", clear: ["attention", "reviewed", "status"] },
-            { label: "All", clear: ["attention", "reviewed", "status", "linked", "document_kind", "q"] },
+            { key: "needs_review", label: "Needs review", value: summary.needs_review, hint: "status" },
+            { key: "failed", label: "Failed", value: summary.failed, hint: "status" },
+            { key: "reviewed", label: "Reviewed", value: summary.reviewed, hint: "review" },
+            { key: "linked", label: "Linked", value: summary.linked, hint: "link" },
+          ] as const
+        ).map((c) => (
+          <div
+            key={c.key}
+            className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm"
+            title={`Approximate count (${c.hint} filter)`}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{c.label}</p>
+            <p className="text-lg font-semibold tabular-nums text-slate-900">
+              {summaryLoading ? "—" : c.value ?? "—"}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Quick filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Quick</span>
+        {(
+          [
+            { key: "all" as const, label: "All" },
+            { key: "attention" as const, label: "Needs attention" },
+            { key: "failed" as const, label: "Failed" },
+            { key: "reviewed" as const, label: "Reviewed" },
+            { key: "unlinked" as const, label: "Unlinked" },
+            { key: "linked" as const, label: "Linked" },
           ] as const
         ).map((chip) => (
           <button
-            key={chip.label}
+            key={chip.key}
             type="button"
-            onClick={() => {
-              const next = new URLSearchParams(searchParams.toString())
-              for (const c of chip.clear ?? []) next.delete(c)
-              if ("attention" in chip && chip.attention) next.set("attention", chip.attention)
-              if ("status" in chip && chip.status) next.set("status", chip.status)
-              if ("reviewed" in chip && chip.reviewed) next.set("reviewed", chip.reviewed)
-              if ("linked" in chip && chip.linked) next.set("linked", chip.linked)
-              next.delete("offset")
-              router.replace(`/service/incoming-documents?${next.toString()}`)
-            }}
-            className="px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/80"
+            onClick={() => applyQuickFilter(chip.key)}
+            className={chipClass(activeQuick === chip.key)}
           >
             {chip.label}
           </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <label className="text-xs block">
-          <span className="text-slate-500 font-medium">Status</span>
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+        <label className="block text-xs">
+          <span className="font-medium text-slate-500">Status</span>
           <select
-            className="mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
             value={searchParams.get("status") ?? ""}
             onChange={(e) => setParam({ status: e.target.value || null, attention: null, reviewed: null })}
           >
@@ -241,10 +459,10 @@ export default function IncomingDocumentsListPage() {
             ))}
           </select>
         </label>
-        <label className="text-xs block">
-          <span className="text-slate-500 font-medium">Review</span>
+        <label className="block text-xs">
+          <span className="font-medium text-slate-500">Review</span>
           <select
-            className="mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
             value={searchParams.get("review_status") ?? ""}
             onChange={(e) => setParam({ review_status: e.target.value || null })}
           >
@@ -256,10 +474,10 @@ export default function IncomingDocumentsListPage() {
             ))}
           </select>
         </label>
-        <label className="text-xs block">
-          <span className="text-slate-500 font-medium">Kind</span>
+        <label className="block text-xs">
+          <span className="font-medium text-slate-500">Kind</span>
           <select
-            className="mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
             value={searchParams.get("document_kind") ?? ""}
             onChange={(e) => setParam({ document_kind: e.target.value || null })}
           >
@@ -271,22 +489,20 @@ export default function IncomingDocumentsListPage() {
             ))}
           </select>
         </label>
-        <label className="text-xs block">
-          <span className="text-slate-500 font-medium">Linked</span>
+        <label className="block text-xs">
+          <span className="font-medium text-slate-500">Linked</span>
           <select
-            className="mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
             value={searchParams.get("linked") ?? "all"}
-            onChange={(e) =>
-              setParam({ linked: e.target.value === "all" ? null : e.target.value || null })
-            }
+            onChange={(e) => setParam({ linked: e.target.value === "all" ? null : e.target.value || null })}
           >
             <option value="all">All</option>
             <option value="unlinked">Unlinked</option>
             <option value="linked">Linked</option>
           </select>
         </label>
-        <label className="text-xs block sm:col-span-2">
-          <span className="text-slate-500 font-medium">Search</span>
+        <label className="block text-xs sm:col-span-2">
+          <span className="font-medium text-slate-500">Search</span>
           <form
             className="mt-1 flex gap-2"
             onSubmit={(e) => {
@@ -299,18 +515,18 @@ export default function IncomingDocumentsListPage() {
               type="search"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              className="flex-1 border border-slate-200 rounded-md px-2 py-1.5 text-sm"
-              placeholder="File name or path…"
+              className="flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+              placeholder="File name, subject, sender…"
             />
-            <button type="submit" className="px-3 py-1.5 text-sm rounded-md bg-slate-800 text-white">
+            <button type="submit" className="rounded-md bg-slate-800 px-3 py-1.5 text-sm text-white">
               Search
             </button>
           </form>
         </label>
-        <label className="text-xs block">
-          <span className="text-slate-500 font-medium">Sort</span>
+        <label className="block text-xs">
+          <span className="font-medium text-slate-500">Sort</span>
           <select
-            className="mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-sm"
+            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
             value={searchParams.get("sort") ?? "newest"}
             onChange={(e) => setParam({ sort: e.target.value === "newest" ? null : e.target.value })}
           >
@@ -327,127 +543,163 @@ export default function IncomingDocumentsListPage() {
         </p>
       )}
 
-      {loading && <p className="text-sm text-slate-600">Loading…</p>}
+      {loading && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-8 text-center text-sm text-slate-600">
+          Loading documents…
+        </div>
+      )}
 
-      {!loading && !error && rows.length === 0 && (
-        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center text-sm text-slate-600">
-          No incoming documents yet. Upload a receipt from an expense, bill, or scanner flow, or send to your
-          workspace inbound address — documents will appear here.
+      {!loading && !error && rows.length === 0 && !hasActiveFilters && (
+        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-6 py-10 text-center">
+          <p className="text-sm font-medium text-slate-800">No incoming documents yet</p>
+          <p className="mx-auto mt-2 max-w-md text-xs text-slate-600">
+            Upload a receipt from an expense or bill flow, or send mail to your workspace inbound address. New items
+            will land here for review.
+          </p>
+          {inboundHint.domainConfigured && (
+            <Link
+              href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
+              className="mt-4 inline-block rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+            >
+              {inboundHint.hasRoute ? "Manage inbound email address" : "Set up inbound email address"}
+            </Link>
+          )}
+        </div>
+      )}
+
+      {!loading && !error && rows.length === 0 && hasActiveFilters && (
+        <div className="rounded-lg border border-dashed border-amber-200 bg-amber-50/60 px-6 py-10 text-center">
+          <p className="text-sm font-medium text-amber-950">No documents match these filters</p>
+          <p className="mt-2 text-xs text-amber-900/90">Try clearing search or switching a quick filter.</p>
+          <button
+            type="button"
+            onClick={() => applyQuickFilter("all")}
+            className="mt-4 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-950 hover:bg-amber-100"
+          >
+            Reset to all
+          </button>
         </div>
       )}
 
       {!loading && rows.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                <th className="px-3 py-2">Document</th>
-                <th className="px-3 py-2">Kind</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Review</th>
-                <th className="px-3 py-2">Extraction</th>
-                <th className="px-3 py-2">Created</th>
-                <th className="px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const bid = effectiveBusinessId ?? ""
-                const reviewHref = `/service/incoming-documents/${encodeURIComponent(r.id)}/review?business_id=${encodeURIComponent(bid)}`
-                const expenseHref = buildServiceRoute(
-                  `/service/expenses/create?from_incoming_doc=${encodeURIComponent(r.id)}`,
-                  bid
-                )
-                const billHref = buildServiceRoute(
-                  `/bills/create?from_incoming_doc=${encodeURIComponent(r.id)}`,
-                  bid
-                )
-                const linked =
-                  r.linked_entity_id && r.linked_entity_type
-                    ? r.linked_entity_type === "expense"
-                      ? buildServiceRoute(`/service/expenses/${r.linked_entity_id}/view`, bid)
-                      : `/bills/${r.linked_entity_id}/view`
-                    : null
-                const ext = r.latest_extraction
-                const extBits = ext
-                  ? [
-                      ext.extraction_mode ?? "—",
-                      ext.page_count != null ? `${ext.page_count} pg` : null,
-                      ext.extraction_failed ? "run failed" : null,
-                      ext.has_warnings ? "warnings" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-                  : "—"
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="divide-y divide-slate-100">
+            {rows.map((r) => {
+              const bid = effectiveBusinessId ?? ""
+              const reviewHref = `/service/incoming-documents/${encodeURIComponent(r.id)}/review?business_id=${encodeURIComponent(bid)}`
+              const expenseHref = buildServiceRoute(
+                `/service/expenses/create?from_incoming_doc=${encodeURIComponent(r.id)}`,
+                bid
+              )
+              const billHref = buildServiceRoute(`/bills/create?from_incoming_doc=${encodeURIComponent(r.id)}`, bid)
+              const linkedHref =
+                r.linked_entity_id && r.linked_entity_type
+                  ? r.linked_entity_type === "expense"
+                    ? buildServiceRoute(`/service/expenses/${r.linked_entity_id}/view`, bid)
+                    : `/bills/${r.linked_entity_id}/view`
+                  : null
+              const linked = isLinked(r)
+              const attention = needsAttentionVisual(r)
 
-                return (
-                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/80">
-                    <td className="px-3 py-2 align-top">
-                      <div className="font-medium text-slate-900 truncate max-w-[200px]" title={r.display_name}>
+              let primary: { href: string; label: string }
+              if (linked && linkedHref) {
+                primary = { href: linkedHref, label: "View linked" }
+              } else {
+                primary = { href: reviewHref, label: "Review" }
+              }
+
+              return (
+                <div
+                  key={r.id}
+                  className={[
+                    "flex flex-wrap items-start justify-between gap-3 px-3 py-2.5",
+                    attention ? "bg-amber-50/50" : "hover:bg-slate-50/80",
+                  ].join(" ")}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="truncate font-medium text-slate-900" title={r.display_name}>
                         {r.display_name}
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-mono truncate max-w-[220px]" title={r.id}>
-                        {r.id}
-                      </div>
-                      <div className="text-[11px] text-slate-500">{SOURCE_LABEL[r.source_type] ?? r.source_type}</div>
-                      {r.source_type === "email_inbound" && (r.source_email_sender || r.source_email_subject) ? (
-                        <div
-                          className="text-[11px] text-slate-600 truncate max-w-[220px] mt-0.5"
-                          title={[r.source_email_sender, r.source_email_subject].filter(Boolean).join(" — ")}
-                        >
-                          {[r.source_email_sender, r.source_email_subject].filter(Boolean).join(" · ")}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2 align-top text-slate-700">
-                      {KIND_LABEL[r.document_kind] ?? r.document_kind}
-                    </td>
-                    <td className="px-3 py-2 align-top">
+                      </span>
+                      <span className="shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                        {KIND_LABEL[r.document_kind] ?? r.document_kind}
+                      </span>
                       <span
-                        className={`inline-flex px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                        className={[
+                          "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold",
                           r.status === "failed"
-                            ? "bg-red-50 text-red-800"
-                            : r.status === "needs_review" || r.status === "extracting"
-                              ? "bg-amber-50 text-amber-900"
+                            ? "bg-red-100 text-red-900"
+                            : r.status === "needs_review" || r.status === "extracting" || r.status === "uploaded"
+                              ? "bg-amber-100 text-amber-950"
                               : r.status === "linked"
-                                ? "bg-emerald-50 text-emerald-900"
-                                : "bg-slate-100 text-slate-700"
-                        }`}
+                                ? "bg-emerald-100 text-emerald-900"
+                                : "bg-slate-100 text-slate-700",
+                        ].join(" ")}
                       >
                         {STATUS_LABEL[r.status] ?? r.status}
                       </span>
-                    </td>
-                    <td className="px-3 py-2 align-top text-slate-700">
-                      {REVIEW_LABEL[r.review_status] ?? r.review_status}
-                    </td>
-                    <td className="px-3 py-2 align-top text-xs text-slate-600 max-w-[160px]">{extBits}</td>
-                    <td className="px-3 py-2 align-top text-xs text-slate-600 whitespace-nowrap">
-                      {formatDate(r.created_at)}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right">
-                      <div className="flex flex-col gap-1 items-end">
-                        <Link href={reviewHref} className="text-blue-700 hover:underline text-xs font-medium">
-                          Review
-                        </Link>
-                        <Link href={expenseHref} className="text-blue-700 hover:underline text-xs">
-                          Create expense
-                        </Link>
-                        <Link href={billHref} className="text-blue-700 hover:underline text-xs">
-                          Create bill
-                        </Link>
-                        {linked && (
-                          <Link href={linked} className="text-emerald-800 hover:underline text-xs font-medium">
-                            View linked
-                          </Link>
-                        )}
+                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                        Review: {REVIEW_LABEL[r.review_status] ?? r.review_status}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-slate-500">
+                        {linked ? "Linked" : "Unlinked"}
+                      </span>
+                    </div>
+                    {r.source_type === "email_inbound" && (r.source_email_sender || r.source_email_subject) ? (
+                      <div className="mt-1 space-y-0.5 text-xs text-slate-600">
+                        {r.source_email_sender ? (
+                          <p className="truncate" title={r.source_email_sender}>
+                            <span className="font-medium text-slate-500">From:</span> {r.source_email_sender}
+                          </p>
+                        ) : null}
+                        {r.source_email_subject ? (
+                          <p className="truncate" title={r.source_email_subject ?? undefined}>
+                            <span className="font-medium text-slate-500">Subject:</span> {r.source_email_subject}
+                          </p>
+                        ) : null}
                       </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          <div className="flex items-center justify-between px-3 py-2 border-t border-slate-100 text-xs text-slate-600">
+                    ) : (
+                      <p className="mt-1 text-[11px] text-slate-500">{SOURCE_LABEL[r.source_type] ?? r.source_type}</p>
+                    )}
+                    <p className="mt-1 font-mono text-[10px] text-slate-400" title={r.id}>
+                      {r.id.slice(0, 8)}…
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500">{extractionSummary(r)}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">{formatDate(r.created_at)}</p>
+                    <p className="mt-1 text-[10px] font-medium text-slate-500">Next: {nextStepHint(r)}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Link
+                      href={primary.href}
+                      className="rounded-md bg-slate-900 px-3 py-1.5 text-center text-xs font-semibold text-white hover:bg-slate-800"
+                    >
+                      {primary.label}
+                    </Link>
+                    {!linked && (
+                      <div className="flex flex-wrap justify-end gap-x-2 gap-y-0.5 text-[11px]">
+                        <Link href={reviewHref} className="text-slate-500 hover:text-slate-800 hover:underline">
+                          Open review
+                        </Link>
+                        <span className="text-slate-300">|</span>
+                        <Link href={expenseHref} className="text-slate-600 hover:text-blue-800 hover:underline">
+                          Expense
+                        </Link>
+                        <Link href={billHref} className="text-slate-600 hover:text-blue-800 hover:underline">
+                          Bill
+                        </Link>
+                      </div>
+                    )}
+                    {linked && linkedHref ? (
+                      <Link href={reviewHref} className="text-[11px] text-slate-500 hover:text-slate-800 hover:underline">
+                        Open review (read-only)
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2 text-xs text-slate-600">
             <span>
               Showing {offset + 1}–{offset + rows.length} of {total}
             </span>
@@ -455,7 +707,7 @@ export default function IncomingDocumentsListPage() {
               <button
                 type="button"
                 disabled={!hasPrev}
-                className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40"
+                className="rounded border border-slate-200 px-2 py-1 disabled:opacity-40"
                 onClick={() => setParam({ offset: String(Math.max(0, offset - limit)) })}
               >
                 Previous
@@ -463,7 +715,7 @@ export default function IncomingDocumentsListPage() {
               <button
                 type="button"
                 disabled={!hasNext}
-                className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40"
+                className="rounded border border-slate-200 px-2 py-1 disabled:opacity-40"
                 onClick={() => setParam({ offset: String(offset + limit) })}
               >
                 Next

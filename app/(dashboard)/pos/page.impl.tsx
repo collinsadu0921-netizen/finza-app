@@ -10,7 +10,6 @@ import { normalizeCountry, UNSUPPORTED_COUNTRY_MARKER } from "@/lib/payments/eli
 import { getUserStore, getStoreFilter, getStores } from "@/lib/stores"
 import { getActiveStoreId, getActiveStoreName, setActiveStoreId } from "@/lib/storeSession"
 import { getUserRole } from "@/lib/userRoles"
-import { getEffectiveStoreIdClient } from "@/lib/storeContext"
 import { getCashierSession, clearCashierSession } from "@/lib/cashierSession"
 import { getOpenRegisterSession, getAllOpenRegisterSessions, getCurrentUserOpenSession, type OpenRegisterSession } from "@/lib/registerStatus"
 import PaymentModal, { PaymentLine, PaymentResult } from "@/components/PaymentModal"
@@ -713,29 +712,16 @@ export default function POSPage() {
       const businessCurrency = businessDetails?.default_currency || null
       setCurrencyCode(businessCurrency)
       
-      // Get role and effective store_id (role-based store context)
+      // Resolve role + active-store session. Keep POS aligned with inventory:
+      // both screens use the shared active-store session value.
       const role = await getUserRole(supabase, user.id, business.id)
       const activeStoreId = getActiveStoreId()
-      
-      // Get user's assigned store_id from database
-      const { data: userData } = await supabase
-        .from("users")
-        .select("store_id")
-        .eq("id", user.id)
-        .maybeSingle()
       
       // Load all available stores for the picker
       const allStores = await getStores(supabase, business.id)
       setAvailableStores(allStores)
-      
-      // Get effective store_id based on role
-      // Admin: can use selected store or null (but POS requires a store)
-      // Manager/Cashier: locked to assigned store
-      const effectiveStoreId = getEffectiveStoreIdClient(
-        role,
-        activeStoreId && activeStoreId !== 'all' ? activeStoreId : null,
-        userData?.store_id || null
-      )
+
+      const effectiveStoreId = activeStoreId && activeStoreId !== "all" ? activeStoreId : null
       
       // POS Access Guard: Check if store is valid (not null, not "all", not undefined)
       const isValidStore = effectiveStoreId && effectiveStoreId !== 'all' && effectiveStoreId !== null
@@ -808,6 +794,11 @@ export default function POSPage() {
       
       if (storeName) {
         setCurrentStoreName(storeName)
+        // Keep POS store context aligned with the shared active-store session used by inventory.
+        setActiveStoreId(effectiveStoreId, storeName)
+      } else {
+        // Ensure store id still exists in shared session even if name was unavailable.
+        setActiveStoreId(effectiveStoreId, null)
       }
       
       // Retail Mode ALWAYS uses VAT-inclusive pricing
@@ -1896,7 +1887,7 @@ export default function POSPage() {
   }, [cart, cartDiscountType, cartDiscountValue])
 
   const retailMomoRegisterContext = useMemo(() => {
-    const store = getActiveStoreId() || currentStoreId
+    const store = getActiveStoreId()
     if (
       !registerSession?.register_id ||
       !registerSession?.id ||
@@ -2044,7 +2035,20 @@ export default function POSPage() {
                   <h1 className="text-2xl font-bold tracking-tight">Retail POS</h1>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
                     <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-800">
-                      Store: {currentStoreName || "—"}
+                      Active store: {currentStoreName || "—"}
+                    </span>
+                    {currentStoreId ? (
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                        Store ID: {currentStoreId}
+                      </span>
+                    ) : null}
+                    {getActiveStoreId() && currentStoreId && getActiveStoreId() !== currentStoreId ? (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-900 ring-1 ring-amber-300">
+                        Store context mismatch - reselect store
+                      </span>
+                    ) : null}
+                    <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-800 ring-1 ring-blue-200">
+                      Sales post to active store context
                     </span>
                     <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-800">
                       Register: {registerSession?.registers?.name || (registerStatusLoading ? "…" : "—")}
@@ -2065,6 +2069,14 @@ export default function POSPage() {
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowStorePicker(true)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+                    title="Switch active store for POS and sales"
+                  >
+                    Switch store
+                  </button>
                   {hasCashierPinSession && (
                     <button
                       type="button"
@@ -3130,9 +3142,16 @@ export default function POSPage() {
       }
 
       // Get active store - POS requires a specific store
-      const activeStoreId = currentStoreId || getActiveStoreId()
+      const activeStoreId = getActiveStoreId()
       if (!activeStoreId || activeStoreId === 'all') {
         setError("Cannot park sale: Please select a store first.")
+        setShowStorePicker(true)
+        setParkingSale(false)
+        return
+      }
+      if (currentStoreId && currentStoreId !== activeStoreId) {
+        setError("Store context changed. Please confirm active store before parking sale.")
+        setShowStorePicker(true)
         setParkingSale(false)
         return
       }
@@ -3444,7 +3463,7 @@ export default function POSPage() {
 
       // STORE CONTEXT VALIDATION: Ensure valid store before creating sale
       // Get active store from session (prioritize over currentStoreId)
-      const activeStoreId = sessionStoreId || currentStoreId || getActiveStoreId()
+      const activeStoreId = sessionStoreId
       
       // CRITICAL: Validate store_id before creating sale
       // This prevents 403 NO_STORE_ASSIGNED errors by blocking invalid sales client-side
@@ -3453,6 +3472,13 @@ export default function POSPage() {
         setShowStorePicker(true)
         setProcessingPayment(false)
         setShowPaymentModal(false) // Close payment modal to show store picker
+        return
+      }
+      if (currentStoreId && currentStoreId !== activeStoreId) {
+        setError("Active store changed. Please verify store before creating sale.")
+        setShowStorePicker(true)
+        setProcessingPayment(false)
+        setShowPaymentModal(false)
         return
       }
       

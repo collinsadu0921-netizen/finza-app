@@ -17,7 +17,7 @@ import {
   inventoryNavigatedFromAddStockToList,
   resolveInventoryRepageAfterFetch,
 } from "@/lib/inventory/inventoryListUiHelpers"
-import { getActiveStoreId } from "@/lib/storeSession"
+import { getActiveStoreId, getActiveStoreName, setActiveStoreId } from "@/lib/storeSession"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
@@ -55,6 +55,8 @@ export default function RetailInventoryPage() {
   const [page, setPage] = useState(0)
   const [totalProductCount, setTotalProductCount] = useState(0)
   const [inventoryVersion, setInventoryVersion] = useState(0)
+  const [activeStoreName, setActiveStoreName] = useState<string | null>(null)
+  const [storeOptions, setStoreOptions] = useState<Array<{ id: string; name: string }>>([])
   /** Full-screen loading only for the first successful load (or after store change). */
   const firstPaintRef = useRef(true)
   /** Suppresses applying stale fetch results when page, filters, or version change mid-request. */
@@ -131,6 +133,27 @@ export default function RetailInventoryPage() {
         if (!cancelled && gen === fetchGenerationRef.current) setBusinessId(business.id)
 
         const activeStoreId = getActiveStoreId()
+        const sessionStoreName = getActiveStoreName()
+        if (!cancelled && gen === fetchGenerationRef.current) {
+          setActiveStoreName(sessionStoreName)
+        }
+
+        const { data: storesData, error: storesError } = await supabase
+          .from("stores")
+          .select("id, name")
+          .eq("business_id", business.id)
+          .order("name", { ascending: true })
+
+        if (storesError) {
+          throw new Error(storesError.message || "Failed to load stores")
+        }
+        if (!cancelled && gen === fetchGenerationRef.current) {
+          setStoreOptions((storesData || []) as Array<{ id: string; name: string }>)
+          if (activeStoreId && activeStoreId !== "all" && !sessionStoreName) {
+            const matched = (storesData || []).find((s: { id: string; name: string }) => s.id === activeStoreId)
+            setActiveStoreName(matched?.name ?? null)
+          }
+        }
 
         if (!activeStoreId || activeStoreId === "all") {
           if (!cancelled && gen === fetchGenerationRef.current) {
@@ -294,6 +317,37 @@ export default function RetailInventoryPage() {
           </RetailBackofficeAlert>
         ) : null}
 
+        <RetailBackofficeCard className="mb-6 border-slate-200/90 bg-white" padding="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active store</p>
+              <p className="mt-1 text-sm text-slate-700">
+                {activeStoreName ? (
+                  <>Showing inventory for <span className="font-semibold">{activeStoreName}</span>.</>
+                ) : (
+                  "No active store selected."
+                )}
+              </p>
+            </div>
+            <div className="w-full sm:w-72">
+              <label className="mb-1 block text-xs font-medium text-slate-600">Switch store</label>
+              <RetailMenuSelect
+                value={getActiveStoreId() && getActiveStoreId() !== "all" ? (getActiveStoreId() as string) : ""}
+                onValueChange={(value) => {
+                  if (!value) return
+                  const selected = storeOptions.find((s) => s.id === value)
+                  setActiveStoreId(value, selected?.name ?? null)
+                  setActiveStoreName(selected?.name ?? null)
+                }}
+                options={[
+                  { value: "", label: "Choose store…" },
+                  ...storeOptions.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+              />
+            </div>
+          </div>
+        </RetailBackofficeCard>
+
         {error ? null : totalProductCount === 0 ? (
           <RetailBackofficeEmpty
             title={selectedCategory ? "Nothing in this category" : "No products in this store"}
@@ -337,9 +391,9 @@ export default function RetailInventoryPage() {
 
               return (
                 <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
-                  <RetailBackofficeCard className="border-slate-200/90 bg-white" padding="p-5">
+                  <RetailBackofficeCard className="min-w-0 border-slate-200/90 bg-white" padding="p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Stock value</p>
-                    <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">
+                    <p className="mt-2 text-base font-semibold tabular-nums leading-tight tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-lg md:text-xl lg:text-2xl">
                       {format(totalStockValue)}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
@@ -347,9 +401,9 @@ export default function RetailInventoryPage() {
                       {pageSliceNote ? ` ${pageSliceNote}` : ""}
                     </p>
                   </RetailBackofficeCard>
-                  <RetailBackofficeCard className="border-slate-200/90 bg-white" padding="p-5">
+                  <RetailBackofficeCard className="min-w-0 border-slate-200/90 bg-white" padding="p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Units on hand</p>
-                    <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">
+                    <p className="mt-2 text-xl font-semibold tabular-nums leading-tight tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-2xl">
                       {formatInteger(totalItems)}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
@@ -357,9 +411,9 @@ export default function RetailInventoryPage() {
                       {pageSliceNote ? ` ${pageSliceNote}` : ""}
                     </p>
                   </RetailBackofficeCard>
-                  <RetailBackofficeCard className="border-slate-200/90 bg-white" padding="p-5">
+                  <RetailBackofficeCard className="min-w-0 border-slate-200/90 bg-white" padding="p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">SKU count</p>
-                    <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">
+                    <p className="mt-2 text-xl font-semibold tabular-nums leading-tight tracking-tight text-slate-900 [overflow-wrap:anywhere] sm:text-2xl">
                       {formatInteger(totalProductCount)}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
@@ -462,6 +516,9 @@ export default function RetailInventoryPage() {
                                           <span className={isOut ? 'text-red-600 font-medium' : ''}>
                                             {variant.variant_name}: {formatInteger(variant.stock)} units
                                           </span>
+                                          <span className="text-xs text-slate-500">
+                                            Avg cost: {formatNumber(variant.average_cost || 0)}
+                                          </span>
                                           {isOut && (
                                             <span className="px-1.5 py-0.5 rounded text-xs font-bold text-white bg-red-600">
                                               OUT
@@ -481,6 +538,9 @@ export default function RetailInventoryPage() {
                                 <>
                                   <p>
                                     Stock: <span className="font-semibold">{formatInteger(product.stock)}</span> units
+                                  </p>
+                                  <p>
+                                    Avg cost: <span className="font-semibold">{formatNumber(product.average_cost || 0)}</span>
                                   </p>
                                   <p>
                                     Price: <span className="font-semibold">{format(product.price)}</span>

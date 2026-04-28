@@ -1,8 +1,8 @@
 /**
  * GET /api/dashboard/service-activity?business_id=...&limit=10
  *
- * Returns a merged recent-activity feed: journal entries, Resend outbound lifecycle
- * events (when tagged with business_id), and inbound document emails (Resend receiving).
+ * Returns a merged recent-activity feed: journal entries, outbound email lifecycle
+ * events (when tagged with business_id), and inbound document emails.
  * Journal items linked to invoices/bills/expenses keep source-document currency for FX.
  */
 
@@ -46,30 +46,27 @@ function activityTimestampMs(iso: string): number {
 
 function resendOutboundDescription(eventType: string): string {
   const labels: Record<string, string> = {
-    "email.delivered": "Outgoing email delivered",
-    "email.bounced": "Outgoing email bounced",
-    "email.complained": "Outgoing email spam complaint",
-    "email.opened": "Outgoing email opened",
-    "email.clicked": "Link clicked in outgoing email",
+    "email.delivered": "Email delivered",
+    "email.bounced": "Email bounced",
+    "email.complained": "Email reported as spam",
+    "email.opened": "Email opened",
+    "email.clicked": "Link clicked in email",
   }
-  const human = labels[eventType] ?? `Outgoing email: ${eventType.replace(/^email\./, "")}`
-  return `${human} (Resend)`
+  return labels[eventType] ?? `Email: ${eventType.replace(/^email\./, "")}`
 }
 
 function inboundDescription(row: {
-  provider: string
   subject: string | null
   processing_status: string
 }): string {
   const subj = row.subject?.trim()
-  const prov = row.provider === "resend" ? "Resend" : row.provider
   const status =
     row.processing_status === "failed"
       ? " — processing failed"
       : row.processing_status === "processing" || row.processing_status === "pending"
         ? " — processing"
         : ""
-  const head = `Inbound email (${prov})`
+  const head = "New document received"
   return subj ? `${head}: ${subj}${status}` : `${head}${status}`
 }
 
@@ -188,7 +185,7 @@ export async function GET(request: NextRequest) {
         .limit(limit),
       supabase
         .from("inbound_email_messages")
-        .select("id, provider, subject, received_at, processing_status")
+        .select("id, subject, received_at, processing_status")
         .eq("business_id", businessId)
         .order("received_at", { ascending: false })
         .limit(limit),
@@ -219,7 +216,6 @@ export async function GET(request: NextRequest) {
       id: `inbound-email:${r.id as string}`,
       type: "email",
       description: inboundDescription({
-        provider: String(r.provider ?? ""),
         subject: r.subject as string | null,
         processing_status: String(r.processing_status ?? ""),
       }),

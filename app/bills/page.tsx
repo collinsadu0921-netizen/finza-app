@@ -7,6 +7,7 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney } from "@/lib/money"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { KpiStatCard } from "@/components/ui/KpiStatCard"
 
 type Bill = {
   id: string
@@ -226,46 +227,27 @@ export default function BillsPage() {
           )}
 
           {/* Stat Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-slate-900">{format(totalOutstanding)}</p>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide">Outstanding</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-slate-900">{format(totalPaid)}</p>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide">Total Paid</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{bills.length}</p>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide">Total Bills</p>
-                </div>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <KpiStatCard
+              icon={<svg className="h-5 w-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+              iconWrapperClassName="bg-amber-100"
+              value={format(totalOutstanding)}
+              label="Outstanding"
+              valueVariant="currency"
+            />
+            <KpiStatCard
+              icon={<svg className="h-5 w-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+              iconWrapperClassName="bg-emerald-100"
+              value={format(totalPaid)}
+              label="Total Paid"
+              valueVariant="currency"
+            />
+            <KpiStatCard
+              icon={<svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+              iconWrapperClassName="bg-blue-100"
+              value={bills.length}
+              label="Total Bills"
+            />
           </div>
 
           {/* Filters */}

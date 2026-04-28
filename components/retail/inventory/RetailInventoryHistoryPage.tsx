@@ -26,7 +26,7 @@ type StockMovement = {
   product_id: string
   product_name: string
   quantity_change: number
-  type: "sale" | "refund" | "adjustment" | "initial_import"
+  type: "sale" | "refund" | "adjustment" | "initial_import" | "purchase_receive"
   created_at: string
   note: string | null
   related_sale_id: string | null
@@ -40,6 +40,7 @@ const MOVEMENT_TYPE_FILTER_OPTIONS: MenuSelectOption[] = [
   { value: "all", label: "All Types" },
   { value: "sale", label: "Sale" },
   { value: "refund", label: "Refunds" },
+  { value: "purchase_receive", label: "PO receipt (stock in)" },
   { value: "adjustment", label: "Adjustment" },
   { value: "initial_import", label: "Import" },
 ]
@@ -275,6 +276,8 @@ export default function RetailInventoryHistoryPage() {
         return "Sale"
       case "refund":
         return "Refund"
+      case "purchase_receive":
+        return "PO receipt"
       case "adjustment":
         return "Adjustment"
       case "initial_import":
@@ -289,6 +292,8 @@ export default function RetailInventoryHistoryPage() {
       case "sale":
         return "neutral"
       case "refund":
+        return "success"
+      case "purchase_receive":
         return "success"
       case "adjustment":
         return "info"

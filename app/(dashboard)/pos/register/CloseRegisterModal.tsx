@@ -220,8 +220,8 @@ export default function CloseRegisterModal({
               <label className="block text-sm font-medium mb-2">
                 Goods sold (session)
               </label>
-              <div className="border p-3 rounded bg-gray-50">
-                <span className="text-lg font-semibold">
+              <div className="min-w-0 border rounded bg-gray-50 p-3">
+                <span className="block text-base font-semibold tabular-nums leading-tight [overflow-wrap:anywhere] sm:text-lg">
                   {goodsSoldSessionTotal === null ? "—" : format(goodsSoldSessionTotal)}
                 </span>
               </div>
@@ -234,8 +234,8 @@ export default function CloseRegisterModal({
               <label className="block text-sm font-medium mb-2">
                 Expected Cash
               </label>
-              <div className="border p-3 rounded bg-gray-50">
-                <span className="text-lg font-semibold">
+              <div className="min-w-0 border rounded bg-gray-50 p-3">
+                <span className="block text-base font-semibold tabular-nums leading-tight [overflow-wrap:anywhere] sm:text-lg">
                   {format(expectedCash)}
                 </span>
               </div>
@@ -273,7 +273,7 @@ export default function CloseRegisterModal({
                       : "bg-green-50 border-green-300 text-green-700"
                   }`}
                 >
-                  <span className="text-lg font-semibold">
+                  <span className="block text-base font-semibold tabular-nums leading-tight [overflow-wrap:anywhere] sm:text-lg">
                     {variance > 0 ? "+" : ""}
                     {format(variance)}
                   </span>

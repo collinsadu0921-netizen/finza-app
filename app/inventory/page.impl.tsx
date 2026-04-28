@@ -321,31 +321,48 @@ export default function InventoryPage() {
 
           {/* Stock value / units are for this page only when paginated */}
           {(() => {
-            let totalStockValue = 0
+            let totalRetailValue = 0
+            let totalCostValue = 0
             let totalItems = 0
             for (const product of products) {
               if (product.hasVariants && product.variants && product.variants.length > 0) {
                 for (const v of product.variants) {
                   const unitPrice =
                     v.price != null && !Number.isNaN(Number(v.price)) ? Number(v.price) : product.price
-                  totalStockValue += v.stock * unitPrice
+                  const avgCost = Number(v.average_cost ?? 0)
+                  totalRetailValue += v.stock * unitPrice
+                  totalCostValue += v.stock * avgCost
                   totalItems += v.stock
                 }
               } else {
-                totalStockValue += product.stock * product.price
+                const avgCost = Number(product.average_cost ?? 0)
+                totalRetailValue += product.stock * product.price
+                totalCostValue += product.stock * avgCost
                 totalItems += product.stock
               }
             }
             const pageNote = showPagination ? " (this page)" : ""
 
             return (
-              <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                  <div className="text-sm font-medium text-blue-600">Total Stock Value{pageNote}</div>
-                  <div className="text-2xl font-bold text-blue-900">{format(totalStockValue)}</div>
+                  <div className="text-sm font-medium text-blue-600">Total retail value{pageNote}</div>
+                  <div className="text-2xl font-bold text-blue-900">{format(totalRetailValue)}</div>
+                  <div className="mt-1 text-xs text-blue-800/80">Stock × selling price</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-sm font-medium text-slate-600">Total cost value{pageNote}</div>
+                  <div
+                    className={`text-2xl font-bold tabular-nums ${
+                      totalCostValue === 0 ? "text-slate-400" : "text-slate-900"
+                    }`}
+                  >
+                    {format(totalCostValue)}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-600/90">Stock × average cost (AVCO)</div>
                 </div>
                 <div className="rounded-lg border border-green-200 bg-green-50 p-4">
-                  <div className="text-sm font-medium text-green-600">Total Items in Stock{pageNote}</div>
+                  <div className="text-sm font-medium text-green-600">Total items in stock{pageNote}</div>
                   <div className="text-2xl font-bold text-green-900">{formatInteger(totalItems)}</div>
                 </div>
                 <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
@@ -452,21 +469,48 @@ export default function InventoryPage() {
                                   <div className="ml-4 space-y-1 mt-1">
                                     {product.variants.map((variant) => {
                                       const isOut = variant.stock === 0
+                                      const unitPrice =
+                                        variant.price != null && !Number.isNaN(Number(variant.price))
+                                          ? Number(variant.price)
+                                          : product.price
+                                      const avgCost = Number(variant.average_cost ?? 0)
+                                      const retailVal = variant.stock * unitPrice
+                                      const costVal = variant.stock * avgCost
                                       return (
-                                        <div key={variant.id} className="flex items-center gap-2">
-                                          <span className={isOut ? 'text-red-600 font-medium' : ''}>
-                                            {variant.variant_name}: {formatInteger(variant.stock)} units
-                                          </span>
-                                          {isOut && (
-                                            <span className="px-1.5 py-0.5 rounded text-xs font-bold text-white bg-red-600">
-                                              OUT
+                                        <div key={variant.id} className="space-y-1">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className={isOut ? "font-medium text-red-600" : ""}>
+                                              {variant.variant_name}: {formatInteger(variant.stock)} units
                                             </span>
-                                          )}
-                                          {variant.price !== undefined && variant.price !== product.price && (
-                                            <span className="text-xs text-gray-500">
-                                              ({format(variant.price)})
+                                            {isOut && (
+                                              <span className="rounded bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white">
+                                                OUT
+                                              </span>
+                                            )}
+                                            {variant.price !== undefined && variant.price !== product.price && (
+                                              <span className="text-xs text-gray-500">({format(variant.price)})</span>
+                                            )}
+                                          </div>
+                                          <div className="ml-0 text-xs text-gray-600">
+                                            <span>
+                                              Avg cost:{" "}
+                                              <span className={avgCost === 0 ? "text-gray-400" : "font-medium text-gray-800"}>
+                                                {format(avgCost)}
+                                              </span>
                                             </span>
-                                          )}
+                                            <span className="mx-2 text-gray-300">·</span>
+                                            <span>
+                                              Retail value:{" "}
+                                              <span className="font-medium text-gray-800">{format(retailVal)}</span>
+                                            </span>
+                                            <span className="mx-2 text-gray-300">·</span>
+                                            <span>
+                                              Cost value:{" "}
+                                              <span className={costVal === 0 ? "text-gray-400" : "font-medium text-gray-800"}>
+                                                {format(costVal)}
+                                              </span>
+                                            </span>
+                                          </div>
                                         </div>
                                       )
                                     })}
@@ -478,10 +522,31 @@ export default function InventoryPage() {
                                     Stock: <span className="font-semibold">{formatInteger(product.stock)}</span> units
                                   </p>
                                   <p>
+                                    Avg cost:{" "}
+                                    <span
+                                      className={`font-semibold ${
+                                        Number(product.average_cost ?? 0) === 0 ? "text-gray-400" : ""
+                                      }`}
+                                    >
+                                      {format(Number(product.average_cost ?? 0))}
+                                    </span>
+                                  </p>
+                                  <p>
                                     Price: <span className="font-semibold">{format(product.price)}</span>
                                   </p>
                                   <p>
-                                    Value: <span className="font-semibold">{format(product.stock * product.price)}</span>
+                                    Retail value:{" "}
+                                    <span className="font-semibold">{format(product.stock * product.price)}</span>
+                                  </p>
+                                  <p>
+                                    Cost value:{" "}
+                                    <span
+                                      className={`font-semibold ${
+                                        product.stock * Number(product.average_cost ?? 0) === 0 ? "text-gray-400" : ""
+                                      }`}
+                                    >
+                                      {format(product.stock * Number(product.average_cost ?? 0))}
+                                    </span>
                                   </p>
                                   {product.low_stock_threshold !== undefined && product.low_stock_threshold > 0 && (
                                     <p className="text-xs">

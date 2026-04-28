@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 
 type Staff = {
   id: string
@@ -22,6 +23,7 @@ type Staff = {
 
 export default function EditStaffPage() {
   const router = useRouter()
+  const payrollBase = usePayrollBasePath()
   const params = useParams()
   const staffId = params.id as string
 
@@ -116,7 +118,7 @@ export default function EditStaffPage() {
       if (response.ok) {
         setSuccess("Staff updated successfully!")
         setTimeout(() => {
-          router.push(`/payroll/staff/${staffId}`)
+          router.push(`${payrollBase}/staff/${staffId}`)
         }, 1000)
       } else {
         setError(data.error || "Failed to update staff")
@@ -152,7 +154,7 @@ export default function EditStaffPage() {
         <div className="max-w-4xl mx-auto">
           <div className="mb-6">
             <button
-              onClick={() => router.push(`/payroll/staff/${staffId}`)}
+              onClick={() => router.push(`${payrollBase}/staff/${staffId}`)}
               className="text-blue-600 dark:text-blue-400 hover:underline mb-2"
             >
               ← Back to Staff Details
@@ -344,7 +346,7 @@ export default function EditStaffPage() {
             <div className="flex gap-4 mt-6">
               <button
                 type="button"
-                onClick={() => router.push(`/payroll/staff/${staffId}`)}
+                onClick={() => router.push(`${payrollBase}/staff/${staffId}`)}
                 className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 px-4 py-2"
               >
                 Cancel

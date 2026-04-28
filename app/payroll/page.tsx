@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 type PayrollRun = {
   id: string
   payroll_month: string
@@ -14,6 +15,7 @@ type PayrollRun = {
 
 export default function PayrollPage() {
   const router = useRouter()
+  const payrollBase = usePayrollBasePath()
   const [loading, setLoading] = useState(true)
   const [runs, setRuns] = useState<PayrollRun[]>([])
 
@@ -60,7 +62,7 @@ export default function PayrollPage() {
               <p className="text-gray-600 dark:text-gray-400">Manage monthly payroll processing</p>
             </div>
             <button
-              onClick={() => router.push("/payroll/run")}
+              onClick={() => router.push(`${payrollBase}/run`)}
               className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -120,10 +122,10 @@ export default function PayrollPage() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
                             className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                              run.status === "paid"
-                                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                : run.status === "approved"
+                              run.status === "approved"
                                 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                                : run.status === "locked"
+                                ? "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200"
                                 : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
                             }`}
                           >
@@ -132,7 +134,7 @@ export default function PayrollPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <button
-                            onClick={() => router.push(`/payroll/${run.id}`)}
+                            onClick={() => router.push(`${payrollBase}/${run.id}`)}
                             className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
                           >
                             View

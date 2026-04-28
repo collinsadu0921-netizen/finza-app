@@ -136,20 +136,34 @@ function StatCard({
   href?: string
 }) {
   const val = (
-    <div className={`text-3xl font-bold ${
-      accent === "red" ? "text-red-600 dark:text-red-400" :
-      accent === "amber" ? "text-amber-600 dark:text-amber-400" :
-      accent === "green" ? "text-green-600 dark:text-green-400" :
-      accent === "blue" ? "text-blue-600 dark:text-blue-400" :
-      "text-gray-900 dark:text-white"
-    }`}>
+    <div
+      className={`min-w-0 text-2xl font-bold tabular-nums leading-tight [overflow-wrap:anywhere] sm:text-3xl ${
+        accent === "red"
+          ? "text-red-600 dark:text-red-400"
+          : accent === "amber"
+            ? "text-amber-600 dark:text-amber-400"
+            : accent === "green"
+              ? "text-green-600 dark:text-green-400"
+              : accent === "blue"
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-gray-900 dark:text-white"
+      }`}
+    >
       {value}
     </div>
   )
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-      {href ? <Link href={href} className="hover:underline">{val}</Link> : val}
-      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-1">{label}</div>
+    <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+      <div className="min-w-0">
+        {href ? (
+          <Link href={href} className="block min-w-0 hover:underline">
+            {val}
+          </Link>
+        ) : (
+          val
+        )}
+      </div>
+      <div className="mt-1 text-xs font-medium text-gray-500 dark:text-gray-400">{label}</div>
     </div>
   )
 }

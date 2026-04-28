@@ -226,7 +226,8 @@ export default function ServiceInboundEmailSettingsPage() {
           >
             Incoming documents
           </Link>{" "}
-          for review before you post them to expenses or bills.
+          for review before you post them to expenses or bills. When Finza saves new files from email, we send a short
+          heads-up to your workspace business email (or the owner email if the business email is not set).
         </p>
       </div>
 

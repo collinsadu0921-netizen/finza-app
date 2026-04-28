@@ -51,7 +51,7 @@ export default function InternalAnnouncementsPage() {
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(DEFAULT_FORM)
-  /** Next skip index per announcement for batched Resend sends */
+  /** Next skip index per announcement for batched email sends */
   const [emailSkipById, setEmailSkipById] = useState<Record<string, number>>({})
   const [emailResultById, setEmailResultById] = useState<Record<string, EmailBatchResult | null>>({})
   const [emailSendingId, setEmailSendingId] = useState<string | null>(null)
@@ -243,7 +243,7 @@ export default function InternalAnnouncementsPage() {
             </li>
           </ol>
           <p className="mt-2 text-xs text-sky-900/80 dark:text-sky-200/90">
-            Email broadcasts use Resend (<code className="rounded px-0.5">RESEND_API_KEY</code>, optional{" "}
+            Email broadcasts use your configured transactional mail integration (<code className="rounded px-0.5">RESEND_API_KEY</code>, optional{" "}
             <code className="rounded px-0.5">INTERNAL_ANNOUNCEMENT_EMAIL_FROM</code>). Sends are batched; click again for the next batch if
             prompted.
           </p>

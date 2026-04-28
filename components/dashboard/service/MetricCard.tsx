@@ -57,20 +57,24 @@ export default function MetricCard({
         ? "negative"
         : "default"
 
+  const valueTone =
+    resolvedVariant === "positive"
+      ? "text-emerald-600"
+      : resolvedVariant === "negative"
+        ? "text-red-500"
+        : "text-slate-900"
+
+  const valueSizeClass =
+    valueFormat === "currency"
+      ? "text-base font-semibold tabular-nums tracking-tight sm:text-lg md:text-xl [overflow-wrap:anywhere]"
+      : "text-lg font-semibold tabular-nums tracking-tight sm:text-xl [overflow-wrap:anywhere]"
+
   const content = (
-    <>
+    <div className="min-w-0">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
         {title}
       </p>
-      <p
-        className={`mt-1.5 text-xl font-semibold tabular-nums tracking-tight ${
-          resolvedVariant === "positive"
-            ? "text-emerald-600"
-            : resolvedVariant === "negative"
-              ? "text-red-500"
-              : "text-slate-900"
-        }`}
-      >
+      <p className={`mt-1.5 min-w-0 leading-tight ${valueSizeClass} ${valueTone}`}>
         {valueDisplay}
       </p>
       {subtitle && (
@@ -110,18 +114,18 @@ export default function MetricCard({
           )}
         </div>
       )}
-    </>
+    </div>
   )
 
   const baseClass =
-    "rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors"
+    "block min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors"
 
   if (isStatic || !reportHref) {
     return <div className={baseClass}>{content}</div>
   }
 
   return (
-    <Link href={reportHref} className={`block ${baseClass} hover:border-slate-300 hover:shadow`}>
+    <Link href={reportHref} className={`${baseClass} hover:border-slate-300 hover:shadow`}>
       {content}
     </Link>
   )

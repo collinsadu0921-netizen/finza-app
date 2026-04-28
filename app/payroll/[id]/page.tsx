@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
+import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 
 type PayrollEntry = {
   id: string
@@ -53,6 +54,41 @@ type Payslip = {
   email_sent_at: string | null
 }
 
+type PayrollPayment = {
+  id: string
+  payroll_run_id: string
+  payment_date: string
+  amount: number
+  payment_account_id: string
+  reference: string | null
+  notes: string | null
+  journal_entry_id: string | null
+  created_at: string
+  payment_account?: {
+    id: string
+    name: string
+    code: string
+    sub_type: string | null
+    type: string
+  } | null
+}
+
+type PayrollPaymentSummary = {
+  total_net_salary: number
+  paid_amount: number
+  outstanding_amount: number
+  payment_status: "unpaid" | "partially_paid" | "paid"
+  latest_payment_date: string | null
+}
+
+type PaymentAccount = {
+  id: string
+  name: string
+  code: string
+  sub_type: string | null
+  type: string
+}
+
 type SendModalState = {
   payslipId: string
   staffName: string
@@ -62,6 +98,7 @@ type SendModalState = {
 
 export default function PayrollRunViewPage() {
   const router = useRouter()
+  const payrollBase = usePayrollBasePath()
   const params = useParams()
   const runId = params.id as string
   const toast = useToast()
@@ -73,6 +110,19 @@ export default function PayrollRunViewPage() {
   const [updating, setUpdating] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [sendingAll, setSendingAll] = useState(false)
+  const [recordingPayment, setRecordingPayment] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [salaryPayments, setSalaryPayments] = useState<PayrollPayment[]>([])
+  const [paymentSummary, setPaymentSummary] = useState<PayrollPaymentSummary | null>(null)
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
+  const [paymentError, setPaymentError] = useState("")
+  const [paymentForm, setPaymentForm] = useState({
+    payment_date: new Date().toISOString().split("T")[0],
+    amount: "",
+    payment_account_id: "",
+    reference: "",
+    notes: "",
+  })
 
   // Send modal state
   const [sendModal, setSendModal] = useState<SendModalState>(null)
@@ -87,6 +137,8 @@ export default function PayrollRunViewPage() {
       if (response.ok) {
         setPayrollRun(data.payrollRun)
         setEntries(data.entries || [])
+        if (data.paymentSummary) setPaymentSummary(data.paymentSummary)
+        if (Array.isArray(data.payments)) setSalaryPayments(data.payments)
       }
     } catch (err) {
       console.error("Error loading payroll run:", err)
@@ -105,10 +157,25 @@ export default function PayrollRunViewPage() {
     } catch (_) {}
   }, [runId])
 
+  const loadPayrollPayments = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/payroll/runs/${runId}/payments`)
+      const data = await response.json()
+      if (response.ok) {
+        setSalaryPayments(data.payments || [])
+        setPaymentSummary(data.summary || null)
+        setPaymentAccounts(data.paymentAccounts || [])
+      }
+    } catch (err) {
+      console.error("Error loading payroll payments:", err)
+    }
+  }, [runId])
+
   useEffect(() => {
     loadPayrollRun()
     loadPayslips()
-  }, [loadPayrollRun, loadPayslips])
+    loadPayrollPayments()
+  }, [loadPayrollRun, loadPayslips, loadPayrollPayments])
 
   const handleApprove = async () => {
     setUpdating(true)
@@ -217,6 +284,64 @@ export default function PayrollRunViewPage() {
     }
   }
 
+  const openPaymentModal = () => {
+    const outstanding = Number(paymentSummary?.outstanding_amount || 0)
+    const defaultAccountId = paymentAccounts[0]?.id || ""
+    setPaymentError("")
+    setPaymentForm({
+      payment_date: new Date().toISOString().split("T")[0],
+      amount: outstanding > 0 ? outstanding.toFixed(2) : "",
+      payment_account_id: defaultAccountId,
+      reference: "",
+      notes: "",
+    })
+    setShowPaymentModal(true)
+  }
+
+  const handleRecordSalaryPayment = async () => {
+    if (!paymentForm.payment_date) {
+      setPaymentError("Payment date is required.")
+      return
+    }
+    if (!paymentForm.payment_account_id) {
+      setPaymentError("Select a payment account.")
+      return
+    }
+    const amount = Number(paymentForm.amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError("Amount must be a positive number.")
+      return
+    }
+
+    setRecordingPayment(true)
+    setPaymentError("")
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_date: paymentForm.payment_date,
+          amount,
+          payment_account_id: paymentForm.payment_account_id,
+          reference: paymentForm.reference || null,
+          notes: paymentForm.notes || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setPaymentError(data.error || "Failed to record salary payment.")
+        return
+      }
+      setShowPaymentModal(false)
+      toast.showToast("Salary payment recorded and posted to ledger", "success")
+      await loadPayrollPayments()
+    } catch {
+      setPaymentError("Failed to record salary payment. Please try again.")
+    } finally {
+      setRecordingPayment(false)
+    }
+  }
+
   const openSendModal = (entry: PayrollEntry, payslip: Payslip) => {
     setSendError("")
     setSendEmailInput(entry.staff.email || "")
@@ -234,6 +359,10 @@ export default function PayrollRunViewPage() {
     payslipByStaff[ps.staff_id] = ps
   }
   const hasPayslips = payslips.length > 0
+  const paymentStatus = paymentSummary?.payment_status || "unpaid"
+  const isRunPayable = payrollRun?.status === "approved" || payrollRun?.status === "locked"
+  const outstandingAmount = Number(paymentSummary?.outstanding_amount || 0)
+  const canRecordPayment = isRunPayable && outstandingAmount > 0.01
   const totals = entries.reduce(
     (acc, entry) => {
       acc.bonus += Number(entry.bonus_amount ?? 0)
@@ -270,7 +399,7 @@ export default function PayrollRunViewPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <button
-                onClick={() => router.push("/payroll")}
+                onClick={() => router.push(payrollBase)}
                 className="text-sm text-blue-600 dark:text-blue-400 hover:underline mb-2 flex items-center gap-1"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -296,10 +425,33 @@ export default function PayrollRunViewPage() {
                     {payslips.length} payslip{payslips.length !== 1 ? "s" : ""} generated
                   </span>
                 )}
+                {paymentSummary && (
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      paymentStatus === "paid"
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-400"
+                        : paymentStatus === "partially_paid"
+                        ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400"
+                        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                    }`}
+                  >
+                    {paymentStatus === "paid"
+                      ? "Payroll Paid"
+                      : paymentStatus === "partially_paid"
+                      ? "Partially Paid"
+                      : "Unpaid"}
+                  </span>
+                )}
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-3 w-full sm:w-auto sm:items-end">
+              {payrollRun.status === "draft" && (
+                <p className="text-sm text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 max-w-xl text-left">
+                  Approving payroll posts salary expense and payroll liabilities to accounting. It does not mark salaries as paid.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
               {payrollRun.status === "draft" && (
                 <button
                   onClick={handleApprove}
@@ -336,11 +488,25 @@ export default function PayrollRunViewPage() {
                   )}
                 </button>
               )}
+              {isRunPayable && (
+                <button
+                  onClick={openPaymentModal}
+                  disabled={!canRecordPayment}
+                  title={!canRecordPayment ? "Payroll net salary is fully paid." : undefined}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a5 5 0 00-10 0v2M5 9h14l-1 11H6L5 9z" />
+                  </svg>
+                  Record Salary Payment
+                </button>
+              )}
+              </div>
             </div>
           </div>
 
           {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">
             {[
               { label: "Gross Salary", value: payrollRun.total_gross_salary, color: "text-gray-900 dark:text-white" },
               { label: "Bonus", value: totals.bonus, color: "text-violet-600 dark:text-violet-400" },
@@ -358,15 +524,99 @@ export default function PayrollRunViewPage() {
               },
               { label: "Net Salary", value: payrollRun.total_net_salary, color: "text-green-600 dark:text-green-400" },
             ].map(({ label, value, color }) => (
-              <div key={label} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-5 border border-gray-200 dark:border-gray-700">
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{label}</p>
-                <p className={`text-xl font-bold ${color}`}>₵{Number(value || 0).toFixed(2)}</p>
+              <div
+                key={label}
+                className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:p-5"
+              >
+                <p className="mb-1 text-[11px] font-medium leading-snug text-gray-500 dark:text-gray-400 sm:text-xs">
+                  {label}
+                </p>
+                <p
+                  className={`min-w-0 text-xs font-bold tabular-nums leading-none tracking-tight whitespace-nowrap sm:text-sm lg:text-sm xl:text-base ${color}`}
+                >
+                  ₵{Number(value || 0).toFixed(2)}
+                </p>
               </div>
             ))}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-2">
             Net salary is gross minus PAYE, employee SSNIT, and other employee deductions — not employer SSNIT.
           </p>
+
+          {paymentSummary && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Salary Payment Summary</h2>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {paymentSummary.latest_payment_date
+                    ? `Last payment: ${new Date(paymentSummary.latest_payment_date).toLocaleDateString("en-GH")}`
+                    : "No salary payment recorded"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Payment Status</p>
+                  <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-white sm:text-base">
+                    {paymentStatus === "paid"
+                      ? "Paid"
+                      : paymentStatus === "partially_paid"
+                      ? "Partially Paid"
+                      : "Unpaid"}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Net Salary Payable</p>
+                  <p className="text-sm font-semibold tabular-nums leading-none tracking-tight text-gray-900 whitespace-nowrap dark:text-white sm:text-sm md:text-base">
+                    ₵{Number(paymentSummary.total_net_salary || 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Paid Amount</p>
+                  <p className="text-sm font-semibold tabular-nums leading-none tracking-tight text-emerald-600 whitespace-nowrap dark:text-emerald-400 sm:text-sm md:text-base">
+                    ₵{Number(paymentSummary.paid_amount || 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Outstanding Amount</p>
+                  <p className="text-sm font-semibold tabular-nums leading-none tracking-tight text-amber-600 whitespace-nowrap dark:text-amber-400 sm:text-sm md:text-base">
+                    ₵{Number(paymentSummary.outstanding_amount || 0).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {salaryPayments.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        <th className="py-2">Date</th>
+                        <th className="py-2">Account</th>
+                        <th className="py-2">Reference</th>
+                        <th className="py-2 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {salaryPayments.map((payment) => (
+                        <tr key={payment.id}>
+                          <td className="py-2 text-gray-700 dark:text-gray-300">
+                            {new Date(payment.payment_date).toLocaleDateString("en-GH")}
+                          </td>
+                          <td className="py-2 text-gray-700 dark:text-gray-300">
+                            {payment.payment_account?.code} - {payment.payment_account?.name}
+                          </td>
+                          <td className="py-2 text-gray-500 dark:text-gray-400">{payment.reference || "—"}</td>
+                          <td className="py-2 text-right font-medium text-gray-900 dark:text-white">
+                            ₵{Number(payment.amount || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Payslips hint when not generated */}
           {!hasPayslips && (
@@ -447,7 +697,7 @@ export default function PayrollRunViewPage() {
                                   className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700"
                                 >
                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                                  {anySent ? "Resend" : "Send"}
+                                  {anySent ? "Send again" : "Send"}
                                 </button>
                                 {payslip.public_token && (
                                   <a
@@ -476,6 +726,123 @@ export default function PayrollRunViewPage() {
 
         </div>
       </div>
+
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white">Record Salary Payment</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  This records salary disbursement and posts Dr Net Salaries Payable, Cr selected payment account. It does not change payroll calculations or statutory liabilities.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (!recordingPayment) {
+                    setShowPaymentModal(false)
+                    setPaymentError("")
+                  }
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {paymentError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {paymentError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Payment Date</span>
+                  <input
+                    type="date"
+                    value={paymentForm.payment_date}
+                    onChange={(e) => setPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Amount</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={paymentForm.amount}
+                    onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  />
+                </label>
+              </div>
+
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Payment Account</span>
+                <select
+                  value={paymentForm.payment_account_id}
+                  onChange={(e) => setPaymentForm((f) => ({ ...f, payment_account_id: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Select account</option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.code} - {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Reference (optional)</span>
+                <input
+                  type="text"
+                  value={paymentForm.reference}
+                  onChange={(e) => setPaymentForm((f) => ({ ...f, reference: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  placeholder="Bank transfer ref / cheque no"
+                />
+              </label>
+
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Notes (optional)</span>
+                <textarea
+                  value={paymentForm.notes}
+                  onChange={(e) => setPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  rows={3}
+                />
+              </label>
+
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Outstanding net salary payable: ₵{Number(paymentSummary?.outstanding_amount || 0).toFixed(2)}
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                disabled={recordingPayment}
+                className="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRecordSalaryPayment}
+                disabled={recordingPayment}
+                className="px-4 py-2 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {recordingPayment ? "Posting..." : "Record Payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Send Payslip Modal ── */}
       {sendModal && (

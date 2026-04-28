@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { KpiStatCard } from "@/components/ui/KpiStatCard"
 
 type MaterialRow = {
   id: string
@@ -182,68 +183,52 @@ export default function ServiceMaterialsPage() {
 
         {/* Stat Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-slate-900">{totalItems}</p>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Total</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-slate-900">{activeItems}</p>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Active</p>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={`bg-white rounded-xl border shadow-sm p-5 cursor-pointer transition-colors ${
-              lowStockItems > 0
-                ? "border-amber-300 hover:bg-amber-50"
-                : "border-slate-200"
-            }`}
+          <KpiStatCard
+            icon={
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+            }
+            iconWrapperClassName="bg-blue-100"
+            value={totalItems}
+            label="Total"
+          />
+          <KpiStatCard
+            icon={
+              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+            iconWrapperClassName="bg-emerald-100"
+            value={activeItems}
+            label="Active"
+          />
+          <KpiStatCard
+            icon={
+              <svg className={`w-5 h-5 ${lowStockItems > 0 ? "text-amber-600" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            }
+            iconWrapperClassName={lowStockItems > 0 ? "bg-amber-100" : "bg-slate-100"}
+            value={lowStockItems}
+            label="Low Stock"
+            valueClassName={lowStockItems > 0 ? "text-amber-600" : undefined}
+            className={
+              lowStockItems > 0 ? "border-amber-300 hover:bg-amber-50" : undefined
+            }
             onClick={() => lowStockItems > 0 && setFilterStock(filterStock === "low" ? "all" : "low")}
-          >
-            <div className="flex items-center gap-3">
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${lowStockItems > 0 ? "bg-amber-100" : "bg-slate-100"}`}>
-                <svg className={`w-5 h-5 ${lowStockItems > 0 ? "text-amber-600" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <div>
-                <p className={`text-2xl font-bold ${lowStockItems > 0 ? "text-amber-600" : "text-slate-900"}`}>{lowStockItems}</p>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Low Stock</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <p className="text-xl font-bold text-slate-900 truncate">{format(totalValue)}</p>
-                <p className="text-xs text-slate-500 uppercase tracking-wide">Total Value</p>
-              </div>
-            </div>
-          </div>
+          />
+          <KpiStatCard
+            icon={
+              <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+            iconWrapperClassName="bg-slate-100"
+            value={format(totalValue)}
+            label="Total Value"
+            valueVariant="currency"
+          />
         </div>
 
         {/* Filters */}

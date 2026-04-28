@@ -623,13 +623,13 @@ export default function ServiceStaffSettingsPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <button
-                            onClick={() => router.push(`/payroll/staff/${member.id}`)}
+                            onClick={() => router.push(`/service/payroll/staff/${member.id}`)}
                             className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 mr-4"
                           >
                             View
                           </button>
                           <button
-                            onClick={() => router.push(`/payroll/staff/${member.id}/edit`)}
+                            onClick={() => router.push(`/service/payroll/staff/${member.id}/edit`)}
                             className="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300 mr-4"
                           >
                             Edit

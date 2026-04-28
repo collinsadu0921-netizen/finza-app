@@ -26,9 +26,12 @@ export default function StorePickerModal({
 
   useEffect(() => {
     if (isOpen && stores.length > 0) {
-      // Pre-select first store if none selected
-      if (!selectedStoreId && stores.length > 0) {
+      // Never silently default to first store when multiple stores exist.
+      // Only auto-select when there is exactly one possible store.
+      if (!selectedStoreId && stores.length === 1) {
         setLocalSelectedStoreId(stores[0].id)
+      } else if (!selectedStoreId && stores.length > 1) {
+        setLocalSelectedStoreId("")
       } else if (selectedStoreId) {
         setLocalSelectedStoreId(selectedStoreId)
       }
@@ -101,6 +104,7 @@ export default function StorePickerModal({
                 onChange={(e) => setLocalSelectedStoreId(e.target.value)}
                 className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
+                {stores.length > 1 && <option value="">Choose store…</option>}
                 {stores.map((store) => (
                   <option key={store.id} value={store.id}>
                     {store.name} {store.location ? `(${store.location})` : ""}

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
+import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 
 type Advance = {
   id: string
@@ -34,6 +35,7 @@ const today = () => new Date().toISOString().split("T")[0]
 
 export default function SalaryAdvancesPage() {
   const router = useRouter()
+  const payrollBase = usePayrollBasePath()
   const toast = useToast()
 
   const [loading, setLoading] = useState(true)
@@ -145,7 +147,7 @@ export default function SalaryAdvancesPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <button
-                onClick={() => router.push("/payroll")}
+                onClick={() => router.push(payrollBase)}
                 className="text-sm text-blue-600 dark:text-blue-400 hover:underline mb-2 flex items-center gap-1"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

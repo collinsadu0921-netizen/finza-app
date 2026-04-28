@@ -551,7 +551,7 @@ Thank you.`
                             }}
                             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 sm:w-auto"
                           >
-                            Resend
+                            Send again
                           </button>
                         )}
                     </div>

@@ -350,11 +350,12 @@ BEGIN
   -- GUARD: Assert accounting period is open
   PERFORM assert_accounting_period_is_open(business_id_val, transfer_record.initiated_at::DATE);
 
-  -- Get inventory account (1400)
-  inventory_account_id := get_account_by_code(business_id_val, '1400');
+  -- Retail inventory policy: store-to-store retail transfers post to 1200.
+  -- Service materials inventory is separate and uses 1450 in service-only flows.
+  inventory_account_id := get_account_by_code(business_id_val, '1200');
 
   IF inventory_account_id IS NULL THEN
-    RAISE EXCEPTION 'Inventory account (1400) not found for business: %', business_id_val;
+    RAISE EXCEPTION 'Inventory account (1200) not found for business: %', business_id_val;
   END IF;
 
   -- Calculate total transfer cost

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { getActiveStoreId, getActiveStoreName, setActiveStoreId } from "@/lib/storeSession"
 import { formatMoney } from "@/lib/money"
 import {
   BUY_LIST_TEMPLATE_IDS,
@@ -72,6 +73,8 @@ export default function BuyListDetailPage() {
   const [stores, setStores] = useState<StoreRow[]>([])
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [receiveStoreId, setReceiveStoreId] = useState("")
+  const [activeStoreId, setActiveStoreIdState] = useState<string | null>(null)
+  const [activeStoreName, setActiveStoreName] = useState<string | null>(null)
   const [receiveLines, setReceiveLines] = useState<Record<string, { qty: string; cost: string }>>({})
   const [actionBusy, setActionBusy] = useState(false)
   const [listTemplate, setListTemplate] = useState<BuyListTemplateId>("default")
@@ -104,7 +107,13 @@ export default function BuyListDetailPage() {
           const { data: st } = await supabase.from("stores").select("id, name").eq("business_id", biz.id).order("name")
           if (st?.length) {
             setStores(st as StoreRow[])
-            setReceiveStoreId((st[0] as StoreRow).id)
+            const sessionStoreId = getActiveStoreId()
+            const sessionStoreName = getActiveStoreName()
+            const validSessionStore = sessionStoreId && st.some((store: { id: string }) => store.id === sessionStoreId)
+
+            setActiveStoreIdState(validSessionStore ? sessionStoreId : null)
+            setActiveStoreName(validSessionStore ? sessionStoreName : null)
+            setReceiveStoreId(validSessionStore ? sessionStoreId : "")
           }
         }
       }
@@ -302,6 +311,17 @@ export default function BuyListDetailPage() {
       setError("Choose a store to receive into.")
       return
     }
+    if (!activeStoreId) {
+      setError("No active store selected. Open a store first so receive and sales stay in the same store context.")
+      return
+    }
+    if (receiveStoreId !== activeStoreId) {
+      const selectedStore = stores.find((s) => s.id === receiveStoreId)
+      const proceed = window.confirm(
+        `You are receiving into "${selectedStore?.name || "selected store"}" while active store is "${activeStoreName || "another store"}".\n\nContinue?`
+      )
+      if (!proceed) return
+    }
     const lines = po.items.map((it) => {
       const row = receiveLines[it.id] || { qty: "0", cost: "" }
       const q = Number(row.qty)
@@ -388,6 +408,9 @@ export default function BuyListDetailPage() {
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <RetailBackofficeBadge tone={purchaseOrderStatusBadgeTone(po.status)}>{purchaseOrderStatusLabel(po.status)}</RetailBackofficeBadge>
           <RetailBackofficeBadge tone="neutral">Pay: {po.payment_state || "unpaid"}</RetailBackofficeBadge>
+          <RetailBackofficeBadge tone={activeStoreId ? "info" : "warning"}>
+            Active store: {activeStoreName || "Not selected"}
+          </RetailBackofficeBadge>
         </div>
 
         <div id="send-to-supplier" className="scroll-mt-4">
@@ -564,6 +587,37 @@ export default function BuyListDetailPage() {
                   onValueChange={setReceiveStoreId}
                   options={receiveStoreMenuOptions}
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Receiving store:{" "}
+                  <span className="font-semibold">
+                    {stores.find((s) => s.id === receiveStoreId)?.name || "Not selected"}
+                  </span>
+                </p>
+                {activeStoreId ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Active store context: <span className="font-semibold">{activeStoreName || activeStoreId}</span>
+                    {receiveStoreId && receiveStoreId !== activeStoreId ? (
+                      <span className="ml-1 text-amber-700">- different from receiving store (confirmation required)</span>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-amber-700">
+                    No active store selected. Open a store first (Stores - Open Store), or select one now:
+                    <button
+                      type="button"
+                      className="ml-1 underline"
+                      onClick={() => {
+                        const selected = stores.find((s) => s.id === receiveStoreId)
+                        if (!selected) return
+                        setActiveStoreId(selected.id, selected.name)
+                        setActiveStoreIdState(selected.id)
+                        setActiveStoreName(selected.name)
+                      }}
+                    >
+                      Set active store to receiving store
+                    </button>
+                  </p>
+                )}
               </div>
               <div className="mt-4 space-y-3">
                 {po.items.map((it) => (

@@ -45,7 +45,8 @@ const SETTING_GROUPS: SettingsGroup[] = [
   },
   {
     title: "Documents",
-    description: "Bring files into Finza without uploading from the app.",
+    description:
+      "Bring files into Finza by email (no upload). You get a short email when something new lands in Incoming documents.",
     links: [{ label: "Inbound email for documents", path: "/service/settings/inbound-email" }],
   },
 ]
@@ -110,9 +111,23 @@ export default function ServiceSettingsHubPage() {
                       ) : (
                         <Link
                           href={href}
-                          className="flex items-center justify-between gap-3 py-3 text-sm font-medium text-slate-700 transition-colors hover:text-slate-900"
+                          className={[
+                            "flex items-center justify-between gap-3 py-3 text-sm font-medium transition-colors hover:text-slate-900",
+                            link.path === "/service/settings/inbound-email"
+                              ? "text-slate-900"
+                              : "text-slate-700",
+                          ].join(" ")}
                         >
-                          {link.label}
+                          {link.path === "/service/settings/inbound-email" ? (
+                            <span>
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                                Email
+                              </span>{" "}
+                              {link.label}
+                            </span>
+                          ) : (
+                            link.label
+                          )}
                           <Chevron />
                         </Link>
                       )}

@@ -158,11 +158,13 @@ BEGIN
       p_purchase_order_id;
   END IF;
 
-  inventory_account_id := get_account_by_code(business_id_val, '1400');
+  -- Retail inventory policy: use 1200 for retail inventory asset postings.
+  -- Service materials inventory is separate and uses 1450 in service-only flows.
+  inventory_account_id := get_account_by_code(business_id_val, '1200');
   ap_account_id := get_account_by_code(business_id_val, '2000');
 
   IF inventory_account_id IS NULL THEN
-    RAISE EXCEPTION 'Inventory account (1400) not found for business: %', business_id_val;
+    RAISE EXCEPTION 'Inventory account (1200) not found for business: %', business_id_val;
   END IF;
 
   IF ap_account_id IS NULL THEN

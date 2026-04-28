@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
+import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 
 export default function PayrollRunPage() {
   const router = useRouter()
+  const payrollBase = usePayrollBasePath()
   const toast = useToast()
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
@@ -28,7 +30,7 @@ export default function PayrollRunPage() {
       const data = await response.json()
 
       if (response.ok) {
-        router.push(`/payroll/${data.payrollRun.id}`)
+        router.push(`${payrollBase}/${data.payrollRun.id}`)
       } else {
         toast.showToast(data.error || "Error creating payroll run", "error")
       }
@@ -45,7 +47,7 @@ export default function PayrollRunPage() {
         <div className="max-w-4xl mx-auto">
           <div className="mb-6">
             <button
-              onClick={() => router.push("/payroll")}
+              onClick={() => router.push(payrollBase)}
               className="text-blue-600 dark:text-blue-400 hover:underline mb-2"
             >
               ← Back to Payroll
@@ -81,7 +83,7 @@ export default function PayrollRunPage() {
               </button>
               <button
                 type="button"
-                onClick={() => router.push("/payroll")}
+                onClick={() => router.push(payrollBase)}
                 className="px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 Cancel

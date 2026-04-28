@@ -390,7 +390,7 @@ export default function SendInvoiceModal({
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-2xl font-bold text-gray-900">
-            {resendOnly ? "Resend invoice" : "Send Invoice"}
+            {resendOnly ? "Send invoice again" : "Send Invoice"}
           </h2>
           <button
             onClick={onClose}
@@ -462,7 +462,7 @@ export default function SendInvoiceModal({
                 : sendMethod === "download"
                   ? "Issue & download"
                   : resendOnly
-                    ? "Resend"
+                    ? "Send again"
                     : "Send Invoice"}
             </button>
           </div>
@@ -481,8 +481,8 @@ export default function SendInvoiceModal({
                 className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <p className="text-xs text-gray-500">
-                Without a verified domain, send only to your Resend account email or use{" "}
-                <code className="bg-gray-100 px-1 rounded">delivered@resend.dev</code> for testing.
+                Without a verified sending domain, test emails are usually limited to your own inbox or other addresses
+                allowed by your mail provider’s sandbox rules.
               </p>
             </div>
           )}

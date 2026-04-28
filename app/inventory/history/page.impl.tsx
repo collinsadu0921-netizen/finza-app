@@ -11,7 +11,7 @@ type StockMovement = {
   product_id: string
   product_name: string
   quantity_change: number
-  type: "sale" | "refund" | "adjustment" | "initial_import"
+  type: "sale" | "refund" | "adjustment" | "initial_import" | "purchase_receive"
   created_at: string
   note: string | null
   related_sale_id: string | null
@@ -238,6 +238,8 @@ export default function InventoryHistoryPage() {
         return "Sale"
       case "refund":
         return "Refund"
+      case "purchase_receive":
+        return "PO receipt (stock in)"
       case "adjustment":
         return "Adjustment"
       case "initial_import":
@@ -253,6 +255,8 @@ export default function InventoryHistoryPage() {
         return "bg-red-100 text-red-800"
       case "refund":
         return "bg-green-100 text-green-800"
+      case "purchase_receive":
+        return "bg-emerald-100 text-emerald-900"
       case "adjustment":
         return "bg-blue-100 text-blue-800"
       case "initial_import":
@@ -307,6 +311,7 @@ export default function InventoryHistoryPage() {
                 <option value="all">All Types</option>
                 <option value="sale">Sale</option>
                 <option value="refund">Refunds</option>
+                <option value="purchase_receive">PO receipt (stock in)</option>
                 <option value="adjustment">Adjustment</option>
                 <option value="initial_import">Import</option>
               </select>

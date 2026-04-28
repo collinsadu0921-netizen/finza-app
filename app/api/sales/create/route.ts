@@ -1224,6 +1224,7 @@ const validation = validateCartDiscount(
         .map((item: any) => item.variant_id)
         .filter((id: any) => id)
       const variantCostMap: Record<string, number> = {}
+      const storeAverageCostMap: Record<string, number> = {}
 
       if (variantIds.length > 0) {
         const { data: variantsData } = await supabase
@@ -1238,15 +1239,48 @@ const validation = validateCartDiscount(
         }
       }
 
+      // Primary retail COGS source: store-level AVCO on products_stock
+      if (finalStoreId && productIds.length > 0) {
+        const { data: storeStockCosts } = await supabase
+          .from("products_stock")
+          .select("product_id, variant_id, average_cost")
+          .eq("store_id", finalStoreId)
+          .in("product_id", productIds)
+
+        if (storeStockCosts) {
+          storeStockCosts.forEach((row) => {
+            const key = `${row.product_id}::${row.variant_id ?? "null"}`
+            storeAverageCostMap[key] = row.average_cost ? Number(row.average_cost) : 0
+          })
+        }
+      }
+
       const itemsToInsert = sale_items.map((item: any) => {
         const productId = item.product_id || null
         const variantId = item.variant_id || null
         const quantity = Number(item.quantity || item.qty || 1)
-        
-        // Use variant cost_price if variant exists, otherwise use product cost_price
-        const costPrice = variantId 
-          ? (variantCostMap[variantId] || 0)
-          : (productId ? (productCostMap[productId] || 0) : 0)
+
+        // COGS cost source priority:
+        // 1) store-level products_stock.average_cost
+        // 2) variant cost_price fallback
+        // 3) product cost_price fallback
+        // 4) zero as last resort (warn)
+        const stockKey = `${productId}::${variantId ?? "null"}`
+        const storeAverageCost = productId ? (storeAverageCostMap[stockKey] || 0) : 0
+        const fallbackVariantCost = variantId ? (variantCostMap[variantId] || 0) : 0
+        const fallbackProductCost = productId ? (productCostMap[productId] || 0) : 0
+        const costPrice = storeAverageCost > 0
+          ? storeAverageCost
+          : (fallbackVariantCost > 0 ? fallbackVariantCost : fallbackProductCost)
+
+        if (costPrice <= 0 && productId) {
+          console.warn("[retail-cogs-cost-fallback-zero] using 0 cost for sale item", {
+            sale_id: sale.id,
+            store_id: finalStoreId,
+            product_id: productId,
+            variant_id: variantId,
+          })
+        }
         const cogs = costPrice * quantity
 
         // Find corresponding discount calculation result for this line item

@@ -187,7 +187,7 @@ export async function POST(
         return NextResponse.json(
           {
             success: false,
-            error: "Resend is for issued invoices only. Use Send while the invoice is still a draft.",
+            error: "Sending again is only for issued invoices. Use Send while the invoice is still a draft.",
             message: "Invalid state for resend",
           },
           { status: 400 }
@@ -197,7 +197,7 @@ export async function POST(
         return NextResponse.json(
           {
             success: false,
-            error: "This invoice has no invoice number yet. Issue it first, then use Resend.",
+            error: "This invoice has no invoice number yet. Issue it first, then send again.",
             message: "Invoice not issued",
           },
           { status: 400 }

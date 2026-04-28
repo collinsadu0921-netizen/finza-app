@@ -11,6 +11,7 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { KpiStatCard } from "@/components/ui/KpiStatCard"
 
 type Invoice = {
   id: string
@@ -368,41 +369,38 @@ function InvoicesPageContent() {
         )}
 
         {/* Stat cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Revenue</span>
-              <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 15l3-3 3 2 4-5" /></svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-slate-900 tabular-nums">
-              {formatWithCode(totalRevenue)}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">Payments received</p>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Outstanding</span>
-              <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{format(outstandingAmount)}</p>
-            <p className="text-xs text-slate-400 mt-1">Awaiting payment</p>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Invoices</span>
-              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{totalInvoices}</p>
-            <p className="text-xs text-slate-400 mt-1">
-              {invoices.filter(i => i.status === "paid").length} paid · {invoices.filter(i => invoiceIsPastDueOpen(i)).length} overdue
-            </p>
-          </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <KpiStatCard
+            layout="header"
+            label="Total Revenue"
+            icon={<svg className="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 15l3-3 3 2 4-5" /></svg>}
+            iconWrapperClassName="bg-emerald-50"
+            value={formatWithCode(totalRevenue)}
+            valueVariant="currency"
+            hint="Payments received"
+          />
+          <KpiStatCard
+            layout="header"
+            label="Outstanding"
+            icon={<svg className="h-4 w-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+            iconWrapperClassName="bg-amber-50"
+            value={format(outstandingAmount)}
+            valueVariant="currency"
+            hint="Awaiting payment"
+          />
+          <KpiStatCard
+            layout="header"
+            label="Invoices"
+            icon={<svg className="h-4 w-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+            iconWrapperClassName="bg-blue-50"
+            value={totalInvoices}
+            hint={
+              <>
+                {invoices.filter((i) => i.status === "paid").length} paid ·{" "}
+                {invoices.filter((i) => invoiceIsPastDueOpen(i)).length} overdue
+              </>
+            }
+          />
         </div>
 
         {/* Filters */}

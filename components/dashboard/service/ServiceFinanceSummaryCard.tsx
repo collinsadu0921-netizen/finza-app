@@ -30,13 +30,13 @@ export default function ServiceFinanceSummaryCard({
   return (
     <Link
       href={reportHref}
-      className="block rounded-xl border border-gray-200/80 bg-white p-5 shadow-sm transition-all duration-200 hover:shadow-md hover:border-gray-300/80 dark:border-gray-700/80 dark:bg-gray-800/80 dark:hover:border-gray-600/80 dark:hover:shadow-lg"
+      className="block min-w-0 rounded-xl border border-gray-200/80 bg-white p-5 shadow-sm transition-all duration-200 hover:shadow-md hover:border-gray-300/80 dark:border-gray-700/80 dark:bg-gray-800/80 dark:hover:border-gray-600/80 dark:hover:shadow-lg"
     >
       <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {title}
       </p>
       <p
-        className={`mt-2 text-2xl font-semibold tabular-nums ${
+        className={`mt-2 min-w-0 text-base font-semibold tabular-nums leading-tight [overflow-wrap:anywhere] sm:text-lg md:text-xl lg:text-2xl ${
           variant === "positive"
             ? "text-emerald-600 dark:text-emerald-400"
             : variant === "negative"
