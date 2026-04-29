@@ -37,6 +37,7 @@ const SETTING_GROUPS: SettingsGroup[] = [
     links: [
       { label: "Invoices & quotes (appearance)", path: "/service/settings/invoice-settings" },
       { label: "Payment integrations", path: "/service/settings/payments" },
+      { label: "Hubtel integration", path: "/service/settings/integrations/hubtel" },
       {
         label: "WhatsApp message templates",
         path: "/service/settings/communication/whatsapp",

@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { TIER_PRICING, type BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+import { activateServiceSubscription } from "@/lib/serviceWorkspace/activateServiceSubscription"
 
 export const FINZA_PAYSTACK_METADATA_PURPOSE_KEY = "finza_purpose"
 export const FINZA_PAYSTACK_SUBSCRIPTION_PURPOSE = "service_subscription"
@@ -133,36 +134,16 @@ export async function applyPaystackSubscriptionWebhook(
   }
 
   if (status === "success") {
-    const now = new Date()
-    // Calculate current_period_ends_at based on billing cycle
-    const periodMs =
-      cycle === "monthly"   ? 30  * 24 * 60 * 60 * 1000 :
-      cycle === "quarterly" ? 90  * 24 * 60 * 60 * 1000 :
-                              365 * 24 * 60 * 60 * 1000 // annual
-
-    const { error: upErr } = await supabase
-      .from("businesses")
-      .update({
-        // Subscription state
-        service_subscription_tier:   tier,
-        service_subscription_status: "active",
-        subscription_grace_until:    null,
-        billing_cycle:               cycle,
-        subscription_started_at:     now.toISOString(),
-        current_period_ends_at:      new Date(now.getTime() + periodMs).toISOString(),
-        // Clear trial flags — the paid subscription supersedes the trial.
-        // resolveServiceEntitlement() uses status='active' so these columns
-        // are no longer evaluated, but nulling them avoids stale data confusion.
-        trial_started_at: null,
-        trial_ends_at:    null,
-        updated_at:       now.toISOString(),
-      })
-      .eq("id", businessId)
-      .is("archived_at", null)
-
-    if (upErr) {
-      console.error("[paystack subscription] business update error:", upErr)
-      return { handled: true, message: upErr.message }
+    const nowIso = new Date().toISOString()
+    const activated = await activateServiceSubscription(supabase, {
+      businessId,
+      tier,
+      cycle,
+      paidAt: nowIso,
+    })
+    if (!activated.ok) {
+      console.error("[paystack subscription] business update error:", activated.error)
+      return { handled: true, message: activated.error }
     }
 
     await supabase.from("paystack_subscription_webhook_events").upsert(

@@ -244,6 +244,7 @@ function SubscriptionCallbackHandler() {
 }
 
 type SubscriptionGatewayOption = "paystack" | "mtn_momo_sandbox"
+type SubscriptionProviderFlagState = { mock_checkout_enabled: boolean }
 
 function SubscriptionPaystackActions({
   businessId,
@@ -547,7 +548,78 @@ function SubscriptionPaystackActions({
   )
 }
 
+function MockSubscriptionActions({
+  businessId,
+  targetTier,
+  cycle,
+  disabled,
+}: {
+  businessId: string | null
+  targetTier: ServiceSubscriptionTier
+  cycle: BillingCycle
+  disabled: boolean
+}) {
+  const toast = useToast()
+  const router = useRouter()
+  const [busy, setBusy] = useState(false)
+
+  const startMockCheckout = async () => {
+    if (!businessId || disabled) return
+    setBusy(true)
+    try {
+      const res = await fetch("/api/subscription/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          business_id: businessId,
+          target_tier: targetTier,
+          billing_cycle: cycle,
+          provider: "mock",
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Could not start mock checkout")
+      const baseUrl =
+        typeof data.checkoutUrl === "string" && data.checkoutUrl
+          ? data.checkoutUrl
+          : "/service/settings/subscription/mock-checkout"
+      const separator = baseUrl.includes("?") ? "&" : "?"
+      const targetUrl =
+        `${baseUrl}${separator}` +
+        `checkout=${encodeURIComponent(String(data.checkoutSessionId || ""))}` +
+        `&business_id=${encodeURIComponent(businessId)}` +
+        `&tier=${encodeURIComponent(targetTier)}` +
+        `&cycle=${encodeURIComponent(cycle)}`
+      router.push(targetUrl)
+    } catch (e: unknown) {
+      toast.showToast(e instanceof Error ? e.message : "Mock checkout failed", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <p className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600">
+        Mock checkout mode is enabled. This simulates payment outcomes and updates subscription state without
+        calling real payment providers.
+      </p>
+      <button
+        type="button"
+        disabled={disabled || busy || !businessId}
+        onClick={() => void startMockCheckout()}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy ? "Starting..." : "Open mock checkout"}
+      </button>
+    </div>
+  )
+}
+
 function SubscriptionPageInner() {
+  const toast = useToast()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const {
     tier,
     status,
@@ -566,6 +638,9 @@ function SubscriptionPageInner() {
     subscriptionLocked,
   } = useServiceSubscription()
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
+  const [providerFlags, setProviderFlags] = useState<SubscriptionProviderFlagState>({
+    mock_checkout_enabled: false,
+  })
 
   // Pre-select the user's current billing cycle once context loads
   useEffect(() => {
@@ -573,6 +648,36 @@ function SubscriptionPageInner() {
       setCycle(billingCycle as BillingCycle)
     }
   }, [billingCycle])
+
+  useEffect(() => {
+    let alive = true
+    fetch("/api/subscription/feature-flags", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: SubscriptionProviderFlagState) => {
+        if (!alive) return
+        setProviderFlags({
+          mock_checkout_enabled: !!data?.mock_checkout_enabled,
+        })
+      })
+      .catch(() => {
+        if (!alive) return
+        setProviderFlags({ mock_checkout_enabled: false })
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    const result = searchParams.get("mock_result")
+    if (!result) return
+    if (result === "paid" || result === "success") {
+      toast.showToast("Mock payment marked successful. Subscription updated.", "success")
+    } else if (result === "failed" || result === "failure" || result === "cancelled" || result === "expired") {
+      toast.showToast(`Mock checkout result: ${result}.`, "info")
+    }
+    router.replace("/service/settings/subscription")
+  }, [searchParams, toast, router])
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -871,12 +976,21 @@ function SubscriptionPageInner() {
 
                 {/* Subscribe CTA — shown during trial, trial-expired, or payment-locked */}
                 {isSubscribeTarget && (
-                  <SubscriptionPaystackActions
-                    businessId={businessId}
-                    targetTier={t}
-                    cycle={cycle}
-                    disabled={false}
-                  />
+                  providerFlags.mock_checkout_enabled ? (
+                    <MockSubscriptionActions
+                      businessId={businessId}
+                      targetTier={t}
+                      cycle={cycle}
+                      disabled={false}
+                    />
+                  ) : (
+                    <SubscriptionPaystackActions
+                      businessId={businessId}
+                      targetTier={t}
+                      cycle={cycle}
+                      disabled={false}
+                    />
+                  )
                 )}
 
                 {/* Upgrade button (active paid subscriber going higher) */}

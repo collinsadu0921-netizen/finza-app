@@ -1,0 +1,2366 @@
+{
+  "info": {
+    "_postman_id": "43f03798-3e46-4d9c-9b73-d9d11502c399",
+    "name": "GRA E-VAT API - VER 8.2",
+    "description": "This document (GRA E-VAT API Documentation or E-VAT API Documentation or VCIS/VSDC API Documentation) describes the API specification for the integration of Taxpayer systems to the Commissioner-General's Electronic Invoicing Systems (E-VAT).\n\n**OVERVIEW**  \nThe following specific requirements are for the systems to communicate with E-VAT VCIS, the Certified Invoicing System to be used together with a Virtual Sales Data Controller (VSDC).\n\n[Data Flow Diagram](https://gra.evatgra.com/DataFlow.php)\n\n**AUTHENTICATION**\n\nThis API requires an Authentication in the Request Header\n\nExample: \"SECURITY_KEY\": \"1234567890987UIEGRTEIIIWOWPPWOOW\"\n\n**DATA FORMAT**\n\nE-VAT API Receives data in;\n\n1. JSON\n    \n2. XML\n    \n\n**LEVY MAPPING**\n\n\\* **LEVY_A : NHIL 2.5 %**  \n\\* **LEVY_B : GETFL 2.5 %**  \n\\* **LEVY_D : CST 5%**  \n\\* **LEVY_E : TOURISM 1%**\n\n**SPECIAL TAX-EXEMPT TAXPAYER**  \nTo serve special tax-exempt taxpayers (taxpayers who are exempted from paying the standard taxes/levies) such as some Mining, Automobile Assembly Plants, etc. Please read more here: [Purchase Order (PO) for Taxpayers Who Have Special Exemptions.](https://evatgra.zendesk.com/hc/en-us/articles/18854227372957-Purchase-Order-PO-for-Taxpayers-Who-Have-Special-Exemptions)\n\n**Covid Levy Amendments, Effective “1st January 2026” & The Impending VAT Amendments: E-VAT Implementation Guidelines**\n\n[https://docs.google.com/document/d/1fXSlFxoBtmNXDWMoe7-coJ8wBphnwN8s/edit?usp=sharing&amp;ouid=114670877025048538475&amp;rtpof=true&amp;sd=true](https://docs.google.com/document/d/1fXSlFxoBtmNXDWMoe7-coJ8wBphnwN8s/edit?usp=sharing&ouid=114670877025048538475&rtpof=true&sd=true)\n\n**EXCEL TEMPLATE OF TAX CALCULATION**  \n[https://docs.google.com/spreadsheets/d/1DAcDUBVdoHD7A_yOqMcrzuX4rNc4VGLC/edit?usp=drive_link&amp;ouid=114670877025048538475&amp;rtpof=true&amp;sd=true](https://docs.google.com/spreadsheets/d/1DAcDUBVdoHD7A_yOqMcrzuX4rNc4VGLC/edit?usp=drive_link&ouid=114670877025048538475&rtpof=true&sd=true)\n\n**SAMPLE INVOICE**\n\nSample Invoice - ERP:\n\n<img src=\"https://content.pstmn.io/ba76d6a3-c0c9-4181-b212-ed01d6d05ad5/aW1hZ2UgKDEpLnBuZw==\">\n\nSample Invoice - POS:\n\n<img src=\"https://content.pstmn.io/ca267bc1-c2c7-4c79-815d-d5296436cd92/aW1hZ2UgKDIpLnBuZw==\">\n\n**TAG DESCRIPTIONS**\n\n| TAG NAME | TAG VALUE EXAMPLE | TAG DESCRIPTION | LENGTH AND TYPE | MANDATORY |\n| --- | --- | --- | --- | --- |\n| \"currency\" | \"GHS\" | CURRENCY: GHS, USD, EUR or GBP | VARCHAR(20) | YES |\n| \"exchangeRate\" | 1 | CURRENT EXCHANGE RATE: DEFAULT 1 FOR GHS | 10 | YES |\n| \"businessPartnerName\" | \"James Kofi\" | CLIENT NAME | VARCHAR(100) | YES |\n| \"invoiceNumber\" | \"2306219003\" | SOFTWARE UNIQUE TRANSACTION IDENTIFIER | VARCHAR(100) | YES |\n| \"totalLevy\" | 30 | TOTAL LEVY AMOUNT | NUMERIC | YES |\n| \"userName\" | \"happy\" | USER NAME | VARCHAR(100) | YES |\n| \"flag\" | \"INVOICE\" | TRANSACTION TYPE:  <br>\"INVOICE\",  <br>  <br>\"PURCHASE\"  <br>  <br>\"REFUND\" For full cancellation of the original invoice  <br>  <br>\"PARTIAL_REFUND \" For partial cancellation of the original invoice  <br>  <br>\"PURCHASE_RETURN\"  <br>  <br>\"REFUND_CANCELLATION\" | VARCHAR(20) | YES |\n| \"calculationType\" | \"INCLUSIVE\" | \"INCLUSIVE\" or \"EXCLUSIVE\" | VARCHAR(20) | YES |\n| \"totalVat\" | 13.04 | TOTAL VAT OF THE INVOICE | NUMERIC | YES |\n| \"groupReferenceId\" | \"\" | REFERENCE ID TO A GROUP OF INVOICES | VARCHAR(50) | NO |\n| \"transactionDate\" | \"2023-06-14\" | INVOICE DATE (POSTED DATE IS THE ONE USED) | VARCHAR(50) | YES |\n| \"businessPartnerTin\" | \"VC00000009055\" | CLIENT TIN NUMBER | VARCHAR(15) | YES |\n| \"totalAmount\" | 100.0 | TOTAL AMOUNT ON THE INVOICE | NUMERIC | YES |\n| \"totalExciseAmount\" | \"600\" | TOTAL EXCISE AMOUNT ON THE INVOICE | NUMERIC | YES if excise duty is applicable. |\n| \"voucherAmount\" | 0.0 | VOUCHER AMOUNT | NUMERIC | NO |\n| \"saleType\" | \"NORMAL\" | \"NORMAL\" - for General case  <br>  <br>\"EXPORT\" - for Export | VARCHAR(20) | YES |\n| \"discountType\" | \"GENERAL\" | \"SELECTIVE\" if discount on whole Invoice total amount  <br>  <br>\"GENERAL\" if  <br>discount on each line of item | VARCHAR(300) | NO |\n| \"discountAmount\" | 0.0 | TOTAL DISCOUNTED AMOUNT ON INVOICE | NUMERIC | NO |\n| \"reference\" | \"39083a038d2940f78eca7931106d3c40\" | REFUND_ID TO USE FOR PARTIAL_CANCELING | VARCHAR(50) | YES |\n| \"itemCode\" | \"TXC005918138\" | ITEM CODE UNIQUE | VARCHAR(50) | YES |\n| \"expireDate\" | \"\" | EXPIRE DATE OF ITEM IF EXIST | VARCHAR(45) | NO |\n| \"description\" | \"Bowl\" | ITEM NAME | VARCHAR(100) | YES |\n| \"quantity\" | 10.0 | ITEM QUANTITY | NUMERIC | YES |\n| \"levyAmountA\" | 2.05 | LEVY_AMOUNT ON NHIL | NUMERIC | YES |\n| \"levyAmountB\" | 2.05 | LEVY_AMOUNT ON GETFUND | NUMERIC | YES |\n| \"levyAmountC\" | 0.82 | LEVY_AMOUNT ON COVID | NUMERIC | YES |\n| \"levyAmountD\" | 0.0 | LEVY_AMOUNT ON CST | NUMERIC | YES |\n| \"levyAmountE\" | 0.0 | LEVY_AMOUNT ON TOURISM | NUMERIC | YES |\n| \"discountAmount\" | 0.0 | DISCOUNT ON ITEM | NUMERIC | NO |\n| \"exciseAmount\" | 10 | EXCISE DUTY ON ITEM |  |  |\n| \"batchCode\" | \"5MAKD1\" | BATCH NUMBER OPTIONAL | VARCHAR(100) | NO |\n| \"itemCategory\" | \"\" | \"\" - For STANDARD ITEM  <br>  <br>\"CST\" - For CST ITEM  <br>  <br>\"TRSM\" - For TOURISM ITEM  <br>  <br>\"EXM\" - For ZERO RATED  <br>  <br>\"RNT\" - RENT ITEM  <br>  <br>\"EXC_PLASTIC\" - For PLASTIC & PLASTIC PRODUCT with Excise Duty | VARCHAR(50) | NO |\n| \"unitPrice\" | 10.0 | UNIT SELLING PRICE OF ITEM, EITHER INCLUSIVE OR EXCLUSIVE OF VAT | NUMERIC | YES |\n| \"purchaseOrderReference\" | \"PO-230822-00001\" | PURCHASE ORDER NUMBER | VARCHAR(50) | NO |\n| \"taxType\" | \"FLAT\" | \"FLAT\" or \"STANDARD\" | VARCHAR(20) | NO |\n\n**INVOICE RESPONSE**\n\n| **FIELD** | **LABEL** | **DESCRIPTION** |\n| --- | --- | --- |\n| \"distributor_tin\" | TIN | TIN of Taxpayer issuing the invoice |\n| \"num\" | Invoice Number | ERP/PoS Invoice Number as sent to the VSDC |\n| \"ysdcid\" | **SDC ID** | The unique identifier of the SDC (Sales Data Controller) issueing the E-VAT Signature |\n| \"ysdcrecnum\" | **Receipt Number** | The Receipt Number issued by the SDC |\n| \"ysdcintdata\" | **Internal Data** | References the Internal Data of the Invoice |\n| \"ysdcregsig\" | **Signature** | Invoice Signature |\n| \"ysdcmrc\" | MRC | Machine Registration Code |\n| \"ysdcmrctime\" | MRC Date & Time | Date/Time invoice is received at the backend |\n| \"ysdctime\" | **Date & Time** | Date/Time invoice is stamped |\n| \"flag\" |  | Type of Invoice |\n| \"ysdcitems\" | **Line-Item Count** | Number of Line-Items on the invoice |\n| \"qr_code\": |  | URL link to be converted to QR CODE |\n| \"status\": |  | Status of invoice request |\n\n**CURRENCIES SUPPORTED**\n\n[https://docs.google.com/spreadsheets/d/1geCW7gk-LvHiAXQsigNDObDsFYCXS-pSGGBKQx78JkI/edit?usp=sharing](https://docs.google.com/spreadsheets/d/1geCW7gk-LvHiAXQsigNDObDsFYCXS-pSGGBKQx78JkI/edit?usp=sharing)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "54416810",
+    "_collection_link": "https://go.postman.co/collection/54416810-43f03798-3e46-4d9c-9b73-d9d11502c399?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "INVOICE",
+      "item": [
+        {
+          "name": "INVOICE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"INVOICE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"taxType\": \"FLAT\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"exciseAmount\": 0.00,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            },
+            "description": "Invoice Invoce (Normal Sale) refers to a receipt that shall be produced and offered to the client. It is any receipt produced while the Electronic Billing Machine is in its normal registration mode, used to register sales of goods and/or services, including corrections and discounts."
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230918-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"INVOICE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-09-13T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "https://vsdcstaging.vat-gh.com/vsdc/api/v1/taxpayer/CXX000000YY-001/invoice",
+                  "protocol": "https",
+                  "host": [
+                    "vsdcstaging",
+                    "vat-gh",
+                    "com"
+                  ],
+                  "path": [
+                    "vsdc",
+                    "api",
+                    "v1",
+                    "taxpayer",
+                    "CXX000000YY-001",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:09:36 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "622"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"C0034186913\",\n        \"mesaage\": {\n            \"num\": \"NS230724-9000001\",\n            \"ysdcid\": \"EV-260623-001\",\n            \"ysdcrecnum\": \"83NS\",\n            \"ysdcintdata\": \"NUGABIDWABF5MRRN2EXDUSJ7M4\",\n            \"ysdcregsig\": \"E4OFBGZX2MT6YBTQ\",\n            \"ysdcmrc\": \"2b60f37f175c7c\",\n            \"ysdcmrctim\": \"2023/07/24 09:09:36\",\n            \"ysdctime\": \"2023/07/24 09:09:36\",\n            \"flag\": \"INVOICE\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"https://verification.vat-gh.com?data=udwCsHNJ1LsF6ljeIIdEdQ1V4srsHpIKgqfS/yD/2/dnhRdAUrVqY5Vjl/0aILYHU9C7vn3HcQqeNiixqXiB1BfxjtBuhZf8UYZwsSWivERBBOSU16BozjS4eTQ/hyXyG/hVInFFTAOODGWa0/6fYS3X+6x/nfShwKe2lRMPV5qgCmRMGx0gsR8w0esCwUO5Wwdjybuu504mY/Av9DLczg==&v=1.0\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "name": "Content-Type",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<invoice>\r\n\t<currency>GHS</currency>\r\n\t<exchangeRate>1</exchangeRate>\r\n\t<invoiceNumber>NS230818-9X00001</invoiceNumber>\r\n\t<totalLevy>63.99</totalLevy>\r\n\t<userName>Kofi Ghana</userName>\r\n\t<flag>INVOICE</flag>\r\n\t<calculationType>INCLUSIVE</calculationType>\r\n\t<totalVat>169.57</totalVat>\r\n\t<transactionDate>2023-07-24T08:43:28Z</transactionDate>\r\n\t<totalAmount>1300</totalAmount>\r\n\t<voucherAmount>0</voucherAmount>\r\n\t<businessPartnerName>fred(cash customer)</businessPartnerName>\r\n\t<businessPartnerTin>C0000000000</businessPartnerTin>\r\n\t<saleType>NORMAL</saleType>\r\n\t<discountType>GENERAL</discountType>\r\n\t<discountAmount>0</discountAmount>\r\n\t<reference></reference>\r\n\t<groupReferenceId></groupReferenceId>\r\n\t<purchaseOrderReference></purchaseOrderReference>\r\n\t<items>\r\n\t\t<itemCode>TXC00389165855</itemCode>\r\n\t\t<itemCategory></itemCategory>\r\n\t\t<expireDate>2025-01-01</expireDate>\r\n\t\t<description>1SFA611130R1101</description>\r\n\t\t<quantity>10</quantity>\r\n\t\t<levyAmountA>26.66</levyAmountA>\r\n\t\t<levyAmountB>26.66</levyAmountB>\r\n\t\t<levyAmountC>10.66</levyAmountC>\r\n\t\t<levyAmountD>0</levyAmountD>\r\n\t\t<levyAmountE>0</levyAmountE>\r\n\t\t<discountAmount>0</discountAmount>\r\n\t\t<batchCode></batchCode>\r\n\t\t<unitPrice>130</unitPrice>\r\n\t</items>\r\n</invoice>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:22:27 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "760"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <response>\n        <distributor_tin>C0034186913</distributor_tin>\n        <mesaage>\n            <num>NS230724-6000001</num>\n            <ysdcid>EV-260623-001</ysdcid>\n            <ysdcrecnum>86NS</ysdcrecnum>\n            <ysdcintdata>6SRDDNTTNL4VEUJ3MBRGQXES6I</ysdcintdata>\n            <ysdcregsig>X3ZACZ2ZB436USMH</ysdcregsig>\n            <ysdcmrc>2b60f37f175c7c</ysdcmrc>\n            <ysdcmrctim>2023/07/24 09:22:26</ysdcmrctim>\n            <ysdctime>2023/07/24 09:22:26</ysdctime>\n            <flag>INVOICE</flag>\n            <ysdcitems>1</ysdcitems>\n        </mesaage>\n        <qr_code>https://verification.vat-gh.com?data=udwCsHNJ1LsF6ljeIIdEdQ1V4srsHpIKgqfS/yD/2/dnhRdAUrVqY5Vjl/0aILYHhInrdV8UgPEBfsejr+beh/l9YlE/1v4d1J4r8k73NpamuM3rTuqyHH78WFgMR5Qe1yThqqcFZn3+7lsEdk2Xt82hGwXU+PyjxVS2RwtlZAmWK4q/aK0E95RPHULfaAzDdXMs1UM0FRxqG37kzTwLAA==&amp;v=1.0</qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            }
+          ]
+        },
+        {
+          "name": "FLATRATE INVOICE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{FlatRateTaxpayer_Sec_Key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS231006-009-0CT00001\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalLevy\": 0.0,\r\n    \"userName\": \"Michael  Ameyaw\",\r\n    \"flag\": \"INVOICE\",\r\n    \"totalVat\": 34.951456310679611650485436893,\r\n    \"transactionDate\": \"2023-10-06T13:14:16.237Z\",\r\n    \"totalAmount\": 1200.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"John Boye(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00395276472\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": null,\r\n            \"description\": \"Mouse pad\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 0.0,\r\n            \"levyAmountB\": 0.0,\r\n            \"levyAmountC\": 0.0,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 120.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{FlatTaxpayerReference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{FlatTaxpayerReference}}",
+                "invoice"
+              ]
+            },
+            "description": "Invoice Invoce (Normal Sale) refers to a receipt that shall be produced and offered to the client. It is any receipt produced while the Electronic Billing Machine is in its normal registration mode, used to register sales of goods and/or services, including corrections and discounts."
+          },
+          "response": [
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "name": "Content-Type",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<invoice>\r\n\t<currency>GHS</currency>\r\n\t<exchangeRate>1</exchangeRate>\r\n\t<invoiceNumber>NS230818-9X00001</invoiceNumber>\r\n\t<totalLevy>63.99</totalLevy>\r\n\t<userName>Kofi Ghana</userName>\r\n\t<flag>INVOICE</flag>\r\n\t<calculationType>INCLUSIVE</calculationType>\r\n\t<totalVat>169.57</totalVat>\r\n\t<transactionDate>2023-07-24T08:43:28Z</transactionDate>\r\n\t<totalAmount>1300</totalAmount>\r\n\t<voucherAmount>0</voucherAmount>\r\n\t<businessPartnerName>fred(cash customer)</businessPartnerName>\r\n\t<businessPartnerTin>C0000000000</businessPartnerTin>\r\n\t<saleType>NORMAL</saleType>\r\n\t<discountType>GENERAL</discountType>\r\n\t<discountAmount>0</discountAmount>\r\n\t<reference></reference>\r\n\t<groupReferenceId></groupReferenceId>\r\n\t<purchaseOrderReference></purchaseOrderReference>\r\n\t<items>\r\n\t\t<itemCode>TXC00389165855</itemCode>\r\n\t\t<itemCategory></itemCategory>\r\n\t\t<expireDate>2025-01-01</expireDate>\r\n\t\t<description>1SFA611130R1101</description>\r\n\t\t<quantity>10</quantity>\r\n\t\t<levyAmountA>26.66</levyAmountA>\r\n\t\t<levyAmountB>26.66</levyAmountB>\r\n\t\t<levyAmountC>10.66</levyAmountC>\r\n\t\t<levyAmountD>0</levyAmountD>\r\n\t\t<levyAmountE>0</levyAmountE>\r\n\t\t<discountAmount>0</discountAmount>\r\n\t\t<batchCode></batchCode>\r\n\t\t<unitPrice>130</unitPrice>\r\n\t</items>\r\n</invoice>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:22:27 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "760"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <response>\n        <distributor_tin>C0034186913</distributor_tin>\n        <mesaage>\n            <num>NS230724-6000001</num>\n            <ysdcid>EV-260623-001</ysdcid>\n            <ysdcrecnum>86NS</ysdcrecnum>\n            <ysdcintdata>6SRDDNTTNL4VEUJ3MBRGQXES6I</ysdcintdata>\n            <ysdcregsig>X3ZACZ2ZB436USMH</ysdcregsig>\n            <ysdcmrc>2b60f37f175c7c</ysdcmrc>\n            <ysdcmrctim>2023/07/24 09:22:26</ysdcmrctim>\n            <ysdctime>2023/07/24 09:22:26</ysdctime>\n            <flag>INVOICE</flag>\n            <ysdcitems>1</ysdcitems>\n        </mesaage>\n        <qr_code>https://verification.vat-gh.com?data=udwCsHNJ1LsF6ljeIIdEdQ1V4srsHpIKgqfS/yD/2/dnhRdAUrVqY5Vjl/0aILYHhInrdV8UgPEBfsejr+beh/l9YlE/1v4d1J4r8k73NpamuM3rTuqyHH78WFgMR5Qe1yThqqcFZn3+7lsEdk2Xt82hGwXU+PyjxVS2RwtlZAmWK4q/aK0E95RPHULfaAzDdXMs1UM0FRxqG37kzTwLAA==&amp;v=1.0</qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            },
+            {
+              "name": "JSON_FLATRATE_INVOICE",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{FlatRateTaxpayer_Sec_Key}}",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS231006-009-0CT00001\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalLevy\": 0.0,\r\n    \"userName\": \"Michael  Ameyaw\",\r\n    \"flag\": \"INVOICE\",\r\n    \"totalVat\": 34.951456310679611650485436893,\r\n    \"transactionDate\": \"2023-10-06T13:14:16.237Z\",\r\n    \"totalAmount\": 1200.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"John Boye(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00395276472\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": null,\r\n            \"description\": \"Mouse pad\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 0.0,\r\n            \"levyAmountB\": 0.0,\r\n            \"levyAmountC\": 0.0,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 120.0\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{FlatTaxpayerReference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{FlatTaxpayerReference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Cache-Control",
+                  "value": "no-cache, no-store, max-age=0, must-revalidate"
+                },
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Pragma",
+                  "value": "no-cache"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Expires",
+                  "value": "0"
+                },
+                {
+                  "key": "Vary",
+                  "value": "Access-Control-Request-Headers"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "X-XSS-Protection",
+                  "value": "0"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Wed, 11 Oct 2023 15:54:58 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "679"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"CXX0000XXXY\",\n        \"message\": {\n            \"num\": \"NS231006-009-0CT00001\",\n            \"ysdcid\": \"EV-260623-001\",\n            \"ysdcrecnum\": \"36NS\",\n            \"ysdcintdata\": \"DABL-37QJ-W2GN-HUT2-VD27-FH5X-YM\",\n            \"ysdcregsig\": \"OM3M-VFSA-ARH4-D6G2\",\n            \"ysdcmrc\": \"90-AC-98-R6-08-23\",\n            \"ysdcmrctim\": \"2023/10/11 15:54:57\",\n            \"ysdctime\": \"2023/10/11 15:54:57\",\n            \"flag\": \"INVOICE\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"https://verification.vat-gh.com?data=Tgwfru4p/COzuGWHqIam5Q4pILJpZgW9+hvGA9k38PEhZEbO4NoXXC0uQS5BlfavIJUXb7yj/li+s1ZHYlcUYs5QXv2Y2/nYxyCNkgou17VQeL8OXcCzvjDI9LNSi/qlfVsnSIFsf3KEjDHxWcKFEkTB7rYsGCYzmB7DV4UwulQ3f4O+9Ru9DjHBYasgs+d2CfdM9Qxty3Foc6KLSvZYb0tjhFWDLCHH7NLSDBxegEPnzZAFmFdUrS3jtSt9loCm&v=1.1\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "INVOICE REFUNDS",
+      "item": [
+        {
+          "name": "FULL REFUND",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-P9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"REFUND\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"exciseAmount\": 0.00,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "Z60gftKe9sei3xOZhvvDa0StkVILKR3j5MBM9ygi1zg=",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230724-X000002\",\r\n    \"totalLevy\": 30.00,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"REFUND\",\r\n    \"totalVat\": 79.50,\r\n    \"transactionDate\": \"2023-07-24T09:43:22\",\r\n    \"totalAmount\": 609.50,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"ohene Akwasi\",\r\n    \"businessPartnerTin\": \"GHA-009977890-0\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.00,\r\n    \"reference\": \"RF230724-X00002\",\r\n    \"groupReferenceId\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00271018229\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": null,\r\n            \"description\": \"A27040652-WHEEL CYLINDER MAJOR\",\r\n            \"quantity\": 1.00000,\r\n            \"levyAmountA\": 12.50,\r\n            \"levyAmountB\": 12.50,\r\n            \"levyAmountC\": 5.00,\r\n            \"levyAmountD\": 0.00,\r\n            \"levyAmountE\": 0.00,\r\n            \"discountAmount\": 0.00,\r\n            \"exciseAmount\": 0.00,\r\n            \"taxCode\": \"B\",\r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 609.5,\r\n            \"taxRate\": 15.00\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "https://vsdcstaging.vat-gh.com/vsdc/api/v1/taxpayer/CXX000000YY-001/invoice",
+                  "protocol": "https",
+                  "host": [
+                    "vsdcstaging",
+                    "vat-gh",
+                    "com"
+                  ],
+                  "path": [
+                    "vsdc",
+                    "api",
+                    "v1",
+                    "taxpayer",
+                    "CXX000000YY-001",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 10:11:21 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "621"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"C0034186913\",\n        \"mesaage\": {\n            \"num\": \"NS230724-X000002\",\n            \"ysdcid\": \"EV-260623-001\",\n            \"ysdcrecnum\": \"26NR\",\n            \"ysdcintdata\": \"K772XXFBF5S4JGK7CQLSX2HR2I\",\n            \"ysdcregsig\": \"BRUSFJ5KBG334EPB\",\n            \"ysdcmrc\": \"2b60f37f175c7c\",\n            \"ysdcmrctim\": \"2023/07/24 10:11:21\",\n            \"ysdctime\": \"2023/07/24 10:11:21\",\n            \"flag\": \"REFUND\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"https://verification.vat-gh.com?data=PvpASAXdmKGs0yiO2ahHTYcZth8am/xEOIknErKPzJmQI+y0lH0sGl3G6xTgdhvyATYCkWLm/CGQivsPYqj9Azj+AHO2ew9276zkP/2FpmLxI2ef/YUgshjBar716lH8Jutx3OwB5zbpAHZGkuJww13uaAC9Dlzg0/NcUrY8btNJ7+021AjNvbBi++JMcl4jegIadVUX+2DvBsXEKg0p3w==&v=1.0\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n    <currency>GHS</currency>\r\n    <exchangeRate>1.0</exchangeRate>\r\n    <invoiceNumber>NS230724-X000002</invoiceNumber>\r\n    <totalLevy>30.00</totalLevy>\r\n    <userName>Kofi Ghana</userName>\r\n    <flag>REFUND</flag>\r\n    <totalVat>79.50</totalVat>\r\n    <transactionDate>2023-07-24T09:43:22</transactionDate>\r\n    <totalAmount>609.50</totalAmount>\r\n    <totalExciseAmount>0.00</totalExciseAmount>\r\n    <voucherAmount>0.0</voucherAmount>\r\n    <businessPartnerName>ohene Akwasi</businessPartnerName>\r\n    <businessPartnerTin>GHA-009977890-0</businessPartnerTin>\r\n    <saleType>NORMAL</saleType>\r\n    <discountType>GENERAL</discountType>\r\n    <discountAmount>0.00</discountAmount>\r\n    <reference>RF230724-X00002</reference>\r\n    <groupReferenceId></groupReferenceId>\r\n    <items>\r\n        <item>\r\n            <itemCode>TXC00271018229</itemCode>\r\n            <itemCategory></itemCategory>\r\n            <expireDate></expireDate>\r\n            <description>A27040652-WHEEL CYLINDER MAJOR</description>\r\n            <quantity>1.00000</quantity>\r\n            <levyAmountA>12.50</levyAmountA>\r\n            <levyAmountB>12.50</levyAmountB>\r\n            <levyAmountC>5.00</levyAmountC>\r\n            <levyAmountD>0.00</levyAmountD>\r\n            <levyAmountE>0.00</levyAmountE>\r\n            <discountAmount>0.00</discountAmount>\r\n            <exciseAmount>0.00</exciseAmount>\r\n            <taxCode>B</taxCode>\r\n            <batchCode></batchCode>\r\n            <unitPrice>609.5</unitPrice>\r\n            <taxRate>15.00</taxRate>\r\n        </item>\r\n    </items>\r\n</root>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 10:19:42 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "759"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <response>\n        <distributor_tin>C0034186913</distributor_tin>\n        <mesaage>\n            <num>NS230724-X000003</num>\n            <ysdcid>EV-260623-001</ysdcid>\n            <ysdcrecnum>27NR</ysdcrecnum>\n            <ysdcintdata>KAMBQETX7X32BLXIZMYF2RCJCI</ysdcintdata>\n            <ysdcregsig>P7X6I36D74M7QOD3</ysdcregsig>\n            <ysdcmrc>2b60f37f175c7c</ysdcmrc>\n            <ysdcmrctim>2023/07/24 10:19:42</ysdcmrctim>\n            <ysdctime>2023/07/24 10:19:42</ysdctime>\n            <flag>REFUND</flag>\n            <ysdcitems>1</ysdcitems>\n        </mesaage>\n        <qr_code>https://verification.vat-gh.com?data=PvpASAXdmKGs0yiO2ahHTYcZth8am/xEOIknErKPzJmQI+y0lH0sGl3G6xTgdhvynOcdz0Kxy+3B2m4H+licRKSf+uzzr6lDHtsLN9CcsxhFkPxO/zZSLrMuu602I6lZpQAqbVFf4V9F7ODVSXAiS6e4zyeDcXtuTamb8N8+U/jTdGaH+4yfBRpzMp5159ONY8mnT3hFA2i5gZvgHsYWRA==&amp;v=1.0</qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            }
+          ]
+        },
+        {
+          "name": "PARTIAL REFUND",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230724-000004\",\r\n    \"totalLevy\": 155.56980,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"PARTIAL_REFUND\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 412.2599700,\r\n    \"transactionDate\": \"2023-07-24T10:23:45.657\",\r\n    \"totalAmount\": 3160.6597700,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"Kojo(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"RF230724-000003\",\r\n    \"groupReferenceId\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00974026621\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": null,\r\n            \"description\": \"N2148795F0A-MOTOR ASSY\",\r\n            \"quantity\": 1.0,\r\n            \"levyAmountA\": 64.82075,\r\n            \"levyAmountB\": 64.82075,\r\n            \"levyAmountC\": 25.9283,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.00,\r\n            \"exciseAmount\": 0.00,\r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 3160.6597700\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "Z60gftKe9sei3xOZhvvDa0StkVILKR3j5MBM9ygi1zg=",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230724-000004\",\r\n    \"totalLevy\": 155.56980,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"PARTIAL_REFUND\",\r\n    \"totalVat\": 412.2599700,\r\n    \"transactionDate\": \"2023-07-24T10:23:45.657\",\r\n    \"totalAmount\": 3160.6597700,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"Kojo(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"RF230724-000003\",\r\n    \"groupReferenceId\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00974026621\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": null,\r\n            \"description\": \"N2148795F0A-MOTOR ASSY\",\r\n            \"quantity\": 1.0,\r\n            \"levyAmountA\": 64.82075,\r\n            \"levyAmountB\": 64.82075,\r\n            \"levyAmountC\": 25.9283,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.00,\r\n            \"exciseAmount\": 0.00,\r\n            \"taxCode\": \"B\",\r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 3160.6597700,\r\n            \"taxRate\": 15.00\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "https://vsdcstaging.vat-gh.com/vsdc/api/v1/taxpayer/CXX000000YY-001/invoice",
+                  "protocol": "https",
+                  "host": [
+                    "vsdcstaging",
+                    "vat-gh",
+                    "com"
+                  ],
+                  "path": [
+                    "vsdc",
+                    "api",
+                    "v1",
+                    "taxpayer",
+                    "CXX000000YY-001",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 10:29:33 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "648"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"C0034186913\",\n        \"mesaage\": {\n            \"num\": \"NS230724-000004\",\n            \"ysdcid\": \"EV-260623-001\",\n            \"ysdcrecnum\": \"29NR\",\n            \"ysdcintdata\": \"LBZ63K4H6NWR73OW2NIOG7F46Y\",\n            \"ysdcregsig\": \"MJZF27M6ZEFLYLFH\",\n            \"ysdcmrc\": \"2b60f37f175c7c\",\n            \"ysdcmrctim\": \"2023/07/24 10:29:33\",\n            \"ysdctime\": \"2023/07/24 10:29:33\",\n            \"flag\": \"PARTIAL_REFUND\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"https://verification.vat-gh.com?data=K/1itQKOukIG/0bzvOFpxmFCFpos5Nhw7fqFmBMFpgz0kOb7VqTI0YzIr6M3oLlTJYu1oCW3W9/3SR2azM4rlH+oZEYu0X7M5X7AdCRQB0FuX/GN44/LNN+9BEvvfojCyFiY1qO+h12r9bw7OyNPeb7NqnF0JzclnxR8NW9uS/D0GowpCbNqCE6QcNkdJKy/tpVKKj992pObjmxvJiq4FaviFe4fipElJFvG4Gl2zc8=&v=1.0\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n    <currency>GHS</currency>\r\n    <exchangeRate>1.0</exchangeRate>\r\n    <invoiceNumber>NS230724-000004</invoiceNumber>\r\n    <totalLevy>155.56980</totalLevy>\r\n    <userName>Kofi Ghana</userName>\r\n    <flag>PARTIAL_REFUND</flag>\r\n    <totalVat>412.2599700</totalVat>\r\n    <transactionDate>2023-07-24T10:23:45.657</transactionDate>\r\n    <totalAmount>3160.6597700</totalAmount>\r\n    <totalExciseAmount>0.00</totalExciseAmount>\r\n    <voucherAmount>0.0</voucherAmount>\r\n    <businessPartnerName>Kojo(cash customer)</businessPartnerName>\r\n    <businessPartnerTin>C0000000000</businessPartnerTin>\r\n    <saleType>NORMAL</saleType>\r\n    <discountType>GENERAL</discountType>\r\n    <discountAmount>0.0</discountAmount>\r\n    <reference>RF230724-000003</reference>\r\n    <groupReferenceId></groupReferenceId>\r\n    <items>\r\n        <item>\r\n            <itemCode>TXC00974026621</itemCode>\r\n            <itemCategory></itemCategory>\r\n            <expireDate></expireDate>\r\n            <description>N2148795F0A-MOTOR ASSY</description>\r\n            <quantity>1.0</quantity>\r\n            <levyAmountA>64.82075</levyAmountA>\r\n            <levyAmountB>64.82075</levyAmountB>\r\n            <levyAmountC>25.9283</levyAmountC>\r\n            <levyAmountD>0.0</levyAmountD>\r\n            <levyAmountE>0.0</levyAmountE>\r\n            <discountAmount>0.00</discountAmount>\r\n            <exciseAmount>0.00</exciseAmount>\r\n            <taxCode>B</taxCode>\r\n            <batchCode></batchCode>\r\n            <unitPrice>3160.6597700</unitPrice>\r\n            <taxRate>15.00</taxRate>\r\n        </item>\r\n    </items>\r\n</root>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 10:32:43 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "786"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <response>\n        <distributor_tin>C0034186913</distributor_tin>\n        <mesaage>\n            <num>NS230724-000004</num>\n            <ysdcid>EV-260623-001</ysdcid>\n            <ysdcrecnum>30NR</ysdcrecnum>\n            <ysdcintdata>TNDUTPYM62XMSCH6DUCTR5P644</ysdcintdata>\n            <ysdcregsig>JAPUBROHHDH3524G</ysdcregsig>\n            <ysdcmrc>2b60f37f175c7c</ysdcmrc>\n            <ysdcmrctim>2023/07/24 10:32:43</ysdcmrctim>\n            <ysdctime>2023/07/24 10:32:43</ysdctime>\n            <flag>PARTIAL_REFUND</flag>\n            <ysdcitems>1</ysdcitems>\n        </mesaage>\n        <qr_code>https://verification.vat-gh.com?data=K/1itQKOukIG/0bzvOFpxmFCFpos5Nhw7fqFmBMFpgz0kOb7VqTI0YzIr6M3oLlTuP54gnkJeQSaFfBJhtcH/AcHaoVyUWHLuh/1F0SS5e1P1JC5OubWj/y5S+fMG2O3FAaA7wVj1noIAcHy7TROJV77QzkX+OwF+l6Jt41ZPDFXfc34byhYnVP/yBiG2Wr67BsNeOS1lwOP/5Sm5fuLVWqdEKOSR+GSnXPZVzI2i/A=&amp;v=1.0</qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            }
+          ]
+        }
+      ],
+      "description": "This includes Partial and Full Refunds\n\n<u><b>FULL REFUND</b></u>\n\nA Full Refund refers to a situation where a customer receives complete reimbursement of the total amount they paid for a product or service. It means that the seller or service provider returns the entire purchase price to the customer.\n\n<u><b>PARTIAL REFUND</b></u>  \nA Partial Refund refers to a situation where a customer receives a refund for only a portion of the total amount they paid for a product or service."
+    },
+    {
+      "name": "REFUND CANCELLATION",
+      "item": [
+        {
+          "name": "JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"invoiceNumber\": \"NS230724-X000002\",\r\n  \"reference\": \"RF230724-X00002\",\r\n  \"userName\": \"kofi ghana\",\r\n  \"flag\": \"REFUND_CANCELATION\",\r\n  \"transactionDate\": \"2023-08-22T11:25:19.121Z\",\r\n  \"totalAmount\": 609.50\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/cancellation",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "cancellation"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "XML",
+          "protocolProfileBehavior": {
+            "disabledSystemHeaders": {
+              "accept": true
+            }
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/xml",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<refundcancellation>\r\n\t<invoiceNumber>NS230724-X000002</invoiceNumber>\r\n\t<reference>RF230724-X00002</reference>\r\n\t<userName>kofi ghana</userName>\r\n\t<flag>REFUND_CANCELATION</flag>\r\n\t<transactionDate>2023-08-22T11:25:19.121Z</transactionDate>\r\n\t<totalAmount>609.5</totalAmount>\r\n</refundcancellation>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/cancellation",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "cancellation"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "<u><b>REFUND CANCELLATION</b></u>\n\nA Refund Cancellation typically refers to the reversal or annulment of a previously issued refund. It occurs when a seller or service provider decides to nullify or revoke a refund that was previously processed and returned to the customer."
+    },
+    {
+      "name": "PURCHASE",
+      "item": [
+        {
+          "name": "PURCHASE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"PURCHASE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"exciseAmount\": 0.00,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"PURCHASE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"exciseAmount\": 0.00,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:55:18 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "311"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"C0034186913\",\n        \"mesaage\": {\n            \"num\": \"1225299\",\n            \"ysdcid\": \"EV-260623-001\",\n            \"ysdcrecnum\": \"27\",\n            \"ysdcintdata\": \"\",\n            \"ysdcregsig\": \"\",\n            \"ysdcmrc\": \"2b60f37f175c7c\",\n            \"ysdcmrctim\": \"2023/07/24 09:55:18\",\n            \"ysdctime\": \"2023/07/24 09:55:18\",\n            \"flag\": \"PURCHASE\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n    <currency>GHS</currency>\r\n    <exchangeRate>1.0</exchangeRate>\r\n    <invoiceNumber>NS230818-9X00001</invoiceNumber>\r\n    <totalLevy>63.99</totalLevy>\r\n    <userName>Kofi Ghana</userName>\r\n    <flag>PURCHASE</flag>\r\n    <calculationType>INCLUSIVE</calculationType>\r\n    <totalVat>169.57</totalVat>\r\n    <transactionDate>2023-07-24T08:43:28Z</transactionDate>\r\n    <totalAmount>1300.0</totalAmount>\r\n    <totalExciseAmount>0.00</totalExciseAmount>\r\n    <voucherAmount>0.0</voucherAmount>\r\n    <businessPartnerName>fred(cash customer)</businessPartnerName>\r\n    <businessPartnerTin>C0000000000</businessPartnerTin>\r\n    <saleType>NORMAL</saleType>\r\n    <discountType>GENERAL</discountType>\r\n    <discountAmount>0.0</discountAmount>\r\n    <reference></reference>\r\n    <groupReferenceId></groupReferenceId>\r\n    <purchaseOrderReference></purchaseOrderReference>\r\n    <items>\r\n        <item>\r\n            <itemCode>TXC00389165855</itemCode>\r\n            <itemCategory></itemCategory>\r\n            <expireDate>2025-01-01</expireDate>\r\n            <description>1SFA611130R1101</description>\r\n            <quantity>10.0</quantity>\r\n            <levyAmountA>26.66</levyAmountA>\r\n            <levyAmountB>26.66</levyAmountB>\r\n            <levyAmountC>10.66</levyAmountC>\r\n            <levyAmountD>0.0</levyAmountD>\r\n            <levyAmountE>0.0</levyAmountE>\r\n            <discountAmount>0.0</discountAmount>\r\n            <exciseAmount>0.00</exciseAmount>\r\n            <batchCode></batchCode>\r\n            <unitPrice>130.0</unitPrice>\r\n        </item>\r\n    </items>\r\n</root>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:57:36 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "447"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <response>\n        <distributor_tin>C0034186913</distributor_tin>\n        <mesaage>\n            <num>991225299</num>\n            <ysdcid>EV-260623-001</ysdcid>\n            <ysdcrecnum>28</ysdcrecnum>\n            <ysdcintdata></ysdcintdata>\n            <ysdcregsig></ysdcregsig>\n            <ysdcmrc>2b60f37f175c7c</ysdcmrc>\n            <ysdcmrctim>2023/07/24 09:57:36</ysdcmrctim>\n            <ysdctime>2023/07/24 09:57:36</ysdctime>\n            <flag>PURCHASE</flag>\n            <ysdcitems>1</ysdcitems>\n        </mesaage>\n        <qr_code></qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            }
+          ]
+        }
+      ],
+      "description": "<u><b>PURCHASE</b></u>\n\nA Purchase refers to the act of acquiring or obtaining goods or services in exchange for payment. You are required to record all purchases that you make revenue from, (including raw  \nmaterials). For record purposes, this may also include other non-revenue purchases."
+    },
+    {
+      "name": "PURCHASE RETURN",
+      "item": [
+        {
+          "name": "PURCHASE RETURN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"PURCHASE_RETURN\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"totalExciseAmount\": 0.00,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"PR230724-X00002\",\r\n    \"groupReferenceId\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,\r\n            \"exciseAmount\": 0.00,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"PURCHASE_RETURN\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"PR230724-X00002\",\r\n    \"groupReferenceId\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:55:18 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "311"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"C0034186913\",\n        \"mesaage\": {\n            \"num\": \"1225299\",\n            \"ysdcid\": \"EV-260623-001\",\n            \"ysdcrecnum\": \"27\",\n            \"ysdcintdata\": \"\",\n            \"ysdcregsig\": \"\",\n            \"ysdcmrc\": \"2b60f37f175c7c\",\n            \"ysdcmrctim\": \"2023/07/24 09:55:18\",\n            \"ysdctime\": \"2023/07/24 09:55:18\",\n            \"flag\": \"PURCHASE\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n    <currency>GHS</currency>\r\n    <exchangeRate>1.0</exchangeRate>\r\n    <invoiceNumber>NS230818-9X00001</invoiceNumber>\r\n    <totalLevy>63.99</totalLevy>\r\n    <userName>Kofi Ghana</userName>\r\n    <flag>PURCHASE_RETURN</flag>\r\n    <calculationType>INCLUSIVE</calculationType>\r\n    <totalVat>169.57</totalVat>\r\n    <transactionDate>2023-07-24T08:43:28Z</transactionDate>\r\n    <totalAmount>1300.0</totalAmount>\r\n    <totalExciseAmount>0.00</totalExciseAmount>\r\n    <voucherAmount>0.0</voucherAmount>\r\n    <businessPartnerName>fred(cash customer)</businessPartnerName>\r\n    <businessPartnerTin>C0000000000</businessPartnerTin>\r\n    <saleType>NORMAL</saleType>\r\n    <discountType>GENERAL</discountType>\r\n    <discountAmount>0.0</discountAmount>\r\n    <reference>PR230724-X00002</reference>\r\n    <groupReferenceId></groupReferenceId>\r\n    <items>\r\n        <item>\r\n            <itemCode>TXC00389165855</itemCode>\r\n            <itemCategory></itemCategory>\r\n            <expireDate>2025-01-01</expireDate>\r\n            <description>1SFA611130R1101</description>\r\n            <quantity>10.0</quantity>\r\n            <levyAmountA>26.66</levyAmountA>\r\n            <levyAmountB>26.66</levyAmountB>\r\n            <levyAmountC>10.66</levyAmountC>\r\n            <levyAmountD>0.0</levyAmountD>\r\n            <levyAmountE>0.0</levyAmountE>\r\n            <discountAmount>0.0</discountAmount>\r\n            <exciseAmount>0.00</exciseAmount>\r\n            <batchCode></batchCode>\r\n            <unitPrice>130.0</unitPrice>\r\n        </item>\r\n    </items>\r\n</root>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 24 Jul 2023 09:57:36 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "447"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <response>\n        <distributor_tin>C0034186913</distributor_tin>\n        <mesaage>\n            <num>991225299</num>\n            <ysdcid>EV-260623-001</ysdcid>\n            <ysdcrecnum>28</ysdcrecnum>\n            <ysdcintdata></ysdcintdata>\n            <ysdcregsig></ysdcregsig>\n            <ysdcmrc>2b60f37f175c7c</ysdcmrc>\n            <ysdcmrctim>2023/07/24 09:57:36</ysdcmrctim>\n            <ysdctime>2023/07/24 09:57:36</ysdctime>\n            <flag>PURCHASE</flag>\n            <ysdcitems>1</ysdcitems>\n        </mesaage>\n        <qr_code></qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            }
+          ]
+        }
+      ],
+      "description": "<u><b>PURCHASE RETURN</b></u>\n\nA Purchase Return refers to the act of reversing or nullifying a previously made purchase. It occurs when a buyer or customer decides to cancel their order or transaction."
+    },
+    {
+      "name": "PURCHASE RETURN CANCELLATION",
+      "item": [
+        {
+          "name": "JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Security_Key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"invoiceNumber\": \"NS230818-9X060001\",\r\n  \"reference\": \"PR-0003\",\r\n  \"userName\": \"kofi ghana\",\r\n  \"flag\": \"PURCHASE_RETURN_CANCELATION\",\r\n  \"transactionDate\": \"2023-08-22T11:25:19.121Z\",\r\n  \"totalAmount\": 1300.0\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/cancellation",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "cancellation"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "XML",
+          "protocolProfileBehavior": {
+            "disabledSystemHeaders": {
+              "accept": true
+            }
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/xml",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n\t<invoiceNumber>NS230818-9X00001</invoiceNumber>\r\n\t<reference>RF230724-X00002</reference>\r\n\t<userName>kofi ghana</userName>\r\n\t<flag>PURCHASE_RETURN_CANCELATION</flag>\r\n\t<transactionDate>2023-08-22T11:25:19.121Z</transactionDate>\r\n\t<totalAmount>609.5</totalAmount>\r\n</root>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/cancellation",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "cancellation"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "<u><b>PURCHASE RETURN CANCELLATION</b></u>\n\nA Purchase Return Cancellation refers to the reversal or nullification of a previously initiated return of goods or services. It occurs when a buyer or customer decides to cancel their request to return a purchased item or cancel a return process that was already initiated."
+    },
+    {
+      "name": "CREDIT NOTE/DEBIT NOTE",
+      "item": [
+        {
+          "name": "JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"noteNumber\": \"34609444488939\",\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"noteAmount\": 1300.0,\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"CREDIT_NOTE\",\r\n    \"groupReferenceId\": \"2390957437\",\r\n    \"transactionDate\": \"2023-09-06T09:05:10.681Z\",\r\n    \"remarks\": \"CN\",\r\n    \"noteLineFlag\": \"INVOICE\",\r\n    \"noteLines\": [\r\n        {\r\n            \"invoiceNumber\": \"NS230918-9X00001\",\r\n            \"invoiceDate\": \"2023-09-06T09:05:10.681Z\",\r\n            \"invoiceAmount\": 1300.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/note",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "note"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "XML",
+          "protocolProfileBehavior": {
+            "disabledSystemHeaders": {
+              "accept": true
+            }
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/xml",
+                "type": "text"
+              },
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<Note>\r\n    <noteNumber>34609444488939</noteNumber>\r\n    <currency>GHS</currency>\r\n    <exchangeRate>1.0</exchangeRate>\r\n    <noteAmount>1300.0</noteAmount>\r\n    <calculationType>INCLUSIVE</calculationType>\r\n    <businessPartnerName>fred(cash customer)</businessPartnerName>\r\n    <businessPartnerTin>C0000000000</businessPartnerTin>\r\n    <userName>Kofi Ghana</userName>\r\n    <flag>CREDIT_NOTE</flag>\r\n    <groupReferenceId>2390957437</groupReferenceId>\r\n    <transactionDate>2023-09-06T09:05:10.681Z</transactionDate>\r\n    <remarks>CN</remarks>\r\n    <noteLineFlag>INVOICE</noteLineFlag>\r\n    <noteLines>\r\n        <noteLine>\r\n            <invoiceNumber>NS230918-9X00001</invoiceNumber>\r\n            <invoiceDate>2023-09-06T09:05:10.681Z</invoiceDate>\r\n            <invoiceAmount>1300.0</invoiceAmount>\r\n        </noteLine>\r\n    </noteLines>\r\n</Note>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/note",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "note"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "<u><b>CREDIT/DEBIT NOTE</b></u>\n\nA Credit Note, also known as a Credit Memo, is a document issued by a seller or service provider to a customer as a form of credit or refund. It is typically provided when there is a need to rectify a previous transaction, such as returning goods, resolving a billing error, or providing compensation for a service issue. Whereas Refunds (Partial & Full) can only be done on a single invoice, Credit/Debit Notes are used in situations where the said refund/credit applies to multiple invoices.\n\n<u><b>TAG DESCRIPTIONS</b></u>\n\n| **TAG NAME** | **TAG VALUE EXAMPLE** | **TAG DESCRIPTION** | **LENGTH AND TYPE** | MANDATORY |\n| --- | --- | --- | --- | --- |\n| \"noteNumber\" | \"0948468491\" | UNIQUE IDENTIFIER FOR CREDIT/DEBIT NOTE | VARCHAR(50) | YES |\n| \"currency\" | \"GHS\" | CURRENCY | VARCHAR(20) | YES |\n| \"exchangeRate\" | 1 | CURRENT EXCHANGE RATE: DEFAULT 1 FOR GHS | 10 | YES |\n| \"noteAmount\" | 200.0 | TOTAL AMOUNT ON CREDIT/DEBIT NOTE | NUMERIC | YES |\n| \"userName\" | \"happy\" | USER NAME | VARCHAR(100) | YES |\n| \"calculationType\" | \"EXCLUSIVE\" | \"EXCLUSIVE\", \"INCLUSIVE\" | VARCHAR(20) | NO  <br>When omitted or left empty, \"INCLUSIVE\" is applied by default |\n| \"flag\" | \"CREDIT_NOTE\" | TRANSACTION TYPE: \"CREDIT_NOTE\", \"DEBIT_NOTE\" | VARCHAR(20) | YES |\n| \"noteLineFlag\" | \"INVOICE\" | \"INVOICE\" or \"PURCHASE\" | VARCHAR(20) | NO  <br>When omitted or left empty, \"INVOICE\" is applied by defualt |\n| \"businessPartnerName\" | \"James Kofi\" | CLIENT NAME | VARCHAR(100) | YES |\n| \"businessPartnerTin\" | \"VC00000009055\" | CLIENT TIN NUMBER | VARCHAR(15) | YES B2B, NO B2C |\n| \"groupReferenceId\" | \"2390957437\" | REFERENCE ID TO A GROUP OF INVOICES | VARCHAR(50) | NO |\n| \"transactionDate\" | \"2023-06-14\" | DATE OF TRANSACTION | VARCHAR(50) | YES |\n| \"remarks\" | \"\" | REMARKS | VARCHAR(100) | NO |\n| \"noteLines\" |  | LIST OF INVOICES DATA | YES | YES |\n| \"invoiceNumber\" | \"2306219003\" | INVOICE NUMBER - UNIQUE TRANSACTION IDENTIFIER | VARCHAR(100) | YES |\n| \"invoiceAmount\" | 100.0 | TOTAL AMOUNT ON THE INVOICE | NUMERIC | YES |\n| \"invoiceDate\" | \"2023-06-14\" | INVOICE DATE (POSTED DATE IS THE ONE USED) | VARCHAR(50) | YES |"
+    },
+    {
+      "name": "STATEMENT OF ACCOUNT",
+      "item": [
+        {
+          "name": "JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1,\r\n    \"totalVat\": 658.9565217391304,\r\n    \"totalAmount\": 5099,\r\n    \"totalLevies\": 248.66283839212469,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"groupReferenceId\": \"GRP_REF_9154\",\r\n    \"transactionDate\": \"2024-01-06T08:49:08.879Z\",\r\n    \"calculationType\":\"INCLUSIVE\",\r\n    \"groupInvoiceLines\": [\r\n        {\r\n            \"currency\": \"GHS\",\r\n            \"exchangeRate\": 1,\r\n            \"calculationType\":\"INCLUSIVE\",\r\n            \"invoiceNumber\": \"QA_INV_7833474375\",\r\n            \"reference\":\"\",        \r\n            \"flag\": \"INVOICE\",\r\n            \"invoiceVat\": 235.82608695652173,\r\n            \"invoiceAmount\": 1836,\r\n            \"invoiceLevies\": 88.9909762100082,\r\n            \"transactionDate\": \"2024-01-06T08:49:08.879Z\"\r\n        },\r\n        {\r\n            \"currency\": \"GHS\",\r\n            \"exchangeRate\": 1,\r\n            \"calculationType\":\"INCLUSIVE\",\r\n            \"invoiceNumber\": \"QA_INV_8153543791\",\r\n            \"flag\": \"INVOICE\",\r\n            \"invoiceVat\": 175.43478260869564,\r\n            \"invoiceAmount\": 1354,\r\n            \"invoiceLevies\": 66.20180475799836,\r\n            \"transactionDate\": \"2024-01-06T08:49:08.879Z\"\r\n        },\r\n        {\r\n            \"currency\": \"GHS\",\r\n            \"exchangeRate\": 1,\r\n            \"calculationType\":\"INCLUSIVE\",\r\n            \"invoiceNumber\": \"QA_INV_5589117822\",\r\n            \"reference\":\"\",\r\n            \"flag\": \"INVOICE\",\r\n            \"invoiceVat\": 247.695652173913,\r\n            \"invoiceAmount\": 1909,\r\n            \"invoiceLevies\": 93.47005742411813,\r\n            \"transactionDate\": \"2024-01-06T08:49:08.879Z\"\r\n        }\r\n        ,\r\n        {\r\n            \"currency\": \"GHS\",\r\n            \"exchangeRate\": 1,\r\n            \"calculationType\":\"INCLUSIVE\",\r\n            \"invoiceNumber\": \"QA_INV_5589117823\",\r\n            \"reference\":\"\",\r\n            \"flag\": \"INVOICE\",\r\n            \"invoiceVat\": 247.695652173913,\r\n            \"invoiceAmount\": 1909,\r\n            \"invoiceLevies\": 93.47005742411813,\r\n            \"transactionDate\": \"2024-01-06T08:49:08.879Z\"\r\n        }\r\n        ,\r\n        {\r\n            \"currency\": \"GHS\",\r\n            \"exchangeRate\": 1,\r\n            \"calculationType\":\"INCLUSIVE\",\r\n            \"invoiceNumber\": \"QA_INV_5589117823\",\r\n            \"reference\":\"00000001\",\r\n            \"flag\": \"REFUND\",\r\n            \"invoiceVat\": 247.695652173913,\r\n            \"invoiceAmount\": 1909,\r\n            \"invoiceLevies\": 93.47005742411813,\r\n            \"transactionDate\": \"2024-01-06T08:49:08.879Z\"\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/statment_of_account",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "statment_of_account"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "XML",
+          "protocolProfileBehavior": {
+            "disabledSystemHeaders": {
+              "accept": true
+            }
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/xml",
+                "type": "text"
+              },
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n    <currency>GHS</currency>\r\n    <exchangeRate>1</exchangeRate>\r\n    <totalVat>658.9565217391304</totalVat>\r\n    <totalAmount>5099</totalAmount>\r\n    <totalLevies>248.66283839212468</totalLevies>\r\n    <userName>Kofi Ghana</userName>\r\n    <businessPartnerName>fred(cash customer)</businessPartnerName>\r\n    <businessPartnerTin>C0000000000</businessPartnerTin>\r\n    <groupReferenceId>GRP_REF_9154</groupReferenceId>\r\n    <transactionDate>2024-01-06T08:49:08.879Z</transactionDate>\r\n    <calculationType>INCLUSIVE</calculationType>\r\n    <groupInvoiceLines>\r\n        <currency>GHS</currency>\r\n        <exchangeRate>1</exchangeRate>\r\n        <calculationType>INCLUSIVE</calculationType>\r\n        <invoiceNumber>QA_INV_7833474375</invoiceNumber>\r\n        <reference></reference>\r\n        <flag>INVOICE</flag>\r\n        <invoiceVat>235.82608695652172</invoiceVat>\r\n        <invoiceAmount>1836</invoiceAmount>\r\n        <invoiceLevies>88.9909762100082</invoiceLevies>\r\n        <transactionDate>2024-01-06T08:49:08.879Z</transactionDate>\r\n    </groupInvoiceLines>\r\n    <groupInvoiceLines>\r\n        <currency>GHS</currency>\r\n        <exchangeRate>1</exchangeRate>\r\n        <calculationType>INCLUSIVE</calculationType>\r\n        <invoiceNumber>QA_INV_8153543791</invoiceNumber>\r\n        <flag>INVOICE</flag>\r\n        <invoiceVat>175.43478260869563</invoiceVat>\r\n        <invoiceAmount>1354</invoiceAmount>\r\n        <invoiceLevies>66.20180475799836</invoiceLevies>\r\n        <transactionDate>2024-01-06T08:49:08.879Z</transactionDate>\r\n    </groupInvoiceLines>\r\n    <groupInvoiceLines>\r\n        <currency>GHS</currency>\r\n        <exchangeRate>1</exchangeRate>\r\n        <calculationType>INCLUSIVE</calculationType>\r\n        <invoiceNumber>QA_INV_5589117822</invoiceNumber>\r\n        <reference></reference>\r\n        <flag>INVOICE</flag>\r\n        <invoiceVat>247.695652173913</invoiceVat>\r\n        <invoiceAmount>1909</invoiceAmount>\r\n        <invoiceLevies>93.47005742411812</invoiceLevies>\r\n        <transactionDate>2024-01-06T08:49:08.879Z</transactionDate>\r\n    </groupInvoiceLines>\r\n    <groupInvoiceLines>\r\n        <currency>GHS</currency>\r\n        <exchangeRate>1</exchangeRate>\r\n        <calculationType>INCLUSIVE</calculationType>\r\n        <invoiceNumber>QA_INV_5589117823</invoiceNumber>\r\n        <reference></reference>\r\n        <flag>INVOICE</flag>\r\n        <invoiceVat>247.695652173913</invoiceVat>\r\n        <invoiceAmount>1909</invoiceAmount>\r\n        <invoiceLevies>93.47005742411812</invoiceLevies>\r\n        <transactionDate>2024-01-06T08:49:08.879Z</transactionDate>\r\n    </groupInvoiceLines>\r\n    <groupInvoiceLines>\r\n        <currency>GHS</currency>\r\n        <exchangeRate>1</exchangeRate>\r\n        <calculationType>INCLUSIVE</calculationType>\r\n        <invoiceNumber>QA_INV_5589117823</invoiceNumber>\r\n        <reference>00000001</reference>\r\n        <flag>REFUND</flag>\r\n        <invoiceVat>247.695652173913</invoiceVat>\r\n        <invoiceAmount>1909</invoiceAmount>\r\n        <invoiceLevies>93.47005742411812</invoiceLevies>\r\n        <transactionDate>2024-01-06T08:49:08.879Z</transactionDate>\r\n    </groupInvoiceLines>\r\n</root>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/statment_of_account",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "statment_of_account"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "<u><b>STATEMENT OF ACCOUNT</b></u>\n\nA Statement of Account is a summary of financial transactions and activity between a seller or service provider and a customer over a specific period. It is used to track the folio of a particular customer. **IMPLEMENTED FOR THE HOSPITALITY INDUSTRIES,** this allows for a single invoice (i.e.: a combination of all invoices from the PMS & PoS) to be printed at the end of a stay.\n\n**TAG DESCRIPTIONS**\n\n| **TAG NAME** | **TAG VALUE EXAMPLE** | **TAG DESCRIPTION** | **LENGTH AND TYPE** | MANDATORY |\n| --- | --- | --- | --- | --- |\n| \"currency\" | \"GHS\" | CURRENCY | VARCHAR(20) | YES |\n| \"exchangeRate\" | 1 | CURRENT EXCHANGE RATE: DEFAULT 1 FOR GHS | 10 | YES |\n| \"totalVat\" | 13.04 | TOTAL VAT | NUMERIC | YES |\n| \"totalAmount\" | 100.0 | TOTAL AMOUNT | NUMERIC | YES |\n| \"totalLevies\" | 30 | TOTAL LEVY AMOUNT | NUMERIC | YES |\n| \"userName\" | \"happy\" | USER NAME | VARCHAR(100) | YES |\n| \"businessPartnerName\" | \"James Kofi\" | CLIENT NAME | VARCHAR(100) | YES |\n| \"businessPartnerTin\" | \"VC00000009055\" | CLIENT TIN NUMBER | VARCHAR(15) | YES B2B, NO B2C |\n| \"groupReferenceId\" | \"2390957437\" | REFERENCE ID TO A GROUP OF INVOICES | VARCHAR(50) | YES |\n| \"transactionDate\" | \"2023-06-14\" | DATE OF TRANSACTION | VARCHAR(50) | YES |\n| \"groupInvoiceLines\" |  | LIST OF INVOICES DATA |  |  |\n| \"transactionId\" | \"2306219003\" | INVOICE NUMBER - UNIQUE TRANSACTION IDENTIFIER | VARCHAR(100) | YES |\n| \"flag\" | \"INVOICE\" | TRANSACTION TYPE: \"INVOICE\", \"REFUND\", \"PARTIAL_REFUND\", \"CREDIT_NOTE\", \"DEBIT_NOTE\", \"REFUND_CANCELATION\" | VARCHAR(20) | YES |\n| \"invoiceVat\" | 13.04 | TOTAL VAT OF THE INVOICE | NUMERIC | YES |\n| \"invoiceAmount\" | 100.0 | TOTAL AMOUNT ON THE INVOICE | NUMERIC | YES |\n| \"invoiceLevies\" | 25 | TOTAL LEVY AMOUNT ON THE INVOICE | NUMERIC | YES |\n| \"transactionDate\" | \"2023-06-14\" | INVOICE DATE (POSTED DATE IS THE ONE USED) | VARCHAR(50) | YES |"
+    },
+    {
+      "name": "HEALTH CHECK",
+      "item": [
+        {
+          "name": "HEALTH CHECK",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/health",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "health"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "PPS9JnHHxZgNwQlAKn7PeQ/mCicjy4p0zqLyFN0g53M=",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/health",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "health"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Wed, 30 Aug 2023 12:49:08 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "15"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": \"UP\"\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/health",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "health"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/xml",
+                  "name": "Content-Type",
+                  "description": "",
+                  "type": "text"
+                }
+              ],
+              "cookie": [],
+              "body": "<ResponseDto>\n    <status>UP</status>\n</ResponseDto>"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ERRORS",
+      "item": [
+        {
+          "name": "FORBIDDEN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Security_Key",
+                "value": "8888888888888",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"INVOICE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Security_Key",
+                    "value": "8888888888888",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"INVOICE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": " ",
+              "code": 403,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json;charset=UTF-8"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Fri, 25 Aug 2023 13:20:04 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "68"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"timestamp\": \"2023-08-25 01:20:04\",\n    \"status\": 901,\n    \"error\": \"forbidden\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "INVOICE_NUMBER_EXIST ERROR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Security_Key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"INVOICE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Security_Key",
+                    "value": "PPS9JnHHxZgNwQlAKn7PeQ/mCicjy4p0zqLyFN0g53M=",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"currency\": \"GHS\",\r\n    \"exchangeRate\": 1.0,\r\n    \"invoiceNumber\": \"NS230818-9X00001\",\r\n    \"totalLevy\": 63.99,\r\n    \"userName\": \"Kofi Ghana\",\r\n    \"flag\": \"INVOICE\",\r\n    \"calculationType\": \"INCLUSIVE\",\r\n    \"totalVat\": 169.57,\r\n    \"transactionDate\": \"2023-07-24T08:43:28Z\",\r\n    \"totalAmount\": 1300.0,\r\n    \"voucherAmount\": 0.0,\r\n    \"businessPartnerName\": \"fred(cash customer)\",\r\n    \"businessPartnerTin\": \"C0000000000\",\r\n    \"saleType\": \"NORMAL\",\r\n    \"discountType\": \"GENERAL\",\r\n    \"discountAmount\": 0.0,\r\n    \"reference\": \"\",\r\n    \"groupReferenceId\": \"\",\r\n    \"purchaseOrderReference\": \"\",\r\n    \"items\": [\r\n        {\r\n            \"itemCode\": \"TXC00389165855\",\r\n            \"itemCategory\": \"\",\r\n            \"expireDate\": \"2025-01-01\",\r\n            \"description\": \"1SFA611130R1101\",\r\n            \"quantity\": 10.0,\r\n            \"levyAmountA\": 26.66,\r\n            \"levyAmountB\": 26.66,\r\n            \"levyAmountC\": 10.66,\r\n            \"levyAmountD\": 0.0,\r\n            \"levyAmountE\": 0.0,\r\n            \"discountAmount\": 0.0,           \r\n            \"batchCode\": \"\",\r\n            \"unitPrice\": 130.0\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "status": " ",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Fri, 25 Aug 2023 13:35:07 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "98"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"timestamp\": \"2023-08-25 01:35:07\",\n    \"status\": 400,\n    \"error\": \"Invoice_NS230818-9X00001_already_signed\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Documentation for Errors\n\n| **CODE** | **ERROR** | **DESCRIPTION** |\n| --- | --- | --- |\n| 403 | FORBIDDEN | When **Company Reference** in the URL does not match the Security_Key in the Header |\n| 400 | BAD REQUEST | Invoice Number Already Signed |\n|  | INVOICE_HAS_ALREADY_BEEN_SIGNED | E700 - The invoice has already been signed |\n|  | INVOICE_WAS_NOT_FOUND | E701 - The invoice was not found |\n|  | INVALID_CALCULATION_TYPE | E801 - Invalid calculation type |\n|  | INVALID_SALE_TYPE | E802 - Invalid sale type |\n|  | INVALID_DISCOUNT_TYPE | E803 - Invalid discount type |\n|  | INVALID_HOME_CURRENCY_EXCHANGE_RATE | E804 - Invalid home currency exchange rate |\n|  | INVALID_REFERENCE | E805 - Invalid reference |\n|  | REFERENCE_IS_IN_USE | E750 - Reference is in use |\n|  | INVOICE_TO_REFUND_IS_ALREADY_CREDITED_OR_DEBITED | E721 - Invoice credited or debited can not be refund |\n|  | INVOICE_HAS_AREADY_BEEN_REFUNDED | E720 - The invoice has already been refunded |\n|  | ITEM_CATEGORY_MISMATCH | E806 - Invalid item category |\n|  | BUSINESS_PARTNER_NAME_MISMATCH | E807 - Invalid business partner name |\n|  | INVALID_LIST_DUPLICATED_INVOICES | E808 - Invalid data, invoices duplication |\n|  | INVOICES_ALREADY_EXIST | E702 - Invalid data, invoices already exist |\n|  | INTERNAL_ERROR | E600 - Something went wrong |\n|  | PURCHASE_ALREADY_EXIST | E710 - Purchase already exist |\n|  | PO_NOT_FOUND | E713 - Purchase order not found |\n|  | PO_IS_IN_USE | E714 - Purchase order in use |\n|  | PURCHASE_AMOUNT_EXCEDED | E716 - Purchase amount exceeded |\n|  | PURCHASE_ALREADY_RETURN | E712 - The purchase is already returned |\n|  | INVALID_NUMBER_OF_TRANSACTION | E703 - Invalid number of items for statement of account reference |\n|  | INVALID_TRANSACTION_FLAG | E705 - Invalid transaction flag |\n|  | INVALID_TRANSACTION_CURRENCY | E706 - Invalid transaction currency |\n|  | INVALID_TOTAL_AMOUNT | E707 - Invalid total amount |\n|  | INVALID_TOTAL_VAT | E708 - Invalid total VAT |\n|  | INVALID_TOTAL_LEVIES | E709 - Invalid total levies |\n|  | NOTE_ALREADY_EXIST | E722 - Credit or debit note already exist |\n|  | DUPLICATION_OF_INVOICE_NUMBER | E723 - Duplication of invoice number |\n|  | CREDIT_NOTE_CANNOT_GREATER_THAN_INVOICES | E724 - Credit note amount cannot be greater than invoice amount |\n|  | INVALID_CURRENCY | E809 - Invalid currency |\n|  | INVALID_EXCHAGE_RATE | E810 - Invalid exchange rate |\n|  | INVALID_ITEM_CODE | E812 - Invalid item code |\n|  | INVALID_ITEM_DESCRIPTION | E813 - Invalid item description |\n|  | INVALID_ITEM_QUANTITY | E814 - Invalid item quantity |\n|  | INVALID_ITEM_UNIT_PRICE | E815 - Invalid item unit price |\n|  | INVALID_INVOICE_NUMBER_FORMAT | E870 - Invalid invoice number format |\n|  | INVALID_TOTAL_AMOUNT_FORMAT | E871 - Invalid total amount format |\n|  | INVALID_TOTAL_VAT_FORMAT | E872 - Invalid total VAT format |\n|  | INVALID_TOTAL_LEVIES_FORMAT | E873 - Invalid total levies format |\n|  | INVALID_EXCHANGE_RATE_FORMAT | E876 - Invalid exchange rate format |\n|  | INVALID_ITEM_CODE_FORMAT | E877 - Invalid item code format |\n|  | INVALID_ITEM_QUANTITY_FORMAT | E878 - Invalid quantity format |\n|  | INVALID_ITEM_UNIT_PRICE_FORMAT | E879 - Invalid unit price format |\n|  | INVALID_TOTAL_DISCOUNT | E817 - Invalid total discount |\n|  | INVALID_TOTAL_VOUCHER | E816 - Invalid total voucher |\n|  | INVALID_LEVY_A_AMOUNT | E818 - Invalid levy A amount |\n|  | INVALID_LEVY_B_AMOUNT | E819 - Invalid levy B amount |\n|  | INVALID_LEVY_C_AMOUNT | E820 - Invalid levy C amount |\n|  | INVALID_LEVY_D_AMOUNT | E821 - Invalid levy D amount |\n|  | INVALID_LEVY_E_AMOUNT | E822 - Invalid levy E amount |\n|  | ITEM_CATEGORY_NOT_FOUND | E751 - Item category not found |\n|  | INVALID_PURCHASE_ORDER_REFERENCE | E715 - Invalid purchase order reference |\n|  | PURCHASE_NOT_FOUND | E711 - Purchase was not found |\n|  | INVALID_BUSINESS_PARTNER_TIN | E823 - Invalid business partner TIN |\n|  | INVALID_CONSUMER_TIN | E831 - Invalid consumer |\n|  | MISMATCH_CURRENCY_BETWEEN_INVOICE_AND_REFUND | E824 - Mismatch currency between invoice and refund |\n|  | REFUND_AMOUNT_EXCEDED | E725 -Refund amount exceeded invoice amount |\n|  | INVOICE_TOTALLY_REFUNDED | E726 - Invoice totally refunded |\n|  | UNABLE_TO_GENERATE_INTERNAL_DATA | E601 - Unable to generate internal data |\n|  | UNABLE_TO_GENERATE_SIGNATURE | E602 - Unable to generate a signature |\n|  | INCONSISTENT_ITEM_CODE_AND_NAME | E825 - An item cannot have multiple description |\n|  | INCONSISTENT_ITEM_CODE_AND_CATEGORY | E826 - An item cannot have multiple category |\n|  | ITEM_CODE_DUPLICATED | E829 - Item code is duplicated |\n|  | ITEM_NAME_DUPLICATED | E830 - Item name is duplicated |\n|  | INCONSISTENT_ITEM_CODE_AND_UNIT_PRICE | E827 - Different unit price was attributed to the item |\n|  | ITEM_QUANTITY_EXCEDED | E828 - Item quantity exceeded |\n|  | INVOICE_ALREADY_REFUNDED | E727 - Invoice Already Refunded |\n|  | TRANSACTION_WAS_NOT_FOUND | E704 - The transaction was not found |\n|  | TRANSACTION_ALREADY_EXIST | E728 - Transaction(s) already exist |\n|  | REFUND_ALREADY_CANCELLED | E729 - Refund already cancelled |\n|  | INVALID_BUSINESS_PARTNER_NAME | E811 - Invalid business partner |\n|  | PURCHASE_RETURN_ALREADY_CANCELLED | E730 - Purchase return already canceled |\n|  | QR_CODE_DATA_ALREADY_GENERATED | E880 - QR Code data already generated |\n|  | GROUP_REFERENCE_NOT_FOUND | E881 - Group reference not found |\n|  | INVALID_AUTHORITY | E890 - Invalid authority |\n|  | INVALID_INVOICE_TRANSACTION_DATE_FORMAT | E891 - Invalid transaction date format |\n|  | INVALID_TOTAL_DISCOUNT_FORMAT | E874 - Invalid total discount format |\n|  | INVALID_TOTAL_VOUCHER_FORMAT | E875 - Invalid total voucher format |\n|  | INVALID_SUPPLIER_TIN | E892 - Invalid supplier tin |\n|  | TLS_VERSION_NOT_SUPPOTED | E603 - TLS version not supported |\n|  | TOO_MANY_REQUEST | E990 - Too many requests |\n|  | INVALID_SECURITY_KEY | E900 - Invalid Security Key |\n|  | INVALID_URL | E901 - Invalid Url |\n|  | UNABLE_TO_LOAD_APP_CONFIG | E902 - Unable to load the application configuration |\n|  | APP_CONFIG_NOT_FOUND | E903 - The application is not Configued |\n|  | INVALID_TAXPAYER_REFERENCE | E904 - Invalid taxpayer reference |\n|  | INVALID_APPLICATION_TYPE | E905 - Invalid application type |\n|  | CLIENT_MACHINE_NOT_FOUND | E906 - The client machine is not registered |\n|  | INVALID_SECURITY_KEY_OR_REFERENCE | E907 - Invalid Security Key or taxpayer reference |\n|  | APP_NOT_FOUND | E908 - Taxpayer or branch not registed |"
+    },
+    {
+      "name": "TIN VALIDATOR",
+      "item": [
+        {
+          "name": "TinDetails",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": ""
+            }
+          },
+          "response": [
+            {
+              "name": "SuccessTinDetails",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/identification/tin/C0034186913",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "identification",
+                    "tin",
+                    "C0034186913"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 16 Oct 2023 08:48:45 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "209"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": \"SUCCESS\",\n    \"data\": {\n        \"tin\": \"C0034186913\",\n        \"type\": \"C\",\n        \"name\": \"SPRING DATA WORKS. LIMITED\",\n        \"sector\": \"Other business support service activities n.e.c.\",\n        \"address\": \"ACRA,  NEAR Dadeban Rd., HOUSE NUMBER 17\"\n    }\n}"
+            },
+            {
+              "name": "TinDetails",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "Z60gftKe9sei3xOZhvvDa0StkVILKR3j5MBM9ygi1zg="
+                  }
+                ],
+                "url": {
+                  "raw": "https://vsdcstaging.vat-gh.com/vsdc/api/v1/taxpayer/CXX000000YY-001/identification/tin/C0034186913",
+                  "protocol": "https",
+                  "host": [
+                    "vsdcstaging",
+                    "vat-gh",
+                    "com"
+                  ],
+                  "path": [
+                    "vsdc",
+                    "api",
+                    "v1",
+                    "taxpayer",
+                    "CXX000000YY-001",
+                    "identification",
+                    "tin",
+                    "C0034186913"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Cache-Control",
+                  "value": "no-store"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "Content-Security-Policy",
+                  "value": "default-src 'self' data: *; style-src 'self' http://* 'unsafe-inline'; script-src 'self' http://* 'unsafe-inline' 'unsafe-eval'; img-src 'self' http://* data:;"
+                },
+                {
+                  "key": "Expect-Ct",
+                  "value": "enforce, max-age=43200"
+                },
+                {
+                  "key": "Feature-Policy",
+                  "value": "fullscreen 'none'"
+                },
+                {
+                  "key": "Permissions-Policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "Strict-Transport-Security",
+                  "value": "max-age=31536000"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Xss-Protection",
+                  "value": "1; mode=block"
+                },
+                {
+                  "key": "Referrer-Policy",
+                  "value": "strict-origin-when-cross-origin"
+                },
+                {
+                  "key": "Date",
+                  "value": "Tue, 11 Mar 2025 11:07:33 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "209"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": \"SUCCESS\",\n    \"data\": {\n        \"tin\": \"C0034186913\",\n        \"type\": \"C\",\n        \"name\": \"SPRING DATA WORKS. LIMITED\",\n        \"sector\": \"Other business support service activities n.e.c.\",\n        \"address\": \"ACRA,  NEAR Dadeban Rd., HOUSE NUMBER 17\"\n    }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GhanaCardDetails",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/identification/nationalId/GHA-000XXXXXX-2",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "identification",
+                "nationalId",
+                "GHA-000XXXXXX-2"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "SuccessTinDetails",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/identification/tin/C0034186913",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "identification",
+                    "tin",
+                    "C0034186913"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Date",
+                  "value": "Mon, 16 Oct 2023 08:48:45 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "209"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": \"SUCCESS\",\n    \"data\": {\n        \"tin\": \"C0034186913\",\n        \"type\": \"C\",\n        \"name\": \"SPRING DATA WORKS. LIMITED\",\n        \"sector\": \"Other business support service activities n.e.c.\",\n        \"address\": \"ACRA,  NEAR Dadeban Rd., HOUSE NUMBER 17\"\n    }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "INVENTORY",
+      "item": [
+        {
+          "name": "JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Security_Key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"inventories\": [\r\n        {\r\n            \"code\": \"04004X\",\r\n            \"description\": \"Yogo\",\r\n            \"quantity\": 3,\r\n            \"batchCode\": \"0001\",\r\n            \"unitPrice\": 100.0,\r\n            \"expiryDate\": \"2024-04-04\"\r\n        }\r\n    ],\r\n    \"inventoryDate\": \"2024-04-04\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/inventory",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "inventory"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Security_Key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"inventories\": [\r\n        {\r\n            \"code\": \"04004X\",\r\n            \"description\": \"Yogo\",\r\n            \"quantity\": 3,\r\n            \"batchCode\": \"0001\",\r\n            \"unitPrice\": 100.0,\r\n            \"expiryDate\": \"2024-04-04\"\r\n        }\r\n    ],\r\n    \"inventoryDate\": \"2024-04-04\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/inventory",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "inventory"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Cache-Control",
+                  "value": "no-store"
+                },
+                {
+                  "key": "Keep-Alive",
+                  "value": "timeout=20"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Vary",
+                  "value": "Access-Control-Request-Headers"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Content-Security-Policy",
+                  "value": "default-src 'self' data: *; style-src 'self' http://* 'unsafe-inline'; script-src 'self' http://* 'unsafe-inline' 'unsafe-eval'; img-src 'self' http://* data:;"
+                },
+                {
+                  "key": "Expect-CT",
+                  "value": "enforce, max-age=43200"
+                },
+                {
+                  "key": "Feature-Policy",
+                  "value": "fullscreen 'none'"
+                },
+                {
+                  "key": "Permission-Policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "Strict-Transport-Security",
+                  "value": "max-age=31536000"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Xss-Protection",
+                  "value": "1; mode=block"
+                },
+                {
+                  "key": "Date",
+                  "value": "Tue, 07 May 2024 16:39:07 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "20"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": \"SUCCESS\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "INVOICE_CALLBACK",
+      "item": [
+        {
+          "name": "INVOICE_CALLBACK",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "security_key",
+                "value": "{{security_key}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"reference\": \"\",\r\n    \"invoiceNumber\": \"NS240442-001-90003\",\r\n    \"flag\": \"INVOICE\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Host}}/{{Company_Reference}}/invoice/callback",
+              "host": [
+                "{{Host}}"
+              ],
+              "path": [
+                "{{Company_Reference}}",
+                "invoice",
+                "callback"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "JSON_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"reference\": \"\",\r\n    \"invoiceNumber\": \"NS240442-001-90003\",\r\n    \"flag\": \"INVOICE\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice/callback",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice",
+                    "callback"
+                  ]
+                }
+              },
+              "status": "OK  ",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Cache-Control",
+                  "value": "no-store"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Vary",
+                  "value": "Access-Control-Request-Headers"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ARR/3.0"
+                },
+                {
+                  "key": "X-Powered-By",
+                  "value": "ASP.NET"
+                },
+                {
+                  "key": "Content-Security-Policy",
+                  "value": "default-src 'self' data: *; style-src 'self' http://* 'unsafe-inline'; script-src 'self' http://* 'unsafe-inline' 'unsafe-eval'; img-src 'self' http://* data:;"
+                },
+                {
+                  "key": "Expect-CT",
+                  "value": "enforce, max-age=43200"
+                },
+                {
+                  "key": "Feature-Policy",
+                  "value": "fullscreen 'none'"
+                },
+                {
+                  "key": "Permission-Policy",
+                  "value": "no-referrer"
+                },
+                {
+                  "key": "Strict-Transport-Security",
+                  "value": "max-age=31536000"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Xss-Protection",
+                  "value": "1; mode=block"
+                },
+                {
+                  "key": "Date",
+                  "value": "Tue, 07 May 2024 16:41:55 GMT"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "88"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"response\": {\n        \"distributor_tin\": \"C0000000003\",\n        \"message\": {\n            \"num\": \"NS240442-001-90003\",\n            \"ysdcid\": \"E000001001\",\n            \"ysdcrecnum\": \"1001-5FC8-NS1\",\n            \"ysdcintdata\": \"3UVG-CHSP-T62G-LMFB-4U2G-WBXC-BA\",\n            \"ysdcregsig\": \"DZGB-FS7P-EEUH-OQYJ\",\n            \"ysdcmrc\": \"00-0C-29-5C-7C-EB\",\n            \"ysdcmrctim\": \"2024/04/23 10:05:50\",\n            \"ysdctime\": \"2024/04/23 10:05:50\",\n            \"flag\": \"INVOICE\",\n            \"ysdcitems\": \"1\"\n        },\n        \"qr_code\": \"https://evat-verification-ey.cimsgh.com?data=Tgwfru4p/COzuGWHqIam5Q4pILJpZgW9+hvGA9k38PED5/xYS3+arhQ6O3Z9/SobvI4I8NOrZyYiNSLfvGSU4J4xL3/53IkvYbhbSmcweQqAtpx3lMY0hQ6UEZWm60yVcGzbRhTkSKGSGz7TfVBGFJ75GIBZJUmDiFMHpurYP/R0BbWBb2CZHvkwpR3UOws9F/dAUtREmAoNOcN7Y0292lzTiSetfcG15e6mB+3G848nsHrOxto+zymE64AkGNaN+aXkPzPmG1gDhZXxmnLU6h7da0A/1ulobMDopVs9DmP1j6oqDUByYibsH17SQy9iixfs5x4GJ4YMYDKAS0lIgw==&v=1.1&t=i\",\n        \"status\": \"SUCCESS\"\n    }\n}"
+            },
+            {
+              "name": "XML_SUCCESS",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "security_key",
+                    "value": "{{security_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Accept",
+                    "name": "Content-Type",
+                    "value": "application/xml",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\r\n<root>\r\n\t<reference></reference>\r\n\t<invoiceNumber>NS240442-001-90003</invoiceNumber>\r\n\t<flag>INVOICE</flag>\r\n</root>",
+                  "options": {
+                    "raw": {
+                      "language": "xml"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Host}}/{{Company_Reference}}/invoice/callback",
+                  "host": [
+                    "{{Host}}"
+                  ],
+                  "path": [
+                    "{{Company_Reference}}",
+                    "invoice",
+                    "callback"
+                  ]
+                }
+              },
+              "_postman_previewlanguage": "xml",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "name": "Content-Type",
+                  "value": "application/xml",
+                  "description": "",
+                  "type": "text"
+                }
+              ],
+              "cookie": [],
+              "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<ResponseDto>\n    <response>\n        <distributor_tin>C0000000003</distributor_tin>\n        <message>\n            <num>NS240442-001-90003</num>\n            <ysdcid>E000001001</ysdcid>\n            <ysdcrecnum>1001-5FC8-NS1</ysdcrecnum>\n            <ysdcintdata>3UVG-CHSP-T62G-LMFB-4U2G-WBXC-BA</ysdcintdata>\n            <ysdcregsig>DZGB-FS7P-EEUH-OQYJ</ysdcregsig>\n            <ysdcmrc>00-0C-29-5C-7C-EB</ysdcmrc>\n            <ysdcmrctim>2024/04/23 10:05:50</ysdcmrctim>\n            <ysdctime>2024/04/23 10:05:50</ysdctime>\n            <flag>INVOICE</flag>\n            <ysdcitems>1</ysdcitems>\n        </message>\n        <qr_code>https://evat-verification-ey.cimsgh.com?data=Tgwfru4p/COzuGWHqIam5Q4pILJpZgW9+hvGA9k38PED5/xYS3+arhQ6O3Z9/SobvI4I8NOrZyYiNSLfvGSU4J4xL3/53IkvYbhbSmcweQqAtpx3lMY0hQ6UEZWm60yVcGzbRhTkSKGSGz7TfVBGFJ75GIBZJUmDiFMHpurYP/R0BbWBb2CZHvkwpR3UOws9F/dAUtREmAoNOcN7Y0292lzTiSetfcG15e6mB+3G848nsHrOxto+zymE64AkGNaN+aXkPzPmG1gDhZXxmnLU6h7da0A/1ulobMDopVs9DmP1j6oqDUByYibsH17SQy9iixfs5x4GJ4YMYDKAS0lIgw==&v=1.1&t=i</qr_code>\n        <status>SUCCESS</status>\n    </response>\n</ResponseDto>"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "Host",
+      "value": "https://vsdcstaging.vat-gh.com/vsdc/api/v1/taxpayer",
+      "type": "string"
+    },
+    {
+      "key": "security_key",
+      "value": "Z60gftKe9sei3xOZhvvDa0StkVILKR3j5MBM9ygi1zg=",
+      "type": "string"
+    },
+    {
+      "key": "Company_Reference",
+      "value": "CXX000000YY-001",
+      "type": "string"
+    },
+    {
+      "key": "VSDC_ID",
+      "value": "EV-260623-001",
+      "type": "string"
+    },
+    {
+      "key": "Vault_Host",
+      "value": "*******",
+      "type": "string"
+    },
+    {
+      "key": "Company_Tin",
+      "value": "CXX000000YY",
+      "type": "string"
+    },
+    {
+      "key": "Branch_Code",
+      "value": "001",
+      "type": "string"
+    },
+    {
+      "key": "Inventory_Base_Url",
+      "value": "https://evat-inventory.persolqa.com",
+      "type": "string"
+    },
+    {
+      "key": "FlatTaxpayerReference",
+      "value": "CXX0000XXXY-001",
+      "type": "string"
+    },
+    {
+      "key": "FlatRateTaxpayer_Sec_Key",
+      "value": "OcXp9FnGEqOXpuJ3/ID2e1iVRGk1PIbF7iOWTNo69FH5Hf3Lj+5Z2aPccMsG6Fvb",
+      "type": "string"
+    }
+  ]
+}
