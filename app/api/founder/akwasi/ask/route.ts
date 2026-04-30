@@ -18,8 +18,32 @@ function tokenize(q: string): string[] {
 
 type SourceRef = { kind: string; label: string; ref: string }
 
+type NoteRow = Record<string, unknown> & { id?: string }
+
+function mergeRelevantNotes(params: {
+  strategyFirst: NoteRow[] | null
+  keywordNotes: NoteRow[] | null
+  recentNotes: NoteRow[] | null
+  maxTotal: number
+}): NoteRow[] {
+  const { strategyFirst, keywordNotes, recentNotes, maxTotal } = params
+  const out: NoteRow[] = []
+  const seen = new Set<string>()
+  const push = (n: NoteRow) => {
+    const id = typeof n.id === "string" ? n.id : null
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    out.push(n)
+  }
+  for (const n of strategyFirst ?? []) push(n)
+  for (const n of keywordNotes ?? []) push(n)
+  for (const n of recentNotes ?? []) push(n)
+  return out.slice(0, maxTotal)
+}
+
 /**
  * POST /api/founder/akwasi/ask — founder Q&A from founder_* context only.
+ * Priority: active decisions → relevant notes → open tasks → latest briefing.
  */
 export async function POST(request: NextRequest) {
   const ctx = await getFounderAkwasiAuthContext()
@@ -33,87 +57,95 @@ export async function POST(request: NextRequest) {
 
   const tokens = tokenize(question)
 
-  const notesRecentP = ctx.admin
-    .from("founder_notes")
-    .select("id,title,content,source_type,source_date,created_at")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(18)
-
   const notesKeywordP =
     tokens.length > 0
       ? ctx.admin
           .from("founder_notes")
-          .select("id,title,content,source_type,source_date,created_at")
+          .select("id,title,content,source_type,source_date,tags,created_at")
           .is("deleted_at", null)
           .or(tokens.flatMap((t) => [`title.ilike.%${t}%`, `content.ilike.%${t}%`]).join(","))
           .order("created_at", { ascending: false })
-          .limit(25)
-      : Promise.resolve({ data: [] as Record<string, unknown>[], error: null })
+          .limit(28)
+      : Promise.resolve({ data: [] as NoteRow[], error: null })
 
   const [
-    { data: notesRecent, error: nRecErr },
-    { data: notesKeyword, error: nKeyErr },
+    { data: decisionsActive, error: dErr },
+    { data: notesStrategy, error: nsErr },
+    { data: notesRecent, error: nrErr },
+    { data: notesKeyword, error: nkErr },
     { data: tasksOpen, error: tErr },
-    { data: decisions, error: dErr },
     { data: briefings, error: bErr },
   ] = await Promise.all([
-    notesRecentP,
-    notesKeywordP,
-    ctx.admin
-      .from("founder_tasks")
-      .select("id,title,description,area,priority,status,due_date,created_at")
-      .is("deleted_at", null)
-      .neq("status", "completed")
-      .neq("status", "cancelled")
-      .order("updated_at", { ascending: false })
-      .limit(50),
     ctx.admin
       .from("founder_decisions")
       .select("id,decision,reason,area,status,created_at")
       .is("deleted_at", null)
       .eq("status", "active")
       .order("created_at", { ascending: false })
+      .limit(50),
+    ctx.admin
+      .from("founder_notes")
+      .select("id,title,content,source_type,source_date,tags,created_at")
+      .is("deleted_at", null)
+      .eq("source_type", "strategy_note")
+      .order("created_at", { ascending: false })
       .limit(25),
+    ctx.admin
+      .from("founder_notes")
+      .select("id,title,content,source_type,source_date,tags,created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(35),
+    notesKeywordP,
+    ctx.admin
+      .from("founder_tasks")
+      .select("id,title,description,area,priority,status,due_date,created_at,updated_at")
+      .is("deleted_at", null)
+      .neq("status", "completed")
+      .neq("status", "cancelled")
+      .order("updated_at", { ascending: false })
+      .limit(70),
     ctx.admin
       .from("founder_briefings")
       .select("id,briefing_date,summary,priorities,risks,blockers,recommended_actions,created_at")
       .order("briefing_date", { ascending: false })
       .order("created_at", { ascending: false })
-      .limit(5),
+      .limit(1),
   ])
 
-  if (nRecErr || nKeyErr || tErr || dErr || bErr) {
-    const err = nRecErr || nKeyErr || tErr || dErr || bErr
+  if (dErr || nsErr || nrErr || nkErr || tErr || bErr) {
+    const err = dErr || nsErr || nrErr || nkErr || tErr || bErr
     console.error("[akwasi/ask] load", err)
     return NextResponse.json({ error: err?.message ?? "load failed" }, { status: 500 })
   }
 
-  const noteMap = new Map<string, Record<string, unknown>>()
-  for (const n of [...(notesRecent ?? []), ...(notesKeyword ?? [])]) {
-    if (n && typeof n === "object" && "id" in n && typeof (n as { id: string }).id === "string") {
-      noteMap.set((n as { id: string }).id, n as Record<string, unknown>)
-    }
-  }
-  const mergedNotes = [...noteMap.values()].slice(0, 40)
+  const relevant_notes = mergeRelevantNotes({
+    strategyFirst: (notesStrategy ?? []) as NoteRow[],
+    keywordNotes: (notesKeyword ?? []) as NoteRow[],
+    recentNotes: (notesRecent ?? []) as NoteRow[],
+    maxTotal: 50,
+  })
+
+  const latest_briefing =
+    briefings && briefings.length > 0 ? (briefings[0] as Record<string, unknown>) : null
 
   const contextBlocks = {
-    notes: mergedNotes,
+    active_decisions: decisionsActive ?? [],
+    relevant_notes,
     open_tasks: tasksOpen ?? [],
-    active_decisions: decisions ?? [],
-    recent_briefings: briefings ?? [],
+    latest_briefing: latest_briefing,
   }
 
   const hasAny =
-    (contextBlocks.notes?.length ?? 0) > 0 ||
-    (contextBlocks.open_tasks?.length ?? 0) > 0 ||
     (contextBlocks.active_decisions?.length ?? 0) > 0 ||
-    (contextBlocks.recent_briefings?.length ?? 0) > 0
+    (contextBlocks.relevant_notes?.length ?? 0) > 0 ||
+    (contextBlocks.open_tasks?.length ?? 0) > 0 ||
+    latest_briefing != null
 
   if (!hasAny) {
     return NextResponse.json({
       answer:
-        "There is not enough founder context in Akwasi yet (no notes, open tasks, active decisions, or briefings). Add notes or tasks first, or generate a briefing.",
+        "The information is missing: there are no active founder decisions, relevant notes, open tasks, or a prior briefing in Akwasi yet. Add decisions, founder memory, tasks, or generate a briefing first.",
       sources: [] as SourceRef[],
     })
   }
@@ -121,8 +153,8 @@ export async function POST(request: NextRequest) {
   try {
     const rawJson = await akwasiGroqJsonCompletion({
       system: AKWASI_ASK_SYSTEM,
-      user: `Question:\n${question}\n\nContext JSON:\n${JSON.stringify(contextBlocks)}`,
-      temperature: 0.35,
+      user: `Question:\n${question}\n\nContext JSON (use only this data; follow block priority 1–4):\n${JSON.stringify(contextBlocks)}`,
+      temperature: 0.3,
     })
     const obj = safeParseJsonObject(rawJson)
     const answer = String(obj?.answer ?? "").trim()

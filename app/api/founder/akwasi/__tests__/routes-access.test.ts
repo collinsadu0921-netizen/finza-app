@@ -1,6 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals"
 import { NextResponse } from "next/server"
 import { GET as GET_NOTES } from "../notes/route"
+import { GET as GET_DECISIONS } from "../decisions/route"
 import { POST as POST_ASK } from "../ask/route"
 
 jest.mock("@/lib/founder/founderAkwasiRouteGuards", () => ({
@@ -32,6 +33,15 @@ describe("/api/founder/akwasi access", () => {
     })
     const res = await GET_NOTES()
     expect(res.status).toBe(401)
+  })
+
+  it("GET decisions returns 403 for non-founder context", async () => {
+    mockCtx.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    })
+    const res = await GET_DECISIONS()
+    expect(res.status).toBe(403)
   })
 
   it("POST ask returns 403 for non-founder context", async () => {

@@ -6,5 +6,7 @@ export type FounderBriefingRow = {
   risks: unknown
   blockers: unknown
   recommended_actions: unknown
+  decision_highlights?: unknown
+  area_overview?: unknown
   created_at: string
 }

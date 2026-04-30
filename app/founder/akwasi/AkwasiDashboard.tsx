@@ -6,10 +6,13 @@ import {
   FOUNDER_TASK_AREAS,
   FOUNDER_TASK_PRIORITIES,
   FOUNDER_TASK_STATUSES,
+  FOUNDER_DECISION_STATUSES,
   type FounderTaskArea,
   type FounderTaskPriority,
   type FounderTaskStatus,
+  type FounderDecisionStatus,
 } from "@/lib/founder/akwasiConstants"
+import { buildAreaOverview, areaTagForNote } from "@/lib/founder/akwasiAreaOverview"
 
 type FounderNote = {
   id: string
@@ -42,9 +45,57 @@ type ExtractedTask = {
   due_date: string | null
 }
 
+type FounderDecision = {
+  id: string
+  decision: string
+  reason: string | null
+  area: FounderTaskArea
+  status: FounderDecisionStatus
+  created_at: string
+}
+
+type CodeContextItem = {
+  id: string
+  title: string
+  summary: string
+  related_area: string | null
+  file_paths: string[] | null
+  source_type: string
+  created_at: string
+}
+
 function asStrings(v: unknown): string[] {
   if (!Array.isArray(v)) return []
   return v.map((x) => String(x)).filter(Boolean)
+}
+
+type BriefingAreaOverviewRow = {
+  area: string
+  open_tasks: number
+  blocked_tasks: number
+  waiting_tasks: number
+  active_decisions: number
+  latest_note_title: string | null
+  latest_note_date: string | null
+}
+
+function asAreaOverviewRows(v: unknown): BriefingAreaOverviewRow[] {
+  if (!Array.isArray(v)) return []
+  const out: BriefingAreaOverviewRow[] = []
+  for (const row of v) {
+    if (!row || typeof row !== "object") continue
+    const r = row as Record<string, unknown>
+    out.push({
+      area: String(r.area ?? ""),
+      open_tasks: Number(r.open_tasks ?? 0) || 0,
+      blocked_tasks: Number(r.blocked_tasks ?? 0) || 0,
+      waiting_tasks: Number(r.waiting_tasks ?? 0) || 0,
+      active_decisions: Number(r.active_decisions ?? 0) || 0,
+      latest_note_title: r.latest_note_title == null ? null : String(r.latest_note_title),
+      latest_note_date: r.latest_note_date == null ? null : String(r.latest_note_date),
+    })
+  }
+  return out
 }
 
 function panelClass() {
@@ -90,22 +141,36 @@ export default function AkwasiDashboard({
   const [askSources, setAskSources] = useState<{ kind: string; label: string; ref: string }[]>([])
   const [askLoading, setAskLoading] = useState(false)
 
+  const [decisions, setDecisions] = useState<FounderDecision[]>([])
+  const [codeItems, setCodeItems] = useState<CodeContextItem[]>([])
+  const [memoryText, setMemoryText] = useState("")
+  const [memoryTitle, setMemoryTitle] = useState("")
+  const [memoryArea, setMemoryArea] = useState<string>("")
+  const [memoryTagsExtra, setMemoryTagsExtra] = useState("")
+  const [memorySaving, setMemorySaving] = useState(false)
+
+  const [decisionText, setDecisionText] = useState("")
+  const [decisionReason, setDecisionReason] = useState("")
+  const [decisionArea, setDecisionArea] = useState<FounderTaskArea>("strategy")
+  const [decisionSaving, setDecisionSaving] = useState(false)
+
+  const [codeTitle, setCodeTitle] = useState("")
+  const [codeSummary, setCodeSummary] = useState("")
+  const [codeRelatedArea, setCodeRelatedArea] = useState<string>("")
+  const [codeFilePaths, setCodeFilePaths] = useState("")
+  const [codeSaving, setCodeSaving] = useState(false)
+
   const reloadLists = useCallback(async () => {
     setError(null)
     setListLoading(true)
     try {
-      const [nr, tr] = await Promise.all([
+      const [nr, tr, dr, cr] = await Promise.all([
         fetch("/api/founder/akwasi/notes", { credentials: "same-origin" }),
-        fetch(
-          `/api/founder/akwasi/tasks?${new URLSearchParams({
-            ...(filterStatus ? { status: filterStatus } : {}),
-            ...(filterArea ? { area: filterArea } : {}),
-            ...(filterPriority ? { priority: filterPriority } : {}),
-          })}`,
-          { credentials: "same-origin" }
-        ),
+        fetch("/api/founder/akwasi/tasks", { credentials: "same-origin" }),
+        fetch("/api/founder/akwasi/decisions", { credentials: "same-origin" }),
+        fetch("/api/founder/akwasi/code-context", { credentials: "same-origin" }),
       ])
-      if (nr.status === 403 || tr.status === 403) {
+      if ([nr, tr, dr, cr].some((r) => r.status === 403)) {
         setError("Forbidden")
         return
       }
@@ -113,25 +178,44 @@ export default function AkwasiDashboard({
         setError("Failed to load notes or tasks")
         return
       }
+      if (!dr.ok) {
+        setError("Failed to load decisions")
+        return
+      }
       const nj = (await nr.json()) as { notes?: FounderNote[] }
       const tj = (await tr.json()) as { tasks?: FounderTask[] }
+      const dj = (await dr.json()) as { decisions?: FounderDecision[] }
+      const cj = cr.ok
+        ? ((await cr.json()) as { items?: CodeContextItem[] })
+        : { items: [] as CodeContextItem[] }
       setNotes(nj.notes ?? [])
       setTasks(tj.tasks ?? [])
+      setDecisions(dj.decisions ?? [])
+      setCodeItems(cj.items ?? [])
     } catch {
       setError("Network error")
     } finally {
       setListLoading(false)
     }
-  }, [filterArea, filterPriority, filterStatus])
+  }, [])
 
   useEffect(() => {
     void reloadLists()
   }, [reloadLists])
 
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (filterStatus && t.status !== filterStatus) return false
+      if (filterArea && t.area !== filterArea) return false
+      if (filterPriority && t.priority !== filterPriority) return false
+      return true
+    })
+  }, [tasks, filterStatus, filterArea, filterPriority])
+
   const groupedTasks = useMemo(() => {
     const orderP: FounderTaskPriority[] = ["urgent", "high", "medium", "low"]
     const byP = new Map<string, FounderTask[]>()
-    for (const t of tasks) {
+    for (const t of filteredTasks) {
       const k = t.priority
       if (!byP.has(k)) byP.set(k, [])
       byP.get(k)!.push(t)
@@ -142,7 +226,15 @@ export default function AkwasiDashboard({
       if (items?.length) out.push({ priority: p, items })
     }
     return out
-  }, [tasks])
+  }, [filteredTasks])
+
+  const areaOverviewRows = useMemo(() => {
+    return buildAreaOverview({
+      tasks,
+      notes,
+      decisions: decisions.filter((d) => d.status === "active"),
+    })
+  }, [tasks, notes, decisions])
 
   const saveNote = async () => {
     setNoteSaving(true)
@@ -275,6 +367,181 @@ export default function AkwasiDashboard({
     await reloadLists()
   }
 
+  const saveFounderMemory = async () => {
+    const content = memoryText.trim()
+    if (!content) {
+      setError("Paste strategic context first")
+      return
+    }
+    const title =
+      memoryTitle.trim() ||
+      (content.split("\n").find((l) => l.trim())?.trim().slice(0, 120) || "Founder strategy memory")
+    setMemorySaving(true)
+    setError(null)
+    try {
+      const tags = ["founder_memory"]
+      if (memoryArea && (FOUNDER_TASK_AREAS as readonly string[]).includes(memoryArea)) {
+        tags.push(areaTagForNote(memoryArea as FounderTaskArea))
+      }
+      if (memoryTagsExtra.trim()) {
+        tags.push(
+          ...memoryTagsExtra
+            .split(/[,]+/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        )
+      }
+      const res = await fetch("/api/founder/akwasi/notes", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          content,
+          source_type: "strategy_note",
+          source_date: null,
+          tags,
+        }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(String((j as { error?: string }).error ?? "Save failed"))
+        return
+      }
+      const noteId = (j as { note?: { id: string } }).note?.id
+      if (noteId) setLastSavedNoteId(noteId)
+      setMemoryText("")
+      setMemoryTitle("")
+      setMemoryArea("")
+      setMemoryTagsExtra("")
+      await reloadLists()
+    } catch {
+      setError("Save failed")
+    } finally {
+      setMemorySaving(false)
+    }
+  }
+
+  const saveDecision = async () => {
+    const d = decisionText.trim()
+    if (!d) {
+      setError("Decision text is required")
+      return
+    }
+    setDecisionSaving(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/founder/akwasi/decisions", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision: d,
+          reason: decisionReason.trim() || null,
+          area: decisionArea,
+          status: "active",
+        }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(String((j as { error?: string }).error ?? "Save decision failed"))
+        return
+      }
+      setDecisionText("")
+      setDecisionReason("")
+      await reloadLists()
+    } catch {
+      setError("Save decision failed")
+    } finally {
+      setDecisionSaving(false)
+    }
+  }
+
+  const patchDecision = async (id: string, patch: Record<string, unknown>) => {
+    setError(null)
+    const res = await fetch(`/api/founder/akwasi/decisions/${id}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}))
+      setError(String((j as { error?: string }).error ?? "Update decision failed"))
+      return
+    }
+    await reloadLists()
+  }
+
+  const deleteDecision = async (id: string) => {
+    setError(null)
+    const res = await fetch(`/api/founder/akwasi/decisions/${id}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    })
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}))
+      setError(String((j as { error?: string }).error ?? "Delete failed"))
+      return
+    }
+    await reloadLists()
+  }
+
+  const softDeleteCodeContext = async (id: string) => {
+    setError(null)
+    const res = await fetch(`/api/founder/akwasi/code-context/${id}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ soft_delete: true }),
+    })
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}))
+      setError(String((j as { error?: string }).error ?? "Remove failed"))
+      return
+    }
+    await reloadLists()
+  }
+
+  const saveCodeContext = async () => {
+    const title = codeTitle.trim()
+    const summary = codeSummary.trim()
+    if (!title || !summary) {
+      setError("Code summary title and body are required")
+      return
+    }
+    setCodeSaving(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/founder/akwasi/code-context", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          summary,
+          related_area: codeRelatedArea || null,
+          file_paths: codeFilePaths,
+          source_type: "cursor_summary",
+        }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(String((j as { error?: string }).error ?? "Save code context failed"))
+        return
+      }
+      setCodeTitle("")
+      setCodeSummary("")
+      setCodeRelatedArea("")
+      setCodeFilePaths("")
+      await reloadLists()
+    } catch {
+      setError("Save code context failed")
+    } finally {
+      setCodeSaving(false)
+    }
+  }
+
   const ask = async () => {
     setAskLoading(true)
     setAskAnswer(null)
@@ -365,12 +632,341 @@ export default function AkwasiDashboard({
                 </ul>
               </div>
             </div>
+            {asStrings(briefing.decision_highlights).length > 0 && (
+              <div>
+                <p className={labelClass()}>Decisions affecting priorities</p>
+                <ul className="list-inside list-disc text-slate-700 dark:text-slate-300">
+                  {asStrings(briefing.decision_highlights).map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {asAreaOverviewRows(briefing.area_overview).length > 0 && (
+              <div>
+                <p className={labelClass()}>Area snapshot (at generation time)</p>
+                <div className="mt-2 overflow-x-auto text-xs">
+                  <table className="w-full border-collapse border border-slate-200 dark:border-slate-700">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800">
+                        <th className="border border-slate-200 px-2 py-1 text-left dark:border-slate-700">Area</th>
+                        <th className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">Open</th>
+                        <th className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">Blocked</th>
+                        <th className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">Waiting</th>
+                        <th className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">Decisions</th>
+                        <th className="border border-slate-200 px-2 py-1 text-left dark:border-slate-700">Latest tagged note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {asAreaOverviewRows(briefing.area_overview).map((row) => (
+                        <tr key={row.area}>
+                          <td className="border border-slate-200 px-2 py-1 dark:border-slate-700">
+                            {row.area.replaceAll("_", " ")}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">
+                            {row.open_tasks}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">
+                            {row.blocked_tasks}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">
+                            {row.waiting_tasks}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right dark:border-slate-700">
+                            {row.active_decisions}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-slate-600 dark:border-slate-700 dark:text-slate-400">
+                            {row.latest_note_title
+                              ? `${row.latest_note_title} (${row.latest_note_date ? new Date(row.latest_note_date).toLocaleDateString() : "—"})`
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             <p className="text-xs text-slate-500">
               Briefing date {briefing.briefing_date} · {new Date(briefing.created_at).toLocaleString()}
             </p>
           </div>
         ) : (
           <p className="mt-4 text-sm text-slate-500">No briefing yet — generate one.</p>
+        )}
+      </section>
+
+      <section className={panelClass()}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Project area summary</h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          From founder tasks and active decisions. Latest note per area uses tag <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">area:product</code> (set via Founder Memory area picker).
+        </p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse border border-slate-200 text-sm dark:border-slate-700">
+            <thead>
+              <tr className="bg-slate-100 text-left dark:bg-slate-800">
+                <th className="border border-slate-200 px-2 py-2 dark:border-slate-700">Area</th>
+                <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">Open tasks</th>
+                <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">Blocked</th>
+                <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">Waiting</th>
+                <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">Active decisions</th>
+                <th className="border border-slate-200 px-2 py-2 dark:border-slate-700">Latest tagged note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {areaOverviewRows.map((row) => (
+                <tr key={row.area} className="text-slate-800 dark:text-slate-200">
+                  <td className="border border-slate-200 px-2 py-2 capitalize dark:border-slate-700">
+                    {row.area.replaceAll("_", " ")}
+                  </td>
+                  <td className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">{row.open_tasks}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">{row.blocked_tasks}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">{row.waiting_tasks}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right dark:border-slate-700">{row.active_decisions}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-400">
+                    {row.latest_note_title ? (
+                      <>
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{row.latest_note_title}</span>
+                        {row.latest_note_date && (
+                          <span className="ml-1">· {new Date(row.latest_note_date).toLocaleDateString()}</span>
+                        )}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className={panelClass()}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Founder Memory</h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          Saves a <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">strategy_note</code> with tag{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">founder_memory</code>. Optional area adds an{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">area:…</code> tag for the area summary. Use{" "}
+          <span className="font-medium">Extract Tasks from Note</span> in the general note panel if you want tasks.
+        </p>
+        <label className={`${labelClass()} mt-3`}>Title</label>
+        <input
+          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+          value={memoryTitle}
+          onChange={(e) => setMemoryTitle(e.target.value)}
+          placeholder="Optional — defaults to first line of context"
+        />
+        <label className={`${labelClass()} mt-3`}>Strategic context</label>
+        <textarea
+          className="mt-1 min-h-[140px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+          value={memoryText}
+          onChange={(e) => setMemoryText(e.target.value)}
+          placeholder="Paste strategic context…"
+        />
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={labelClass()}>Area (optional, for tagged notes)</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={memoryArea}
+              onChange={(e) => setMemoryArea(e.target.value)}
+            >
+              <option value="">— None —</option>
+              {FOUNDER_TASK_AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:col-span-1">
+            <label className={labelClass()}>Extra tags (comma-separated)</label>
+            <input
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={memoryTagsExtra}
+              onChange={(e) => setMemoryTagsExtra(e.target.value)}
+              placeholder="e.g. launch, partnerships"
+            />
+          </div>
+        </div>
+        <div className="mt-3">
+          <button
+            type="button"
+            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+            disabled={memorySaving || !memoryText.trim()}
+            onClick={() => void saveFounderMemory()}
+          >
+            {memorySaving ? "Saving…" : "Save as Founder Memory"}
+          </button>
+        </div>
+      </section>
+
+      <section className={panelClass()}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Founder decisions</h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          Log calls; status <code className="mx-1 rounded bg-slate-100 px-1 dark:bg-slate-800">archived</code> or soft-delete removes from active lists. Superseded keeps history.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className={labelClass()}>Decision</label>
+            <textarea
+              className="min-h-[72px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={decisionText}
+              onChange={(e) => setDecisionText(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelClass()}>Reason (optional)</label>
+            <textarea
+              className="min-h-[56px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={decisionReason}
+              onChange={(e) => setDecisionReason(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={labelClass()}>Area</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={decisionArea}
+              onChange={(e) => setDecisionArea(e.target.value as FounderTaskArea)}
+            >
+              {FOUNDER_TASK_AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+              disabled={decisionSaving || !decisionText.trim()}
+              onClick={() => void saveDecision()}
+            >
+              {decisionSaving ? "Saving…" : "Save decision"}
+            </button>
+          </div>
+        </div>
+        <div className="mt-6 space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">All decisions</h3>
+          {decisions.length === 0 ? (
+            <p className="text-sm text-slate-500">No decisions yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {decisions.map((d) => (
+                <li
+                  key={d.id}
+                  className="rounded border border-slate-100 bg-slate-50/80 p-3 text-sm dark:border-slate-800 dark:bg-slate-950/50"
+                >
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{d.decision}</p>
+                  {d.reason && <p className="mt-1 text-slate-600 dark:text-slate-400">{d.reason}</p>}
+                  <p className="mt-1 text-xs text-slate-500">
+                    {d.area} · {d.status} · {new Date(d.created_at).toLocaleDateString()}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <select
+                      className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-950"
+                      value={d.status}
+                      onChange={(e) =>
+                        void patchDecision(d.id, { status: e.target.value as FounderDecisionStatus })
+                      }
+                    >
+                      {FOUNDER_DECISION_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
+                      onClick={() => void deleteDecision(d.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className={panelClass()}>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Code / implementation context</h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          Save Cursor-style summaries into Akwasi (migration <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">456</code>).
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className={labelClass()}>Title</label>
+            <input
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={codeTitle}
+              onChange={(e) => setCodeTitle(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelClass()}>Summary</label>
+            <textarea
+              className="min-h-[100px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={codeSummary}
+              onChange={(e) => setCodeSummary(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={labelClass()}>Related area (optional)</label>
+            <select
+              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={codeRelatedArea}
+              onChange={(e) => setCodeRelatedArea(e.target.value)}
+            >
+              <option value="">—</option>
+              {FOUNDER_TASK_AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelClass()}>File paths (comma or newline)</label>
+            <textarea
+              className="min-h-[56px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              value={codeFilePaths}
+              onChange={(e) => setCodeFilePaths(e.target.value)}
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          className="mt-3 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+          disabled={codeSaving || !codeTitle.trim() || !codeSummary.trim()}
+          onClick={() => void saveCodeContext()}
+        >
+          {codeSaving ? "Saving…" : "Save code context"}
+        </button>
+        {codeItems.length > 0 && (
+          <ul className="mt-4 space-y-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+            {codeItems.slice(0, 12).map((c) => (
+              <li key={c.id} className="rounded border border-slate-100 p-2 text-sm dark:border-slate-800">
+                <p className="font-medium text-slate-900 dark:text-slate-100">{c.title}</p>
+                <p className="mt-1 line-clamp-2 text-xs text-slate-600 dark:text-slate-400">{c.summary}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {c.related_area ?? "—"} · {new Date(c.created_at).toLocaleString()}
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 text-xs text-red-700 underline dark:text-red-400"
+                  onClick={() => void softDeleteCodeContext(c.id)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 
@@ -555,7 +1151,7 @@ export default function AkwasiDashboard({
       <section className={panelClass()}>
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Ask Akwasi</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Answers use only founder notes, tasks, decisions, and briefings — not tenant data.
+          Answers use only founder notes (strategy prioritized), tasks, active decisions, briefings, and code summaries — not tenant data.
         </p>
         <textarea
           className="mt-3 min-h-[88px] w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"

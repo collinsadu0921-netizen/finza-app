@@ -45,3 +45,10 @@ export function isFounderTaskStatus(v: unknown): v is FounderTaskStatus {
 export function isFounderExtractTaskStatus(v: unknown): v is FounderExtractTaskStatus {
   return typeof v === "string" && (FOUNDER_EXTRACT_TASK_STATUSES as readonly string[]).includes(v)
 }
+
+export const FOUNDER_DECISION_STATUSES = ["active", "superseded", "archived"] as const
+export type FounderDecisionStatus = (typeof FOUNDER_DECISION_STATUSES)[number]
+
+export function isFounderDecisionStatus(v: unknown): v is FounderDecisionStatus {
+  return typeof v === "string" && (FOUNDER_DECISION_STATUSES as readonly string[]).includes(v)
+}

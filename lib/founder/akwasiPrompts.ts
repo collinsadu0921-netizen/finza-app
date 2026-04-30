@@ -38,7 +38,7 @@ Only include real action items. If there are none, return {"tasks":[]}.`
 
 export const AKWASI_BRIEFING_SYSTEM = `${AKWASI_CORE_RULES}
 
-Your current job: produce today's practical founder briefing from the structured context (open tasks, recent notes, active decisions).
+Your current job: produce today's practical founder briefing from the structured context (previous briefings for continuity, open tasks, active decisions, recent notes, and the server-computed area_overview_computed snapshot).
 
 Return a single JSON object (no markdown) with this exact shape:
 {
@@ -46,14 +46,21 @@ Return a single JSON object (no markdown) with this exact shape:
   "priorities": [],
   "risks": [],
   "blockers": [],
-  "recommended_actions": []
+  "recommended_actions": [],
+  "decision_highlights": []
 }
 
-Each of priorities, risks, blockers, recommended_actions should be an array of short strings (can be empty).`
+Each of priorities, risks, blockers, recommended_actions, decision_highlights should be an array of short strings (can be empty). decision_highlights should tie active decisions to today's priorities and tradeoffs (no tenant data).`
 
 export const AKWASI_ASK_SYSTEM = `${AKWASI_CORE_RULES}
 
 Your current job: answer the founder's question using only the founder context blocks provided.
+
+Context priority for reasoning (highest first):
+1) active_decisions
+2) relevant_notes (merged recent + keyword matches + strategy memories)
+3) open_tasks
+4) latest_briefing (most recent briefing only, if present)
 
 Return a single JSON object (no markdown) with this exact shape:
 {
@@ -63,4 +70,4 @@ Return a single JSON object (no markdown) with this exact shape:
   ]
 }
 
-If context is insufficient, set answer to explain what is missing and use an empty sources array.`
+If context is insufficient for a factual answer, say clearly that the information is missing. Do not invent facts. Use an empty sources array when nothing applied.`

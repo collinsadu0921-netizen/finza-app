@@ -12,7 +12,9 @@ export default async function FounderAkwasiPage() {
   if (admin) {
     const { data } = await admin
       .from("founder_briefings")
-      .select("id,briefing_date,summary,priorities,risks,blockers,recommended_actions,created_at")
+      .select(
+        "id,briefing_date,summary,priorities,risks,blockers,recommended_actions,decision_highlights,area_overview,created_at"
+      )
       .order("briefing_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1)
