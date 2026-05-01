@@ -33,7 +33,7 @@ function SignupPageInner() {
   const workspaceNormalized = rawWorkspace.trim().toLowerCase()
   const rawPlan = searchParams.get("plan") ?? ""
   const rawTrial = searchParams.get("trial") ?? ""
-  const rawBillingCycle = searchParams.get("billing_cycle") ?? ""
+  const rawBillingCycle = searchParams.get("billing_cycle") ?? searchParams.get("cycle") ?? ""
   const parsedBillingCycle = tryParseBillingCycle(rawBillingCycle)
 
   const hasValidServicePlanContext =
@@ -78,7 +78,8 @@ function SignupPageInner() {
         plan: rawPlan,
         trial: rawTrial,
         workspace: trialWorkspace ?? rawWorkspace,
-        ...(parsedBillingCycle ? { billing_cycle: parsedBillingCycle } : {}),
+        billing_cycle: searchParams.get("billing_cycle") ?? undefined,
+        cycle: searchParams.get("cycle") ?? undefined,
       })
       const { error: oauthError } = await signInWithGoogle(redirectTo)
       if (oauthError) {

@@ -82,7 +82,22 @@ export async function GET(request: NextRequest) {
   const trialParam = requestUrl.searchParams.get("trial")
   const workspaceParam = (requestUrl.searchParams.get("workspace") ?? "").trim().toLowerCase()
   const parsedPlan = tryParseServiceSubscriptionTier(planParam)
-  const parsedBillingCycle = tryParseBillingCycle(requestUrl.searchParams.get("billing_cycle"))
+  const billingRaw =
+    requestUrl.searchParams.get("billing_cycle") ?? requestUrl.searchParams.get("cycle")
+  const parsedBillingCycle = tryParseBillingCycle(billingRaw)
+
+  if (process.env.NODE_ENV === "development") {
+    console.info(
+      "[auth/callback] marketing query params:",
+      JSON.stringify({
+        workspace: workspaceParam || null,
+        trial: trialParam,
+        plan: planParam,
+        billing_raw: billingRaw,
+        billing_parsed: parsedBillingCycle,
+      })
+    )
+  }
 
   const rawMeta = { ...(user.user_metadata as Record<string, unknown>) }
   const existingSignupIntent =
@@ -123,6 +138,19 @@ export async function GET(request: NextRequest) {
     try {
       const admin = createSupabaseAdminClient()
       await admin.auth.admin.updateUserById(user.id, { user_metadata: effectiveMeta })
+      if (process.env.NODE_ENV === "development") {
+        console.info(
+          "[auth/callback] user_metadata merge ok:",
+          JSON.stringify({
+            userId: user.id,
+            isServiceTrialFromUrl,
+            trial_intent: effectiveMeta.trial_intent === true,
+            trial_workspace: effectiveMeta.trial_workspace ?? null,
+            trial_plan: effectiveMeta.trial_plan ?? null,
+            signup_billing_cycle: effectiveMeta.signup_billing_cycle ?? null,
+          })
+        )
+      }
     } catch (e) {
       console.warn("[auth/callback] metadata merge failed (SERVICE_ROLE?):", e)
     }

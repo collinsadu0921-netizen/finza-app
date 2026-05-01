@@ -40,6 +40,26 @@ const inputClass =
 
 const labelClass = "block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5"
 
+const ORPHAN_PUBLIC_USER_EMAIL_MESSAGE =
+  "A Finza profile already exists for this email from a previous deleted login. Please use another test email or ask an admin to clean up the orphan profile."
+
+/** Postgres unique_violation (e.g. public.users_email_key) from Supabase insert. */
+function isPublicUsersEmailUniqueViolation(err: unknown): boolean {
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? String((err as { code?: string }).code ?? "")
+      : ""
+  const message =
+    typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message?: string }).message ?? "")
+      : err instanceof Error
+        ? err.message
+        : String(err ?? "")
+  if (code === "23505") return true
+  if (message.includes("users_email_key")) return true
+  return false
+}
+
 export default function BusinessSetupPage() {
   const router = useRouter()
   const [name, setName] = useState("")
@@ -108,8 +128,18 @@ export default function BusinessSetupPage() {
 
     try {
       await ensureUserRecord(currentUser)
-    } catch (err: any) {
-      setError(err.message || "Failed to prepare user record")
+    } catch (err: unknown) {
+      if (isPublicUsersEmailUniqueViolation(err)) {
+        console.error("[business-setup] public.users insert failed (orphan email / unique constraint):", err)
+        setError(ORPHAN_PUBLIC_USER_EMAIL_MESSAGE)
+      } else {
+        console.error("[business-setup] ensureUserRecord failed:", err)
+        const msg =
+          err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err
+            ? String((err as { message?: string }).message)
+            : "Failed to prepare user record"
+        setError(msg || "Failed to prepare user record")
+      }
       setSaving(false)
       return
     }

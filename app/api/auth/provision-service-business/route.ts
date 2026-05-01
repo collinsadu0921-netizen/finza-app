@@ -1,8 +1,35 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { resolveServiceBusinessSubscriptionFromUserMetadata } from "@/lib/auth/resolveServiceBusinessSubscription"
 import { sendServiceWelcomeNotificationsAfterProvision } from "@/lib/auth/sendServiceWelcomeNotification"
+
+/**
+ * JWT `user_metadata` on the session cookie can lag behind Auth DB after
+ * `admin.updateUserById` in `/auth/callback`. Always read from Admin for provisioning.
+ */
+async function readUserMetadataForProvisioning(
+  userId: string,
+  jwtMetadata: Record<string, unknown>
+): Promise<{ meta: Record<string, unknown>; source: "admin" | "jwt" }> {
+  try {
+    const admin = createSupabaseAdminClient()
+    const { data, error } = await admin.auth.admin.getUserById(userId)
+    if (error || !data?.user) {
+      console.warn(
+        "[provision-service-business] admin.getUserById failed; using JWT user_metadata (may be stale after OAuth):",
+        error?.message
+      )
+      return { meta: jwtMetadata, source: "jwt" }
+    }
+    const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>
+    return { meta, source: "admin" }
+  } catch (e) {
+    console.warn("[provision-service-business] admin client error; using JWT user_metadata:", e)
+    return { meta: jwtMetadata, source: "jwt" }
+  }
+}
 
 const BodySchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -63,8 +90,27 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const sub = resolveServiceBusinessSubscriptionFromUserMetadata(
-    user.user_metadata as Record<string, unknown>
+  const jwtMeta = (user.user_metadata ?? {}) as Record<string, unknown>
+  const { meta: provisionMeta, source: metadataSource } = await readUserMetadataForProvisioning(user.id, jwtMeta)
+  const sub = resolveServiceBusinessSubscriptionFromUserMetadata(provisionMeta)
+
+  console.info(
+    "[provision-service-business]",
+    JSON.stringify({
+      userId: user.id,
+      metadataSource,
+      trial_intent: provisionMeta.trial_intent === true,
+      trial_workspace: typeof provisionMeta.trial_workspace === "string" ? provisionMeta.trial_workspace : null,
+      trial_plan: typeof provisionMeta.trial_plan === "string" ? provisionMeta.trial_plan : null,
+      signup_service_plan:
+        typeof provisionMeta.signup_service_plan === "string" ? provisionMeta.signup_service_plan : null,
+      signup_billing_cycle:
+        typeof provisionMeta.signup_billing_cycle === "string" ? provisionMeta.signup_billing_cycle : null,
+      resolvedStatus: sub.service_subscription_status,
+      resolvedTier: sub.service_subscription_tier,
+      trial_started_at_set: Boolean(sub.trial_started_at),
+      trial_ends_at_set: Boolean(sub.trial_ends_at),
+    })
   )
 
   const body = parsed.data
@@ -97,21 +143,6 @@ export async function POST(request: NextRequest) {
   if (linkError) {
     console.error("[provision-service-business] business_users:", linkError)
     return NextResponse.json({ error: linkError.message || "Could not link user to business" }, { status: 500 })
-  }
-
-  if (process.env.NODE_ENV === "development") {
-    console.info(
-      "[provision-service-business] service subscription provisioning",
-      JSON.stringify({
-        businessId: business.id,
-        selectedTier: sub.service_subscription_tier,
-        trialRequested: sub.service_subscription_status === "trialing",
-        resultingStatus: sub.service_subscription_status,
-        trial_started_at_set: Boolean(sub.trial_started_at),
-        trial_ends_at_set: Boolean(sub.trial_ends_at),
-        billing_cycle: sub.billing_cycle,
-      })
-    )
   }
 
   void sendServiceWelcomeNotificationsAfterProvision({

@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabaseClient"
 import { getPublicAppUrl } from "@/lib/auth/publicAppUrl"
+import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 
 /** Build `/auth/callback` with optional marketing params preserved through Google OAuth. */
 export function buildOAuthRedirectToWithMarketingContext(opts: {
@@ -9,7 +10,10 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   trial?: string | null
   /** Only "service" is forwarded (public Finza Service signup). */
   workspace?: string | null
+  /** Canonical marketing param; also accepts {@link opts.cycle} as alias. */
   billing_cycle?: string | null
+  /** Alias some marketing sites use instead of `billing_cycle`. */
+  cycle?: string | null
 }): string {
   const base = getPublicAppUrl().replace(/\/$/, "")
   const u = new URL("/auth/callback", base)
@@ -19,9 +23,9 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   if (opts.workspace?.trim().toLowerCase() === "service") {
     u.searchParams.set("workspace", "service")
   }
-  const bc = opts.billing_cycle?.trim().toLowerCase()
-  if (bc === "monthly" || bc === "quarterly" || bc === "annual") {
-    u.searchParams.set("billing_cycle", bc)
+  const parsed = tryParseBillingCycle(opts.billing_cycle ?? opts.cycle ?? null)
+  if (parsed) {
+    u.searchParams.set("billing_cycle", parsed)
   }
   return u.toString()
 }
