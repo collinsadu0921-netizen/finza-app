@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { logAudit } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 /**
  * POST /api/service/jobs/use-material
@@ -34,6 +35,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const businessId = scope.businessId
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId,
+      minTier: "professional",
+    })
+    if (denied) return denied
 
     const qty = Number(quantity_used)
     if (isNaN(qty) || qty <= 0) {

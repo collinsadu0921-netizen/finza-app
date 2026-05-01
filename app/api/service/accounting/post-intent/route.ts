@@ -14,6 +14,7 @@ import {
   validateServiceIntent,
   type AccountForValidation,
 } from "@/lib/service/accounting/intentTypes"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,6 +42,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId,
+      minTier: "business",
+    })
+    if (denied) return denied
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "write")
     if (!auth.authorized) {

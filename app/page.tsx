@@ -43,9 +43,8 @@ export default function HomePage() {
       const all = await getAllUserBusinesses(supabase, userId)
 
       if (all.length === 0) {
-        // No business yet — send to service dashboard to set up
         setTabIndustryMode("service")
-        router.replace("/service/dashboard")
+        router.replace("/business-setup")
         return
       }
 

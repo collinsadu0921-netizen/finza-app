@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
@@ -23,6 +24,7 @@ type BusinessState = {
 }
 
 export default function ServiceDashboardPage() {
+  const router = useRouter()
   const { business: ctxBusiness, sessionUser } = useWorkspaceBusiness()
   const [localBusiness, setLocalBusiness] = useState<BusinessState | null>(null)
   const [localUserName, setLocalUserName] = useState<string | null>(null)
@@ -70,6 +72,10 @@ export default function ServiceDashboardPage() {
         if (!cancelled) setLocalUserName(displayName)
 
         const biz = await getCurrentBusiness(supabase, user.id)
+        if (!cancelled && !biz) {
+          router.replace("/business-setup")
+          return
+        }
         if (!cancelled) {
           setLocalBusiness(biz as BusinessState | null)
         }
@@ -84,7 +90,7 @@ export default function ServiceDashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [ctxBusiness?.id])
+  }, [ctxBusiness?.id, router])
 
   const showSkeleton = fallbackLoading || !business
 

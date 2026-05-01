@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 /**
  * GET /api/service/materials/list
@@ -15,6 +16,14 @@ export async function GET() {
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId: business.id,
+      minTier: "professional",
+    })
+    if (denied) return denied
 
     const { data, error } = await supabase
       .from("service_material_inventory")

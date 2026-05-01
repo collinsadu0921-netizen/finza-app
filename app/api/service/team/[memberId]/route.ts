@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { hasPermission, type CustomPermissions } from "@/lib/permissions"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { logAudit } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 async function getCallerPermissions(
   supabase: SupabaseClient,
@@ -35,6 +36,14 @@ export async function PATCH(
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const subDenied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId: business.id,
+      minTier: "starter",
+    })
+    if (subDenied) return subDenied
 
     const caller = await getCallerPermissions(supabase, business.id, user.id, business.owner_id)
     if (!caller || !hasPermission(caller.role, caller.customPermissions, "team.manage")) {
@@ -125,6 +134,14 @@ export async function DELETE(
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const subDenied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId: business.id,
+      minTier: "starter",
+    })
+    if (subDenied) return subDenied
 
     const caller = await getCallerPermissions(supabase, business.id, user.id, business.owner_id)
     if (!caller || !hasPermission(caller.role, caller.customPermissions, "team.manage")) {

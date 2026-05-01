@@ -140,11 +140,11 @@ export default function OnboardingPage() {
       if (business?.industry === "retail") {
         router.push("/pos")
       } else if (business?.industry === "service") {
-        router.push("/dashboard")
+        router.push("/service/dashboard")
       } else if (business?.industry === "logistics") {
         router.push("/rider/dashboard")
       } else {
-        router.push("/dashboard")
+        router.push("/service/dashboard")
       }
     }
   }
@@ -162,11 +162,11 @@ export default function OnboardingPage() {
     if (business?.industry === "retail") {
       router.push("/pos")
     } else if (business?.industry === "service") {
-      router.push("/dashboard")
+      router.push("/service/dashboard")
     } else if (business?.industry === "logistics") {
       router.push("/rider/dashboard")
     } else {
-      router.push("/dashboard")
+      router.push("/service/dashboard")
     }
   }
 

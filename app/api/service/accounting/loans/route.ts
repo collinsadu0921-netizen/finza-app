@@ -17,6 +17,7 @@ import {
   validateServiceIntent,
   type AccountForValidation,
 } from "@/lib/service/accounting/intentTypes"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,6 +28,14 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
     if (!businessId) return NextResponse.json({ error: "Missing business_id" }, { status: 400 })
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId,
+      minTier: "business",
+    })
+    if (denied) return denied
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
@@ -101,6 +110,14 @@ export async function POST(request: NextRequest) {
 
     const businessId: string | undefined = body.business_id
     if (!businessId) return NextResponse.json({ error: "Missing business_id" }, { status: 400 })
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId,
+      minTier: "business",
+    })
+    if (denied) return denied
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "write")
     if (!auth.authorized) return NextResponse.json({ error: "Unauthorized" }, { status: 403 })

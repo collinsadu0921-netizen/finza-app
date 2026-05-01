@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { logAudit } from "@/lib/auditLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 const ALLOWED_STATUSES = ["allocated", "consumed", "returned"] as const
 
@@ -41,6 +42,14 @@ export async function PATCH(
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const businessId = scope.businessId
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId,
+      minTier: "professional",
+    })
+    if (denied) return denied
 
     const { data: existing, error: fetchErr } = await supabase
       .from("service_job_material_usage")

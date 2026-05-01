@@ -1,6 +1,14 @@
 "use client"
 
-import { Suspense, createContext, useContext, useEffect, useRef, useState } from "react"
+import {
+  Suspense,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, usePathname } from "next/navigation"
 import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscriptionContext"
@@ -21,6 +29,7 @@ import {
   type WorkspaceSessionUser,
 } from "@/components/WorkspaceBusinessContext"
 import PlatformAnnouncementsHost from "@/components/platform/PlatformAnnouncementsHost"
+import { fetchAssistantBusinessSnapshot } from "@/components/ProtectedLayout-assistantSnapshot"
 
 const ProtectedLayoutContext = createContext(false)
 
@@ -31,7 +40,27 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(isNestedProtectedLayout ? false : true)
   const [aiBusinessId, setAiBusinessId] = useState<string | null>(null)
   const [aiContext, setAiContext] = useState<Record<string, unknown> | null>(null)
-  const [aiContextRefreshKey, setAiContextRefreshKey] = useState(0)
+  const [assistantContextLoading, setAssistantContextLoading] = useState(false)
+  const aiBusinessIdRef = useRef<string | null>(null)
+  /** Business id whose assistant snapshot row caps were last fetched into `aiContext` */
+  const assistantContextCacheBusinessIdRef = useRef<string | null>(null)
+  /** Latest successful snapshot payload (mirrors merged assistant context for API calls before re-render). */
+  const assistantCachedPayloadRef = useRef<Record<string, unknown> | null>(null)
+  const assistantContextLoadInflightRef =
+    useRef<Promise<Record<string, unknown> | undefined> | null>(null)
+
+  useEffect(() => {
+    aiBusinessIdRef.current = aiBusinessId
+  }, [aiBusinessId])
+
+  /** New workspace clears cached assistant snapshot until the user opens the assistant again */
+  useEffect(() => {
+    setAiContext(null)
+    assistantContextCacheBusinessIdRef.current = null
+    assistantCachedPayloadRef.current = null
+    assistantContextLoadInflightRef.current = null
+    setAssistantContextLoading(false)
+  }, [aiBusinessId])
   const [workspaceBusiness, setWorkspaceBusiness] = useState<WorkspaceBusiness>(null)
   const [workspaceSessionUser, setWorkspaceSessionUser] = useState<WorkspaceSessionUser>(null)
   /** DB role cashier on a retail business — hide owner sidebar/nav (parallel to PIN session chrome). */
@@ -177,438 +206,73 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     return () => window.removeEventListener("cashierSessionChanged", onCashierSession)
   }, [])
 
-  useEffect(() => {
-    if (isNestedProtectedLayout || !aiBusinessId) {
-      return
+  const ensureAssistantContextLoaded = useCallback(async (): Promise<
+    Record<string, unknown> | undefined
+  > => {
+    const bid = aiBusinessIdRef.current
+    if (!bid || isNestedProtectedLayout) return undefined
+
+    if (
+      assistantContextCacheBusinessIdRef.current === bid &&
+      assistantCachedPayloadRef.current !== null
+    ) {
+      return assistantCachedPayloadRef.current
     }
 
-    let isMounted = true
-
-    const roundMoney = (value: number) => Math.round((value || 0) * 100) / 100
-    const monthRange = (monthOffset: number) => {
-      const now = new Date()
-      const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
-      const end = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 0)
-      return {
-        start: start.toISOString().split("T")[0],
-        end: end.toISOString().split("T")[0],
-      }
+    const inflight = assistantContextLoadInflightRef.current
+    if (inflight) {
+      await inflight
+      if (aiBusinessIdRef.current !== bid) return undefined
+      return assistantCachedPayloadRef.current ?? undefined
     }
 
-    async function loadAiContext() {
-      const currentMonth = monthRange(0)
-      const lastMonth = monthRange(-1)
-
-      const [
-        transactionsResult,
-        invoicesResult,
-        billsResult,
-        customersResult,
-        suppliersResult,
-        accountsResult,
-        accountLinesResult,
-        businessProfileResult,
-        serviceJobsResult,
-        serviceJobUsageResult,
-        currentMonthPaymentsResult,
-        currentMonthExpensesResult,
-        lastMonthPaymentsResult,
-        lastMonthExpensesResult,
-      ] = await Promise.all([
-        supabase
-          .from("journal_entries")
-          .select("id, date, description, reference_type, created_at, journal_entry_lines(account_id, debit, credit)")
-          .eq("business_id", aiBusinessId)
-          .order("created_at", { ascending: false })
-          .limit(50),
-        supabase
-          .from("invoices")
-          .select("*")
-          .eq("business_id", aiBusinessId)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("bills")
-          .select("*")
-          .eq("business_id", aiBusinessId)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("customers")
-          .select("*")
-          .eq("business_id", aiBusinessId),
-        supabase
-          .from("suppliers")
-          .select("*")
-          .eq("business_id", aiBusinessId),
-        supabase
-          .from("accounts")
-          .select("*")
-          .eq("business_id", aiBusinessId),
-        supabase
-          .from("journal_entry_lines")
-          .select("account_id, debit, credit, journal_entries!inner(business_id)")
-          .eq("journal_entries.business_id", aiBusinessId),
-        supabase
-          .from("businesses")
-          .select("*")
-          .eq("id", aiBusinessId)
-          .maybeSingle(),
-        supabase
-          .from("service_jobs")
-          .select("*")
-          .eq("business_id", aiBusinessId)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("service_job_material_usage")
-          .select("job_id, total_cost")
-          .eq("business_id", aiBusinessId),
-        supabase
-          .from("payments")
-          .select("amount, date")
-          .eq("business_id", aiBusinessId)
-          .gte("date", currentMonth.start)
-          .lte("date", currentMonth.end),
-        supabase
-          .from("expenses")
-          .select("total, date")
-          .eq("business_id", aiBusinessId)
-          .gte("date", currentMonth.start)
-          .lte("date", currentMonth.end),
-        supabase
-          .from("payments")
-          .select("amount, date")
-          .eq("business_id", aiBusinessId)
-          .gte("date", lastMonth.start)
-          .lte("date", lastMonth.end),
-        supabase
-          .from("expenses")
-          .select("total, date")
-          .eq("business_id", aiBusinessId)
-          .gte("date", lastMonth.start)
-          .lte("date", lastMonth.end),
-      ])
-
-      if (
-        transactionsResult.error ||
-        invoicesResult.error ||
-        billsResult.error ||
-        customersResult.error ||
-        suppliersResult.error ||
-        accountsResult.error ||
-        accountLinesResult.error ||
-        businessProfileResult.error ||
-        serviceJobsResult.error ||
-        serviceJobUsageResult.error ||
-        currentMonthPaymentsResult.error ||
-        currentMonthExpensesResult.error ||
-        lastMonthPaymentsResult.error ||
-        lastMonthExpensesResult.error
-      ) {
-        console.warn("ProtectedLayout: some AI context queries returned errors", {
-          transactions: transactionsResult.error,
-          invoices: invoicesResult.error,
-          bills: billsResult.error,
-          customers: customersResult.error,
-          suppliers: suppliersResult.error,
-          accounts: accountsResult.error,
-          accountLines: accountLinesResult.error,
-          businessProfile: businessProfileResult.error,
-          serviceJobs: serviceJobsResult.error,
-          serviceJobUsage: serviceJobUsageResult.error,
-          currentMonthPayments: currentMonthPaymentsResult.error,
-          currentMonthExpenses: currentMonthExpensesResult.error,
-          lastMonthPayments: lastMonthPaymentsResult.error,
-          lastMonthExpenses: lastMonthExpensesResult.error,
-        })
-      }
-
-      const invoices = invoicesResult.data ?? []
-      const bills = billsResult.data ?? []
-      const customers = customersResult.data ?? []
-      const suppliers = suppliersResult.data ?? []
-      const accounts = accountsResult.data ?? []
-      const accountLines = accountLinesResult.data ?? []
-      const transactions = transactionsResult.data ?? []
-      const serviceJobs = serviceJobsResult.data ?? []
-      const serviceJobUsage = serviceJobUsageResult.data ?? []
-      const businessProfile = businessProfileResult.data ?? {}
-
-      const customerNameById = new Map<string, { name: string | null; email: string | null }>()
-      for (const customer of customers as any[]) {
-        customerNameById.set(String(customer.id), {
-          name: customer.name || null,
-          email: customer.email || null,
-        })
-      }
-
-      const supplierNameById = new Map<string, { name: string | null }>()
-      for (const supplier of suppliers as any[]) {
-        supplierNameById.set(String(supplier.id), {
-          name: supplier.name || null,
-        })
-      }
-
-      const accountLabelById = new Map<string, string>()
-      for (const account of accounts as any[]) {
-        accountLabelById.set(String(account.id), `${account.code || "N/A"} - ${account.name || "Account"}`)
-      }
-
-      const accountBalanceById = new Map<string, number>()
-      for (const line of accountLines as any[]) {
-        const accountId = String(line.account_id || "")
-        if (!accountId) continue
-        const debit = Number(line.debit) || 0
-        const credit = Number(line.credit) || 0
-        accountBalanceById.set(accountId, (accountBalanceById.get(accountId) || 0) + debit - credit)
-      }
-
-      const transactionRows = (transactions as any[]).map((entry) => {
-        const lines = Array.isArray(entry.journal_entry_lines) ? entry.journal_entry_lines : []
-        const totalDebits = lines.reduce((sum: number, line: any) => sum + (Number(line.debit) || 0), 0)
-        const totalCredits = lines.reduce((sum: number, line: any) => sum + (Number(line.credit) || 0), 0)
-        const primaryLine = [...lines].sort((a: any, b: any) => {
-          const aValue = Math.max(Number(a.debit) || 0, Number(a.credit) || 0)
-          const bValue = Math.max(Number(b.debit) || 0, Number(b.credit) || 0)
-          return bValue - aValue
-        })[0]
-        const accountLabel = primaryLine?.account_id
-          ? accountLabelById.get(String(primaryLine.account_id)) || "Unmapped account"
-          : "Unmapped account"
-
-        return {
-          id: entry.id,
-          date: entry.date || entry.created_at || null,
-          description: entry.description ? String(entry.description).slice(0, 200) : "Journal entry",
-          amount: roundMoney(Math.max(totalDebits, totalCredits)),
-          type: entry.reference_type || "journal_entry",
-          account: accountLabel,
+    const capturedBid = bid
+    const promise = (async (): Promise<Record<string, unknown> | undefined> => {
+      setAssistantContextLoading(true)
+      const t0 = typeof performance !== "undefined" ? performance.now() : 0
+      try {
+        const snapshot = await fetchAssistantBusinessSnapshot(supabase, capturedBid)
+        if (aiBusinessIdRef.current !== capturedBid) return undefined
+        const row = snapshot as Record<string, unknown>
+        assistantCachedPayloadRef.current = row
+        setAiContext(row)
+        assistantContextCacheBusinessIdRef.current = capturedBid
+        if (process.env.NODE_ENV !== "production") {
+          const elapsed = typeof performance !== "undefined" ? performance.now() - t0 : 0
+          console.debug(
+            `[ProtectedLayout] Assistant business snapshot loaded in ${Math.round(elapsed)}ms (capped sampling; ids not logged)`
+          )
         }
-      })
-
-      const invoiceAmountByCustomerId = new Map<string, number>()
-      for (const invoice of invoices as any[]) {
-        const customerId = invoice.customer_id ? String(invoice.customer_id) : ""
-        if (!customerId) continue
-        const total = Number(invoice.total) || 0
-        invoiceAmountByCustomerId.set(customerId, (invoiceAmountByCustomerId.get(customerId) || 0) + total)
-      }
-
-      const billAmountBySupplierId = new Map<string, number>()
-      for (const bill of bills as any[]) {
-        const supplierId = bill.supplier_id ? String(bill.supplier_id) : ""
-        if (!supplierId) continue
-        const total = Number(bill.total) || Number(bill.amount) || 0
-        billAmountBySupplierId.set(supplierId, (billAmountBySupplierId.get(supplierId) || 0) + total)
-      }
-
-      const invoiceRows = (invoices as any[]).map((invoice) => {
-        const customer = customerNameById.get(String(invoice.customer_id || "")) || { name: null, email: null }
-        return {
-          id: invoice.id,
-          customer: customer.name || "Unknown customer",
-          amount: roundMoney(Number(invoice.total) || 0),
-          status: invoice.status || "unknown",
-          due_date: invoice.due_date || null,
-        }
-      })
-
-      const billRows = (bills as any[]).map((bill) => {
-        const supplier = supplierNameById.get(String(bill.supplier_id || "")) || { name: null }
-        return {
-          id: bill.id,
-          supplier: supplier.name || "Unknown supplier",
-          amount: roundMoney(Number(bill.total) || Number(bill.amount) || 0),
-          status: bill.status || "unknown",
-          due_date: bill.due_date || null,
-        }
-      })
-
-      const customerRows = (customers as any[]).map((customer) => ({
-        id: customer.id,
-        name: customer.name || "Unknown customer",
-        email: customer.email || null,
-        total_billed: roundMoney(invoiceAmountByCustomerId.get(String(customer.id)) || 0),
-      }))
-
-      const supplierRows = (suppliers as any[]).map((supplier) => ({
-        id: supplier.id,
-        name: supplier.name || "Unknown supplier",
-        total_billed: roundMoney(billAmountBySupplierId.get(String(supplier.id)) || 0),
-      }))
-
-      const accountsRows = (accounts as any[]).map((account) => ({
-        id: account.id,
-        code: account.code || null,
-        name: account.name || "Unnamed account",
-        type: account.type || null,
-        sub_type: account.sub_type || null,
-        balance: roundMoney(accountBalanceById.get(String(account.id)) || 0),
-      }))
-
-      const usageTotalByJobId = new Map<string, number>()
-      for (const usage of serviceJobUsage as any[]) {
-        const jobId = String(usage.job_id || "")
-        if (!jobId) continue
-        usageTotalByJobId.set(jobId, (usageTotalByJobId.get(jobId) || 0) + (Number(usage.total_cost) || 0))
-      }
-
-      const serviceJobRows = (serviceJobs as any[]).map((job) => {
-        const inferredAmount =
-          Number(job.amount) ||
-          Number(job.total_amount) ||
-          Number(job.quoted_amount) ||
-          Number(job.total) ||
-          usageTotalByJobId.get(String(job.id)) ||
-          0
-
-        return {
-          id: job.id,
-          status: job.status || "unknown",
-          assigned_staff: job.assigned_staff_id || job.staff_id || job.technician_id || job.assigned_to || null,
-          amount: roundMoney(inferredAmount),
-        }
-      })
-
-      const currentIncome = roundMoney(
-        (currentMonthPaymentsResult.data ?? []).reduce((sum: number, row: any) => sum + (Number(row.amount) || 0), 0)
-      )
-      const currentExpenses = roundMoney(
-        (currentMonthExpensesResult.data ?? []).reduce((sum: number, row: any) => sum + (Number(row.total) || 0), 0)
-      )
-      const lastIncome = roundMoney(
-        (lastMonthPaymentsResult.data ?? []).reduce((sum: number, row: any) => sum + (Number(row.amount) || 0), 0)
-      )
-      const lastExpenses = roundMoney(
-        (lastMonthExpensesResult.data ?? []).reduce((sum: number, row: any) => sum + (Number(row.total) || 0), 0)
-      )
-
-      const unpaidInvoiceStatuses = new Set(["sent", "partial", "overdue", "unpaid"])
-      const unpaidBillStatuses = new Set(["pending", "partial", "overdue", "unpaid", "approved"])
-
-      const unpaidInvoicesTotal = roundMoney(
-        (invoices as any[]).reduce((sum: number, invoice: any) => {
-          const status = String(invoice.status || "").toLowerCase()
-          const openAmount = Number(invoice.balance_due) || Number(invoice.amount_due) || Number(invoice.total) || 0
-          if (!unpaidInvoiceStatuses.has(status)) return sum
-          return sum + openAmount
-        }, 0)
-      )
-
-      const unpaidBillsTotal = roundMoney(
-        (bills as any[]).reduce((sum: number, bill: any) => {
-          const status = String(bill.status || "").toLowerCase()
-          const openAmount = Number(bill.balance_due) || Number(bill.amount_due) || Number(bill.total) || Number(bill.amount) || 0
-          if (!unpaidBillStatuses.has(status)) return sum
-          return sum + openAmount
-        }, 0)
-      )
-
-      const whtSettings = Object.fromEntries(
-        Object.entries(businessProfile as Record<string, unknown>).filter(([key]) => {
-          const lowered = key.toLowerCase()
-          return lowered.includes("wht") || lowered.includes("withholding")
-        })
-      )
-
-      const builtContext = {
-        generated_at: new Date().toISOString(),
-        business_id: aiBusinessId,
-        page_scope: "global",
-        transactions: {
-          label: "Last 50 transactions",
-          count: transactionRows.length,
-          total_amount: roundMoney(transactionRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)),
-          rows: transactionRows,
-        },
-        invoices: {
-          label: "All invoices",
-          count: invoiceRows.length,
-          total_amount: roundMoney(invoiceRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)),
-          rows: invoiceRows,
-        },
-        bills: {
-          label: "All bills",
-          count: billRows.length,
-          total_amount: roundMoney(billRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)),
-          rows: billRows,
-        },
-        customers: {
-          label: "All customers",
-          count: customerRows.length,
-          total_billed: roundMoney(customerRows.reduce((sum, row) => sum + (Number(row.total_billed) || 0), 0)),
-          rows: customerRows,
-        },
-        suppliers: {
-          label: "All suppliers",
-          count: supplierRows.length,
-          total_billed: roundMoney(supplierRows.reduce((sum, row) => sum + (Number(row.total_billed) || 0), 0)),
-          rows: supplierRows,
-        },
-        accounts: {
-          label: "All chart of accounts with current balances",
-          count: accountsRows.length,
-          net_balance: roundMoney(accountsRows.reduce((sum, row) => sum + (Number(row.balance) || 0), 0)),
-          rows: accountsRows,
-        },
-        tax_profile: {
-          label: "Business tax profile",
-          vat_scheme: (businessProfile as any).vat_scheme || null,
-          cit_rate: (businessProfile as any).cit_rate_code || null,
-          wht_settings: whtSettings,
-        },
-        service_jobs: {
-          label: "All service jobs",
-          count: serviceJobRows.length,
-          total_amount: roundMoney(serviceJobRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)),
-          rows: serviceJobRows,
-        },
-        monthly_summary: {
-          label: "Current and last month financial summary",
-          current_month: {
-            period_start: currentMonth.start,
-            period_end: currentMonth.end,
-            total_income: currentIncome,
-            total_expenses: currentExpenses,
-            net_profit: roundMoney(currentIncome - currentExpenses),
-          },
-          last_month: {
-            period_start: lastMonth.start,
-            period_end: lastMonth.end,
-            total_income: lastIncome,
-            total_expenses: lastExpenses,
-            net_profit: roundMoney(lastIncome - lastExpenses),
-          },
-        },
-        unpaid_invoices_total: {
-          label: "Total outstanding receivables",
-          amount: unpaidInvoicesTotal,
-        },
-        unpaid_bills_total: {
-          label: "Total outstanding payables",
-          amount: unpaidBillsTotal,
-        },
-      }
-
-      if (isMounted) {
-        setAiContext(builtContext)
-      }
-    }
-
-    loadAiContext().catch((error) => {
-      console.error("ProtectedLayout: Failed to load global AI context", error)
-      if (isMounted) {
-        setAiContext({
+        return row
+      } catch (error) {
+        console.error("ProtectedLayout: Failed to load assistant business snapshot", error)
+        if (aiBusinessIdRef.current !== capturedBid) return undefined
+        const fallback: Record<string, unknown> = {
           generated_at: new Date().toISOString(),
-          business_id: aiBusinessId,
+          business_id: capturedBid,
           page_scope: "global",
           warning: "Some context data could not be loaded.",
-        })
+        }
+        assistantCachedPayloadRef.current = fallback
+        setAiContext(fallback)
+        assistantContextCacheBusinessIdRef.current = capturedBid
+        return fallback
+      } finally {
+        if (aiBusinessIdRef.current === capturedBid) {
+          setAssistantContextLoading(false)
+        }
       }
-    })
+    })()
 
-    return () => {
-      isMounted = false
+    assistantContextLoadInflightRef.current = promise
+    try {
+      return await promise
+    } finally {
+      if (assistantContextLoadInflightRef.current === promise) {
+        assistantContextLoadInflightRef.current = null
+      }
     }
-  }, [aiBusinessId, isNestedProtectedLayout, aiContextRefreshKey])
+  }, [isNestedProtectedLayout])
 
   if (isNestedProtectedLayout) {
     return <>{children}</>
@@ -685,9 +349,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             {!hideFloatingAssistant && (
               <div className="fixed bottom-3 right-3 z-40 w-auto max-w-[calc(100vw-1.5rem)] print-hide">
                 <AiAssistant
-                  onPanelOpen={() => setAiContextRefreshKey((k) => k + 1)}
+                  ensureAssistantContext={ensureAssistantContextLoaded}
+                  assistantContextLoading={assistantContextLoading}
                   context={{
-                    ...(aiContext ?? { page_scope: "global", warning: "AI context is still loading." }),
+                    business_id: aiBusinessId ?? undefined,
+                    ...(aiContext ?? {}),
                     current_path: pathname || "/",
                     ...(invoiceIdFromPath ? { page_invoice_id: invoiceIdFromPath } : {}),
                   }}

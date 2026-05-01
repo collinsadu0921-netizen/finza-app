@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 async function ensureServiceBusinessAccess(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -58,6 +59,14 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId: businessId.trim(),
+      minTier: "starter",
+    })
+    if (denied) return denied
 
     const startDate = searchParams.get("startDate") ?? searchParams.get("start_date") ?? null
     const endDate = searchParams.get("endDate") ?? searchParams.get("end_date") ?? null

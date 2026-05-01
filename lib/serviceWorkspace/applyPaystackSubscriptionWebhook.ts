@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { TIER_PRICING, type BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { activateServiceSubscription } from "@/lib/serviceWorkspace/activateServiceSubscription"
+import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
 
 export const FINZA_PAYSTACK_METADATA_PURPOSE_KEY = "finza_purpose"
 export const FINZA_PAYSTACK_SUBSCRIPTION_PURPOSE = "service_subscription"
@@ -140,6 +141,7 @@ export async function applyPaystackSubscriptionWebhook(
       tier,
       cycle,
       paidAt: nowIso,
+      subscriptionNotificationLifecycleKey: reference,
     })
     if (!activated.ok) {
       console.error("[paystack subscription] business update error:", activated.error)
@@ -190,6 +192,15 @@ export async function applyPaystackSubscriptionWebhook(
     },
     { onConflict: "reference" }
   )
+
+  void sendSubscriptionLifecycleNotification({
+    businessId,
+    eventType: "payment_failed_grace_started",
+    lifecycleKey: `${graceEnd}|${reference}`,
+    metadata: { reference },
+  }).catch((err) => {
+    console.error("[paystack subscription] payment_failed_grace_started email:", err)
+  })
 
   return { handled: true, applied: true, message: "subscription payment failed — grace period set" }
 }

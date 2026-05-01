@@ -30,13 +30,20 @@ type VerifyCheckoutInput = {
 
 async function activateSubscriptionIfNeeded(
   supabase: SupabaseClient,
-  params: { businessId: string; planTier: ServiceSubscriptionTier; billingCycle: BillingCycle; paidAt: string }
+  params: {
+    businessId: string
+    planTier: ServiceSubscriptionTier
+    billingCycle: BillingCycle
+    paidAt: string
+    subscriptionNotificationLifecycleKey?: string
+  }
 ): Promise<void> {
   const out = await activateServiceSubscription(supabase, {
     businessId: params.businessId,
     tier: params.planTier,
     cycle: params.billingCycle,
     paidAt: params.paidAt,
+    subscriptionNotificationLifecycleKey: params.subscriptionNotificationLifecycleKey,
   })
   if (!out.ok) {
     throw new Error(out.error)
@@ -198,6 +205,7 @@ export async function simulateMockSubscriptionOutcome(
       planTier: session.plan_tier as ServiceSubscriptionTier,
       billingCycle: session.billing_cycle as BillingCycle,
       paidAt: now,
+      subscriptionNotificationLifecycleKey: `checkout:${session.id}`,
     })
   }
 
@@ -267,6 +275,7 @@ export async function verifySubscriptionCheckout(
       planTier: session.plan_tier as ServiceSubscriptionTier,
       billingCycle: session.billing_cycle as BillingCycle,
       paidAt: verify.data.paidAt ?? now,
+      subscriptionNotificationLifecycleKey: `checkout:${session.id}`,
     })
   }
 

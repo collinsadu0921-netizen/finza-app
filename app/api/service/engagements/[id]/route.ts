@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { logFirmActivity } from "@/lib/firmActivityLog"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function PATCH(
   request: NextRequest,
@@ -84,6 +85,14 @@ export async function PATCH(
         { status: 403 }
       )
     }
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId: engagement.client_business_id as string,
+      minTier: "starter",
+    })
+    if (denied) return denied
 
     if (engagement.status !== "pending") {
       return NextResponse.json(

@@ -9,70 +9,40 @@ import {
 } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { FinzaDemoVideoEmbed } from "@/components/marketing/FinzaDemoVideoEmbed"
+import { buildOAuthRedirectToWithMarketingContext, signInWithGoogle } from "@/lib/auth/startGoogleAuth"
 
 /**
- * Valid workspaces that support the trial flow.
- * Only "service" is finished — do NOT extend to retail or other workspaces.
+ * Valid workspaces that support the trial flow in URL + metadata.
+ * Public signup is Service-only; retail/accounting are not selectable or honored here.
  */
 const TRIAL_SUPPORTED_WORKSPACES = ["service"] as const
 
-/**
- * Strict signup gate.
- *
- * When NEXT_PUBLIC_SIGNUP_REQUIRE_SERVICE_PLAN_CONTEXT === "true", the signup
- * page is only accessible if the visitor arrives with:
- *   (a) valid service plan context:  workspace=service & plan=<valid tier>
- *   (b) accounting-firm bypass:      flow=accounting_firm
- *
- * Any other visitor is redirected to NEXT_PUBLIC_MARKETING_PRICING_URL.
- * When the flag is absent / not "true" the gate is OFF and behavior is
- * identical to before — nothing changes for dev or existing flows.
- */
 const STRICT_GATE =
   process.env.NEXT_PUBLIC_SIGNUP_REQUIRE_SERVICE_PLAN_CONTEXT === "true"
 
-/**
- * Strict plan validator used ONLY by the signup gate.
- *
- * Intentionally does NOT fall back to "starter" — an unknown or missing plan
- * param should fail the gate, not silently grant entry as Essentials.
- * This is separate from parseServiceSubscriptionTier (which has a safe
- * fallback for subscription logic elsewhere).
- */
 function isValidServicePlanParam(raw: string): boolean {
-  const n = raw.trim().toLowerCase()
-  // Mirror all aliases accepted by parseServiceSubscriptionTier so the gate
-  // stays in sync with the rest of the tier system.
-  return (
-    n === "starter"      || n === "essentials" ||
-    n === "professional" || n === "growth"     || n === "pro" ||
-    n === "business"     || n === "scale"       || n === "enterprise"
-  )
+  return tryParseServiceSubscriptionTier(raw) !== null
 }
 
 function SignupPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // --- Trial intent from marketing site URL params ---
-  // e.g. /signup?workspace=service&plan=professional&trial=1
-  // These are read once on mount; stored durably in user metadata so they
-  // survive email verification redirects (URL params are lost after the flow).
   const rawWorkspace = searchParams.get("workspace") ?? ""
-  const rawPlan      = searchParams.get("plan") ?? ""
-  const rawTrial     = searchParams.get("trial") ?? ""
-
-  // Accounting-firm bypass param (flow=accounting_firm).
-  // Used by: accounting firm invite links, internal onboarding.
-  const rawFlow = searchParams.get("flow") ?? ""
-  const isAccountingFirmFlow = rawFlow === "accounting_firm"
+  const rawPlan = searchParams.get("plan") ?? ""
+  const rawTrial = searchParams.get("trial") ?? ""
 
   const hasValidServicePlanContext =
-    rawWorkspace.trim().toLowerCase() === "service" &&
-    tryParseServiceSubscriptionTier(rawPlan) !== null
+    rawWorkspace.trim().toLowerCase() === "service" && isValidServicePlanParam(rawPlan)
+
+  const trialWorkspace = (TRIAL_SUPPORTED_WORKSPACES as readonly string[]).includes(rawWorkspace)
+    ? rawWorkspace
+    : null
+  const trialPlan = trialWorkspace ? parseServiceSubscriptionTier(rawPlan) : null
+  const hasTrial = trialWorkspace !== null && rawTrial === "1"
 
   const shouldBlockAndRedirect =
-    STRICT_GATE && !hasValidServicePlanContext && !isAccountingFirmFlow
+    STRICT_GATE && !hasValidServicePlanContext && !hasTrial
 
   useEffect(() => {
     if (!shouldBlockAndRedirect) return
@@ -89,41 +59,39 @@ function SignupPageInner() {
     window.location.replace("/")
   }, [shouldBlockAndRedirect])
 
-  // Only honour trial intent for finished workspaces
-  const trialWorkspace = (TRIAL_SUPPORTED_WORKSPACES as readonly string[]).includes(rawWorkspace)
-    ? rawWorkspace
-    : null
-  // Normalise plan alias → internal tier key
-  const trialPlan = trialWorkspace
-    ? parseServiceSubscriptionTier(rawPlan) // returns 'starter' if invalid → safe fallback
-    : null
-  const hasTrial = trialWorkspace !== null && rawTrial === "1"
-
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [fullName, setFullName] = useState("")
-  // Preselect accounting_firm when the flow param is present; this is a
-  // harmless UX hint — the actual signup_intent is written from the selector.
-  const [signupIntent, setSignupIntent] = useState<"business_owner" | "accounting_firm">(
-    isAccountingFirmFlow ? "accounting_firm" : "business_owner"
-  )
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+
+  const handleGoogle = async () => {
+    setError("")
+    setLoading(true)
+    try {
+      const redirectTo = buildOAuthRedirectToWithMarketingContext({
+        plan: rawPlan,
+        trial: rawTrial,
+        workspace: rawWorkspace,
+      })
+      const { error: oauthError } = await signInWithGoogle(redirectTo)
+      if (oauthError) {
+        setError(oauthError.message || "Could not start Google sign-in")
+        setLoading(false)
+      }
+    } catch (err: any) {
+      setError(err.message || "Could not start Google sign-in")
+      setLoading(false)
+    }
+  }
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
     setLoading(true)
 
-    if (
-      STRICT_GATE &&
-      !hasTrial &&
-      signupIntent === "business_owner" &&
-      !hasValidServicePlanContext
-    ) {
-      setError(
-        "Start from our pricing page to choose a plan, or select “I manage accounting for clients” if you are signing up as an accounting firm."
-      )
+    if (STRICT_GATE && !hasTrial && !hasValidServicePlanContext) {
+      setError("Start from our pricing page to choose a plan.")
       setLoading(false)
       return
     }
@@ -133,22 +101,21 @@ function SignupPageInner() {
         process.env.NEXT_PUBLIC_APP_URL ||
         (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
 
-      // Build durable metadata. Trial intent lives here so it survives the
-      // email-verification redirect (URL params are gone by then).
-      //
-      // trial_intent is ALWAYS written — true for website trial links, false for
-      // contextless signups. This makes the intent unambiguous at rest and prevents
-      // business-setup from needing to distinguish "key absent" from "key = false".
       const userMetadata: Record<string, string | boolean> = {
-        full_name:     fullName,
-        signup_intent: hasTrial ? "business_owner" : signupIntent,
-        trial_intent:  false,   // default; overwritten below if valid trial link
+        full_name: fullName,
+        signup_intent: "business_owner",
+        trial_intent: false,
       }
 
       if (hasTrial && trialWorkspace && trialPlan) {
-        userMetadata.trial_workspace = trialWorkspace   // "service"
-        userMetadata.trial_plan      = trialPlan        // "starter" | "professional" | "business"
-        userMetadata.trial_intent    = true             // explicit flag — prevents accidental activation
+        userMetadata.trial_workspace = trialWorkspace
+        userMetadata.trial_plan = trialPlan
+        userMetadata.trial_intent = true
+      } else {
+        const parsed = tryParseServiceSubscriptionTier(rawPlan)
+        if (parsed) {
+          userMetadata.signup_service_plan = parsed
+        }
       }
 
       const { data, error: authError } = await supabase.auth.signUp({
@@ -167,10 +134,11 @@ function SignupPageInner() {
       }
 
       if (data.user) {
-        if (!hasTrial && signupIntent === "accounting_firm") {
-          router.push("/accounting/firm/setup")
-        } else {
+        setLoading(false)
+        if (data.session) {
           router.push("/business-setup")
+        } else {
+          router.push(`/signup/check-email?email=${encodeURIComponent(email.trim())}`)
         }
       }
     } catch (err: any) {
@@ -190,7 +158,6 @@ function SignupPageInner() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 px-4 py-8">
       <div className="mx-auto w-full max-w-6xl">
-        {/* Header */}
         <div className="mb-8 text-center">
           <div className="mb-6 flex justify-center">
             <FinzaLogo height={72} />
@@ -207,21 +174,27 @@ function SignupPageInner() {
               <p className="text-sm text-gray-600">
                 You&apos;re starting a{" "}
                 <span className="font-semibold capitalize text-blue-700">
-                  {trialPlan === "starter" ? "Essentials" : trialPlan === "professional" ? "Professional" : "Business"}
+                  {trialPlan === "starter"
+                    ? "Essentials"
+                    : trialPlan === "professional"
+                      ? "Professional"
+                      : "Business"}
                 </span>{" "}
-                trial of the Service workspace.
+                trial of Finza Service.
               </p>
             </>
           ) : (
             <>
               <h1 className="mb-2 text-3xl font-bold text-gray-900">Create your account</h1>
-              <p className="text-sm text-gray-600">Get started with your free account today</p>
+              <p className="text-sm text-gray-600 max-w-lg mx-auto">
+                Start with Finza Service. Create quotes, invoices, receipts and track payments for your Ghanaian service
+                business.
+              </p>
             </>
           )}
         </div>
 
         <div className="grid items-start gap-10 lg:grid-cols-2">
-          {/* Video first on small screens; right column on large */}
           <div className="order-1 lg:order-2">
             <div className="lg:sticky lg:top-8">
               <h2 className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500 lg:text-left">
@@ -244,149 +217,152 @@ function SignupPageInner() {
 
           <div className="order-2 lg:order-1">
             <div className="mx-auto w-full max-w-md rounded-2xl border border-gray-100 bg-white p-10 shadow-xl lg:mx-0 lg:max-w-none">
-        {/* Signup intent selector — hidden when arriving from a trial link
-            (trial always implies business_owner) */}
-        {!hasTrial && (
-          <div className="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-              How will you use Finza?
-            </label>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setSignupIntent("accounting_firm")}
-                className={`w-full px-4 py-3 rounded-lg text-left transition-all ${
-                  signupIntent === "accounting_firm"
-                    ? "bg-blue-600 text-white border-2 border-blue-600"
-                    : "bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🧮</span>
-                  <div>
-                    <div className="font-medium">I manage accounting for clients</div>
-                    <div className="text-xs opacity-80">For accounting firms and bookkeepers</div>
+              {error && (
+                <div className="bg-red-50 border-l-4 border-red-400 text-red-700 px-4 py-3 rounded-r mb-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <span className="text-sm font-medium">{error}</span>
                   </div>
                 </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSignupIntent("business_owner")}
-                className={`w-full px-4 py-3 rounded-lg text-left transition-all ${
-                  signupIntent === "business_owner"
-                    ? "bg-blue-600 text-white border-2 border-blue-600"
-                    : "bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🏢</span>
-                  <div>
-                    <div className="font-medium">I run my own business</div>
-                    <div className="text-xs opacity-80">For business owners and operators</div>
+              )}
+
+              <div className="space-y-5">
+                <button
+                  type="button"
+                  onClick={() => void handleGoogle()}
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-3 rounded-lg border-2 border-gray-200 bg-white py-3 px-4 font-semibold text-gray-800 hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    />
+                  </svg>
+                  Continue with Google
+                </button>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                    <div className="w-full border-t border-gray-200" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-gray-500">or sign up with email</span>
                   </div>
                 </div>
-              </button>
-            </div>
-          </div>
-        )}
+              </div>
 
-        {/* Error */}
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 text-red-700 px-4 py-3 rounded-r mb-6 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <span className="text-sm font-medium">{error}</span>
-            </div>
-          </div>
-        )}
+              <form onSubmit={handleSignup} className="space-y-5 mt-6">
+                <div>
+                  <label htmlFor="fullName" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Full name
+                  </label>
+                  <input
+                    id="fullName"
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
+                    placeholder="John Doe"
+                    required
+                    disabled={loading}
+                  />
+                </div>
 
-        {/* Form */}
-        <form onSubmit={handleSignup} className="space-y-5">
-          <div>
-            <label htmlFor="fullName" className="block text-sm font-semibold text-gray-700 mb-2">
-              Full name
-            </label>
-            <input
-              id="fullName"
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
-              placeholder="John Doe"
-              required
-              disabled={loading}
-            />
-          </div>
+                <div>
+                  <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Email address
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
+                    placeholder="you@example.com"
+                    required
+                    disabled={loading}
+                  />
+                </div>
 
-          <div>
-            <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
-              Email address
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
-              placeholder="you@example.com"
-              required
-              disabled={loading}
-            />
-          </div>
+                <div>
+                  <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Password
+                  </label>
+                  <input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
+                    placeholder="At least 6 characters"
+                    required
+                    minLength={6}
+                    disabled={loading}
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Must be at least 6 characters long</p>
+                </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
-              placeholder="At least 6 characters"
-              required
-              minLength={6}
-              disabled={loading}
-            />
-            <p className="mt-1 text-xs text-gray-500">Must be at least 6 characters long</p>
-          </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                >
+                  {loading ? (
+                    <span className="flex items-center justify-center">
+                      <svg
+                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      Creating account...
+                    </span>
+                  ) : hasTrial ? (
+                    "Start free trial"
+                  ) : (
+                    "Create account"
+                  )}
+                </button>
+              </form>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Creating account...
-              </span>
-            ) : hasTrial ? (
-              "Start free trial"
-            ) : (
-              "Create account"
-            )}
-          </button>
-        </form>
-
-        {/* Login link */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600">
-            Already have an account?{" "}
-            <button
-              onClick={() => router.push("/login")}
-              className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
-            >
-              Sign in
-            </button>
-          </p>
-        </div>
+              <div className="mt-6 text-center">
+                <p className="text-sm text-gray-600">
+                  Already have an account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => router.push("/login")}
+                    className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
+                  >
+                    Sign in
+                  </button>
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -397,7 +373,11 @@ function SignupPageInner() {
 
 export default function SignupPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-gray-500">Loading…</div>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-gray-500">Loading…</div>
+      }
+    >
       <SignupPageInner />
     </Suspense>
   )

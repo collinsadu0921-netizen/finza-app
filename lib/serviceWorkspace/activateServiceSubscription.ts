@@ -3,12 +3,15 @@ import "server-only"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
 
 type ActivateInput = {
   businessId: string
   tier: ServiceSubscriptionTier
   cycle: BillingCycle
   paidAt?: string
+  /** Dedupes reactivation emails (e.g. Paystack reference or checkout session id). */
+  subscriptionNotificationLifecycleKey?: string
 }
 
 function addCycle(baseIso: string, cycle: BillingCycle): string {
@@ -77,6 +80,19 @@ export async function activateServiceSubscription(
     .is("archived_at", null)
 
   if (error) return { ok: false, error: error.message || "Failed to activate subscription" }
+
+  const reactivateKey =
+    input.subscriptionNotificationLifecycleKey?.trim() ||
+    `reactivate:${input.businessId}:${paidAt}`
+
+  void sendSubscriptionLifecycleNotification({
+    businessId: input.businessId,
+    eventType: "subscription_reactivated",
+    lifecycleKey: reactivateKey,
+  }).catch((err) => {
+    console.error("[activateServiceSubscription] subscription_reactivated email:", err)
+  })
+
   return { ok: true }
 }
 

@@ -10,6 +10,7 @@ import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveServiceBusinessContext } from "@/lib/serviceBusinessContext"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 const TARGET_ENGAGEMENT_ID = "6896b6e6-50ad-441c-a4d8-972ca8f98330"
 const today = () => new Date().toISOString().split("T")[0]
@@ -59,6 +60,14 @@ export async function GET() {
     }
 
     const businessId = ctx.businessId
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase,
+      userId: user.id,
+      businessId,
+      minTier: "starter",
+    })
+    if (denied) return denied
 
     // STEP 3 — Verify getCurrentBusiness result (inline)
     const getCurrentBusinessResult = await getCurrentBusiness(supabase, user.id)

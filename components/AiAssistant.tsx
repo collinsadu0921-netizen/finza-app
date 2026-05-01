@@ -16,8 +16,13 @@ type ChatMessage = {
 
 type AiAssistantProps = {
   context?: unknown
-  /** Refetch client-side AI context when the user opens the panel (e.g. fresher snapshot). */
-  onPanelOpen?: () => void
+  /**
+   * Load Finza Assist business snapshot once per workspace (caller caches by business).
+   * Returns the snapshot for immediate `/api/ai` payloads (before the next React re-render).
+   */
+  ensureAssistantContext?: () => Promise<Record<string, unknown> | undefined>
+  /** Caller-owned loading flag while snapshot queries run */
+  assistantContextLoading?: boolean
 }
 
 const AI_FETCH_TIMEOUT_MS = 180_000
@@ -31,7 +36,11 @@ const SUGGESTED_PROMPTS = [
   "Where is payroll?",
 ]
 
-export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) {
+export default function AiAssistant({
+  context,
+  ensureAssistantContext,
+  assistantContextLoading = false,
+}: AiAssistantProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -52,16 +61,27 @@ export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) 
   }, [messages, loading])
 
   useEffect(() => {
-    if (isOpen && !wasOpenRef.current) onPanelOpen?.()
+    if (isOpen && !wasOpenRef.current) {
+      void ensureAssistantContext?.()
+    }
     wasOpenRef.current = isOpen
-  }, [isOpen, onPanelOpen])
+  }, [isOpen, ensureAssistantContext])
 
   const sendMessage = async (e: FormEvent) => {
     e.preventDefault()
     const text = input.trim()
     if ((!text && !receiptFile) || loading) return
 
-    const businessId = businessIdFromContext(context)
+    const snapshotLayer = await ensureAssistantContext?.()
+    const contextForApi =
+      typeof context === "object" && context !== null
+        ? {
+            ...(typeof snapshotLayer === "object" && snapshotLayer ? snapshotLayer : {}),
+            ...(context as Record<string, unknown>),
+          }
+        : snapshotLayer
+
+    const businessId = businessIdFromContext(contextForApi ?? context)
     let receiptPath: string | undefined
 
     if (receiptFile) {
@@ -128,7 +148,7 @@ export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) 
           signal: controller.signal,
           body: JSON.stringify({
             message: text || undefined,
-            context,
+            context: contextForApi ?? context,
             ...(receiptPath ? { receipt_path: receiptPath, document_type: "expense" } : {}),
           }),
         })
@@ -253,7 +273,8 @@ export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) 
 
   return (
     <section className="w-[min(420px,calc(100vw-1.5rem))] rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-sm overflow-hidden">
-      <header className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-700/80 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+      <header className="flex flex-col gap-1 border-b border-slate-200/80 dark:border-slate-700/80 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+        <div className="flex items-center justify-between w-full">
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-bold">
             FA
@@ -271,6 +292,12 @@ export default function AiAssistant({ context, onPanelOpen }: AiAssistantProps) 
         >
           −
         </button>
+        </div>
+        {assistantContextLoading && (
+          <p className="text-[11px] text-blue-100/95 pl-[2.5rem] animate-pulse" role="status">
+            Loading business context…
+          </p>
+        )}
       </header>
 
       <div
