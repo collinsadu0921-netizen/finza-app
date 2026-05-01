@@ -55,7 +55,7 @@ async function loadBusinessSubscriptionRow(
   const { data } = await supabase
     .from("businesses")
     .select(
-      "service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle"
+      "service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle, subscription_started_at"
     )
     .eq("id", businessId)
     .is("archived_at", null)

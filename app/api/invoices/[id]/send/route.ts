@@ -448,14 +448,14 @@ export async function POST(
 
       // Send email first. Only mark as sent and post to ledger after email succeeds,
       // so a failed send leaves the invoice as draft.
-      const businessName =
-        (invoice.businesses as { trading_name?: string; legal_name?: string } | null)?.trading_name ||
-        (invoice.businesses as { legal_name?: string } | null)?.legal_name ||
-        "Our Business"
       const publicInvoiceUrlForEmail = `${baseUrl}/invoice-public/${effectivePublicToken ?? ""}`
       const invoiceForEmail = { ...invoice, invoice_items: invoice.invoice_items }
       const customerName = (invoice.customers as { name?: string } | null)?.name
       const docLabel = invoice.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice"
+      const businessName =
+        (invoice.businesses as { trading_name?: string; legal_name?: string } | null)?.trading_name ||
+        (invoice.businesses as { legal_name?: string } | null)?.legal_name ||
+        "Our Business"
       const businessEmail = (invoice.businesses as { email?: string } | null)?.email ?? undefined
       const businessIndustry = (invoice.businesses as { industry?: string | null } | null)?.industry ?? null
       const isServiceWorkspace = businessIndustry === "service"

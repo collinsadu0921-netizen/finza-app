@@ -19,6 +19,7 @@ import {
 } from "@/lib/serviceWorkspace/subscriptionPricing"
 import { formatMoney } from "@/lib/money"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { buildServiceRoute } from "@/lib/service/routes"
 
 const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
 
@@ -203,7 +204,7 @@ function SubscriptionCallbackHandler() {
     const ref = searchParams.get("reference") || searchParams.get("trxref")
     if (!ref) {
       toast.showToast("Missing payment reference from Paystack.", "error")
-      router.replace("/service/settings/subscription")
+      router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
       return
     }
     if (!businessId) return
@@ -221,19 +222,19 @@ function SubscriptionCallbackHandler() {
             "Payment confirmed. Your plan will update shortly. Your billing period runs from this payment.",
             "success"
           )
-          router.replace("/service/settings/subscription")
+          router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
           router.refresh()
           return
         }
         if (j.status === "failed" || j.status === "abandoned") {
           toast.showToast("Payment was not completed.", "error")
-          router.replace("/service/settings/subscription")
+          router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
           return
         }
         await new Promise((resolve) => setTimeout(resolve, 1500))
       }
       toast.showToast("Still processing — refresh this page shortly.", "info")
-      router.replace("/service/settings/subscription")
+      router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
     })()
     return () => {
       alive = false
@@ -288,6 +289,15 @@ function SubscriptionPaystackActions({
         setGateways(g)
         if (g.paystack) setGateway("paystack")
         else if (g.mtn_momo_sandbox) setGateway("mtn_momo_sandbox")
+        if (
+          process.env.NODE_ENV === "development" &&
+          !g.paystack &&
+          !g.mtn_momo_sandbox
+        ) {
+          console.warn(
+            "[subscription UI] No Paystack secret or MTN sandbox config — online checkout hidden. Ensure PAYSTACK_SECRET_KEY is set for server routes in this environment."
+          )
+        }
       })
       .catch(() => {
         if (!alive) return
@@ -455,9 +465,11 @@ function SubscriptionPaystackActions({
   if (noGatewayConfigured) {
     return (
       <div className="mt-4 space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-        <p className="text-sm font-medium text-amber-900">Contact support to upgrade</p>
+        <p className="text-sm font-medium text-amber-900">Online checkout isn&apos;t available here</p>
         <p className="text-xs leading-relaxed text-amber-800">
-          Online subscription checkout is not available right now (payment gateway not configured).
+          We couldn&apos;t enable card or Mobile Money checkout on this deployment. Your team may need to add
+          server-side Paystack credentials for this environment, or you may be on a preview build without production
+          keys. You can still reach us below.
         </p>
         <a
           href={`mailto:hello@finza.app?subject=${encodeURIComponent(`Upgrade — ${SERVICE_TIER_LABEL[targetTier]}`)}`}
@@ -652,15 +664,18 @@ function SubscriptionPageInner() {
   const searchParams = useSearchParams()
   const {
     tier,
+    effectiveTier,
     status,
     loading,
     businessId,
     isTrialing,
     trialExpired,
     trialEndsAt,
+    trialStartedAt,
     trialDaysLeft,
     billingCycle,
     currentPeriodEndsAt,
+    subscriptionStartedAt,
     periodExpired,
     daysUntilRenewal,
     graceEndsAt,
@@ -706,8 +721,8 @@ function SubscriptionPageInner() {
     } else if (result === "failed" || result === "failure" || result === "cancelled" || result === "expired") {
       toast.showToast(`Mock checkout result: ${result}.`, "info")
     }
-    router.replace("/service/settings/subscription")
-  }, [searchParams, toast, router])
+    router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
+  }, [searchParams, toast, router, businessId])
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -717,7 +732,10 @@ function SubscriptionPageInner() {
         {/* Header */}
         <div className="mb-8">
           <Link
-            href="/service/settings/business-profile"
+            href={buildServiceRoute(
+              "/service/settings/business-profile",
+              searchParams.get("business_id")?.trim() || businessId || undefined
+            )}
             className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -749,13 +767,24 @@ function SubscriptionPageInner() {
                   </svg>
                   <div className="flex-1">
                     <p className="text-sm font-semibold text-blue-800">
-                      {SERVICE_TIER_LABEL[tier]} free trial
+                      <span className="uppercase tracking-wide text-[11px] text-blue-600">Trial active</span>
+                      {" · "}
+                      {SERVICE_TIER_LABEL[tier]} plan
                       {trialDaysLeft !== null && (
                         <> — {trialDaysLeft === 0 ? "last day" : trialDaysLeft === 1 ? "1 day left" : `${trialDaysLeft} days left`}</>
                       )}
                     </p>
+                    <p className="mt-1 text-xs text-blue-800">
+                      Trial ends on <span className="font-medium">{formatDate(trialEndsAt)}</span>.
+                      {trialStartedAt && (
+                        <>
+                          {" "}
+                          Started <span className="font-medium">{formatDate(trialStartedAt)}</span>.
+                        </>
+                      )}
+                    </p>
                     <p className="mt-0.5 text-xs text-blue-700">
-                      Trial ends on {formatDate(trialEndsAt)}. Subscribe before then to keep uninterrupted access.
+                      Subscribe before your trial ends to keep uninterrupted access to this plan&apos;s features.
                     </p>
                   </div>
                 </div>
@@ -823,7 +852,7 @@ function SubscriptionPageInner() {
                   </svg>
                   <div className="flex-1">
                     <p className="text-sm font-semibold text-emerald-800">
-                      Next billing date:{" "}
+                      Next renewal:{" "}
                       <span className="font-bold">{formatDate(currentPeriodEndsAt)}</span>
                       {daysUntilRenewal !== null && (
                         <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
@@ -837,7 +866,12 @@ function SubscriptionPageInner() {
                     </p>
                     <p className="mt-0.5 text-xs text-emerald-700">
                       {billingCycle ? `Billing cycle: ${BILLING_CYCLE_LABEL[billingCycle as BillingCycle] ?? billingCycle}. ` : ""}
-                      Your plan renews manually — pay before this date to maintain uninterrupted access.
+                      {subscriptionStartedAt && (
+                        <>
+                          Member since <span className="font-medium">{formatDate(subscriptionStartedAt)}</span>.{" "}
+                        </>
+                      )}
+                      Pay before this date to maintain uninterrupted access.
                     </p>
                   </div>
                 </div>
@@ -846,7 +880,7 @@ function SubscriptionPageInner() {
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Current plan</p>
-                  <p className="mt-1 text-2xl font-bold text-slate-900">{SERVICE_TIER_LABEL[tier]}</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-900">{SERVICE_TIER_LABEL[effectiveTier]}</p>
                   <p className="mt-0.5 text-xs text-slate-500 capitalize">
                     Status:{" "}
                     <span className={
@@ -869,7 +903,7 @@ function SubscriptionPageInner() {
                     </span>
                   </p>
                 </div>
-                {!loading && status === "active" && tier === "business" && (
+                {!loading && status === "active" && effectiveTier === "business" && (
                   <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -925,11 +959,13 @@ function SubscriptionPageInner() {
         {/* Plan comparison cards */}
         <div className="grid gap-4 sm:grid-cols-3">
           {TIER_ORDER.map((t) => {
-            const isCurrent   = t === tier
+            const isCurrent   = t === effectiveTier
             // Show payment actions when: trial (any state), period expired (grace), or locked
             const needsSubscription = isTrialing || trialExpired || subscriptionLocked || periodExpired
-            const isUpgrade   = !loading && !needsSubscription && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[tier]
-            const isDowngrade  = !loading && !needsSubscription && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[tier]
+            const isUpgrade   =
+              !loading && !needsSubscription && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[effectiveTier]
+            const isDowngrade  =
+              !loading && !needsSubscription && SERVICE_TIER_RANK[t] < SERVICE_TIER_RANK[effectiveTier]
             const isSubscribeTarget = !loading && needsSubscription
             const config     = TIER_FEATURES[t]
             const price      = TIER_PRICING[cycle][t]
@@ -1016,7 +1052,7 @@ function SubscriptionPageInner() {
                   ) : (
                     <SubscriptionPaystackActions
                       businessId={businessId}
-                      currentTier={tier}
+                      currentTier={effectiveTier}
                       targetTier={t}
                       cycle={cycle}
                       disabled={false}
@@ -1024,24 +1060,24 @@ function SubscriptionPageInner() {
                   )
                 )}
 
-                {/* Upgrade button (active paid subscriber going higher) */}
+                {/* Upgrade (active paid subscriber going higher) — online checkout when configured */}
                 {isUpgrade && (
-                  <div className="mt-4 space-y-1.5">
-                    <a
-                      href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700"
-                    >
-                      Email to upgrade to {SERVICE_TIER_LABEL[t]}
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                      </svg>
-                    </a>
-                    <p className="text-center text-[11px] leading-relaxed text-slate-500">
-                      Upgrades are billed at the <span className="font-medium text-slate-600">full price</span> for the
-                      plan and billing cycle shown. Your new subscription period begins when payment succeeds. We do not
-                      prorate or apply unused-time credit.
-                    </p>
-                  </div>
+                  providerFlags.mock_checkout_enabled ? (
+                    <MockSubscriptionActions
+                      businessId={businessId}
+                      targetTier={t}
+                      cycle={cycle}
+                      disabled={false}
+                    />
+                  ) : (
+                    <SubscriptionPaystackActions
+                      businessId={businessId}
+                      currentTier={effectiveTier}
+                      targetTier={t}
+                      cycle={cycle}
+                      disabled={false}
+                    />
+                  )
                 )}
 
                 {/* Downgrade button (active paid subscriber going lower) */}

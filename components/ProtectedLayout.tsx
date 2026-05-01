@@ -12,6 +12,7 @@ import {
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, usePathname } from "next/navigation"
 import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscriptionContext"
+import ServiceWorkspaceSubscriptionBanners from "@/components/service/ServiceWorkspaceSubscriptionBanners"
 import StoreSwitcher from "./StoreSwitcher"
 import Sidebar from "./Sidebar"
 import { isCashierAuthenticated } from "@/lib/cashierSession"
@@ -302,6 +303,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             className="min-h-screen bg-gray-50 dark:bg-gray-900"
             data-export-mode={isExportMode ? "true" : undefined}
           >
+            <ServiceWorkspaceSubscriptionBanners />
             {/* Sidebar - hidden in print/export/preview (export-hide) */}
             {!hideRetailOwnerChrome && !isAccountingRoute && (
               <div className="export-hide print-hide">

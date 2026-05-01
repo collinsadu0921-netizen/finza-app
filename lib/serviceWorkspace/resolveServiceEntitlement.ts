@@ -46,6 +46,7 @@ export type RawBusinessSubscriptionRow = {
   subscription_grace_until?:    string | null
   current_period_ends_at?:      string | null
   billing_cycle?:               string | null
+  subscription_started_at?:     string | null
 }
 
 export type ServiceEntitlement = {
@@ -70,6 +71,10 @@ export type ServiceEntitlement = {
   trialExpired: boolean
   /** ISO date of trial end, or null if not on a trial. */
   trialEndsAt: Date | null
+  /** When the trial started, if known. */
+  trialStartedAt: Date | null
+  /** When the first paid subscription period started, if known. */
+  subscriptionStartedAt: Date | null
   /**
    * Whole days remaining in the trial (0 on the last day).
    * Null when not on an active trial.
@@ -121,9 +126,13 @@ export function resolveServiceEntitlement(
   const rawTier      = parseServiceSubscriptionTier(row.service_subscription_tier)
   const status       = parseServiceSubscriptionStatus(row.service_subscription_status)
   const trialEndsAt  = row.trial_ends_at          ? new Date(row.trial_ends_at)          : null
+  const trialStartedAt = row.trial_started_at    ? new Date(row.trial_started_at)       : null
   const graceUntil   = row.subscription_grace_until ? new Date(row.subscription_grace_until) : null
   const periodEndsAt = row.current_period_ends_at  ? new Date(row.current_period_ends_at) : null
   const billingCycle = row.billing_cycle ?? null
+  const subscriptionStartedAt = row.subscription_started_at
+    ? new Date(row.subscription_started_at)
+    : null
 
   // --- Trial state ---
   const isTrialing   = status === "trialing" && trialEndsAt !== null && now < trialEndsAt
@@ -181,6 +190,8 @@ export function resolveServiceEntitlement(
     isTrialing,
     trialExpired,
     trialEndsAt,
+    trialStartedAt,
+    subscriptionStartedAt,
     trialDaysLeft,
     periodExpired,
     daysUntilRenewal,

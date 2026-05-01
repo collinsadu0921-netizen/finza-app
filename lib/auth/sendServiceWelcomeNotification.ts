@@ -119,42 +119,128 @@ async function insertTenantNotificationLog(
   return { duplicate: false }
 }
 
+/** Customer-facing welcome subject (Finza Service provisioning). */
+export const SERVICE_WELCOME_EMAIL_SUBJECT = "Welcome to Finza Service — your workspace is ready"
+
+const WELCOME_PREHEADER =
+  "Start creating quotes, invoices, receipts, and tracking payments from one workspace."
+
+function shouldShowNamedWorkspace(businessNameTrimmed: string): boolean {
+  if (!businessNameTrimmed) return false
+  const lower = businessNameTrimmed.toLowerCase()
+  if (lower === "finza" || lower === "finza service") return false
+  return true
+}
+
 function buildWelcomeEmail(opts: {
   businessName: string
+  showNamedWorkspace: boolean
   dashboardUrl: string
   subscriptionUrl: string
   supportEmail: string
 }): { html: string; text: string } {
-  const name = escapeHtml(opts.businessName)
   const dash = escapeHtml(opts.dashboardUrl)
   const sub = escapeHtml(opts.subscriptionUrl)
   const sup = escapeHtml(opts.supportEmail)
+  const bizEsc = opts.showNamedWorkspace ? escapeHtml(opts.businessName) : ""
+
+  const introLead = opts.showNamedWorkspace
+    ? `Your workspace for ${opts.businessName} is ready.`
+    : "Your workspace is ready."
+  const introRest =
+    " You can now manage quotes, invoices, receipts, customers, and payment records from one place."
+
+  const checklistText = [
+    "Complete your business profile",
+    "Add your bank and Mobile Money payment details",
+    "Create your first quote or invoice",
+    "Send documents by email or WhatsApp",
+    "Track pending and paid invoices",
+  ]
 
   const text = [
-    `Hi,`,
+    `${introLead}${introRest}`,
     ``,
-    `Thank you for signing up for Finza Service for ${opts.businessName}.`,
+    `Start with these steps:`,
+    ...checklistText.map((l, i) => `${i + 1}. ${l}`),
     ``,
-    `Finza Service helps Ghanaian service businesses create quotes and invoices, send receipts, track payments, and keep day-to-day records clearer — without overpromising legal or tax outcomes.`,
+    `Open your Service dashboard: ${opts.dashboardUrl}`,
     ``,
-    `Open your workspace: ${opts.dashboardUrl}`,
-    `Subscription & billing: ${opts.subscriptionUrl}`,
+    `Manage subscription & billing: ${opts.subscriptionUrl}`,
     ``,
-    `Questions? Contact us at ${opts.supportEmail}.`,
+    `Need help? ${opts.supportEmail}`,
     ``,
     `— Finza`,
+    ``,
+    `Finza helps you keep clearer business records. Tax and compliance decisions remain the responsibility of the business and its advisers.`,
   ].join("\n")
 
+  const checklistHtml = checklistText
+    .map(
+      (line, i) =>
+        `<tr><td style="padding:6px 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;color:#1e293b"><span style="font-weight:700;color:#0f766e;margin-right:6px">${i + 1}.</span>${escapeHtml(line)}</td></tr>`
+    )
+    .join("")
+
+  const introHtml = opts.showNamedWorkspace
+    ? `<p style="margin:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.65;color:#334155;"><span style="color:#0f172a;font-weight:600">Your workspace for <strong style="color:#0f172a">${bizEsc}</strong> is ready.</span>${escapeHtml(introRest)}</p>`
+    : `<p style="margin:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.65;color:#334155;"><span style="color:#0f172a;font-weight:600">Your workspace is ready.</span>${escapeHtml(introRest)}</p>`
+
   const html = `
-<p style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#111">Hi,</p>
-<p style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#111">Thank you for signing up for <strong>Finza Service</strong> for <strong>${name}</strong>.</p>
-<p style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#111">Finza Service helps Ghanaian service businesses create <strong>quotes</strong>, <strong>invoices</strong>, and <strong>receipts</strong>, track <strong>payments</strong>, and keep business records clearer. We focus on practical tools — we do not guarantee compliance or specific business results.</p>
-<p style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#111">
-  <a href="${dash}">Go to your Service dashboard</a><br/>
-  <a href="${sub}">Subscription &amp; billing</a>
-</p>
-<p style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;color:#444">Support: <a href="mailto:${sup}">${sup}</a></p>
-<p style="font-family:system-ui,sans-serif;font-size:12px;color:#666">— Finza</p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>${escapeHtml(SERVICE_WELCOME_EMAIL_SUBJECT)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#e2e8f0;">
+<!-- Preheader (hidden in inbox preview clients that support it) -->
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:transparent;width:0;height:0;opacity:0;">
+  ${escapeHtml(WELCOME_PREHEADER)}
+</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#e2e8f0;">
+  <tr>
+    <td align="center" style="padding:24px 16px;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#0f766e 0%,#059669 100%);padding:28px 24px;text-align:center;">
+            <p style="margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.9);">Finza</p>
+            <p style="margin:8px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:22px;font-weight:700;color:#ffffff;line-height:1.25;">Finza Service</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px 28px 24px;">
+            <h1 style="margin:0 0 12px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:24px;font-weight:700;color:#0f172a;line-height:1.3;">Welcome to Finza Service</h1>
+            ${introHtml}
+            <p style="margin:0 0 10px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;font-weight:600;color:#0f172a;">Start with these steps:</p>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:28px;">${checklistHtml}</table>
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 20px;">
+              <tr>
+                <td align="center" style="border-radius:10px;background:linear-gradient(135deg,#0d9488 0%,#059669 100%);">
+                  <a href="${dash}" style="display:inline-block;padding:14px 28px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">Open your Service dashboard</a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0 0 24px;text-align:center;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;">
+              <a href="${sub}" style="color:#0d9488;font-weight:600;text-decoration:underline;">Manage subscription &amp; billing</a>
+            </p>
+            <p style="margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#334155;">Need help? <a href="mailto:${sup}" style="color:#0d9488;font-weight:600;">${sup}</a></p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 28px 28px;">
+            <p style="margin:0;padding-top:20px;border-top:1px solid #e2e8f0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:11px;line-height:1.5;color:#64748b;">Finza helps you keep clearer business records. Tax and compliance decisions remain the responsibility of the business and its advisers.</p>
+            <p style="margin:12px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;color:#94a3b8;">© ${new Date().getFullYear()} Finza</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>
 `.trim()
 
   return { html, text }
@@ -214,8 +300,9 @@ export async function sendServiceWelcomeNotificationsAfterProvision(params: {
     }
 
     const business = biz as BusinessRow
-    const businessName =
-      typeof business.name === "string" && business.name.trim() ? business.name.trim() : "your workspace"
+    const rawBusinessName = typeof business.name === "string" ? business.name.trim() : ""
+    const businessName = rawBusinessName || "your workspace"
+    const showNamedWorkspace = shouldShowNamedWorkspace(rawBusinessName)
 
     let ownerEmail: string | null = null
     const { data: ownerAuth, error: authErr } = await admin.auth.admin.getUserById(ownerUserId)
@@ -241,14 +328,15 @@ export async function sendServiceWelcomeNotificationsAfterProvision(params: {
       )
       if (!dupWelcome) {
         const { html, text } = buildWelcomeEmail({
-          businessName,
+          businessName: rawBusinessName || businessName,
+          showNamedWorkspace,
           dashboardUrl,
           subscriptionUrl,
           supportEmail,
         })
         const sendResult = await sendTransactionalEmail({
           to: tenantTo,
-          subject: "Welcome to Finza Service",
+          subject: SERVICE_WELCOME_EMAIL_SUBJECT,
           html,
           text,
           finza: { businessId, documentType: "trial", workspace: "service" },

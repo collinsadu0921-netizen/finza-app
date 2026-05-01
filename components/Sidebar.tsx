@@ -724,36 +724,46 @@ export default function Sidebar() {
                               !isAccountantFirmUser &&
                               item.minTier != null &&
                               !canAccessTier(item.minTier)
-                            const disabled =
-                              ((isAccountingClientRoute || isServiceClientRoute) && !sidebarBusinessId) || tierBlocked
+                            const contextBlocked =
+                              (isAccountingClientRoute || isServiceClientRoute) && !sidebarBusinessId
+                            const navLocked = contextBlocked || tierBlocked
                             const target = item.route
                             return (
                               <button
                                 key={itemIdx}
-                                title={tierBlocked ? upgradeLabel(item.minTier!) : undefined}
+                                type="button"
+                                title={
+                                  tierBlocked
+                                    ? upgradeLabel(item.minTier!)
+                                    : contextBlocked
+                                      ? "Select a business to open this page"
+                                      : undefined
+                                }
                                 onClick={() => {
-                                  if (!disabled) {
-                                    router.push(target)
+                                  if (tierBlocked) {
+                                    router.push("/service/settings/subscription")
                                     setIsOpen(false)
+                                    return
                                   }
+                                  if (contextBlocked) return
+                                  router.push(target)
+                                  setIsOpen(false)
                                 }}
-                                disabled={disabled}
+                                aria-disabled={contextBlocked || undefined}
                                 className={`w-full text-left px-3 py-1.5 rounded-md text-sm transition-all duration-150 relative ${
-                                  disabled
-                                    ? "text-slate-300 cursor-not-allowed opacity-60"
+                                  navLocked
+                                    ? tierBlocked
+                                      ? "text-slate-500 opacity-90 cursor-pointer hover:bg-slate-50/80"
+                                      : "text-slate-300 cursor-not-allowed opacity-60"
                                     : active
-                                    ? "bg-slate-100 text-slate-900 font-semibold"
-                                    : "text-slate-600 hover:bg-slate-50"
+                                      ? "bg-slate-100 text-slate-900 font-semibold"
+                                      : "text-slate-600 hover:bg-slate-50"
                                 }`}
                               >
                                 <span className="flex items-center justify-between gap-2">
                                   <span>{item.label}</span>
                                   {tierBlocked && (
-                                    <span
-                                      role="link"
-                                      onClick={(e) => { e.stopPropagation(); router.push("/service/settings/subscription") }}
-                                      className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 shrink-0 cursor-pointer hover:text-amber-700"
-                                    >
+                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 shrink-0">
                                       Upgrade
                                     </span>
                                   )}

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useServiceSubscription } from "./ServiceSubscriptionContext"
-import TrialBanner from "./TrialBanner"
+import { buildServiceRoute } from "@/lib/service/routes"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { SERVICE_TIER_LABEL } from "@/lib/serviceWorkspace/subscriptionTiers"
 
@@ -25,34 +25,39 @@ type TierGateProps = {
  *    to 'starter'. If the page requires a higher tier, this gate fires and the
  *    upgrade wall copy explains what happened.
  *
- * 3. inGracePeriod — MoMo payment failed, 3-day grace window still open.
- *    Renders children + amber payment-warning banner.
+ * 3. Trial / grace / renewal reminders — shown globally via
+ *    `ServiceWorkspaceSubscriptionBanners` in ProtectedLayout (not here).
  *
- * 4. isTrialing — active free trial.
- *    Renders children + blue TrialBanner countdown.
- *
- * 5. Normal — no decoration.
- *
- * Falls back to rendering children while context is loading to avoid a flash
- * of the wall when the subscription state is being fetched.
+ * While subscription is loading for the current business scope, shows a small
+ * “checking access” state instead of the full page shell (avoids a long blank
+ * or misleading loading page on tier-gated routes).
  */
 export default function TierGate({ minTier, children }: TierGateProps) {
   const {
     canAccessTier,
     effectiveTier,
-    tier: rawTier,
     trialExpired,
     entitlementResolved,
-    isTrialing,
-    inGracePeriod,
-    periodExpired,
-    graceEndsAt,
     subscriptionLocked,
+    businessId,
   } = useServiceSubscription()
 
-  // Avoid upgrade-wall flash while default starter entitlement is still stale; server routes must enforce access.
+  const subscriptionHref = buildServiceRoute("/service/settings/subscription", businessId ?? undefined)
+
   if (!entitlementResolved) {
-    return <>{children}</>
+    return (
+      <div
+        className="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-4 py-12 text-slate-500"
+        role="status"
+        aria-live="polite"
+      >
+        <div
+          className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600"
+          aria-hidden
+        />
+        <p className="text-sm">Checking your plan access…</p>
+      </div>
+    )
   }
 
   // --- 1. Payment locked (MoMo grace period expired) ---
@@ -74,7 +79,7 @@ export default function TierGate({ minTier, children }: TierGateProps) {
           </p>
           <div className="mt-6 flex flex-col items-center gap-3">
             <Link
-              href="/service/settings/subscription"
+              href={subscriptionHref}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700"
             >
               Renew subscription
@@ -132,7 +137,7 @@ export default function TierGate({ minTier, children }: TierGateProps) {
 
           <div className="mt-6 flex flex-col items-center gap-3">
             <Link
-              href="/service/settings/subscription"
+              href={subscriptionHref}
               className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-700"
             >
               {trialExpired ? "View plans & subscribe" : "View plans & upgrade"}
@@ -146,59 +151,5 @@ export default function TierGate({ minTier, children }: TierGateProps) {
     )
   }
 
-  // --- 3. Grace period: period expired OR MoMo payment failed ---
-  if (inGracePeriod) {
-    const graceEndFormatted = graceEndsAt
-      ? graceEndsAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
-      : null
-
-    return (
-      <>
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="mx-auto flex max-w-5xl items-center gap-3">
-            <svg className="h-4 w-4 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-            {periodExpired ? (
-              <p className="text-sm text-amber-800">
-                <span className="font-semibold">Your subscription period has ended.</span>{" "}
-                You have limited time to renew.
-                {graceEndFormatted && (
-                  <> Access is available until <span className="font-medium">{graceEndFormatted}</span>.</>
-                )}{" "}
-                <Link href="/service/settings/subscription" className="underline hover:text-amber-900">
-                  Renew now
-                </Link>.
-              </p>
-            ) : (
-              <p className="text-sm text-amber-800">
-                <span className="font-semibold">Payment failed.</span> Your Mobile Money renewal
-                did not go through. Renew within the 3-day grace period to avoid losing access.
-                {graceEndFormatted && (
-                  <> Grace period ends <span className="font-medium">{graceEndFormatted}</span>.</>
-                )}{" "}
-                <Link href="/service/settings/subscription" className="underline hover:text-amber-900">
-                  Renew now
-                </Link>.
-              </p>
-            )}
-          </div>
-        </div>
-        {children}
-      </>
-    )
-  }
-
-  // --- 4. Active trial — show countdown banner above content ---
-  if (isTrialing) {
-    return (
-      <>
-        <TrialBanner />
-        {children}
-      </>
-    )
-  }
-
-  // --- 5. Normal paid subscription ---
   return <>{children}</>
 }

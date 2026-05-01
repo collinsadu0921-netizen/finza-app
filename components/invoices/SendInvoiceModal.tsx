@@ -520,4 +520,3 @@ export default function SendInvoiceModal({
     </div>
   )
 }
-

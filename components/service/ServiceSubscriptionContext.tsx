@@ -6,11 +6,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { shouldMountServiceSubscriptionProvider } from "@/lib/serviceWorkspace/serviceSubscriptionSurface"
 import {
   type ServiceSubscriptionTier,
   type ServiceSubscriptionStatus,
@@ -33,8 +35,9 @@ export type ServiceSubscriptionContextValue = {
   businessId: string | null
   loading: boolean
   /**
-   * False until the first subscription fetch for the current service scope finishes.
+   * False until subscription fetch for the current business scope finishes.
    * Tier checks stay permissive until then (avoids Upgrade UI flashing on default starter).
+   * Stays true during in-app navigations that do not change `business_id` (no flicker).
    */
   entitlementResolved: boolean
 
@@ -45,6 +48,7 @@ export type ServiceSubscriptionContextValue = {
   isTrialing: boolean
   trialExpired: boolean
   trialEndsAt: Date | null
+  trialStartedAt: Date | null
   trialDaysLeft: number | null
 
   // --- Billing period ---
@@ -52,6 +56,8 @@ export type ServiceSubscriptionContextValue = {
   billingCycle: string | null
   /** When the current paid period ends. Null for trial users or when not set. */
   currentPeriodEndsAt: Date | null
+  /** When the paid subscription began, if stored. */
+  subscriptionStartedAt: Date | null
   /** True when the paid period has passed and renewal is needed. */
   periodExpired: boolean
   /** Days remaining until current_period_ends_at. Null when expired or not active. */
@@ -70,14 +76,17 @@ const defaultValue: ServiceSubscriptionContextValue = {
   status: "active",
   businessId: null,
   loading: false,
-  entitlementResolved: false,
+  /** No Provider (non-service shell): skip TierGate loading state. */
+  entitlementResolved: true,
   canAccessTier: () => true,
   isTrialing: false,
   trialExpired: false,
   trialEndsAt: null,
+  trialStartedAt: null,
   trialDaysLeft: null,
   billingCycle: null,
   currentPeriodEndsAt: null,
+  subscriptionStartedAt: null,
   periodExpired: false,
   daysUntilRenewal: null,
   inGracePeriod: false,
@@ -89,7 +98,7 @@ const ServiceSubscriptionContext =
   createContext<ServiceSubscriptionContextValue>(defaultValue)
 
 const SERVICE_COLUMNS =
-  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle"
+  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle, subscription_started_at"
 
 function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitlement {
   const r: RawBusinessSubscriptionRow = {
@@ -100,6 +109,7 @@ function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitleme
     subscription_grace_until:    (row?.subscription_grace_until    as string) ?? null,
     current_period_ends_at:      (row?.current_period_ends_at      as string) ?? null,
     billing_cycle:               (row?.billing_cycle               as string) ?? null,
+    subscription_started_at:     (row?.subscription_started_at     as string) ?? null,
   }
   return resolveServiceEntitlement(r)
 }
@@ -111,16 +121,9 @@ export function ServiceSubscriptionProvider({
 }) {
   const pathname     = usePathname()
   const searchParams = useSearchParams()
+  const prevScopeRef = useRef<string | undefined>(undefined)
 
-  // Activate for /service/* paths AND legacy root-level service routes.
-  const isService =
-    (pathname?.startsWith("/service") ?? false) ||
-    (pathname?.startsWith("/bills")        ?? false) ||
-    (pathname?.startsWith("/payroll")      ?? false) ||
-    (pathname?.startsWith("/assets")       ?? false) ||
-    (pathname?.startsWith("/credit-notes") ?? false) ||
-    (pathname?.startsWith("/audit-log")    ?? false) ||
-    (pathname?.startsWith("/vat-returns")  ?? false)
+  const shouldMount = shouldMountServiceSubscriptionProvider(pathname)
 
   const [entitlement, setEntitlement] = useState<ServiceEntitlement>(() =>
     resolveServiceEntitlement({})
@@ -132,13 +135,22 @@ export function ServiceSubscriptionProvider({
   const urlBusinessId = searchParams.get("business_id")?.trim() || null
 
   useEffect(() => {
-    if (!isService) {
+    if (!shouldMount) {
+      prevScopeRef.current = undefined
       setEntitlementResolved(false)
       return
     }
 
+    const scopeKey = urlBusinessId ?? "__session__"
+    const scopeChanged =
+      prevScopeRef.current !== undefined && prevScopeRef.current !== scopeKey
+    prevScopeRef.current = scopeKey
+
     let cancelled = false
-    setEntitlementResolved(false)
+    if (scopeChanged) {
+      setEntitlementResolved(false)
+    }
+
     ;(async () => {
       setLoading(true)
       try {
@@ -169,15 +181,17 @@ export function ServiceSubscriptionProvider({
         setBusinessId((b as any)?.id ?? null)
         setEntitlement(rowToEntitlement(b as Record<string, unknown> | null))
       } finally {
-        if (!cancelled) setEntitlementResolved(true)
-        setLoading(false)
+        if (!cancelled) {
+          setEntitlementResolved(true)
+          setLoading(false)
+        }
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [isService, urlBusinessId, pathname])
+  }, [shouldMount, urlBusinessId])
 
   const canAccessTier = useCallback(
     (required: ServiceSubscriptionTier) => {
@@ -199,9 +213,11 @@ export function ServiceSubscriptionProvider({
       isTrialing:         entitlement.isTrialing,
       trialExpired:       entitlement.trialExpired,
       trialEndsAt:        entitlement.trialEndsAt,
+      trialStartedAt:     entitlement.trialStartedAt,
       trialDaysLeft:      entitlement.trialDaysLeft,
       billingCycle:       entitlement.billingCycle,
       currentPeriodEndsAt: entitlement.currentPeriodEndsAt,
+      subscriptionStartedAt: entitlement.subscriptionStartedAt,
       periodExpired:      entitlement.periodExpired,
       daysUntilRenewal:   entitlement.daysUntilRenewal,
       inGracePeriod:      entitlement.inGracePeriod,
@@ -211,7 +227,7 @@ export function ServiceSubscriptionProvider({
     [entitlement, businessId, loading, entitlementResolved, canAccessTier]
   )
 
-  if (!isService) return <>{children}</>
+  if (!shouldMount) return <>{children}</>
 
   return (
     <ServiceSubscriptionContext.Provider value={value}>

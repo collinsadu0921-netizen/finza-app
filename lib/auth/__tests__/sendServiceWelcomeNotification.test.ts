@@ -15,6 +15,7 @@ jest.mock("@/lib/supabaseAdmin", () => ({
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import {
+  SERVICE_WELCOME_EMAIL_SUBJECT,
   resolveFinzaSupportEmailForWelcome,
   resolveInternalCustomerSuccessRecipient,
   sendServiceWelcomeNotificationsAfterProvision,
@@ -131,12 +132,13 @@ describe("sendServiceWelcomeNotificationsAfterProvision", () => {
     await sendServiceWelcomeNotificationsAfterProvision({ businessId: BIZ, ownerUserId: OWNER })
 
     expect(sendTransactionalEmail).toHaveBeenCalledTimes(2)
-    expect(sendTransactionalEmail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: "owner@co.test",
-        subject: "Welcome to Finza Service",
-      })
-    )
+    const welcomeCall = jest.mocked(sendTransactionalEmail).mock.calls.find((c) => c[0].to === "owner@co.test")
+    expect(welcomeCall?.[0]).toMatchObject({
+      to: "owner@co.test",
+      subject: SERVICE_WELCOME_EMAIL_SUBJECT,
+    })
+    expect(String(welcomeCall?.[0].html ?? "")).toContain("Open your Service dashboard")
+    expect(String(welcomeCall?.[0].html ?? "")).not.toContain("do not guarantee")
     expect(sendTransactionalEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "internal@co.test",
@@ -168,7 +170,7 @@ describe("sendServiceWelcomeNotificationsAfterProvision", () => {
     expect(sendTransactionalEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "biz@co.test",
-        subject: "Welcome to Finza Service",
+        subject: SERVICE_WELCOME_EMAIL_SUBJECT,
       })
     )
   })
@@ -193,7 +195,7 @@ describe("sendServiceWelcomeNotificationsAfterProvision", () => {
 
     expect(sendTransactionalEmail).toHaveBeenCalledTimes(1)
     expect(sendTransactionalEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: "Welcome to Finza Service" })
+      expect.objectContaining({ subject: SERVICE_WELCOME_EMAIL_SUBJECT })
     )
   })
 
