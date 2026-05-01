@@ -6,6 +6,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
+import {
+  isPaystackServiceSubscriptionReference,
+  tenantInvoiceOnlinePaymentsEnabled,
+} from "@/lib/payments/tenantInvoiceOnlinePayments"
 
 export const dynamic = "force-dynamic"
 
@@ -25,6 +29,17 @@ export async function POST(request: NextRequest) {
   const { otp, reference } = body
   if (!otp || !reference) {
     return NextResponse.json({ success: false, error: "otp and reference are required" }, { status: 400 })
+  }
+
+  // Platform subscription OTP (service settings) uses FNZ-SUB-* references — must stay allowed.
+  if (!tenantInvoiceOnlinePaymentsEnabled() && !isPaystackServiceSubscriptionReference(reference)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Online invoice payment is not enabled. Use the bank or mobile money details from your invoice.",
+      },
+      { status: 403 }
+    )
   }
 
   const res = await fetch("https://api.paystack.co/charge/submit_otp", {

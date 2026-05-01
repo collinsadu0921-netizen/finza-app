@@ -7,6 +7,11 @@ import {
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
+import {
+  PUBLIC_BUSINESS_SELECT,
+  PUBLIC_PROFORMA_INVOICE_COLUMNS,
+  PUBLIC_PROFORMA_ITEM_SELECT,
+} from "@/lib/publicDocuments/publicDocumentSelects"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -28,19 +33,31 @@ export async function GET(
     const { token: rawToken } = await params
     const token = decodeURIComponent(rawToken).trim()
     if (!token) {
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = serviceClient()
-    const { data: proforma, error } = await supabase
+    const { data: proformaRaw, error } = (await supabase
       .from("proforma_invoices")
-      .select("*")
+      .select(PUBLIC_PROFORMA_INVOICE_COLUMNS)
       .eq("public_token", token)
       .is("deleted_at", null)
-      .maybeSingle()
+      .maybeSingle()) as {
+      data: Record<string, unknown> | null
+      error: { message?: string } | null
+    }
 
-    if (error || !proforma) {
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+    if (error || !proformaRaw) {
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
+    }
+
+    const proforma = proformaRaw as Record<string, unknown> & {
+      id: string
+      business_id: string
+      customer_id?: string | null
+      proforma_number?: string | null
+      payment_terms?: string | null
+      footer_message?: string | null
     }
 
     const [{ data: customer }, { data: business }, { data: items }] = await Promise.all([
@@ -53,14 +70,12 @@ export async function GET(
         : Promise.resolve({ data: null }),
       supabase
         .from("businesses")
-        .select(
-          "name, legal_name, trading_name, phone, email, address, logo_url, tax_id, registration_number, default_currency"
-        )
+        .select(PUBLIC_BUSINESS_SELECT)
         .eq("id", proforma.business_id)
         .single(),
       supabase
         .from("proforma_invoice_items")
-        .select("id, description, qty, unit_price, discount_amount, line_subtotal, created_at")
+        .select(PUBLIC_PROFORMA_ITEM_SELECT)
         .eq("proforma_invoice_id", proforma.id)
         .order("created_at", { ascending: true }),
     ])
@@ -74,7 +89,7 @@ export async function GET(
     let html: string
     try {
       html = buildProformaFinancialDocumentHtmlForPdf({
-        proforma: proforma as Record<string, unknown>,
+        proforma,
         business: business ?? undefined,
         customer: customer ?? undefined,
         items: items || [],
@@ -84,8 +99,8 @@ export async function GET(
         payment_details: invSettings.payment_details,
       })
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to build document"
-      return NextResponse.json({ error: message }, { status: 400 })
+      console.error("public proforma PDF build error:", e)
+      return NextResponse.json({ error: "Unable to generate PDF" }, { status: 400 })
     }
 
     let pdfBuffer: Buffer
@@ -93,14 +108,14 @@ export async function GET(
       pdfBuffer = await renderHtmlToPdfBuffer(html)
     } catch (err: unknown) {
       console.error("public proforma PDF (Chromium) failed:", err)
-      const message = err instanceof Error ? err.message : "PDF generation failed"
       return NextResponse.json(
         {
-          error: message,
-          hint:
-            process.env.VERCEL !== "1"
-              ? "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary."
-              : undefined,
+          error: "Unable to generate PDF",
+          ...(process.env.VERCEL !== "1"
+            ? {
+                hint: "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary.",
+              }
+            : {}),
         },
         { status: 500 }
       )
@@ -119,8 +134,8 @@ export async function GET(
         "Cache-Control": "no-store",
       },
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("public proforma pdf error:", error)
-    return NextResponse.json({ error: error.message || "Failed to generate proforma PDF preview" }, { status: 500 })
+    return NextResponse.json({ error: "Unable to generate PDF" }, { status: 500 })
   }
 }

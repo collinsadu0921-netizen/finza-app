@@ -12,43 +12,15 @@ import {
   loadInvoiceSettingsForDocument,
   mergeInvoiceTermsFooter,
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
+import { invoiceCustomerStatusLabel } from "@/lib/invoices/invoiceCustomerPaymentDisplay"
+import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
+import { PUBLIC_INVOICE_PREVIEW_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
 
 export type InvoicePreviewLoadResult =
   | { ok: true; html: string; invoiceNumber: string | null; invoiceId: string }
   | { ok: false; status: number; error: string }
 
-const INVOICE_PREVIEW_SELECT = `
-        *,
-        customers (
-          id,
-          name,
-          email,
-          phone,
-          whatsapp_phone,
-          address
-        ),
-        businesses (
-          id,
-          name,
-          legal_name,
-          trading_name,
-          phone,
-          email,
-          address,
-          logo_url,
-          tax_id,
-          registration_number,
-          address_country
-        ),
-        invoice_items (
-          id,
-          description,
-          qty,
-          unit_price,
-          discount_amount,
-          line_subtotal
-        )
-      `
+const INVOICE_PREVIEW_SELECT = PUBLIC_INVOICE_PREVIEW_SELECT.replace(/\s+/g, " ").trim()
 
 /**
  * Builds invoice PDF/preview HTML from an invoice row that already includes
@@ -121,11 +93,14 @@ async function buildInvoicePreviewHtmlFromLoadedInvoice(
       : {}),
   }
 
+  const balanceDue = await fetchInvoiceBalanceDuePublic(supabase, inv.id, invoiceTotal)
+
   const documentMeta: DocumentMeta = {
     document_number: inv.invoice_number || "DRAFT",
     issue_date: inv.issue_date,
     due_date: inv.due_date || null,
     public_token: inv.public_token || null,
+    status: inv.status ?? null,
   }
 
   if (!inv.currency_code) {
@@ -172,6 +147,10 @@ async function buildInvoicePreviewHtmlFromLoadedInvoice(
     fx_rate: inv.fx_rate ?? null,
     home_currency_code: inv.home_currency_code ?? null,
     home_currency_total: inv.home_currency_total ?? null,
+    invoice_customer_payment_summary: {
+      status_label: invoiceCustomerStatusLabel(inv.status),
+      balance_due: balanceDue > 0.005 ? balanceDue : null,
+    },
   })
 
   return {
@@ -227,7 +206,10 @@ export async function buildInvoicePreviewHtmlForPublicToken(
     return { ok: false, status: 404, error: "Invoice not found" }
   }
 
-  if ((invoice as { status?: string }).status === "cancelled") {
+  const st = String((invoice as { status?: string }).status || "")
+    .trim()
+    .toLowerCase()
+  if (st === "cancelled" || st === "void" || st === "draft") {
     return { ok: false, status: 404, error: "Invoice not found" }
   }
 

@@ -246,13 +246,24 @@ function SubscriptionCallbackHandler() {
 type SubscriptionGatewayOption = "paystack" | "mtn_momo_sandbox"
 type SubscriptionProviderFlagState = { mock_checkout_enabled: boolean }
 
+function tierPrimaryCtaLine(
+  currentTier: ServiceSubscriptionTier,
+  targetTier: ServiceSubscriptionTier
+): string {
+  const label = SERVICE_TIER_LABEL[targetTier]
+  const upgradeTier = SERVICE_TIER_RANK[targetTier] > SERVICE_TIER_RANK[currentTier]
+  return upgradeTier ? `Upgrade to ${label}` : `Start ${label} plan`
+}
+
 function SubscriptionPaystackActions({
   businessId,
+  currentTier,
   targetTier,
   cycle,
   disabled,
 }: {
   businessId: string | null
+  currentTier: ServiceSubscriptionTier
   targetTier: ServiceSubscriptionTier
   cycle: BillingCycle
   disabled: boolean
@@ -280,7 +291,7 @@ function SubscriptionPaystackActions({
       })
       .catch(() => {
         if (!alive) return
-        setGateways({ paystack: true, mtn_momo_sandbox: false })
+        setGateways({ paystack: false, mtn_momo_sandbox: false })
       })
     return () => {
       alive = false
@@ -437,14 +448,33 @@ function SubscriptionPaystackActions({
   const showGatewayPicker =
     gateways && gateways.paystack && gateways.mtn_momo_sandbox
   const optionsReady = gateways !== null
+  const noGatewayConfigured =
+    optionsReady && gateways && !gateways.paystack && !gateways.mtn_momo_sandbox
+  const primaryLine = tierPrimaryCtaLine(currentTier, targetTier)
+
+  if (noGatewayConfigured) {
+    return (
+      <div className="mt-4 space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <p className="text-sm font-medium text-amber-900">Contact support to upgrade</p>
+        <p className="text-xs leading-relaxed text-amber-800">
+          Online subscription checkout is not available right now (payment gateway not configured).
+        </p>
+        <a
+          href={`mailto:hello@finza.app?subject=${encodeURIComponent(`Upgrade — ${SERVICE_TIER_LABEL[targetTier]}`)}`}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700"
+        >
+          Email hello@finza.app
+        </a>
+      </div>
+    )
+  }
 
   return (
     <div className="mt-4 space-y-2">
       <p className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] leading-relaxed text-slate-600">
-        You will be charged the <span className="font-medium text-slate-700">full amount</span> shown for this plan
-        and billing cycle. When payment succeeds, your subscription period{" "}
-        <span className="font-medium text-slate-700">starts from that date</span> for the full length of the cycle.
-        We do not prorate or credit unused time.
+        Upgrades are billed at the <span className="font-medium text-slate-700">full price</span> for the plan and
+        billing cycle shown. Your new subscription period begins when payment succeeds. We do not prorate or apply
+        unused-time credit.
       </p>
       {showGatewayPicker && (
         <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
@@ -480,7 +510,7 @@ function SubscriptionPaystackActions({
         onClick={() => void startCard()}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Pay full amount with card
+        {primaryLine}
       </button>
       )}
       {!showMomo ? (
@@ -986,6 +1016,7 @@ function SubscriptionPageInner() {
                   ) : (
                     <SubscriptionPaystackActions
                       businessId={businessId}
+                      currentTier={tier}
                       targetTier={t}
                       cycle={cycle}
                       disabled={false}

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 
 /**
- * Customer block aligned with `/pay/[invoiceId]/view` (public invoice document).
+ * Customer block aligned with legacy pay-page invoice view (`/pay/...` with token) and public invoice UX.
  * Used on public quote and proforma pages for consistent “Bill To” presentation.
  */
 export type PublicBillToCustomer = {

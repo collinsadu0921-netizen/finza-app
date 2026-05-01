@@ -23,7 +23,7 @@ const SAMPLE_VARIABLES: Record<WhatsAppTemplateType, Record<string, string>> = {
     invoice_number: "#INV-001",
     due_date: "15 March 2026",
     public_url: "https://app.example.com/invoice-public/abc123",
-    pay_url: "https://app.example.com/pay/inv-uuid",
+    pay_url: "https://app.example.com/invoice-public/abc123",
     business_name: "Our Business",
     total: "",
     currency: "",
@@ -162,7 +162,11 @@ export default function WhatsAppTemplatesPage() {
                     Message template
                   </label>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    {"Use {{variable_name}} for placeholders. Required: {{invoice_number}} and {{public_url}} for Invoice; {{estimate_number}} and {{public_url}} for Estimate; {{order_number}} and {{public_url}} for Order."}
+                    {activeTab === "invoice"
+                      ? "Use {{variable_name}} for placeholders. Required: {{invoice_number}} and {{public_url}}. Customer-facing sends should point to the public invoice link (same as {{public_url}}, e.g. /invoice-public/{public_token}). Optional {{pay_url}} remains for older templates—it is populated with that same public invoice URL, not a legacy raw pay link."
+                      : activeTab === "estimate"
+                        ? "Use {{variable_name}} for placeholders. Required: {{estimate_number}} and {{public_url}} (public estimate link)."
+                        : "Use {{variable_name}} for placeholders. Required: {{order_number}} and {{public_url}} (public order link)."}
                   </p>
                   <textarea
                     value={template}
@@ -188,6 +192,13 @@ export default function WhatsAppTemplatesPage() {
               <div className="space-y-4">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Available variables</h3>
+                  {activeTab === "invoice" ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      <span className="font-mono">{`{{pay_url}}`}</span> uses the same URL as{" "}
+                      <span className="font-mono">{`{{public_url}}`}</span> (the public invoice link). Prefer{" "}
+                      <span className="font-mono">{`{{public_url}}`}</span> in new templates.
+                    </p>
+                  ) : null}
                   <ul className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
                     {TEMPLATE_VARIABLES[activeTab].map((v) => (
                       <li key={v} className="font-mono">{`{{${v}}}`}</li>

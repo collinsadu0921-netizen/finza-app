@@ -15,6 +15,10 @@
 import { calculateTaxesFromAmount } from "@/lib/taxEngine"
 import type { TaxLine } from "@/lib/taxEngine/types"
 import { formatMoneyWithSymbol } from "@/lib/money"
+import {
+  showTenantBankPaymentCard,
+  showTenantMomoPaymentCard,
+} from "@/lib/invoices/invoicePaymentDetailsDisplay"
 
 export type DocumentType = "estimate" | "proforma" | "order" | "invoice" | "credit_note"
 
@@ -123,6 +127,12 @@ export interface FinancialDocumentProps {
   fx_rate?: number | null
   home_currency_code?: string | null
   home_currency_total?: number | null
+  /** Invoice PDF/public: sentence-case payment status + optional balance due (display only). */
+  invoice_customer_payment_summary?: {
+    status_label: string
+    /** Outstanding amount; omit line when paid or zero. */
+    balance_due: number | null
+  } | null
 }
 
 function escapeHtml(text: string): string {
@@ -210,6 +220,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     fx_rate,
     home_currency_code,
     home_currency_total,
+    invoice_customer_payment_summary,
   } = props
 
   const isFxDocument = !!(fx_rate && home_currency_code && home_currency_total != null)
@@ -348,14 +359,12 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   const hasFooterBottom = footerBottomHtml.length > 0
 
   const pd = payment_details
-  const hasBank = Boolean(pd?.bank_account_number && String(pd.bank_account_number).trim())
-  const hasMomo = Boolean(pd?.momo_number && String(pd.momo_number).trim())
+  const hasBank = showTenantBankPaymentCard(pd)
+  const hasMomo = showTenantMomoPaymentCard(pd)
   const hasPaymentHowTo =
     (documentType === "invoice" || documentType === "proforma") && (hasBank || hasMomo)
 
   // Slate palette (matches create invoice page): slate-50 #f8fafc, slate-100 #f1f5f9, slate-200 #e2e8f0, slate-500 #64748b, slate-600 #475569, slate-700 #334155, slate-900 #0f172a
-  // Invoice PDFs omit workflow status (Sent/Paid/etc.); the app UI shows payment state.
-  const statusBadgeHtml = ""
 
   /** Grouped thousands + always 2 decimals; NBSP after symbol for PDF wrap. */
   const fmtMoney = (amount: number) =>
@@ -365,6 +374,26 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       useGrouping: true,
       symbolNumberGlue: "\u00A0",
     })
+
+  let statusBadgeHtml = ""
+  if (
+    documentType === "invoice" &&
+    invoice_customer_payment_summary &&
+    invoice_customer_payment_summary.status_label.trim()
+  ) {
+    const ips = invoice_customer_payment_summary
+    const st = String(meta.status || "").toLowerCase()
+    const balanceDueVal = ips.balance_due
+    const showBalanceLine =
+      balanceDueVal != null && balanceDueVal > 0.005 && st !== "paid"
+    const balanceLine = showBalanceLine
+      ? `<p class="invoice-pay-summary__balance"><strong>Balance due</strong> ${escapeHtml(fmtMoney(balanceDueVal))}</p>`
+      : ""
+    statusBadgeHtml = `<div class="invoice-pay-summary" role="status">
+      <p class="invoice-pay-summary__status">${escapeHtml(ips.status_label.trim())}</p>
+      ${balanceLine}
+    </div>`
+  }
 
   let headerSecondaryLabel: string | null = null
   let headerSecondaryDate: string | null = null
@@ -403,20 +432,21 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       ? "Subtotal (excl. tax)"
       : "Subtotal"
 
-  /** Bank rows: branch / SWIFT / IBAN only on invoice PDFs when filled (not quote/proforma). */
+  /** Bank rows: branch / SWIFT / IBAN on invoice & proforma PDFs when filled. */
+  const showBankExtras = documentType === "invoice" || documentType === "proforma"
   const paymentBankRowsHtml =
     hasBank && pd
       ? [
           paymentDetailRow("Bank name", pd.bank_name),
-          ...(documentType === "invoice"
+          paymentDetailRow("Account name", pd.bank_account_name),
+          paymentDetailRow("Account number", pd.bank_account_number),
+          ...(showBankExtras
             ? [
                 paymentDetailRow("Branch", pd.bank_branch),
                 paymentDetailRow("SWIFT / BIC", pd.bank_swift),
                 paymentDetailRow("IBAN", pd.bank_iban),
               ]
             : []),
-          paymentDetailRow("Account name", pd.bank_account_name),
-          paymentDetailRow("Account number", pd.bank_account_number),
         ]
           .filter(Boolean)
           .join("")
@@ -425,9 +455,9 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
   const paymentMomoRowsHtml =
     hasMomo && pd
       ? [
-          paymentDetailRow("MoMo provider", pd.momo_provider),
-          paymentDetailRow("MoMo number", pd.momo_number),
-          paymentDetailRow("Recipient / account name", pd.momo_name),
+          paymentDetailRow("Provider", pd.momo_provider),
+          paymentDetailRow("Account name", pd.momo_name),
+          paymentDetailRow("Number", pd.momo_number),
         ]
           .filter(Boolean)
           .join("")
@@ -529,6 +559,25 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
       }
       .doc-meta-line:last-child { margin-bottom: 0; }
       .header-doc-status { margin-top: 10px; }
+      .invoice-pay-summary {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        background: #f8fafc;
+        text-align: left;
+      }
+      .invoice-pay-summary__status {
+        margin: 0 0 4px;
+        font-size: 9.5pt;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .invoice-pay-summary__balance {
+        margin: 0;
+        font-size: 9pt;
+        color: #334155;
+      }
       .issuer-name-compact {
         font-size: 16px;
         font-weight: 600;
@@ -833,6 +882,9 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         .doc-number { font-size: 11pt; margin-bottom: 8px; }
         .doc-meta-line { font-size: 8.5pt; margin-bottom: 3px; }
         .header-doc-status { margin-top: 6px; }
+        .invoice-pay-summary { padding: 6px 8px; margin-top: 6px; }
+        .invoice-pay-summary__status { font-size: 8.5pt; margin-bottom: 3px; }
+        .invoice-pay-summary__balance { font-size: 8pt; }
         .doc-top-grid {
           margin-bottom: 10px;
         }
@@ -1085,8 +1137,8 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
 
       ${hasPaymentHowTo ? `
       <div class="footer doc-section-how-to-pay">
-        <h4>How to pay</h4>
-        <p class="doc-section-how-to-pay__intro">Use the details below. Please include your document number as the payment reference where possible.</p>
+        <h4>Payment details</h4>
+        <p class="doc-section-how-to-pay__intro">Please use the payment details below when making payment. Please include your document number as the payment reference where possible.</p>
         <div class="payment-cards">
           ${hasBank ? `
           <div class="payment-card">
@@ -1106,7 +1158,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
 
       ${hasPaymentTermsBottom ? `
       <div class="doc-payment-terms">
-        <p class="doc-payment-terms__title">Payment terms</p>
+        <p class="doc-payment-terms__title">Payment instructions</p>
         <p class="doc-payment-terms__body">${paymentTermsHtml}</p>
       </div>
       ` : ""}

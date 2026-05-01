@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import { InvoiceDocument } from "@/components/invoices/InvoiceDocument"
+import { invoiceCustomerStatusLabel } from "@/lib/invoices/invoiceCustomerPaymentDisplay"
 import { formatMoney } from "@/lib/money"
 
 type Invoice = {
@@ -55,12 +56,20 @@ type InvoiceSettings = {
   show_tax_breakdown: boolean
   show_business_tin: boolean
   bank_name: string | null
+  bank_branch?: string | null
+  bank_swift?: string | null
+  bank_iban?: string | null
   bank_account_name: string | null
   bank_account_number: string | null
   momo_provider: string | null
   momo_name: string | null
   momo_number: string | null
   brand_color: string | null
+}
+
+type PaymentSummary = {
+  balanceDue: number
+  statusLabel: string
 }
 
 export default function PublicInvoicePage() {
@@ -72,8 +81,9 @@ export default function PublicInvoicePage() {
   const [business, setBusiness] = useState<Business | null>(null)
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
   const [items, setItems] = useState<any[]>([])
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null)
+  const [linkCopied, setLinkCopied] = useState(false)
   const [error, setError] = useState("")
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const enc = encodeURIComponent(token)
@@ -87,6 +97,14 @@ export default function PublicInvoicePage() {
         setBusiness(d.business)
         setSettings(d.settings)
         setItems(d.items || [])
+        setPaymentSummary(
+          d.paymentSummary?.balanceDue != null && d.paymentSummary?.statusLabel
+            ? {
+                balanceDue: Number(d.paymentSummary.balanceDue),
+                statusLabel: String(d.paymentSummary.statusLabel),
+              }
+            : null
+        )
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -97,15 +115,6 @@ export default function PublicInvoicePage() {
     const issuer = business?.trading_name ?? business?.legal_name ?? "Business"
     document.title = `Invoice ${invoice.invoice_number} — ${issuer}`
   }, [invoice, business])
-
-  const handleCopyPayLink = () => {
-    if (!invoice) return
-    const url = `${window.location.origin}/pay/${invoice.id}`
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
 
   if (loading) {
     return (
@@ -135,17 +144,30 @@ export default function PublicInvoicePage() {
   }
 
   const isPaid = invoice.status === "paid"
+  const isPartial = invoice.status === "partially_paid"
   const isOverdue = invoice.status === "overdue"
   const bizName = business?.trading_name ?? business?.legal_name ?? "Business"
   const brand = settings?.brand_color || "#0f172a"
+
+  const effectiveBalanceDue = paymentSummary?.balanceDue ?? Number(invoice.total ?? 0)
+  const badgeLabel =
+    paymentSummary?.statusLabel ?? invoiceCustomerStatusLabel(invoice.status)
 
   // Status banner config
   const bannerClass = isPaid
     ? "bg-emerald-50 border-emerald-200"
     : isOverdue
     ? "bg-rose-50 border-rose-200"
-    : "bg-blue-50 border-blue-200"
-  const bannerTextClass = isPaid ? "text-emerald-800" : isOverdue ? "text-rose-800" : "text-blue-800"
+      : isPartial
+        ? "bg-amber-50 border-amber-200"
+        : "bg-sky-50 border-sky-200"
+  const bannerTextClass = isPaid
+    ? "text-emerald-800"
+    : isOverdue
+      ? "text-rose-800"
+      : isPartial
+        ? "text-amber-900"
+        : "text-sky-900"
   const bannerIcon = isPaid ? (
     <svg className="w-5 h-5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -154,8 +176,12 @@ export default function PublicInvoicePage() {
     <svg className="w-5 h-5 text-rose-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
+  ) : isPartial ? (
+    <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
   ) : (
-    <svg className="w-5 h-5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg className="w-5 h-5 text-sky-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   )
@@ -187,7 +213,7 @@ export default function PublicInvoicePage() {
                 <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
               <a
                 href={`/api/invoices/public/${encodeURIComponent(token)}/pdf`}
                 target="_blank"
@@ -209,6 +235,31 @@ export default function PublicInvoicePage() {
                 </svg>
                 Print
               </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const url = typeof window !== "undefined" ? window.location.href : ""
+                    await navigator.clipboard.writeText(url)
+                    setLinkCopied(true)
+                    setTimeout(() => setLinkCopied(false), 2000)
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                {linkCopied ? "Copied" : "Copy invoice link"}
+              </button>
+              <a
+                href="#invoice-doc"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                View invoice
+              </a>
             </div>
           </div>
 
@@ -217,11 +268,15 @@ export default function PublicInvoicePage() {
             {bannerIcon}
             <div className="flex-1 min-w-0">
               <p className={`font-semibold text-sm ${bannerTextClass}`}>
-                {isPaid
-                  ? "This invoice has been paid — thank you!"
-                  : isOverdue
-                  ? `Invoice ${invoice.invoice_number} is overdue`
-                  : `Invoice ${invoice.invoice_number} — payment due`}
+                {isPaid ? (
+                  "This invoice has been paid — thank you."
+                ) : (
+                  <>
+                    <span>{badgeLabel}</span>
+                    <span className="font-medium opacity-75"> · </span>
+                    <span>invoice {invoice.invoice_number}</span>
+                  </>
+                )}
               </p>
               {!isPaid && invoice.due_date && (
                 <p className={`text-xs mt-0.5 ${bannerTextClass} opacity-70`}>
@@ -230,16 +285,15 @@ export default function PublicInvoicePage() {
               )}
             </div>
             <div className="shrink-0 text-right">
-              <p className={`text-xs ${bannerTextClass} opacity-60`}>{isPaid ? "Amount paid" : "Amount due"}</p>
+              <p className={`text-xs ${bannerTextClass} opacity-60`}>{isPaid ? "Amount paid" : "Balance due"}</p>
               <p className={`text-lg font-bold tabular-nums ${bannerTextClass}`}>
-                {formatMoney(invoice.total, invoice.currency_code)}
+                {formatMoney(isPaid ? Number(invoice.total) : effectiveBalanceDue, invoice.currency_code)}
               </p>
             </div>
           </div>
 
           {/* ── Invoice document ───────────────────────────── */}
-          {/* Bank/momo details appear inside this component at the bottom.
-              displayStatus converts internal "sent" → "Awaiting Payment" for the client. */}
+          {/* Bank/momo appear below totals; badges use sentence-case labels for customers */}
           <InvoiceDocument
             invoice={invoice}
             business={business}
@@ -247,81 +301,25 @@ export default function PublicInvoicePage() {
             settings={settings}
             brandColor={brand}
             className="print:shadow-none print:border-0 print:rounded-none"
+            documentDomId="invoice-doc"
             displayStatus={
-              invoice.status === "sent" ? "awaiting_payment" :
+              invoice.status === "sent" ? "payment_pending" :
               invoice.status === "overdue" ? "overdue" :
               invoice.status === "paid" ? "paid" :
               invoice.status === "partially_paid" ? "partially_paid" :
               undefined
             }
+            statusBadgeLabel={badgeLabel}
+            balanceDueHighlight={
+              !isPaid && effectiveBalanceDue > 0.005
+                ? {
+                    balanceDue: effectiveBalanceDue,
+                    currencyCode: invoice.currency_code,
+                    dueDate: invoice.due_date,
+                  }
+                : undefined
+            }
           />
-
-          {/* ── Pay online (no-print, only if unpaid) ──────── */}
-          {!isPaid && (
-            <div className="no-print bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-800">Pay Online</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Secure payment via mobile money</p>
-                </div>
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                  isOverdue ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"
-                }`}>
-                  {formatMoney(invoice.total, invoice.currency_code)} due
-                </span>
-              </div>
-              <div className="p-5 flex flex-col sm:flex-row items-center gap-6">
-                {/* QR */}
-                <div className="shrink-0 flex flex-col items-center gap-1.5">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=4&data=${encodeURIComponent(typeof window !== "undefined" ? `${window.location.origin}/pay/${invoice.id}` : "")}`}
-                    alt="QR code"
-                    className="w-28 h-28 rounded-xl border border-slate-100 bg-white"
-                  />
-                  <p className="text-xs text-slate-400">Scan to pay</p>
-                </div>
-
-                {/* Buttons */}
-                <div className="flex-1 w-full space-y-2.5">
-                  <a
-                    href={`/pay/${invoice.id}`}
-                    className="flex items-center justify-center gap-2 w-full text-white font-semibold py-3 px-5 rounded-xl transition-opacity hover:opacity-90 text-sm"
-                    style={{ backgroundColor: brand }}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                    Pay with Mobile Money
-                  </a>
-                  <button
-                    onClick={handleCopyPayLink}
-                    className="flex items-center justify-center gap-2 w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 font-medium py-2.5 px-5 rounded-xl transition-colors text-sm"
-                  >
-                    {copied ? (
-                      <>
-                        <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Link copied!
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                        Copy payment link
-                      </>
-                    )}
-                  </button>
-                  {(settings?.bank_account_number || settings?.momo_number) && (
-                    <p className="text-xs text-slate-400 text-center pt-1">
-                      Or pay via bank/mobile money details shown on the invoice above
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
 
           <p className="no-print text-center text-[11px] text-slate-300 pb-3">Powered by Finza</p>
         </div>

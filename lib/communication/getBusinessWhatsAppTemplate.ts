@@ -11,6 +11,9 @@ export type WhatsAppTemplateType = "invoice" | "estimate" | "order"
 /**
  * Placeholders substituted when sending. Legacy keys (total, currency, pay_url, valid_until)
  * remain supported for businesses that saved older templates.
+ *
+ * Invoice: when messages are built in-app, `pay_url` is set to the same URL as `public_url`
+ * (the public invoice link `/invoice-public/{public_token}`), not a raw `/pay/{invoiceId}` link.
  */
 export const TEMPLATE_VARIABLES: Record<WhatsAppTemplateType, string[]> = {
   invoice: [

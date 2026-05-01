@@ -6,6 +6,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
+import {
+  isPaystackServiceSubscriptionReference,
+  tenantInvoiceOnlinePaymentsEnabled,
+} from "@/lib/payments/tenantInvoiceOnlinePayments"
 
 export const dynamic = "force-dynamic"
 
@@ -13,6 +17,16 @@ export async function GET(request: NextRequest) {
   const reference = request.nextUrl.searchParams.get("reference")
   if (!reference) {
     return NextResponse.json({ error: "reference is required" }, { status: 400 })
+  }
+
+  if (!tenantInvoiceOnlinePaymentsEnabled() && !isPaystackServiceSubscriptionReference(reference)) {
+    return NextResponse.json(
+      {
+        error: "Online invoice payment is not enabled",
+        status: "disabled",
+      },
+      { status: 403 }
+    )
   }
 
   const secretKey = process.env.PAYSTACK_SECRET_KEY

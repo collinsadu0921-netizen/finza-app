@@ -7,6 +7,7 @@ import {
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
+import { PUBLIC_BUSINESS_SELECT, PUBLIC_ESTIMATE_COLUMNS, PUBLIC_ESTIMATE_ITEM_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -29,50 +30,58 @@ export async function GET(
     const { token: rawToken } = await params
     const token = decodeURIComponent(rawToken).trim()
     if (!token) {
-      return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = serviceClient()
-    const { data: estimate, error } = await supabase
+    const { data: estimate, error } = (await supabase
       .from("estimates")
-      .select("*")
+      .select(PUBLIC_ESTIMATE_COLUMNS)
       .eq("public_token", token)
       .is("deleted_at", null)
-      .maybeSingle()
+      .maybeSingle()) as {
+      data: Record<string, unknown> | null
+      error: { message?: string } | null
+    }
 
     if (error || !estimate) {
-      return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
+    }
+
+    const est = estimate as Record<string, unknown> & {
+      id: string
+      business_id: string
+      customer_id?: string | null
+      estimate_number?: string | null
     }
 
     const [{ data: customer }, { data: business }, { data: items }] = await Promise.all([
-      estimate.customer_id
+      est.customer_id
         ? supabase
             .from("customers")
             .select("id, name, email, phone, whatsapp_phone, address")
-            .eq("id", estimate.customer_id)
+            .eq("id", est.customer_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
       supabase
         .from("businesses")
-        .select(
-          "name, legal_name, trading_name, phone, email, address, logo_url, tax_id, registration_number, default_currency"
-        )
-        .eq("id", estimate.business_id)
+        .select(PUBLIC_BUSINESS_SELECT)
+        .eq("id", est.business_id)
         .single(),
       supabase
         .from("estimate_items")
-        .select("*")
-        .eq("estimate_id", estimate.id)
+        .select(PUBLIC_ESTIMATE_ITEM_SELECT)
+        .eq("estimate_id", est.id)
         .order("created_at", { ascending: true }),
     ])
 
-    const invSettings = await loadInvoiceSettingsForDocument(supabase, estimate.business_id)
+    const invSettings = await loadInvoiceSettingsForDocument(supabase, est.business_id)
     const quoteTerms = mergeQuotePdfTerms(invSettings, null)
 
     let html: string
     try {
       html = buildEstimateFinancialDocumentHtmlForPdf({
-        estimate: estimate as Record<string, unknown>,
+        estimate: est,
         business: business ?? undefined,
         customer: customer ?? undefined,
         items: items || [],
@@ -81,8 +90,8 @@ export async function GET(
         quote_terms: quoteTerms.quote_terms,
       })
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to build document"
-      return NextResponse.json({ error: message }, { status: 400 })
+      console.error("public quote PDF build error:", e)
+      return NextResponse.json({ error: "Unable to generate PDF" }, { status: 400 })
     }
 
     let pdfBuffer: Buffer
@@ -90,14 +99,14 @@ export async function GET(
       pdfBuffer = await renderHtmlToPdfBuffer(html)
     } catch (err: unknown) {
       console.error("public quote PDF (Chromium) failed:", err)
-      const message = err instanceof Error ? err.message : "PDF generation failed"
       return NextResponse.json(
         {
-          error: message,
-          hint:
-            process.env.VERCEL !== "1"
-              ? "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary."
-              : undefined,
+          error: "Unable to generate PDF",
+          ...(process.env.VERCEL !== "1"
+            ? {
+                hint: "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary.",
+              }
+            : {}),
         },
         { status: 500 }
       )
@@ -105,8 +114,8 @@ export async function GET(
 
     const { contentDisposition } = buildFinancialDocumentPdfDisposition({
       label: "Quote",
-      documentNumber: estimate.estimate_number,
-      fallbackId: estimate.id,
+      documentNumber: est.estimate_number,
+      fallbackId: est.id,
     })
 
     return new NextResponse(new Uint8Array(pdfBuffer), {
@@ -116,8 +125,8 @@ export async function GET(
         "Cache-Control": "no-store",
       },
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("public quote pdf error:", error)
-    return NextResponse.json({ error: error.message || "Failed to generate quote PDF preview" }, { status: 500 })
+    return NextResponse.json({ error: "Unable to generate PDF" }, { status: 500 })
   }
 }

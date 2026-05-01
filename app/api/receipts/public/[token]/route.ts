@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import {
+  PUBLIC_BUSINESS_SELECT,
+  PUBLIC_INVOICE_ITEM_SELECT,
+  PUBLIC_PAYMENT_RECEIPT_SELECT,
+} from "@/lib/publicDocuments/publicDocumentSelects"
 
 export const dynamic = "force-dynamic"
 
@@ -15,91 +20,57 @@ export async function GET(
   try {
     const { token } = await params
     if (!token) {
-      return NextResponse.json({ error: "Token is required" }, { status: 400 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = createSupabaseAdminClient()
 
-    // Get payment by public token (invoice nested for receipt document)
-    const { data: payment, error: paymentError } = await supabase
+    const paySel = PUBLIC_PAYMENT_RECEIPT_SELECT.replace(/\s+/g, " ").trim()
+    const { data: payment, error: paymentError } = (await supabase
       .from("payments")
-      .select(
-        `
-        *,
-        invoices (
-          id,
-          invoice_number,
-          issue_date,
-          due_date,
-          payment_terms,
-          notes,
-          footer_message,
-          currency_code,
-          currency_symbol,
-          subtotal,
-          nhil,
-          getfund,
-          covid,
-          vat,
-          total_tax,
-          total,
-          apply_taxes,
-          tax_lines,
-          wht_receivable_applicable,
-          wht_receivable_rate,
-          wht_receivable_amount,
-          customers (
-            id,
-            name,
-            email,
-            phone,
-            whatsapp_phone,
-            tin,
-            address
-          )
-        )
-      `
-      )
+      .select(paySel)
       .eq("public_token", token)
       .is("deleted_at", null)
-      .single()
+      .single()) as {
+      data: {
+        invoice_id: string
+        invoices: { business_id?: string; total?: unknown } | null
+      } | null
+      error: { message?: string } | null
+    }
 
     if (paymentError || !payment) {
-      return NextResponse.json(
-        { error: "Receipt not found" },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const invoiceId = payment.invoice_id as string
+    const businessId = (payment.invoices as { business_id?: string } | null)?.business_id
+    if (!businessId) {
+      console.error("Public receipt: missing business_id on nested invoice", payment.invoice_id)
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
+    }
+
     const { data: invoiceItems } = await supabase
       .from("invoice_items")
       .select(
         `
-        id,
-        description,
-        qty,
-        unit_price,
-        discount_amount,
-        line_subtotal,
+        ${PUBLIC_INVOICE_ITEM_SELECT},
         products_services ( name )
-      `
+      `.replace(/\s+/g, " ").trim()
       )
       .eq("invoice_id", invoiceId)
       .order("created_at", { ascending: true })
 
-    // Get business profile
     const { data: business, error: businessError } = await supabase
       .from("businesses")
-      .select("*")
-      .eq("id", payment.business_id)
+      .select(PUBLIC_BUSINESS_SELECT)
+      .eq("id", businessId)
       .single()
 
     if (businessError) {
       console.error("Error fetching business:", businessError)
     }
 
-    // Calculate remaining balance (payments + applied credits — same basis as invoice UI)
     const { data: allPayments } = await supabase
       .from("payments")
       .select("amount")
@@ -126,12 +97,8 @@ export async function GET(
       totalCredits,
       invoiceItems: invoiceItems || [],
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching public receipt:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Unable to load document" }, { status: 500 })
   }
 }
-

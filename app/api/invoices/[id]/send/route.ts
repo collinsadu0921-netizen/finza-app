@@ -9,7 +9,9 @@ import { renderWhatsAppTemplate } from "@/lib/communication/renderWhatsAppTempla
 import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
+import type { ManualPaymentEmailPayload } from "@/lib/email/buildManualPaymentDetailsEmailHtml"
 import { buildInvoiceEmailHtml } from "@/lib/email/templates/invoice"
+import { mergeInvoiceTermsFooter } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -301,7 +303,6 @@ export async function POST(
         )
       }
 
-      const payUrl = `${baseUrl}/pay/${invoice.id}`
       const businessName =
         (invoice.businesses as { trading_name?: string; legal_name?: string } | null)?.trading_name ||
         (invoice.businesses as { legal_name?: string } | null)?.legal_name ||
@@ -357,7 +358,7 @@ export async function POST(
         currency: "",
         due_date: formatDueDateForWhatsApp(invoice.due_date, invoice.payment_terms),
         public_url: publicInvoiceUrl,
-        pay_url: payUrl,
+        pay_url: publicInvoiceUrl,
         business_name: businessName,
       })
 
@@ -452,13 +453,52 @@ export async function POST(
         (invoice.businesses as { legal_name?: string } | null)?.legal_name ||
         "Our Business"
       const publicInvoiceUrlForEmail = `${baseUrl}/invoice-public/${effectivePublicToken ?? ""}`
-      const payUrlForEmail = `${baseUrl}/pay/${invoiceId}`
       const invoiceForEmail = { ...invoice, invoice_items: invoice.invoice_items }
       const customerName = (invoice.customers as { name?: string } | null)?.name
       const docLabel = invoice.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice"
       const businessEmail = (invoice.businesses as { email?: string } | null)?.email ?? undefined
       const businessIndustry = (invoice.businesses as { industry?: string | null } | null)?.industry ?? null
       const isServiceWorkspace = businessIndustry === "service"
+
+      const { data: invoiceSettingsRow } = await supabase
+        .from("invoice_settings")
+        .select(
+          "bank_name, bank_branch, bank_swift, bank_iban, bank_account_name, bank_account_number, momo_provider, momo_name, momo_number, default_payment_terms, default_footer_message"
+        )
+        .eq("business_id", invoice.business_id)
+        .maybeSingle()
+
+      const mergedForEmail = mergeInvoiceTermsFooter(invoice.payment_terms, invoice.footer_message, {
+        default_payment_terms: invoiceSettingsRow?.default_payment_terms ?? null,
+        default_footer_message: invoiceSettingsRow?.default_footer_message ?? null,
+      })
+
+      const manualPayment: ManualPaymentEmailPayload | null = (() => {
+        if (!invoiceSettingsRow) return null
+        const row = invoiceSettingsRow as typeof invoiceSettingsRow & {
+          bank_branch?: string | null
+          bank_swift?: string | null
+          bank_iban?: string | null
+        }
+        const hasBank = !!(row.bank_account_number?.trim() || row.bank_iban?.trim())
+        const hasMomo = !!(row.momo_number?.trim())
+        const hasTerms = !!(mergedForEmail.payment_terms?.trim())
+        const hasFooter = !!(mergedForEmail.footer_message?.trim())
+        if (!hasBank && !hasMomo && !hasTerms && !hasFooter) return null
+        return {
+          bank_name: row.bank_name ?? null,
+          bank_branch: row.bank_branch ?? null,
+          bank_swift: row.bank_swift ?? null,
+          bank_iban: row.bank_iban ?? null,
+          bank_account_name: row.bank_account_name ?? null,
+          bank_account_number: row.bank_account_number ?? null,
+          momo_provider: row.momo_provider ?? null,
+          momo_name: row.momo_name ?? null,
+          momo_number: row.momo_number ?? null,
+          payment_terms: mergedForEmail.payment_terms,
+          footer_message: mergedForEmail.footer_message,
+        }
+      })()
 
       const result = isServiceWorkspace
         ? await sendServiceWorkspaceDocumentEmail({
@@ -473,6 +513,7 @@ export async function POST(
               ? `Due: ${new Date(invoice.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`
               : invoice.payment_terms?.trim() || null,
             publicUrl: effectivePublicToken ? publicInvoiceUrlForEmail : "",
+            manualPayment,
             meta: { documentType: "invoice", documentId: invoiceId, businessId: invoice.business_id },
           })
         : await sendTransactionalEmail({
@@ -480,8 +521,8 @@ export async function POST(
             subject: `${docLabel} from ${businessName}`,
             html: buildInvoiceEmailHtml(invoiceForEmail, businessName, {
               publicViewUrl: effectivePublicToken ? publicInvoiceUrlForEmail : undefined,
-              payUrl: payUrlForEmail,
               customerName: customerName ?? undefined,
+              manualPayment,
             }),
             fromName: businessName,
             replyTo: businessEmail,

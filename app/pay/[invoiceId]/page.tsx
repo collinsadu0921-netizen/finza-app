@@ -1,10 +1,14 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
+import {
+  ManualInvoicePaymentDetails,
+  type InvoiceManualPaymentDetailsProps,
+} from "@/components/invoices/ManualInvoicePaymentDetails"
 
 type Invoice = {
   id: string
@@ -13,6 +17,7 @@ type Invoice = {
   currency_code: string
   currency_symbol: string
   status: string
+  public_token?: string | null
   customers: { name: string } | null
   businesses?: { id: string; address_country: string | null } | null
 }
@@ -59,15 +64,21 @@ const PROVIDER_COLORS: Record<string, string> = {
   blue:   "border-blue-500 bg-blue-50",
 }
 
+const PAY_LINK_UNAVAILABLE =
+  "This payment link is no longer available. Please use the invoice link sent by the business."
+
 export default function PayInvoicePage() {
   const params  = useParams()
   const router  = useRouter()
+  const searchParams = useSearchParams()
   const toast   = useToast()
   const invoiceId = (params?.invoiceId as string) || ""
+  const publicToken = (searchParams.get("token") ?? "").trim()
 
   const [invoice,          setInvoice]          = useState<Invoice | null>(null)
   const [payments,         setPayments]          = useState<InvoicePaymentRow[]>([])
-  const [loading,          setLoading]           = useState(true)
+  const [loading,          setLoading]           = useState(false)
+  const [linkUnavailable, setLinkUnavailable]   = useState(false)
   const [error,            setError]             = useState("")
   const [selectedProvider, setSelectedProvider]  = useState<ProviderId | null>(null)
   const [phone,            setPhone]             = useState("")
@@ -79,14 +90,26 @@ export default function PayInvoicePage() {
   const [businessCountry,  setBusinessCountry]   = useState<string | null>(null)
   const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
   const [paymentFlow, setPaymentFlow] = useState<"manual_wallet" | "mtn_momo_direct" | "paystack_momo">("paystack_momo")
+  const [tenantOnlinePay, setTenantOnlinePay] = useState(false)
+  const [invoiceSettingsPublic, setInvoiceSettingsPublic] = useState<InvoiceManualPaymentDetailsProps | null>(null)
   /** Paystack MoMo: token returned from /charge (same row as poll/verify). MTN: filled from refreshed `payments` after success. */
   const [chargePublicToken, setChargePublicToken] = useState<string | null>(null)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
 
-  // ── Load invoice ─────────────────────────────────────────────────────────────
+  // ── Load invoice (requires ?token= matching public_token — never ID alone) ───
   useEffect(() => {
-    if (invoiceId) loadInvoice()
-  }, [invoiceId])
+    if (!invoiceId) {
+      setLoading(false)
+      return
+    }
+    if (!publicToken) {
+      setLoading(false)
+      setInvoice(null)
+      setLinkUnavailable(false)
+      return
+    }
+    void loadInvoice()
+  }, [invoiceId, publicToken])
 
   // ── Poll for payment confirmation ─────────────────────────────────────────
   useEffect(() => {
@@ -97,25 +120,50 @@ export default function PayInvoicePage() {
   }, [paymentStatus, paymentRef])
 
   const loadInvoice = async () => {
+    if (!invoiceId || !publicToken) return
     try {
-      setLoading(true); setError("")
-      const res  = await fetch(`/api/public/invoice/${invoiceId}`)
+      setLoading(true)
+      setError("")
+      setLinkUnavailable(false)
+      const res = await fetch(
+        `/api/public/invoice/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`
+      )
       if (!res.ok) {
-        const e = await res.json().catch(() => ({}))
-        throw new Error(e.error || "Invoice not found")
+        setInvoice(null)
+        setPayments([])
+        setLinkUnavailable(true)
+        return
       }
       const data = await res.json()
-      if (!data.invoice) throw new Error("Invoice data not available")
+      if (!data.invoice) {
+        setInvoice(null)
+        setPayments([])
+        setLinkUnavailable(true)
+        return
+      }
+
+      if (data.tenant_invoice_online_payments_enabled !== true) {
+        router.replace(`/invoice-public/${encodeURIComponent(publicToken)}`)
+        return
+      }
+
       setInvoice(data.invoice)
       setPayments((data.payments || []) as InvoicePaymentRow[])
       setManualWalletPayment(data.manual_wallet_payment ?? null)
       setPaymentFlow(data.invoice_payment_flow ?? "paystack_momo")
+      setTenantOnlinePay(data.tenant_invoice_online_payments_enabled === true)
+      setInvoiceSettingsPublic(data.invoice_settings_public ?? null)
       const country = data.invoice.businesses?.address_country || null
       setBusinessCountry(country)
-      const payUrl = `${window.location.origin}/pay/${invoiceId}`
-      setQrCodeUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payUrl)}`)
-    } catch (err: any) {
-      setError(err.message || "Failed to load invoice")
+      const origin = window.location.origin
+      const payUrl = `${origin}/pay/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`
+      setQrCodeUrl(
+        `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payUrl)}`
+      )
+    } catch {
+      setInvoice(null)
+      setPayments([])
+      setLinkUnavailable(true)
     } finally {
       setLoading(false)
     }
@@ -143,6 +191,13 @@ export default function PayInvoicePage() {
       }
 
       const res = await fetch(`/api/payments/paystack/verify?reference=${paymentRef}`)
+      if (res.status === 403) {
+        if (pollRef.current) clearInterval(pollRef.current)
+        setPaymentStatus("failed")
+        setChargePublicToken(null)
+        setError("Online invoice payment is not available for this invoice.")
+        return
+      }
       const data = await res.json()
       if (data.status === "success") {
         if (pollRef.current) clearInterval(pollRef.current)
@@ -246,28 +301,28 @@ export default function PayInvoicePage() {
   }
 
   // ── Loading / error screens ───────────────────────────────────────────────
-  if (loading) {
+  if (loading && publicToken) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Loading invoice…</p>
+          <p className="text-gray-600">Loading…</p>
         </div>
       </div>
     )
   }
 
-  if (error && !invoice) {
+  if (!publicToken || linkUnavailable) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white p-4">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-          <svg className="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Invoice Not Found</h2>
-          <p className="text-gray-600 mb-6">{error}</p>
-          <button onClick={() => router.push("/")} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
-            Go Home
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 max-w-md w-full text-center">
+          <p className="text-gray-800 leading-relaxed">{PAY_LINK_UNAVAILABLE}</p>
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className="mt-6 text-sm text-blue-600 hover:text-blue-700 font-medium"
+          >
+            Go home
           </button>
         </div>
       </div>
@@ -307,7 +362,9 @@ export default function PayInvoicePage() {
 
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-1">Pay Invoice</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">
+            {tenantOnlinePay ? "Pay invoice" : "Invoice"}
+          </h1>
           <p className="text-gray-500 text-sm">#{invoice.invoice_number}</p>
         </div>
 
@@ -434,12 +491,34 @@ export default function PayInvoicePage() {
         {invoice.status !== "paid" && remaining > 0 && paymentStatus !== "success" && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-5">
 
-            {manualWalletPayment ? (
+            {!tenantOnlinePay ? (
               <div className="space-y-4">
-                <h2 className="text-lg font-bold text-gray-900 mb-1">Pay manually</h2>
+                <ManualInvoicePaymentDetails
+                  details={invoiceSettingsPublic}
+                  manualWallet={manualWalletPayment}
+                  showPayFallbackBanner
+                  payFallbackSubtitle="Online payment is currently unavailable for this invoice. Please use the payment details provided by the business."
+                />
+                {invoice.public_token && (
+                  <>
+                    <p className="text-xs text-center text-gray-500">
+                      For a printable copy or PDF, open the full invoice from the business link.
+                    </p>
+                    <a
+                      href={`/invoice-public/${encodeURIComponent(invoice.public_token)}`}
+                      className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                    >
+                      View invoice
+                    </a>
+                  </>
+                )}
+              </div>
+            ) : manualWalletPayment ? (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold text-gray-900 mb-1">Manual payment</h2>
                 <p className="text-sm text-gray-600">
-                  Send your payment using the details below. This invoice will be updated after the business records your
-                  payment — there is no automatic confirmation for manual transfers.
+                  Use the instructions below to pay. This invoice updates when the business records your payment — there is
+                  no automatic confirmation for manual transfers.
                 </p>
                 {manualWalletPayment.display_label && (
                   <p className="text-sm font-semibold text-gray-800">{manualWalletPayment.display_label}</p>
@@ -617,23 +696,49 @@ export default function PayInvoicePage() {
           </div>
         )}
 
-        {/* QR / share link */}
+        {/* QR / share — pay-page URL includes token; invoice-public is the generic customer-facing link */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
-          <h3 className="text-base font-semibold text-gray-900 mb-3">Share Payment Link</h3>
+          <h3 className="text-base font-semibold text-gray-900 mb-3">
+            {tenantOnlinePay ? "Share payment link" : "View invoice"}
+          </h3>
+          {tenantOnlinePay ? (
+            <p className="text-xs text-gray-500 mb-3 max-w-sm mx-auto">
+              Link opens this pay page and includes the security token. For email or WhatsApp, prefer sharing the{" "}
+              public invoice link below (same page customers get from Finza invoice sends).
+            </p>
+          ) : null}
           {qrCodeUrl && (
             <div className="flex justify-center mb-3">
               <img src={qrCodeUrl} alt="QR Code" className="border border-gray-200 rounded-lg p-2" width={160} height={160} />
             </div>
           )}
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}/pay/${invoiceId}`)
-              toast.showToast("Payment link copied!", "success")
-            }}
-            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-          >
-            Copy payment link
-          </button>
+          {tenantOnlinePay ? (
+            <button
+              type="button"
+              onClick={() => {
+                const u = `${window.location.origin}/pay/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`
+                navigator.clipboard.writeText(u)
+                toast.showToast("Payment link copied!", "success")
+              }}
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Copy payment link
+            </button>
+          ) : invoice.public_token ? (
+            <button
+              type="button"
+              onClick={() => {
+                const u = `${window.location.origin}/invoice-public/${encodeURIComponent(invoice.public_token!)}`
+                navigator.clipboard.writeText(u)
+                toast.showToast("Invoice link copied!", "success")
+              }}
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Copy invoice link
+            </button>
+          ) : (
+            <p className="text-sm text-gray-500">Ask the business for their invoice link if you need a printable copy.</p>
+          )}
         </div>
 
       </div>

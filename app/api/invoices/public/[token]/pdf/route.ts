@@ -20,14 +20,16 @@ export async function GET(
     const resolvedParams = await Promise.resolve(params)
     const rawToken = (resolvedParams.token || "").trim()
     if (!rawToken) {
-      return NextResponse.json({ error: "Public token is required" }, { status: 400 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = createSupabaseAdminClient()
     const built = await buildInvoicePreviewHtmlForPublicToken(supabase, rawToken)
 
     if (!built.ok) {
-      return NextResponse.json({ error: built.error }, { status: built.status })
+      const error =
+        built.status === 404 ? "Document not found" : "Unable to generate PDF"
+      return NextResponse.json({ error }, { status: built.status })
     }
 
     let pdfBuffer: Buffer
@@ -35,14 +37,14 @@ export async function GET(
       pdfBuffer = await renderHtmlToPdfBuffer(built.html)
     } catch (err: unknown) {
       console.error("public invoice PDF (Chromium) failed:", err)
-      const message = err instanceof Error ? err.message : "PDF generation failed"
       return NextResponse.json(
         {
-          error: message,
-          hint:
-            process.env.VERCEL !== "1"
-              ? "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary."
-              : undefined,
+          error: "Unable to generate PDF",
+          ...(process.env.VERCEL !== "1"
+            ? {
+                hint: "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary.",
+              }
+            : {}),
         },
         { status: 500 }
       )
@@ -59,9 +61,6 @@ export async function GET(
     })
   } catch (error: unknown) {
     console.error("public invoice pdf error:", error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to export PDF" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Unable to generate PDF" }, { status: 500 })
   }
 }

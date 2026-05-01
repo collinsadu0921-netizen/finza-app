@@ -4,6 +4,11 @@ import {
   loadInvoiceSettingsForDocument,
   mergeQuotePdfTerms,
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
+import {
+  PUBLIC_BUSINESS_SELECT,
+  PUBLIC_PROFORMA_INVOICE_COLUMNS,
+  PUBLIC_PROFORMA_ITEM_SELECT,
+} from "@/lib/publicDocuments/publicDocumentSelects"
 
 export const dynamic = "force-dynamic"
 
@@ -23,27 +28,37 @@ export async function GET(
     const { token: rawToken } = await params
     const token = decodeURIComponent(rawToken).trim()
     if (!token) {
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = serviceClient()
 
-    const { data: row, error } = await supabase
+    const { data: row, error } = (await supabase
       .from("proforma_invoices")
-      .select("*")
+      .select(PUBLIC_PROFORMA_INVOICE_COLUMNS)
       .eq("public_token", token)
       .is("deleted_at", null)
-      .maybeSingle()
+      .maybeSingle()) as {
+      data: Record<string, unknown> | null
+      error: { message?: string } | null
+    }
 
     if (error) {
       console.error("public/proforma GET error:", error.message)
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
     if (!row) {
-      return NextResponse.json({ error: "Proforma not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
-    const customerId = row.customer_id as string | null | undefined
+    const pRow = row as Record<string, unknown> & {
+      id: string
+      business_id: string
+      payment_terms?: string | null
+      footer_message?: string | null
+    }
+
+    const customerId = pRow.customer_id as string | null | undefined
     let customers: {
       id: string
       name: string
@@ -64,14 +79,14 @@ export async function GET(
       customers = cust ?? null
     }
 
-    const invSettings = await loadInvoiceSettingsForDocument(supabase, row.business_id as string)
+    const invSettings = await loadInvoiceSettingsForDocument(supabase, pRow.business_id)
     const merged = mergeQuotePdfTerms(invSettings, {
-      payment_terms: row.payment_terms as string | null | undefined,
-      footer_message: row.footer_message as string | null | undefined,
+      payment_terms: pRow.payment_terms,
+      footer_message: pRow.footer_message,
     })
 
     const proforma = {
-      ...row,
+      ...pRow,
       customers,
       payment_terms: merged.payment_terms,
       footer_message: merged.footer_message,
@@ -80,18 +95,18 @@ export async function GET(
     const [{ data: items }, { data: biz }, { data: settingsRow }] = await Promise.all([
       supabase
         .from("proforma_invoice_items")
-        .select("id, description, qty, unit_price, discount_amount, line_subtotal")
-        .eq("proforma_invoice_id", row.id)
+        .select(PUBLIC_PROFORMA_ITEM_SELECT)
+        .eq("proforma_invoice_id", pRow.id)
         .order("created_at", { ascending: true }),
       supabase
         .from("businesses")
-        .select("legal_name, trading_name, address_street, address_city, address_region, phone, email, website, tin, logo_url")
-        .eq("id", row.business_id as string)
+        .select(PUBLIC_BUSINESS_SELECT)
+        .eq("id", pRow.business_id)
         .single(),
       supabase
         .from("invoice_settings")
         .select("brand_color")
-        .eq("business_id", row.business_id as string)
+        .eq("business_id", pRow.business_id)
         .maybeSingle(),
     ])
 
@@ -105,8 +120,8 @@ export async function GET(
         payment_details: invSettings.payment_details,
       },
     })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("public/proforma GET error:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    return NextResponse.json({ error: "Unable to load document" }, { status: 500 })
   }
 }

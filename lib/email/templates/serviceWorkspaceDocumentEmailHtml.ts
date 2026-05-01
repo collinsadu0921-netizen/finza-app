@@ -3,6 +3,9 @@
  * No line items — CTA links to the public document page.
  */
 
+import type { ManualPaymentEmailPayload } from "@/lib/email/buildManualPaymentDetailsEmailHtml"
+import { buildManualPaymentDetailsEmailHtml } from "@/lib/email/buildManualPaymentDetailsEmailHtml"
+
 function escapeHtml(text: string): string {
   const map: Record<string, string> = {
     "&": "&amp;",
@@ -32,6 +35,8 @@ export function buildServiceWorkspaceDocumentEmailHtml(opts: {
   /** Optional line under title, e.g. due date */
   contextLine?: string | null
   publicUrl: string
+  /** Invoice: tenant bank/MoMo + merged instructions (optional). */
+  manualPayment?: ManualPaymentEmailPayload | null
 }): { html: string; text: string } {
   const greeting = opts.customerName?.trim()
     ? `Hi ${escapeHtml(opts.customerName.trim())},`
@@ -40,6 +45,11 @@ export function buildServiceWorkspaceDocumentEmailHtml(opts: {
   const ctx =
     opts.contextLine && opts.contextLine.trim()
       ? `<p style="margin:12px 0 0;font-size:15px;color:#334155;">${escapeHtml(opts.contextLine.trim())}</p>`
+      : ""
+
+  const paymentHtml =
+    opts.kind === "invoice" && opts.manualPayment
+      ? buildManualPaymentDetailsEmailHtml(opts.manualPayment)
       : ""
 
   const html = `<!DOCTYPE html>
@@ -56,16 +66,22 @@ export function buildServiceWorkspaceDocumentEmailHtml(opts: {
       <a href="${escapeHtml(opts.publicUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;">${escapeHtml(cta)}</a>
       <p style="margin:20px 0 0;font-size:13px;color:#64748b;">If the button doesn’t work, copy this link:</p>
       <p style="margin:6px 0 0;font-size:13px;word-break:break-all;"><a href="${escapeHtml(opts.publicUrl)}" style="color:#2563eb;">${escapeHtml(opts.publicUrl)}</a></p>
+      ${paymentHtml ? `<div style="margin:20px 0 0;">${paymentHtml}</div>` : ""}
     </td></tr>
   </table>
   <p style="max-width:560px;margin:16px auto 0;font-size:12px;color:#94a3b8;text-align:center;">You’re receiving this because you are listed as the client contact on this document.</p>
 </body></html>`
 
+  const textPaymentNote =
+    opts.kind === "invoice" && paymentHtml
+      ? "\n\nBank, Mobile Money, and payment instructions are included in the HTML version of this email, or open your invoice link."
+      : ""
+
   const text = `${opts.customerName?.trim() ? `Hi ${opts.customerName.trim()},` : "Hello,"}
 
 ${opts.businessName} has shared ${opts.documentTitleLine} with you in Finza.
 ${opts.contextLine?.trim() ? `${opts.contextLine.trim()}\n` : ""}
-${cta}: ${opts.publicUrl}
+${cta}: ${opts.publicUrl}${textPaymentNote}
 `
 
   return { html, text }

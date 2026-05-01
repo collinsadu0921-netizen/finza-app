@@ -534,6 +534,9 @@ export default function ServiceInvoiceSettingsPage() {
                   />
                 </div>
               </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+                Account number or IBAN is required for bank transfer details to appear on invoices.
+              </p>
             </div>
 
             {/* Mobile Money Details */}
@@ -578,6 +581,9 @@ export default function ServiceInvoiceSettingsPage() {
                     className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                     placeholder="0XX XXX XXXX"
                   />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    MoMo number is required for Mobile Money details to appear on invoices.
+                  </p>
                 </div>
               </div>
             </div>

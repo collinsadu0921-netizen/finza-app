@@ -1,4 +1,5 @@
 import type { FinzaDocumentTagType } from "@/lib/email/buildFinzaResendTags"
+import type { ManualPaymentEmailPayload } from "@/lib/email/buildManualPaymentDetailsEmailHtml"
 import { sendTransactionalEmail, type SendTransactionalEmailResult } from "@/lib/email/sendTransactionalEmail"
 import { SERVICE_DOCUMENTS_RESEND_FROM } from "@/lib/email/serviceDocumentsConstants"
 import {
@@ -26,6 +27,8 @@ export type SendServiceWorkspaceDocumentEmailParams = {
   documentTitleLine: string
   contextLine?: string | null
   publicUrl: string
+  /** Invoice sends: tenant bank/MoMo + merged instructions (optional). */
+  manualPayment?: ManualPaymentEmailPayload | null
   /** For structured logs / audit payloads */
   meta?: { documentType: string; documentId: string; businessId: string }
 }
@@ -61,6 +64,7 @@ export async function sendServiceWorkspaceDocumentEmail(
     documentTitleLine: params.documentTitleLine,
     contextLine: params.contextLine ?? null,
     publicUrl: pub,
+    manualPayment: params.manualPayment ?? null,
   })
 
   console.info("[sendServiceWorkspaceDocumentEmail] attempt", {

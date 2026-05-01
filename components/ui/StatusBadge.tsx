@@ -3,15 +3,18 @@ import { cn } from "@/lib/utils"
 
 export type StatusType =
     | "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled" | "void"
+    | "payment_pending"
     | "open" | "soft_closed" | "locked"
     | "active" | "blocked" | "inactive" | "pending"
 
 interface StatusBadgeProps {
     status: string
     className?: string
+    /** When set, shown instead of the auto title-case label (e.g. customer-facing sentence case). */
+    label?: string | null
 }
 
-export function StatusBadge({ status, className }: StatusBadgeProps) {
+export function StatusBadge({ status, className, label }: StatusBadgeProps) {
     const normalizedStatus = status.toLowerCase().replace(/ /g, "_") as StatusType
 
     const styles: Record<string, string> = {
@@ -26,6 +29,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
 
         // Client-facing display statuses (override internal labels for public pages)
         awaiting_payment: "bg-amber-50 text-amber-700 border border-amber-200",
+        payment_pending: "bg-sky-50 text-sky-800 border border-sky-200",
 
         // VAT Return Statuses
         submitted: "bg-blue-50 text-blue-700 border border-blue-200",
@@ -45,15 +49,17 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
     // Fallback for unknown statuses
     const baseStyle = styles[normalizedStatus] || "bg-gray-100 text-gray-800 border border-gray-200"
 
-    const label = normalizedStatus.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+    const autoLabel = normalizedStatus.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+    const displayLabel = (label != null && String(label).trim()) ? String(label).trim() : autoLabel
 
     return (
         <span className={cn(
-            "px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wide tabular-nums select-none",
+            "px-2.5 py-0.5 rounded text-xs font-semibold tabular-nums select-none",
+            !(label != null && String(label).trim()) && "uppercase tracking-wide",
             baseStyle,
             className
         )}>
-            {label}
+            {displayLabel}
         </span>
     )
 }

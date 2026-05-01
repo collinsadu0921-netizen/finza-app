@@ -10,6 +10,10 @@ import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { formatMoney } from "@/lib/money"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
+import {
+  showTenantBankPaymentCard,
+  showTenantMomoPaymentCard,
+} from "@/lib/invoices/invoicePaymentDetailsDisplay"
 
 function formatInvoiceNumberForHeader(num: string): string {
   const s = (num || "").trim()
@@ -95,9 +99,19 @@ export type InvoiceDocumentProps = {
   /**
    * Override the status shown in the badge.
    * Use this on client-facing pages to show a friendlier label
-   * (e.g. "awaiting_payment" instead of the internal "sent").
+   * (e.g. "payment_pending" instead of the internal "sent").
    */
   displayStatus?: string
+  /** Sentence-case label for the badge (colour still follows `displayStatus ?? invoice.status`). */
+  statusBadgeLabel?: string
+  /** Highlights balance due near payment details (customer-facing links / print). */
+  balanceDueHighlight?: {
+    balanceDue: number
+    currencyCode: string
+    dueDate: string | null
+  }
+  /** Anchor for in-page navigation (e.g. public toolbar "View invoice"). */
+  documentDomId?: string
   /**
    * Brand colour from invoice settings — renders a top accent strip.
    * Defaults to slate-900 (#0f172a).
@@ -120,6 +134,9 @@ export function InvoiceDocument({
   settings,
   className = "",
   displayStatus,
+  statusBadgeLabel,
+  balanceDueHighlight,
+  documentDomId,
   brandColor = "#0f172a",
 }: InvoiceDocumentProps) {
   const businessName = business?.trading_name || business?.legal_name || "Business"
@@ -151,9 +168,9 @@ export function InvoiceDocument({
   )
   const showLineDiscountSummary = lineItemsDiscountTotal > 0.005
 
-  const hasBank = !!(settings?.bank_account_number)
-  const hasMomo = !!(settings?.momo_number)
-  const hasPaymentDetails = hasBank || hasMomo
+  const hasBank = showTenantBankPaymentCard(settings)
+  const hasMomo = showTenantMomoPaymentCard(settings)
+  const hasPaymentMethodCards = hasBank || hasMomo
 
   // WHT on customer invoices — same rule as lib/invoices/buildInvoicePreviewHtml → FinancialDocument
   const whtApplicable = Boolean(invoice.wht_receivable_applicable)
@@ -167,8 +184,16 @@ export function InvoiceDocument({
       ? `Less WHT (${(whtRate * 100).toFixed(0)}% withheld by customer)`
       : "Less WHT (withheld by customer)"
 
+  const showBalanceStrip =
+    balanceDueHighlight &&
+    balanceDueHighlight.balanceDue > 0.005 &&
+    invoice.status !== "paid"
+
   return (
-    <div className={`bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden ${className}`}>
+    <div
+      id={documentDomId}
+      className={`bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden ${className}`}
+    >
       {/* Brand accent strip */}
       <div className="h-1.5 w-full" style={{ backgroundColor: brandColor }} />
 
@@ -210,7 +235,7 @@ export function InvoiceDocument({
               {invoice.due_date ? <p>Due Date: {formatDate(invoice.due_date)}</p> : null}
             </div>
             <div className="mt-2.5">
-              <StatusBadge status={displayStatus ?? invoice.status} />
+              <StatusBadge status={displayStatus ?? invoice.status} label={statusBadgeLabel} />
             </div>
           </div>
         </div>
@@ -354,6 +379,18 @@ export function InvoiceDocument({
         </div>
       </div>
 
+      {showBalanceStrip && balanceDueHighlight && (
+        <div className="px-6 py-3.5 border-b border-slate-100 bg-slate-50/90">
+          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Balance due</p>
+          <p className="text-lg font-bold text-slate-900 tabular-nums">
+            {formatMoney(balanceDueHighlight.balanceDue, balanceDueHighlight.currencyCode)}
+          </p>
+          {balanceDueHighlight.dueDate ? (
+            <p className="text-xs text-slate-600 mt-1">Due {formatDate(balanceDueHighlight.dueDate)}</p>
+          ) : null}
+        </div>
+      )}
+
       {/* Notes — above payment instructions (matches PDF order) */}
       {invoice.notes?.trim() && (
         <div className="px-6 py-3 border-b border-slate-100">
@@ -362,13 +399,12 @@ export function InvoiceDocument({
         </div>
       )}
 
-      {/* Payment Details — full width below totals */}
-      {hasPaymentDetails && (
+      {/* Payment method cards — gated by account number or IBAN (bank) / MoMo number */}
+      {hasPaymentMethodCards && (
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
-            How to Pay
-          </h3>
-          <div className={`grid gap-4 ${hasBank && hasMomo ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 max-w-xs"}`}>
+          <h3 className="text-sm font-semibold text-slate-900 mb-1">Payment details</h3>
+          <p className="text-xs text-slate-600 mb-3">Please use the payment details below when making payment.</p>
+          <div className={`grid gap-4 ${hasBank && hasMomo ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 max-w-md"}`}>
             {hasBank && (
               <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
                 <div className="flex items-center gap-2 mb-3">
@@ -377,11 +413,24 @@ export function InvoiceDocument({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
                     </svg>
                   </div>
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Bank Transfer</span>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Bank transfer</span>
                 </div>
                 <div className="space-y-1.5 text-sm">
                   {settings?.bank_name && (
                     <p className="font-semibold text-slate-800">{settings.bank_name}</p>
+                  )}
+                  {settings?.bank_account_name && (
+                    <p className="text-slate-500 text-xs">
+                      Account name: <span className="text-slate-700 font-medium">{settings.bank_account_name}</span>
+                    </p>
+                  )}
+                  {settings?.bank_account_number?.trim() && (
+                    <>
+                      <p className="text-slate-500 text-xs">Account number</p>
+                      <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block text-sm tracking-widest font-bold">
+                        {settings.bank_account_number}
+                      </p>
+                    </>
                   )}
                   {settings?.bank_branch?.trim() && (
                     <p className="text-slate-500 text-xs">
@@ -390,21 +439,16 @@ export function InvoiceDocument({
                   )}
                   {settings?.bank_swift?.trim() && (
                     <p className="text-slate-500 text-xs">
-                      SWIFT / BIC: <span className="text-slate-700 font-medium font-mono tracking-wide">{settings.bank_swift.trim()}</span>
+                      SWIFT / BIC:{" "}
+                      <span className="text-slate-700 font-medium font-mono tracking-wide">{settings.bank_swift.trim()}</span>
                     </p>
                   )}
                   {settings?.bank_iban?.trim() && (
                     <p className="text-slate-500 text-xs">
-                      IBAN: <span className="text-slate-700 font-medium font-mono tracking-wide break-all">{settings.bank_iban.trim()}</span>
+                      IBAN:{" "}
+                      <span className="text-slate-700 font-medium font-mono tracking-wide break-all">{settings.bank_iban.trim()}</span>
                     </p>
                   )}
-                  {settings?.bank_account_name && (
-                    <p className="text-slate-500 text-xs">Account name: <span className="text-slate-700 font-medium">{settings.bank_account_name}</span></p>
-                  )}
-                  <p className="text-slate-500 text-xs">Account number:</p>
-                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block text-sm tracking-widest font-bold">
-                    {settings?.bank_account_number}
-                  </p>
                 </div>
               </div>
             )}
@@ -416,15 +460,19 @@ export function InvoiceDocument({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                   </div>
-                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">
-                    {settings?.momo_provider ? `${settings.momo_provider} MoMo` : "Mobile Money"}
-                  </span>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Mobile money</span>
                 </div>
                 <div className="space-y-1 text-sm">
+                  <p className="font-semibold text-slate-800">
+                    {settings?.momo_provider?.trim() ? settings.momo_provider.trim() : "Mobile money"}
+                  </p>
                   {settings?.momo_name && (
-                    <p className="text-slate-500 text-xs">Name: <span className="text-slate-700 font-medium">{settings.momo_name}</span></p>
+                    <p className="text-slate-500 text-xs">
+                      Account name: <span className="text-slate-700 font-medium">{settings.momo_name}</span>
+                    </p>
                   )}
-                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block mt-1.5 text-sm tracking-widest font-bold">
+                  <p className="text-slate-500 text-xs">Number</p>
+                  <p className="font-mono text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 inline-block text-sm tracking-widest font-bold">
                     {settings?.momo_number}
                   </p>
                 </div>
@@ -436,8 +484,8 @@ export function InvoiceDocument({
 
       {invoice.payment_terms?.trim() && (
         <div className="px-6 py-3 border-b border-slate-100">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Payment terms</h3>
-          <p className="text-xs text-slate-700 leading-relaxed">{invoice.payment_terms}</p>
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Payment instructions</h3>
+          <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line">{invoice.payment_terms}</p>
         </div>
       )}
 

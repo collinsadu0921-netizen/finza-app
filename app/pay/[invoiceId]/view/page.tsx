@@ -1,9 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { formatMoney } from "@/lib/money"
+import {
+  ManualInvoicePaymentDetails,
+  type InvoiceManualPaymentDetailsProps,
+} from "@/components/invoices/ManualInvoicePaymentDetails"
 
 type Business = {
   id: string
@@ -25,6 +29,7 @@ type Customer = {
 
 type Invoice = {
   id: string
+  public_token?: string | null
   invoice_number: string
   issue_date: string
   due_date: string | null
@@ -78,6 +83,9 @@ type ManualWalletPayment = {
   display_label: string | null
 }
 
+const PAY_LINK_UNAVAILABLE =
+  "This payment link is no longer available. Please use the invoice link sent by the business."
+
 const METHOD_LABELS: Record<string, string> = {
   cash: "Cash",
   momo: "Mobile Money",
@@ -96,59 +104,104 @@ function fmtDate(d: string | null) {
 export default function InvoiceViewPage() {
   const params    = useParams()
   const router    = useRouter()
+  const searchParams = useSearchParams()
   const invoiceId = (params?.invoiceId as string) || ""
+  const publicToken = (searchParams.get("token") ?? "").trim()
 
   const [invoice,  setInvoice]  = useState<Invoice | null>(null)
   const [items,    setItems]    = useState<LineItem[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [remaining, setRemaining] = useState(0)
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState("")
+  const [loading,  setLoading]  = useState(false)
+  const [linkUnavailable, setLinkUnavailable] = useState(false)
   const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
+  const [tenantOnlinePay, setTenantOnlinePay] = useState(false)
+  const [invoiceSettingsPublic, setInvoiceSettingsPublic] = useState<InvoiceManualPaymentDetailsProps | null>(null)
 
   useEffect(() => {
     if (!invoiceId) return
-    fetch(`/api/public/invoice/${invoiceId}`)
-      .then(async r => {
-        if (!r.ok) {
-          const e = await r.json().catch(() => ({}))
-          throw new Error(e.error || "Invoice not found")
+    if (!publicToken) {
+      setLinkUnavailable(false)
+      return
+    }
+
+    let cancelled = false
+    const run = async () => {
+      setLoading(true)
+      setLinkUnavailable(false)
+      try {
+        const r = await fetch(
+          `/api/public/invoice/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`
+        )
+        if (!r.ok || cancelled) {
+          if (!cancelled) {
+            setInvoice(null)
+            setLinkUnavailable(true)
+          }
+          return
         }
-        return r.json()
-      })
-      .then(data => {
+        const data = await r.json()
+        if (cancelled) return
+        if (!data.invoice) {
+          setInvoice(null)
+          setLinkUnavailable(true)
+          return
+        }
+
+        if (data.tenant_invoice_online_payments_enabled !== true) {
+          router.replace(`/invoice-public/${encodeURIComponent(publicToken)}`)
+          return
+        }
+
         setInvoice(data.invoice)
         setItems(data.items || [])
         setPayments(data.payments || [])
         setRemaining(data.remaining ?? Number(data.invoice?.total ?? 0))
         setManualWalletPayment(data.manual_wallet_payment ?? null)
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [invoiceId])
+        setTenantOnlinePay(data.tenant_invoice_online_payments_enabled === true)
+        setInvoiceSettingsPublic(data.invoice_settings_public ?? null)
+      } catch {
+        if (!cancelled) {
+          setInvoice(null)
+          setLinkUnavailable(true)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
 
-  if (loading) {
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [invoiceId, publicToken, router])
+
+  if (loading && publicToken) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">Loading invoice…</p>
+          <p className="text-gray-500 text-sm">Loading…</p>
         </div>
       </div>
     )
   }
 
-  if (error || !invoice) {
+  if (!publicToken || linkUnavailable) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="bg-white rounded-xl shadow p-8 max-w-md w-full text-center">
-          <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Invoice Not Found</h2>
-          <p className="text-gray-500 text-sm">{error || "This invoice doesn't exist or isn't available."}</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 max-w-md w-full text-center">
+          <p className="text-gray-800 text-sm leading-relaxed">{PAY_LINK_UNAVAILABLE}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!invoice) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 max-w-md w-full text-center">
+          <p className="text-gray-800 text-sm leading-relaxed">{PAY_LINK_UNAVAILABLE}</p>
         </div>
       </div>
     )
@@ -209,16 +262,13 @@ export default function InvoiceViewPage() {
               </svg>
               Print
             </button>
-            {!isPaid && remaining > 0 && (
-              <button
-                onClick={() => router.push(`/pay/${invoiceId}`)}
-                className="flex items-center gap-1.5 text-sm bg-green-600 text-white rounded-lg px-4 py-1.5 hover:bg-green-700 font-medium"
+            {!isPaid && remaining > 0 && invoice.public_token && (
+              <a
+                href={`/invoice-public/${encodeURIComponent(invoice.public_token)}`}
+                className="flex items-center gap-1.5 text-sm border border-slate-300 bg-white rounded-lg px-4 py-1.5 hover:bg-slate-50 font-medium text-slate-800"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-                Pay {formatMoney(remaining, invoice.currency_code)}
-              </button>
+                Open full invoice
+              </a>
             )}
           </div>
         </div>
@@ -427,42 +477,20 @@ export default function InvoiceViewPage() {
             </div>
           )}
 
-          {/* Manual wallet (tenant default provider) */}
-          {!isPaid && remaining > 0 && manualWalletPayment && (
-            <div className="px-8 py-5 border-b border-gray-100 bg-amber-50/80">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 mb-2">Pay manually</p>
-              <p className="text-sm text-amber-900/90 mb-3">
-                Use the details below to send payment. The business will confirm receipt — this is not an automated card or
-                MoMo checkout.
-              </p>
-              {manualWalletPayment.display_label && (
-                <p className="text-sm font-semibold text-gray-900 mb-2">{manualWalletPayment.display_label}</p>
-              )}
-              <dl className="space-y-1.5 text-sm text-gray-800">
-                {manualWalletPayment.network && (
-                  <div>
-                    <span className="text-gray-500">Network: </span>
-                    {manualWalletPayment.network}
-                  </div>
-                )}
-                {manualWalletPayment.account_name && (
-                  <div>
-                    <span className="text-gray-500">Account name: </span>
-                    {manualWalletPayment.account_name}
-                  </div>
-                )}
-                {manualWalletPayment.wallet_number && (
-                  <div>
-                    <span className="text-gray-500">Wallet: </span>
-                    <span className="font-mono font-semibold">{manualWalletPayment.wallet_number}</span>
-                  </div>
-                )}
-              </dl>
-              {manualWalletPayment.instructions && (
-                <p className="text-sm text-gray-700 mt-3 whitespace-pre-line border-t border-amber-200/80 pt-3">
-                  {manualWalletPayment.instructions}
-                </p>
-              )}
+          {/* Bank / MoMo / manual wallet (public-safe) */}
+          {!isPaid && remaining > 0 && (
+            <div className="px-8 py-5 border-b border-gray-100 bg-white">
+              <ManualInvoicePaymentDetails
+                details={invoiceSettingsPublic}
+                manualWallet={manualWalletPayment}
+                showPayFallbackBanner={!tenantOnlinePay}
+                payFallbackSubtitle={
+                  !tenantOnlinePay
+                    ? "Online payment is currently unavailable for this invoice. Please use the payment details provided by the business."
+                    : ""
+                }
+                className="max-w-xl"
+              />
             </div>
           )}
 
@@ -483,18 +511,14 @@ export default function InvoiceViewPage() {
 
         </div>
 
-        {/* Pay CTA — bottom, outside document, hidden when printing */}
-        {!isPaid && remaining > 0 && (
+        {!isPaid && remaining > 0 && tenantOnlinePay && (
           <div className="mt-5 print:hidden">
-            <button
-              onClick={() => router.push(`/pay/${invoiceId}`)}
-              className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-md hover:from-green-700 hover:to-emerald-700 flex items-center justify-center gap-2"
+            <a
+              href={`/pay/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`}
+              className="flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-              Pay Now — {formatMoney(remaining, invoice.currency_code)} Due
-            </button>
+              Open payment page
+            </a>
           </div>
         )}
 

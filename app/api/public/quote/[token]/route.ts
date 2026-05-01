@@ -4,6 +4,7 @@ import {
   loadInvoiceSettingsForDocument,
   mergeQuotePdfTerms,
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
+import { PUBLIC_BUSINESS_SELECT, PUBLIC_ESTIMATE_COLUMNS } from "@/lib/publicDocuments/publicDocumentSelects"
 
 export const dynamic = "force-dynamic"
 
@@ -64,26 +65,30 @@ export async function GET(
     const { token: rawToken } = await params
     const token = decodeURIComponent(rawToken).trim()
     if (!token) {
-      return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = serviceClient()
 
     // Avoid PostgREST embed `customers (...)` — relationship hints often break across
     // schema versions and surface as PGRST errors that we were treating as 404.
-    const { data: row, error } = await supabase
+    const { data: row, error } = (await supabase
       .from("estimates")
-      .select("*")
+      .select(PUBLIC_ESTIMATE_COLUMNS)
       .eq("public_token", token)
       .is("deleted_at", null)
-      .maybeSingle()
+      .maybeSingle()) as {
+      data: Record<string, unknown> | null
+      error: { message?: string } | null
+    }
 
     if (error) {
-      console.error("public/quote GET estimates error:", error.message, error.code, error.details)
-      return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+      const pe = error as { message?: string; code?: string; details?: string }
+      console.error("public/quote GET estimates error:", pe.message, pe.code, pe.details)
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
     if (!row) {
-      return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const customerId = row.customer_id as string | null | undefined
@@ -109,7 +114,7 @@ export async function GET(
       customers = cust ?? null
     }
 
-    const estimate = normalizeEstimateForPublic(row as Record<string, unknown>, customers)
+    const estimate = normalizeEstimateForPublic(row, customers)
 
     const invSettings = await loadInvoiceSettingsForDocument(supabase, estimate.business_id)
     const mergedTerms = mergeQuotePdfTerms(invSettings, null)
@@ -122,7 +127,7 @@ export async function GET(
         .order("created_at", { ascending: true }),
       supabase
         .from("businesses")
-        .select("legal_name, trading_name, address_street, address_city, address_region, phone, email, website, tin, logo_url")
+        .select(PUBLIC_BUSINESS_SELECT)
         .eq("id", estimate.business_id)
         .single(),
       supabase
@@ -143,8 +148,8 @@ export async function GET(
         footer_message: mergedTerms.footer_message,
       },
     })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("public/quote GET error:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    return NextResponse.json({ error: "Unable to load document" }, { status: 500 })
   }
 }

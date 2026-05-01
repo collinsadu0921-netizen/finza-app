@@ -3,6 +3,13 @@
  * Full details appear on the public invoice page after the recipient opens the link.
  */
 
+import {
+  buildManualPaymentDetailsEmailHtml,
+  type ManualPaymentEmailPayload,
+} from "@/lib/email/buildManualPaymentDetailsEmailHtml"
+
+export type { ManualPaymentEmailPayload }
+
 function escapeHtml(text: string): string {
   const map: Record<string, string> = {
     "&": "&amp;",
@@ -34,10 +41,10 @@ export interface InvoiceForEmail {
 export interface InvoiceEmailOptions {
   /** Public link to view the invoice */
   publicViewUrl?: string
-  /** Link to pay the invoice online (no amounts shown in this email) */
-  payUrl?: string
   /** Customer name for greeting */
   customerName?: string
+  /** Shown when tenant has configured bank/MoMo or terms (no internal IDs). */
+  manualPayment?: ManualPaymentEmailPayload | null
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -54,11 +61,13 @@ export function buildInvoiceEmailHtml(
   businessName: string,
   options: InvoiceEmailOptions = {}
 ): string {
-  const { publicViewUrl, payUrl, customerName } = options
+  const { publicViewUrl, customerName, manualPayment } = options
   const docNumber = invoice.invoice_number ? `#${invoice.invoice_number}` : "invoice"
   const greetingName = customerName ? escapeHtml(customerName) : "there"
   const dueLine =
     formatDate(invoice.due_date) || (invoice.payment_terms?.trim() ? escapeHtml(invoice.payment_terms) : "—")
+
+  const paymentBlock = manualPayment ? buildManualPaymentDetailsEmailHtml(manualPayment) : ""
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -82,25 +91,21 @@ export function buildInvoiceEmailHtml(
               <p style="margin:0 0 8px;font-size:15px;color:#374151;line-height:1.6;">Hello ${greetingName},</p>
               <p style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.6;">Your invoice ${escapeHtml(docNumber)} from ${escapeHtml(businessName)} is ready.</p>
               <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.6;"><strong style="color:#374151;">Due date:</strong> ${dueLine}</p>
-              ${publicViewUrl || payUrl ? `
+              ${publicViewUrl ? `
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
                 <tr>
                   <td align="center">
                     <table cellpadding="0" cellspacing="0">
                       <tr>
-                        ${publicViewUrl ? `
                         <td style="padding:4px;">
                           <a href="${escapeHtml(publicViewUrl)}" style="display:inline-block;padding:13px 24px;background:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;letter-spacing:.01em;">View invoice</a>
-                        </td>` : ""}
-                        ${payUrl ? `
-                        <td style="padding:4px;">
-                          <a href="${escapeHtml(payUrl)}" style="display:inline-block;padding:13px 24px;background:#059669;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;letter-spacing:.01em;">Pay now</a>
-                        </td>` : ""}
+                        </td>
                       </tr>
                     </table>
                   </td>
                 </tr>
               </table>` : ""}
+              ${paymentBlock}
               <p style="margin:28px 0 0;font-size:15px;color:#374151;line-height:1.6;">Thank you,<br />${escapeHtml(businessName)}</p>
             </td>
           </tr>

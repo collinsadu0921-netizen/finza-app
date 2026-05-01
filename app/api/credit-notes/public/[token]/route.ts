@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import {
+  PUBLIC_BUSINESS_SELECT,
+  PUBLIC_CREDIT_NOTE_ITEM_SELECT,
+} from "@/lib/publicDocuments/publicDocumentSelects"
 
 export async function GET(
   request: NextRequest,
@@ -9,7 +13,6 @@ export async function GET(
     const supabase = await createSupabaseServerClient()
     const { token } = await params
 
-    // Get credit note by public token
     const { data: creditNote, error: creditNoteError } = await supabase
       .from("credit_notes")
       .select(
@@ -33,16 +36,12 @@ export async function GET(
       .single()
 
     if (creditNoteError || !creditNote) {
-      return NextResponse.json(
-        { error: "Credit note not found" },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
-    // Get business profile
     const { data: business, error: businessError } = await supabase
       .from("businesses")
-      .select("*")
+      .select(PUBLIC_BUSINESS_SELECT)
       .eq("id", creditNote.business_id)
       .single()
 
@@ -50,10 +49,9 @@ export async function GET(
       console.error("Error fetching business:", businessError)
     }
 
-    // Get credit note items
     const { data: items, error: itemsError } = await supabase
       .from("credit_note_items")
-      .select("*")
+      .select(PUBLIC_CREDIT_NOTE_ITEM_SELECT)
       .eq("credit_note_id", creditNote.id)
       .order("created_at", { ascending: true })
 
@@ -66,12 +64,8 @@ export async function GET(
       business: business || null,
       items: items || [],
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching public credit note:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Unable to load document" }, { status: 500 })
   }
 }
-

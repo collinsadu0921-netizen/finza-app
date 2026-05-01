@@ -1,7 +1,8 @@
 /**
  * Paystack Mobile Money Charge — Public endpoint
  *
- * Called by the public /pay/[invoiceId] page.  No user auth required —
+ * Called by the public pay flow when `/pay/[invoiceId]?token=...` loads and tenant invoice Paystack is enabled.
+ * No user session required —
  * the invoice ID is the access token for this payment operation.
  *
  * Flow:
@@ -21,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
 
 export const dynamic = "force-dynamic"
 
@@ -41,6 +43,16 @@ const PROVIDER_CODES: Record<string, string> = {
 }
 
 export async function POST(request: NextRequest) {
+  if (!tenantInvoiceOnlinePaymentsEnabled()) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Online invoice payment is not enabled. Use the bank or mobile money details from your invoice.",
+      },
+      { status: 403 }
+    )
+  }
+
   const secretKey = process.env.PAYSTACK_SECRET_KEY
   if (!secretKey) {
     return NextResponse.json({ success: false, error: "Paystack is not configured" }, { status: 503 })
