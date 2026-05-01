@@ -99,6 +99,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: linkError.message || "Could not link user to business" }, { status: 500 })
   }
 
+  if (process.env.NODE_ENV === "development") {
+    console.info(
+      "[provision-service-business] service subscription provisioning",
+      JSON.stringify({
+        businessId: business.id,
+        selectedTier: sub.service_subscription_tier,
+        trialRequested: sub.service_subscription_status === "trialing",
+        resultingStatus: sub.service_subscription_status,
+        trial_started_at_set: Boolean(sub.trial_started_at),
+        trial_ends_at_set: Boolean(sub.trial_ends_at),
+        billing_cycle: sub.billing_cycle,
+      })
+    )
+  }
+
   void sendServiceWelcomeNotificationsAfterProvision({
     businessId: business.id as string,
     ownerUserId: user.id,

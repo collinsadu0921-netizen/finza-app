@@ -193,6 +193,14 @@ function formatGHS(amount: number): string {
   return formatMoney(amount, "GHS")
 }
 
+/** Whole calendar days until `end` (0 if already passed). */
+function wholeDaysUntil(end: Date | null): number | null {
+  if (!end) return null
+  const ms = end.getTime() - Date.now()
+  if (ms <= 0) return 0
+  return Math.ceil(ms / (24 * 60 * 60 * 1000))
+}
+
 function SubscriptionCallbackHandler() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -769,12 +777,23 @@ function SubscriptionPageInner() {
                     <p className="text-sm font-semibold text-blue-800">
                       <span className="uppercase tracking-wide text-[11px] text-blue-600">Trial active</span>
                       {" · "}
-                      {SERVICE_TIER_LABEL[tier]} plan
-                      {trialDaysLeft !== null && (
-                        <> — {trialDaysLeft === 0 ? "last day" : trialDaysLeft === 1 ? "1 day left" : `${trialDaysLeft} days left`}</>
-                      )}
+                      <span className="font-medium">14-day trial</span>
+                      {" · "}
+                      <span className="font-medium">{SERVICE_TIER_LABEL[tier]}</span>
                     </p>
                     <p className="mt-1 text-xs text-blue-800">
+                      {trialDaysLeft !== null && (
+                        <>
+                          <span className="font-semibold text-blue-900">
+                            {trialDaysLeft === 0
+                              ? "Last day of your trial"
+                              : trialDaysLeft === 1
+                                ? "1 day left in your trial"
+                                : `${trialDaysLeft} days left in your trial`}
+                          </span>
+                          {" · "}
+                        </>
+                      )}
                       Trial ends on <span className="font-medium">{formatDate(trialEndsAt)}</span>.
                       {trialStartedAt && (
                         <>
@@ -784,7 +803,8 @@ function SubscriptionPageInner() {
                       )}
                     </p>
                     <p className="mt-0.5 text-xs text-blue-700">
-                      Subscribe before your trial ends to keep uninterrupted access to this plan&apos;s features.
+                      This is a free trial, not a paid subscription. Subscribe before your trial ends to keep full
+                      access to {SERVICE_TIER_LABEL[tier]} features.
                     </p>
                   </div>
                 </div>
@@ -816,6 +836,38 @@ function SubscriptionPageInner() {
                     <p className="mt-0.5 text-xs text-red-700">
                       Your subscription has expired. Renew to continue using paid features.
                     </p>
+                    <p className="mt-2 text-xs text-red-800">
+                      Use the plan options below to subscribe or renew with card or Mobile Money.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Past due — payment failed; grace window from subscription_grace_until */}
+              {status === "past_due" && !subscriptionLocked && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-900">Payment overdue — grace period</p>
+                    <p className="mt-1 text-xs text-amber-800">
+                      {graceEndsAt ? (
+                        <>
+                          Pay before{" "}
+                          <span className="font-medium">{formatDate(graceEndsAt)}</span>
+                          {(() => {
+                            const d = wholeDaysUntil(graceEndsAt)
+                            if (d === null) return null
+                            if (d === 0) return <> (ends today).</>
+                            if (d === 1) return <> (1 day remaining).</>
+                            return <> ({d} days remaining).</>
+                          })()}
+                        </>
+                      ) : (
+                        <>Complete payment soon to avoid interruption.</>
+                      )}
+                    </p>
                   </div>
                 </div>
               )}
@@ -844,35 +896,55 @@ function SubscriptionPageInner() {
                 </div>
               )}
 
-              {/* Active paid — next billing date */}
-              {status === "active" && !periodExpired && !subscriptionLocked && currentPeriodEndsAt && (
+              {/* Active paid — current plan billing period */}
+              {status === "active" && !periodExpired && !subscriptionLocked && (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
                   <svg className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-emerald-800">
-                      Next renewal:{" "}
-                      <span className="font-bold">{formatDate(currentPeriodEndsAt)}</span>
-                      {daysUntilRenewal !== null && (
-                        <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                          {daysUntilRenewal === 0
-                            ? "Due today"
-                            : daysUntilRenewal === 1
-                            ? "1 day left"
-                            : `${daysUntilRenewal} days left`}
-                        </span>
-                      )}
-                    </p>
-                    <p className="mt-0.5 text-xs text-emerald-700">
-                      {billingCycle ? `Billing cycle: ${BILLING_CYCLE_LABEL[billingCycle as BillingCycle] ?? billingCycle}. ` : ""}
-                      {subscriptionStartedAt && (
-                        <>
-                          Member since <span className="font-medium">{formatDate(subscriptionStartedAt)}</span>.{" "}
-                        </>
-                      )}
-                      Pay before this date to maintain uninterrupted access.
-                    </p>
+                    {currentPeriodEndsAt ? (
+                      <>
+                        <p className="text-sm font-semibold text-emerald-800">
+                          Current billing period ends{" "}
+                          <span className="font-bold">{formatDate(currentPeriodEndsAt)}</span>
+                          {daysUntilRenewal !== null && (
+                            <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                              {daysUntilRenewal === 0
+                                ? "Due today"
+                                : daysUntilRenewal === 1
+                                  ? "1 day left"
+                                  : `${daysUntilRenewal} days left`}
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-xs text-emerald-700">
+                          {billingCycle ? `Billing cycle: ${BILLING_CYCLE_LABEL[billingCycle as BillingCycle] ?? billingCycle}. ` : ""}
+                          {subscriptionStartedAt && (
+                            <>
+                              Member since <span className="font-medium">{formatDate(subscriptionStartedAt)}</span>.{" "}
+                            </>
+                          )}
+                          Pay before this date to maintain uninterrupted access.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-semibold text-emerald-800">Active paid subscription</p>
+                        <p className="mt-0.5 text-xs text-emerald-700">
+                          Your plan is <span className="font-medium">{SERVICE_TIER_LABEL[effectiveTier]}</span>.
+                          {billingCycle ? (
+                            <>
+                              {" "}
+                              Billing cycle: {BILLING_CYCLE_LABEL[billingCycle as BillingCycle] ?? billingCycle}. Your
+                              next renewal date will appear here after the first billing period is recorded.
+                            </>
+                          ) : (
+                            <> Renewal dates will appear here after your first successful payment is recorded.</>
+                          )}
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

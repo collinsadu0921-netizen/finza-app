@@ -9,6 +9,7 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   trial?: string | null
   /** Only "service" is forwarded (public Finza Service signup). */
   workspace?: string | null
+  billing_cycle?: string | null
 }): string {
   const base = getPublicAppUrl().replace(/\/$/, "")
   const u = new URL("/auth/callback", base)
@@ -17,6 +18,10 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   if (opts.trial === "1") u.searchParams.set("trial", "1")
   if (opts.workspace?.trim().toLowerCase() === "service") {
     u.searchParams.set("workspace", "service")
+  }
+  const bc = opts.billing_cycle?.trim().toLowerCase()
+  if (bc === "monthly" || bc === "quarterly" || bc === "annual") {
+    u.searchParams.set("billing_cycle", bc)
   }
   return u.toString()
 }

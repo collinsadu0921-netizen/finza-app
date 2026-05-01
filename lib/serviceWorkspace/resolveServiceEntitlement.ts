@@ -23,6 +23,11 @@
  * Essentials (starter) access permanently. They see an upgrade CTA on any
  * page that requires a higher tier.
  *
+ * **current_period_ends_at vs trial:** Trial access is driven only by
+ * `service_subscription_status === 'trialing'` and `trial_ends_at`. We do not
+ * use `current_period_ends_at` for trial countdown (new trials insert it as
+ * null until the first paid activation writes the billing period).
+ *
  * MoMo payment grace (subscription_grace_until) is completely separate from
  * trial state — it is only set when a renewal payment fails on an active/paid
  * subscription.

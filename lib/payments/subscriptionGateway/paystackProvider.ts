@@ -87,7 +87,7 @@ export async function paystackInitiateSubscriptionCard(
   ctx: SubscriptionInitiateContext
 ): Promise<PaystackInitiateCardResult> {
   const appUrl = resolvePublicAppOrigin(request)
-  const callback_url = `${appUrl}/service/settings/subscription?sub_callback=1`
+  const callback_url = `${appUrl}/service/settings/subscription?sub_callback=1&business_id=${encodeURIComponent(ctx.businessId)}`
 
   const initRes = await fetch("https://api.paystack.co/transaction/initialize", {
     method: "POST",

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
-import { tryParseServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+import {
+  DEFAULT_SERVICE_SUBSCRIPTION_TIER,
+  tryParseServiceSubscriptionTier,
+} from "@/lib/serviceWorkspace/subscriptionTiers"
+import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import {
   resolveBusinessDashboardRedirect,
   shouldApplyServiceMarketingMetadataFromUrl,
@@ -78,6 +82,7 @@ export async function GET(request: NextRequest) {
   const trialParam = requestUrl.searchParams.get("trial")
   const workspaceParam = (requestUrl.searchParams.get("workspace") ?? "").trim().toLowerCase()
   const parsedPlan = tryParseServiceSubscriptionTier(planParam)
+  const parsedBillingCycle = tryParseBillingCycle(requestUrl.searchParams.get("billing_cycle"))
 
   const rawMeta = { ...(user.user_metadata as Record<string, unknown>) }
   const existingSignupIntent =
@@ -85,21 +90,34 @@ export async function GET(request: NextRequest) {
 
   let effectiveMeta: Record<string, unknown> = rawMeta
 
-  if (shouldApplyServiceMarketingMetadataFromUrl(parsedPlan, existingSignupIntent)) {
-    const isServiceTrialLink = trialParam === "1" && workspaceParam === "service"
-    if (isServiceTrialLink) {
+  const isAccountingFirm = existingSignupIntent === "accounting_firm"
+  /** Service marketing trial CTA: `trial=1` + `workspace=service` — plan may be omitted (defaults to Essentials). */
+  const isServiceTrialFromUrl = trialParam === "1" && workspaceParam === "service" && !isAccountingFirm
+
+  const canApplyPlanOnlyFromUrl =
+    !isAccountingFirm && shouldApplyServiceMarketingMetadataFromUrl(parsedPlan, existingSignupIntent)
+
+  if (isServiceTrialFromUrl || (canApplyPlanOnlyFromUrl && parsedPlan !== null)) {
+    if (isServiceTrialFromUrl) {
+      const trialTier = parsedPlan ?? DEFAULT_SERVICE_SUBSCRIPTION_TIER
       effectiveMeta = {
         ...effectiveMeta,
         signup_intent: "business_owner",
         trial_intent: true,
         trial_workspace: "service",
-        trial_plan: parsedPlan,
+        trial_plan: trialTier,
+      }
+      if (parsedBillingCycle) {
+        effectiveMeta.signup_billing_cycle = parsedBillingCycle
       }
     } else {
       effectiveMeta = {
         ...effectiveMeta,
         signup_intent: "business_owner",
         signup_service_plan: parsedPlan,
+      }
+      if (parsedBillingCycle) {
+        effectiveMeta.signup_billing_cycle = parsedBillingCycle
       }
     }
     try {

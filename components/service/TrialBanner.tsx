@@ -62,6 +62,8 @@ export default function TrialBanner() {
             <p>
               <span className="font-semibold">Trial active</span>
               {" · "}
+              <span className="font-medium">14-day trial</span>
+              {" · "}
               <span className="font-medium">{tierLabel}</span>
               {daysText && (
                 <>

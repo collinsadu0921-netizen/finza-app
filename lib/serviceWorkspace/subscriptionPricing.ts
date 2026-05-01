@@ -57,3 +57,12 @@ export function billingCycleSavings(cycle: BillingCycle, tier: ServiceSubscripti
   const discountedPrice = TIER_PRICING[cycle][tier]
   return Math.round(((fullPrice - discountedPrice) / fullPrice) * 100)
 }
+
+const BILLING_CYCLES = new Set<BillingCycle>(["monthly", "quarterly", "annual"])
+
+/** Parses marketing/signup `billing_cycle` query values only when recognized. */
+export function tryParseBillingCycle(raw: string | null | undefined): BillingCycle | null {
+  if (!raw || typeof raw !== "string") return null
+  const n = raw.trim().toLowerCase() as BillingCycle
+  return BILLING_CYCLES.has(n) ? n : null
+}

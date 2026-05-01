@@ -4,9 +4,10 @@ import { Suspense, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
-  parseServiceSubscriptionTier,
+  DEFAULT_SERVICE_SUBSCRIPTION_TIER,
   tryParseServiceSubscriptionTier,
 } from "@/lib/serviceWorkspace/subscriptionTiers"
+import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { FinzaDemoVideoEmbed } from "@/components/marketing/FinzaDemoVideoEmbed"
 import { buildOAuthRedirectToWithMarketingContext, signInWithGoogle } from "@/lib/auth/startGoogleAuth"
@@ -29,16 +30,20 @@ function SignupPageInner() {
   const searchParams = useSearchParams()
 
   const rawWorkspace = searchParams.get("workspace") ?? ""
+  const workspaceNormalized = rawWorkspace.trim().toLowerCase()
   const rawPlan = searchParams.get("plan") ?? ""
   const rawTrial = searchParams.get("trial") ?? ""
+  const rawBillingCycle = searchParams.get("billing_cycle") ?? ""
+  const parsedBillingCycle = tryParseBillingCycle(rawBillingCycle)
 
   const hasValidServicePlanContext =
-    rawWorkspace.trim().toLowerCase() === "service" && isValidServicePlanParam(rawPlan)
+    workspaceNormalized === "service" && isValidServicePlanParam(rawPlan)
 
-  const trialWorkspace = (TRIAL_SUPPORTED_WORKSPACES as readonly string[]).includes(rawWorkspace)
-    ? rawWorkspace
+  const trialWorkspace = (TRIAL_SUPPORTED_WORKSPACES as readonly string[]).includes(workspaceNormalized)
+    ? "service"
     : null
-  const trialPlan = trialWorkspace ? parseServiceSubscriptionTier(rawPlan) : null
+  const trialTierForSignup =
+    trialWorkspace ? tryParseServiceSubscriptionTier(rawPlan) ?? DEFAULT_SERVICE_SUBSCRIPTION_TIER : null
   const hasTrial = trialWorkspace !== null && rawTrial === "1"
 
   const shouldBlockAndRedirect =
@@ -72,7 +77,8 @@ function SignupPageInner() {
       const redirectTo = buildOAuthRedirectToWithMarketingContext({
         plan: rawPlan,
         trial: rawTrial,
-        workspace: rawWorkspace,
+        workspace: trialWorkspace ?? rawWorkspace,
+        ...(parsedBillingCycle ? { billing_cycle: parsedBillingCycle } : {}),
       })
       const { error: oauthError } = await signInWithGoogle(redirectTo)
       if (oauthError) {
@@ -107,14 +113,20 @@ function SignupPageInner() {
         trial_intent: false,
       }
 
-      if (hasTrial && trialWorkspace && trialPlan) {
+      if (hasTrial && trialWorkspace && trialTierForSignup) {
         userMetadata.trial_workspace = trialWorkspace
-        userMetadata.trial_plan = trialPlan
+        userMetadata.trial_plan = trialTierForSignup
         userMetadata.trial_intent = true
+        if (parsedBillingCycle) {
+          userMetadata.signup_billing_cycle = parsedBillingCycle
+        }
       } else {
         const parsed = tryParseServiceSubscriptionTier(rawPlan)
         if (parsed) {
           userMetadata.signup_service_plan = parsed
+        }
+        if (parsedBillingCycle) {
+          userMetadata.signup_billing_cycle = parsedBillingCycle
         }
       }
 
@@ -174,9 +186,9 @@ function SignupPageInner() {
               <p className="text-sm text-gray-600">
                 You&apos;re starting a{" "}
                 <span className="font-semibold capitalize text-blue-700">
-                  {trialPlan === "starter"
+                  {trialTierForSignup === "starter"
                     ? "Essentials"
-                    : trialPlan === "professional"
+                    : trialTierForSignup === "professional"
                       ? "Professional"
                       : "Business"}
                 </span>{" "}
