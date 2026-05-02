@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useCallback } from "react"
+import Link from "next/link"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
@@ -712,6 +713,18 @@ export default function Sidebar() {
     })
   }, [pathname, effectiveIndustry, menuSections])
 
+  /** Warm common service routes so Dashboard / Invoices feel instant after sidebar paints. */
+  const servicePrefetchPathSet = useMemo(
+    () => new Set(["/service/dashboard", "/service/invoices"]),
+    []
+  )
+
+  useEffect(() => {
+    if (effectiveIndustry !== "service") return
+    router.prefetch("/service/dashboard")
+    router.prefetch("/service/invoices")
+  }, [effectiveIndustry, router])
+
   const winningNavPathBases = useMemo(
     () => computeWinningSidebarNavPathBases(pathname, menuSections),
     [pathname, menuSections]
@@ -765,11 +778,12 @@ export default function Sidebar() {
             }`}
           >
             {isServiceWorkspaceRoute ? (
-              <button
-                type="button"
-                onClick={() => router.push("/service/dashboard")}
+              <Link
+                href="/service/dashboard"
+                prefetch
                 className="flex min-h-0 w-full min-w-0 items-center justify-start rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
                 aria-label="Finza — Service dashboard"
+                onClick={() => setIsOpen(false)}
               >
                 {!finzaSidebarSvgFailed ? (
                   <img
@@ -793,7 +807,7 @@ export default function Sidebar() {
                     </span>
                   </>
                 )}
-              </button>
+              </Link>
             ) : (
               <button
                 type="button"
@@ -948,6 +962,13 @@ export default function Sidebar() {
                                       ? "Select a business to open this page"
                                       : undefined
                                 }
+                                onMouseEnter={() => {
+                                  if (!isServiceMenu || navLocked || tierBlocked) return
+                                  const pathOnly = pathOnlyFromSidebarRoute(target)
+                                  if (servicePrefetchPathSet.has(pathOnly)) {
+                                    router.prefetch(target)
+                                  }
+                                }}
                                 onClick={() => {
                                   if (tierBlocked) {
                                     router.push(

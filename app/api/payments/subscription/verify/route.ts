@@ -1,7 +1,9 @@
 /**
  * Authenticated subscription payment status.
- * Paystack: polling mirror of /api/payments/paystack/verify (webhook still activates).
- * MTN sandbox: polls MTN Collection status and applies subscription when successful.
+ * Paystack: verifies transaction; on success for FNZ-SUB-* references, idempotently applies subscription
+ * via applyPaystackSubscriptionWebhook (same as webhook — paystack_subscription_webhook_events).
+ * Webhook remains the primary activation path; verify is a safe fallback after Paystack confirms success.
+ * MTN sandbox: polls MTN Collection status and applies subscription when successful (unchanged).
  */
 
 import { NextRequest, NextResponse } from "next/server"

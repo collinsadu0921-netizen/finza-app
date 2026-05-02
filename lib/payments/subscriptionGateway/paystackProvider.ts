@@ -200,6 +200,23 @@ export async function paystackInitiateSubscriptionCard(
   }
 }
 
+/** Normalizes Paystack transaction `metadata` from verify/webhook (object or JSON string). */
+export function normalizePaystackTransactionMetadata(raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>
+  if (typeof raw === "string") {
+    const t = raw.trim()
+    if (!t) return null
+    try {
+      const p = JSON.parse(t) as unknown
+      if (typeof p === "object" && p !== null && !Array.isArray(p)) return p as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 export async function paystackVerifyTransaction(
   secretKey: string,
   reference: string
@@ -209,6 +226,8 @@ export async function paystackVerifyTransaction(
   amount: number | null
   reference?: string
   error?: string
+  metadata?: Record<string, unknown> | null
+  transactionId?: string
 }> {
   const res = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
     headers: { Authorization: `Bearer ${secretKey}` },
@@ -218,15 +237,19 @@ export async function paystackVerifyTransaction(
   const data = await res.json()
 
   if (!res.ok || !data.status) {
-    return { status: "pending", error: data.message, amount: null }
+    return { status: "pending", error: data.message, amount: null, metadata: null }
   }
 
   const chargeStatus: string = data.data?.status ?? "pending"
+  const metadata = normalizePaystackTransactionMetadata(data.data?.metadata)
+  const transactionId = data.data?.id != null ? String(data.data.id) : undefined
 
   return {
     status: chargeStatus,
     gateway_response: data.data?.gateway_response,
     amount: data.data?.amount != null ? Number(data.data.amount) / 100 : null,
     reference: data.data?.reference,
+    metadata,
+    transactionId,
   }
 }

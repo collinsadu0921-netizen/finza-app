@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef, Suspense } from "react"
+import { useEffect, useState, useRef, Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -12,6 +12,13 @@ import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+
+function devInvoiceTiming(label: string, startedAt: number) {
+  if (process.env.NODE_ENV === "production") return
+  console.info(`[service/invoices] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
+}
+
+type CustomerOption = { id: string; name: string }
 
 type Invoice = {
   id: string
@@ -27,7 +34,8 @@ type Invoice = {
   status: "draft" | "sent" | "partially_paid" | "partial" | "paid" | "overdue" | "cancelled"
   issue_date: string | null
   due_date: string | null
-  created_at: string
+  /** Present for CSV/Excel export VAT breakdown; optional when older rows lack JSON. */
+  tax_lines?: unknown
 }
 
 /** Format a list-row total using the currency stored on the invoice (same as invoice view). */
@@ -86,6 +94,60 @@ function fmt(dateString: string | null) {
   return new Date(dateString).toLocaleDateString("en-GH", { year: "numeric", month: "short", day: "numeric" })
 }
 
+function InvoicesPageSkeleton() {
+  const pulse = "animate-pulse rounded-lg bg-slate-200/80 dark:bg-slate-700/50"
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className={`h-8 w-40 ${pulse}`} />
+            <div className={`h-4 w-56 ${pulse}`} />
+          </div>
+          <div className="flex gap-2">
+            <div className={`h-10 w-24 ${pulse}`} />
+            <div className={`h-10 w-28 ${pulse}`} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+              <div className={`h-4 w-24 ${pulse}`} />
+              <div className={`h-8 w-36 ${pulse}`} />
+              <div className={`h-3 w-32 ${pulse}`} />
+            </div>
+          ))}
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className={`h-11 ${pulse}`} />
+            ))}
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3.5 flex gap-6 flex-wrap">
+            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+              <div key={i} className={`h-3 w-14 ${pulse}`} />
+            ))}
+          </div>
+          {[1, 2, 3, 4, 5, 6].map((row) => (
+            <div key={row} className="flex items-center gap-5 px-5 py-4 border-b border-slate-100">
+              <div className={`h-4 w-28 ${pulse}`} />
+              <div className={`h-4 flex-1 max-w-[140px] ${pulse}`} />
+              <div className={`h-4 w-20 ml-auto ${pulse}`} />
+              <div className={`h-6 w-20 ${pulse}`} />
+              <div className={`h-4 w-24 ${pulse}`} />
+              <div className={`h-4 w-24 ${pulse}`} />
+              <div className={`h-8 w-16 ml-auto ${pulse}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function InvoicesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -108,70 +170,182 @@ function InvoicesPageContent() {
   const [endDate, setEndDate] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
-  const [customers, setCustomers] = useState<any[]>([])
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const isInitialLoadRef = useRef(true)
-
-  useEffect(() => { loadCustomers(); loadInvoices() }, [])
+  const businessIdRef = useRef("")
+  const skipFilterEffectOnce = useRef(true)
 
   useEffect(() => {
-    const handleFocus = () => { if (businessId && !isInitialLoadRef.current) loadInvoices() }
-    window.addEventListener("focus", handleFocus)
-    return () => window.removeEventListener("focus", handleFocus)
+    businessIdRef.current = businessId
   }, [businessId])
 
-  useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-    if (searchInput.trim()) setIsSearching(true)
-    searchDebounceRef.current = setTimeout(() => { setSearchQuery(searchInput); setIsSearching(false) }, 300)
-    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current) }
-  }, [searchInput])
+  const resolveAuthBusiness = useCallback(async () => {
+    const tAuth = performance.now()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return { ok: false as const, error: "Not logged in" }
+    const business = await getCurrentBusiness(supabase, user.id)
+    devInvoiceTiming("auth+business resolution", tAuth)
+    if (!business) return { ok: false as const, error: "Business not found" }
+    return { ok: true as const, business }
+  }, [])
 
-  useEffect(() => { if (businessId) loadInvoices() }, [businessId, statusFilter, customerFilter, startDate, endDate, searchQuery])
-
-  const loadCustomers = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) return
-      const { data } = await supabase.from("customers").select("id, name").eq("business_id", business.id).is("deleted_at", null).order("name")
-      setCustomers(data || [])
-    } catch {}
-  }
-
-  const loadInvoices = async () => {
-    try {
-      if (isInitialLoadRef.current) setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setError("Not logged in"); setLoading(false); return }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) { setError("Business not found"); setLoading(false); return }
-      setBusinessId(business.id)
-
+  const buildInvoiceListParams = useCallback(
+    (bid: string) => {
       const params = new URLSearchParams()
-      // Server getCurrentBusiness() cannot read localStorage workspace; pass explicit scope
-      // so the list matches client-side totals (payments, etc.) for the selected business.
-      params.append("business_id", business.id)
+      // Server cannot read client workspace; pass explicit scope so the list matches totals for the selected business.
+      params.append("business_id", bid)
       if (statusFilter !== "all") params.append("status", statusFilter)
       if (customerFilter !== "all") params.append("customer_id", customerFilter)
       if (startDate) params.append("start_date", startDate)
       if (endDate) params.append("end_date", endDate)
       if (searchQuery) params.append("search", searchQuery)
+      return params
+    },
+    [statusFilter, customerFilter, startDate, endDate, searchQuery]
+  )
 
+  const fetchInvoiceList = useCallback(
+    async (bid: string): Promise<Invoice[]> => {
+      const params = buildInvoiceListParams(bid)
+      const t0 = performance.now()
       const res = await fetch(`/api/invoices/list?${params.toString()}`)
+      devInvoiceTiming("invoices API load", t0)
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
       const { invoices: data } = await res.json()
-      setInvoices(data || [])
-      setTotalInvoices(data?.length || 0)
-      setLoading(false)
-      isInitialLoadRef.current = false
-    } catch (err: any) {
-      setError(err.message || "Failed to load invoices")
-      setLoading(false)
-      isInitialLoadRef.current = false
+      return data || []
+    },
+    [buildInvoiceListParams]
+  )
+
+  const reloadInvoicesOnly = useCallback(async () => {
+    const bid = businessIdRef.current
+    if (!bid) return
+    try {
+      const data = await fetchInvoiceList(bid)
+      setInvoices(data)
+      setTotalInvoices(data.length)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load invoices")
     }
-  }
+  }, [fetchInvoiceList])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError("")
+      const resolved = await resolveAuthBusiness()
+      if (cancelled) return
+      if (!resolved.ok) {
+        setError(resolved.error)
+        setLoading(false)
+        isInitialLoadRef.current = false
+        return
+      }
+      const bid = resolved.business.id
+      setBusinessId(bid)
+
+      try {
+        const customersPromise = (async () => {
+          const t0 = performance.now()
+          const { data } = await supabase
+            .from("customers")
+            .select("id, name")
+            .eq("business_id", bid)
+            .is("deleted_at", null)
+            .order("name")
+          devInvoiceTiming("customers load", t0)
+          return data || []
+        })()
+
+        const invoicesPromise = (async () => {
+          const params = buildInvoiceListParams(bid)
+          const t0 = performance.now()
+          const res = await fetch(`/api/invoices/list?${params.toString()}`)
+          devInvoiceTiming("invoices API load", t0)
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
+          const { invoices: data } = await res.json()
+          return (data || []) as Invoice[]
+        })()
+
+        const [custRows, invData] = await Promise.all([customersPromise, invoicesPromise])
+        if (cancelled) return
+        setCustomers(custRows)
+        setInvoices(invData)
+        setTotalInvoices(invData.length)
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load invoices")
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+          isInitialLoadRef.current = false
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // One-shot mount: filter-driven reloads use reloadInvoicesOnly. Intentionally freeze first-query params to initial render state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolveAuthBusiness])
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (isInitialLoadRef.current) return
+      void (async () => {
+        const before = businessIdRef.current
+        const resolved = await resolveAuthBusiness()
+        if (!resolved.ok) return
+        const bid = resolved.business.id
+        if (bid !== before) {
+          skipFilterEffectOnce.current = true
+          setBusinessId(bid)
+          const t0 = performance.now()
+          const { data } = await supabase
+            .from("customers")
+            .select("id, name")
+            .eq("business_id", bid)
+            .is("deleted_at", null)
+            .order("name")
+          devInvoiceTiming("customers load", t0)
+          setCustomers(data || [])
+        }
+        try {
+          const data = await fetchInvoiceList(bid)
+          setInvoices(data)
+          setTotalInvoices(data.length)
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : "Failed to load invoices")
+        }
+      })()
+    }
+    window.addEventListener("focus", handleFocus)
+    return () => window.removeEventListener("focus", handleFocus)
+  }, [resolveAuthBusiness, fetchInvoiceList])
+
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    if (searchInput.trim()) setIsSearching(true)
+    searchDebounceRef.current = setTimeout(() => {
+      setSearchQuery(searchInput)
+      setIsSearching(false)
+    }, 300)
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    }
+  }, [searchInput])
+
+  useEffect(() => {
+    if (!businessId) return
+    if (skipFilterEffectOnce.current) {
+      skipFilterEffectOnce.current = false
+      return
+    }
+    void reloadInvoicesOnly()
+  }, [businessId, statusFilter, customerFilter, startDate, endDate, searchQuery, reloadInvoicesOnly])
 
   const fetchPaymentTotals = async (ids: string[]) => {
     if (!ids.length) return { payments: {} as Record<string, number>, creditNotes: {} as Record<string, number> }
@@ -189,28 +363,43 @@ function InvoicesPageContent() {
   useEffect(() => {
     const calc = async () => {
       if (!businessId) return
+      const t0 = performance.now()
       const { data } = await supabase.from("payments").select("amount").eq("business_id", businessId).is("deleted_at", null)
+      devInvoiceTiming("revenue/payment totals load", t0)
       setTotalRevenue(data?.reduce((s, p) => s + Number(p.amount), 0) || 0)
     }
-    calc()
+    void calc()
   }, [businessId])
 
   useEffect(() => {
     const calc = async () => {
-      if (!businessId || !invoices.length) { setOutstandingAmount(0); return }
-      const open = invoices.filter(i => ["sent", "overdue", "partially_paid"].includes(i.status))
-      if (!open.length) { setOutstandingAmount(0); return }
-      const { payments, creditNotes } = await fetchPaymentTotals(open.map(i => i.id))
-      setOutstandingAmount(open.reduce((s, inv) => s + Math.max(0, Number(inv.total) - (payments[inv.id] || 0) - (creditNotes[inv.id] || 0)), 0))
+      if (!businessId || !invoices.length) {
+        setOutstandingAmount(0)
+        return
+      }
+      const open = invoices.filter((i) => ["sent", "overdue", "partially_paid"].includes(i.status))
+      if (!open.length) {
+        setOutstandingAmount(0)
+        return
+      }
+      const t0 = performance.now()
+      const { payments, creditNotes } = await fetchPaymentTotals(open.map((i) => i.id))
+      devInvoiceTiming("outstanding totals load", t0)
+      setOutstandingAmount(
+        open.reduce(
+          (s, inv) => s + Math.max(0, Number(inv.total) - (payments[inv.id] || 0) - (creditNotes[inv.id] || 0)),
+          0
+        )
+      )
     }
-    calc()
+    void calc()
   }, [businessId, invoices])
 
   const handleExportCSV = async () => {
     if (!invoices.length) { toast.showToast("No invoices to export", "error"); return }
     const { payments, creditNotes } = await fetchPaymentTotals(invoices.map(i => i.id))
     const rows = invoices.map(inv => {
-      const { vat } = getGhanaLegacyView((inv as any).tax_lines)
+      const { vat } = getGhanaLegacyView(inv.tax_lines)
       return { ...inv, amountPaid: payments[inv.id] || 0, credits: creditNotes[inv.id] || 0, outstanding: Math.max(0, Number(inv.total) - (payments[inv.id] || 0) - (creditNotes[inv.id] || 0)), subtotal: Number(inv.subtotal || 0), vat: vat || inv.vat || 0, total: Number(inv.total) }
     })
     const cols: ExportColumn<typeof rows[0]>[] = [
@@ -264,7 +453,7 @@ function InvoicesPageContent() {
     if (!invoices.length) { toast.showToast("No invoices to export", "error"); return }
     const { payments, creditNotes } = await fetchPaymentTotals(invoices.map(i => i.id))
     const rows = invoices.map(inv => {
-      const { vat } = getGhanaLegacyView((inv as any).tax_lines)
+      const { vat } = getGhanaLegacyView(inv.tax_lines)
       return { ...inv, amountPaid: payments[inv.id] || 0, credits: creditNotes[inv.id] || 0, outstanding: Math.max(0, Number(inv.total) - (payments[inv.id] || 0) - (creditNotes[inv.id] || 0)), subtotal: Number(inv.subtotal || 0), vat: vat || inv.vat || 0, total: Number(inv.total) }
     })
     const cols: ExportColumn<typeof rows[0]>[] = [
@@ -318,14 +507,7 @@ function InvoicesPageContent() {
   const hasFilters = statusFilter !== "all" || customerFilter !== "all" || startDate || endDate || searchInput
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-slate-500 mt-3 text-sm">Loading invoices…</p>
-        </div>
-      </div>
-    )
+    return <InvoicesPageSkeleton />
   }
 
   return (
@@ -573,11 +755,7 @@ function InvoicesPageContent() {
 
 export default function InvoicesPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    }>
+    <Suspense fallback={<InvoicesPageSkeleton />}>
       <InvoicesPageContent />
     </Suspense>
   )

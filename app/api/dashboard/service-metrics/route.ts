@@ -13,7 +13,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import {
+  getProfitAndLossReport,
+  type PnLReportResponse,
+} from "@/lib/accounting/reports/getProfitAndLossReport"
 import {
   getBalanceSheetReport,
   type BalanceSheetReportResponse,
@@ -57,87 +60,153 @@ function extractAP(bs: any): number {
   return Math.round(sum * 100) / 100
 }
 
+function devServiceMetricsLog(label: string, startedAt: number) {
+  if (process.env.NODE_ENV === "production") return
+  console.info(`[service-metrics] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
+}
+
+type PreviousPeriodPayload = {
+  revenue: number
+  expenses: number
+  netProfit: number
+  cashCollected: number
+  accountsReceivable: number | null
+  accountsPayable: number | null
+  cashBalance: number | null
+}
+
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const finish = (res: NextResponse) => {
+    devServiceMetricsLog("total route", routeT0)
+    return res
+  }
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      devServiceMetricsLog("auth/business/access resolution", tAuth)
+      return finish(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
     }
 
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
     if (!businessId) {
-      return NextResponse.json(
-        { error: "Missing required parameter: business_id" },
-        { status: 400 }
+      devServiceMetricsLog("auth/business/access resolution", tAuth)
+      return finish(
+        NextResponse.json({ error: "Missing required parameter: business_id" }, { status: 400 })
       )
     }
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
-      return NextResponse.json(
-        { error: "You do not have access to this business" },
-        { status: 403 }
+      devServiceMetricsLog("auth/business/access resolution", tAuth)
+      return finish(
+        NextResponse.json({ error: "You do not have access to this business" }, { status: 403 })
       )
     }
+    devServiceMetricsLog("auth/business/access resolution", tAuth)
 
     const periodId = searchParams.get("period_id") ?? undefined
     const periodStart = searchParams.get("period_start") ?? undefined
     const explicitPeriod =
       Boolean(periodId?.trim()) || Boolean(periodStart?.trim())
 
-    const { data: pnl, error: pnlError } = await getProfitAndLossReport(supabase, {
-      businessId,
-      period_id: periodId,
-      period_start: periodStart,
-    })
-
-    if (pnlError || !pnl) {
-      return NextResponse.json(
-        { error: pnlError ?? "Could not resolve period or fetch P&L" },
-        { status: 500 }
-      )
-    }
+    const pnlPromise = (async () => {
+      const t0 = performance.now()
+      const r = await getProfitAndLossReport(supabase, {
+        businessId,
+        period_id: periodId,
+        period_start: periodStart,
+      })
+      devServiceMetricsLog("Profit & Loss calculation", t0)
+      return r
+    })()
 
     /** Position metrics: live as-of today when user picked a historical report period. */
     const todayUtc = new Date().toISOString().slice(0, 10)
     let bsPositions: BalanceSheetReportResponse | null = null
     let bsError = ""
+    let pnl: PnLReportResponse | null = null
 
     if (explicitPeriod) {
-      const live = await getBalanceSheetReport(supabase, {
-        businessId,
-        as_of_date: todayUtc,
-      })
-      bsPositions = live.data
-      bsError = live.error
+      const bsLivePromise = (async () => {
+        const t0 = performance.now()
+        const r = await getBalanceSheetReport(supabase, {
+          businessId,
+          as_of_date: todayUtc,
+        })
+        devServiceMetricsLog("Balance Sheet calculation (as-of today)", t0)
+        return r
+      })()
+
+      const [pnlOut, liveBs] = await Promise.all([pnlPromise, bsLivePromise])
+
+      if (pnlOut.error || !pnlOut.data) {
+        return finish(
+          NextResponse.json(
+            { error: pnlOut.error ?? "Could not resolve period or fetch P&L" },
+            { status: 500 }
+          )
+        )
+      }
+      pnl = pnlOut.data
+
+      bsPositions = liveBs.data
+      bsError = liveBs.error
       if (!bsPositions) {
+        const tFb = performance.now()
         const fallback = await getBalanceSheetReport(supabase, {
           businessId,
           period_id: periodId,
           period_start: periodStart,
         })
+        devServiceMetricsLog("Balance Sheet calculation (fallback aligned period)", tFb)
         bsPositions = fallback.data
         bsError = fallback.error
       }
     } else {
-      const aligned = await getBalanceSheetReport(supabase, {
-        businessId,
-        period_id: periodId,
-        period_start: periodStart,
-      })
-      bsPositions = aligned.data
-      bsError = aligned.error
+      const bsAlignedPromise = (async () => {
+        const t0 = performance.now()
+        const r = await getBalanceSheetReport(supabase, {
+          businessId,
+          period_id: periodId,
+          period_start: periodStart,
+        })
+        devServiceMetricsLog("Balance Sheet calculation (period-aligned)", t0)
+        return r
+      })()
+
+      const [pnlOut, bsRes] = await Promise.all([pnlPromise, bsAlignedPromise])
+
+      if (pnlOut.error || !pnlOut.data) {
+        return finish(
+          NextResponse.json(
+            { error: pnlOut.error ?? "Could not resolve period or fetch P&L" },
+            { status: 500 }
+          )
+        )
+      }
+      pnl = pnlOut.data
+
+      bsPositions = bsRes.data
+      bsError = bsRes.error
+    }
+
+    if (!pnl) {
+      return finish(
+        NextResponse.json({ error: "Could not resolve period or fetch P&L" }, { status: 500 })
+      )
     }
 
     if (bsError || !bsPositions) {
-      return NextResponse.json(
-        { error: bsError || "Could not fetch balance sheet" },
-        { status: 500 }
+      return finish(
+        NextResponse.json({ error: bsError || "Could not fetch balance sheet" }, { status: 500 })
       )
     }
 
@@ -156,40 +225,97 @@ export async function GET(request: NextRequest) {
     const ar = extractAR(bsPositions)
     const ap = extractAP(bsPositions)
 
-    // ── Cash Collected: sum of debits to cash accounts in the period ──────────
-    // This represents actual cash received (payments), distinct from accrual revenue.
-    let cashCollected = 0
-    const pnlPeriodStart = (pnl.period as Record<string, unknown>)?.period_start as string | undefined
-    const pnlPeriodEnd = (pnl.period as Record<string, unknown>)?.period_end as string | undefined
+    const prevStartRaw = searchParams.get("previous_period_start")
+    const prevStart = prevStartRaw?.trim() ? prevStartRaw : null
 
-    if (pnlPeriodStart && pnlPeriodEnd) {
-      // Step 1: find the IDs of cash accounts for this business
-      const { data: cashAccounts } = await supabase
-        .from("accounts")
-        .select("id")
-        .eq("business_id", businessId)
-        .in("code", [...CASH_CODES])
+    const cashCollectedPromise = (async () => {
+      const tCash = performance.now()
+      let cashCollected = 0
+      const pnlPeriodStart = (pnl.period as Record<string, unknown>)?.period_start as string | undefined
+      const pnlPeriodEnd = (pnl.period as Record<string, unknown>)?.period_end as string | undefined
 
-      const cashAccountIds = (cashAccounts ?? []).map((a: { id: string }) => a.id)
+      if (pnlPeriodStart && pnlPeriodEnd) {
+        const { data: cashAccounts } = await supabase
+          .from("accounts")
+          .select("id")
+          .eq("business_id", businessId)
+          .in("code", [...CASH_CODES])
 
-      if (cashAccountIds.length > 0) {
-        // Step 2: sum debits to those accounts within the period
-        const { data: cashLines } = await supabase
-          .from("journal_entry_lines")
-          .select("debit, journal_entries!inner(date, business_id)")
-          .in("account_id", cashAccountIds)
-          .gte("journal_entries.date", pnlPeriodStart)
-          .lte("journal_entries.date", pnlPeriodEnd)
-          .eq("journal_entries.business_id", businessId)
+        const cashAccountIds = (cashAccounts ?? []).map((a: { id: string }) => a.id)
 
-        cashCollected = Math.round(
-          (cashLines ?? []).reduce(
-            (s: number, l: Record<string, unknown>) => s + (Number(l.debit) || 0),
-            0
-          ) * 100
-        ) / 100
+        if (cashAccountIds.length > 0) {
+          const { data: cashLines } = await supabase
+            .from("journal_entry_lines")
+            .select("debit, journal_entries!inner(date, business_id)")
+            .in("account_id", cashAccountIds)
+            .gte("journal_entries.date", pnlPeriodStart)
+            .lte("journal_entries.date", pnlPeriodEnd)
+            .eq("journal_entries.business_id", businessId)
+
+          cashCollected = Math.round(
+            (cashLines ?? []).reduce(
+              (s: number, l: Record<string, unknown>) => s + (Number(l.debit) || 0),
+              0
+            ) * 100
+          ) / 100
+        }
       }
-    }
+      devServiceMetricsLog("cash/journal aggregation", tCash)
+      return cashCollected
+    })()
+
+    const previousPeriodPromise = (async (): Promise<PreviousPeriodPayload | null> => {
+      if (!prevStart) return null
+      const tPrev = performance.now()
+      const [pnlPrevRes, bsPrevRes] = await Promise.all([
+        getProfitAndLossReport(supabase, {
+          businessId,
+          period_start: prevStart,
+        }),
+        getBalanceSheetReport(supabase, {
+          businessId,
+          period_start: prevStart,
+        }),
+      ])
+      devServiceMetricsLog("previous period reports (P&L + BS parallel)", tPrev)
+
+      const pnlPrev = pnlPrevRes.data
+      const bsPrev = bsPrevRes.data
+      if (!pnlPrev || !bsPrev) return null
+
+      const revPrev = Math.round(
+        pnlPrev.sections
+          .filter((s) => s.key === "income" || s.key === "other_income")
+          .reduce((sum, s) => sum + s.subtotal, 0) * 100
+      ) / 100
+      const expPrev = Math.round(
+        pnlPrev.sections
+          .filter(
+            (s) =>
+              s.key === "cogs" ||
+              s.key === "operating_expenses" ||
+              s.key === "other_expenses" ||
+              s.key === "taxes"
+          )
+          .reduce((sum, s) => sum + s.subtotal, 0) * 100
+      ) / 100
+
+      return {
+        revenue: revPrev,
+        expenses: expPrev,
+        netProfit: pnlPrev.totals?.net_profit ?? revPrev - expPrev,
+        cashCollected: 0,
+        accountsReceivable: explicitPeriod ? null : extractAR(bsPrev),
+        accountsPayable: explicitPeriod ? null : extractAP(bsPrev),
+        cashBalance: explicitPeriod ? null : extractCash(bsPrev),
+      }
+    })()
+
+    const tAsm = performance.now()
+    const [cashCollected, previousPeriod] = await Promise.all([
+      cashCollectedPromise,
+      previousPeriodPromise,
+    ])
 
     const payload = {
       period: pnl.period,
@@ -201,67 +327,24 @@ export async function GET(request: NextRequest) {
       accountsReceivable: ar,
       accountsPayable: ap,
       cashBalance,
-      /** True when AR/AP/cash balance are from BS as-of today, not the selected P&L period. */
       positionBalancesAsOfToday: explicitPeriod,
-      /** ISO date (YYYY-MM-DD) used for live position BS when positionBalancesAsOfToday. */
       positionAsOfDate: explicitPeriod ? todayUtc : null,
-      previousPeriod: null as {
-        revenue: number
-        expenses: number
-        netProfit: number
-        cashCollected: number
-        accountsReceivable: number | null
-        accountsPayable: number | null
-        cashBalance: number | null
-      } | null,
+      previousPeriod: null as PreviousPeriodPayload | null,
+    }
+    if (previousPeriod) {
+      payload.previousPeriod = previousPeriod
     }
 
-    const prevStart = searchParams.get("previous_period_start")
-    if (prevStart) {
-      const { data: pnlPrev } = await getProfitAndLossReport(supabase, {
-        businessId,
-        period_start: prevStart,
-      })
-      const { data: bsPrev } = await getBalanceSheetReport(supabase, {
-        businessId,
-        period_start: prevStart,
-      })
-      if (pnlPrev && bsPrev) {
-        const revPrev = Math.round(
-          pnlPrev.sections
-            .filter((s) => s.key === "income" || s.key === "other_income")
-            .reduce((sum, s) => sum + s.subtotal, 0) * 100
-        ) / 100
-        const expPrev = Math.round(
-          pnlPrev.sections
-            .filter(
-              (s) =>
-                s.key === "cogs" ||
-                s.key === "operating_expenses" ||
-                s.key === "other_expenses" ||
-                s.key === "taxes"
-            )
-            .reduce((sum, s) => sum + s.subtotal, 0) * 100
-        ) / 100
-        payload.previousPeriod = {
-          revenue: revPrev,
-          expenses: expPrev,
-          netProfit: pnlPrev.totals?.net_profit ?? revPrev - expPrev,
-          cashCollected: 0, // previous-period cash collected not needed for trend arrows
-          // No period-over-period % on position cards when those values are "live" (QB-style).
-          accountsReceivable: explicitPeriod ? null : extractAR(bsPrev),
-          accountsPayable: explicitPeriod ? null : extractAP(bsPrev),
-          cashBalance: explicitPeriod ? null : extractCash(bsPrev),
-        }
-      }
-    }
+    devServiceMetricsLog("final response assembly", tAsm)
 
-    return NextResponse.json(payload)
+    return finish(NextResponse.json(payload))
   } catch (err) {
     console.error("Dashboard service-metrics error:", err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Server error" },
-      { status: 500 }
+    return finish(
+      NextResponse.json(
+        { error: err instanceof Error ? err.message : "Server error" },
+        { status: 500 }
+      )
     )
   }
 }

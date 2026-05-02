@@ -200,16 +200,16 @@ export function InvoiceDocument({
       {/* Header: logo + business info (left) | invoice number + status (right) */}
       <div className="px-6 pt-5 pb-4 border-b border-slate-200">
         <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-          <div className="flex items-start gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:items-start md:gap-3">
             <BusinessLogoDisplay
               logoUrl={business?.logo_url}
               businessName={businessName}
               size="lg"
               rounded="lg"
-              variant="document"
+              variant="publicDocument"
               brandingResolved
             />
-            <div>
+            <div className="min-w-0 flex-1">
               <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-tight">{businessName}</h1>
               {businessAddress && (
                 <p className="text-xs text-slate-500 mt-0.5">{businessAddress}</p>

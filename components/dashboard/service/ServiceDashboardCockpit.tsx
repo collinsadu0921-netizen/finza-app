@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import { supabase } from "@/lib/supabaseClient"
 import MetricCard from "./MetricCard"
@@ -8,7 +8,11 @@ import DashboardHeader from "./DashboardHeader"
 import QuickActionsBar from "./QuickActionsBar"
 import RecentActivityFeed from "./RecentActivityFeed"
 import type { ActivityItem } from "./RecentActivityFeed"
-import ServiceDashboardSkeleton from "./ServiceDashboardSkeleton"
+import ServiceDashboardSkeleton, {
+  ServiceDashboardActivityPanelSkeleton,
+  ServiceDashboardMetricsCardsSkeleton,
+  ServiceDashboardTrendsPanelSkeleton,
+} from "./ServiceDashboardSkeleton"
 import DashboardErrorBanner from "./DashboardErrorBanner"
 
 const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
@@ -59,6 +63,17 @@ type TimelineItem = {
 
 const SERVICE_ANALYTICS_V2 = process.env.NEXT_PUBLIC_SERVICE_ANALYTICS_V2 === "true"
 
+function devServiceDashboardLog(label: string, startedAt: number) {
+  if (process.env.NODE_ENV === "production") return
+  console.info(`[service/dashboard] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
+}
+
+function isAbortOrCancelled(reason: unknown): boolean {
+  if (reason instanceof DOMException && reason.name === "AbortError") return true
+  if (reason instanceof Error && reason.name === "AbortError") return true
+  return false
+}
+
 export type ServiceDashboardCockpitProps = {
   business: Business
   /** Workspace identity (logo + title); date + Refresh align to the right when set. */
@@ -106,13 +121,17 @@ const QUICK_ACTIONS = [
   { label: "View Reports", href: "/service/reports/profit-and-loss", icon: "reports" as const },
 ]
 
-async function fetchTimelineData(businessId: string): Promise<TimelineItem[]> {
+async function fetchTimelineData(
+  businessId: string,
+  signal?: AbortSignal
+): Promise<TimelineItem[]> {
   if (SERVICE_ANALYTICS_V2) {
     const end = new Date()
     const start = new Date(end)
     start.setDate(start.getDate() - 365)
     const timelineRes = await fetch(
-      `/api/dashboard/service-analytics?business_id=${encodeURIComponent(businessId)}&start_date=${start.toISOString().split("T")[0]}&end_date=${end.toISOString().split("T")[0]}&interval=day`
+      `/api/dashboard/service-analytics?business_id=${encodeURIComponent(businessId)}&start_date=${start.toISOString().split("T")[0]}&end_date=${end.toISOString().split("T")[0]}&interval=day`,
+      { signal }
     )
     const json = timelineRes.ok ? await timelineRes.json() : {}
     return (json.timeline ?? []).map((r: Record<string, unknown>) => ({
@@ -125,15 +144,17 @@ async function fetchTimelineData(businessId: string): Promise<TimelineItem[]> {
     }))
   }
   const timelineRes = await fetch(
-    `/api/dashboard/service-timeline?business_id=${encodeURIComponent(businessId)}&periods=12`
+    `/api/dashboard/service-timeline?business_id=${encodeURIComponent(businessId)}&periods=12`,
+    { signal }
   )
   return timelineRes.ok ? (await timelineRes.json()).timeline ?? [] : []
 }
 
 async function fetchMetricsPayload(
-  params: URLSearchParams
+  params: URLSearchParams,
+  signal?: AbortSignal
 ): Promise<{ ok: true; payload: Metrics } | { ok: false; errMessage: string }> {
-  const res = await fetch(`/api/dashboard/service-metrics?${params.toString()}`)
+  const res = await fetch(`/api/dashboard/service-metrics?${params.toString()}`, { signal })
   if (res.ok) {
     return { ok: true, payload: await res.json() }
   }
@@ -147,9 +168,13 @@ async function fetchMetricsPayload(
   return { ok: false, errMessage }
 }
 
-async function fetchActivityItems(businessId: string): Promise<ActivityItem[]> {
+async function fetchActivityItems(
+  businessId: string,
+  signal?: AbortSignal
+): Promise<ActivityItem[]> {
   const actRes = await fetch(
-    `/api/dashboard/service-activity?business_id=${encodeURIComponent(businessId)}&limit=10`
+    `/api/dashboard/service-activity?business_id=${encodeURIComponent(businessId)}&limit=10`,
+    { signal }
   )
   if (!actRes.ok) return []
   const actJson = await actRes.json()
@@ -176,9 +201,16 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
   const [overdueCount, setOverdueCount] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loadingMetrics, setLoadingMetrics] = useState(true)
+  const [loadingTimeline, setLoadingTimeline] = useState(true)
+  const [loadingActivity, setLoadingActivity] = useState(true)
+  const [loadingOverdue, setLoadingOverdue] = useState(true)
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null)
   const [metricsError, setMetricsError] = useState<string | null>(null)
+
+  /** Monotonic generation — stale async completions must not overwrite state. */
+  const loadGenerationRef = useRef(0)
+  const loadAbortRef = useRef<AbortController | null>(null)
 
   const rawMetricsCurrency = metrics?.currency
   const metricsCurrencyCode = typeof rawMetricsCurrency === "object" && rawMetricsCurrency !== null
@@ -189,11 +221,39 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const load = useCallback(async () => {
     const businessId = business?.id
     if (!businessId) {
-      setLoading(false)
+      loadAbortRef.current?.abort()
+      loadAbortRef.current = null
+      setLoadingMetrics(false)
+      setLoadingTimeline(false)
+      setLoadingActivity(false)
+      setLoadingOverdue(false)
       return
     }
-    setLoading(true)
+
+    loadGenerationRef.current += 1
+    const gen = loadGenerationRef.current
+    loadAbortRef.current?.abort()
+    const ac = new AbortController()
+    loadAbortRef.current = ac
+    const signal = ac.signal
+
+    const isLatest = () => loadGenerationRef.current === gen
+
+    const tCockpit = performance.now()
+    setLoadingMetrics(true)
+    setLoadingTimeline(true)
+    setLoadingActivity(true)
+    setLoadingOverdue(true)
     setMetricsError(null)
+
+    const runTimed = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
+      const t0 = performance.now()
+      try {
+        return await fn()
+      } finally {
+        devServiceDashboardLog(label, t0)
+      }
+    }
 
     const applyMetricsResult = (
       result: { ok: true; payload: Metrics } | { ok: false; errMessage: string }
@@ -212,8 +272,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
         selectedPeriodStart != null && selectedPeriodStart !== ""
 
       if (needsTimelineBeforeMetrics) {
-        const tl = await fetchTimelineData(businessId)
+        const tl = await runTimed("timeline fetch", () => fetchTimelineData(businessId, signal))
+        if (!isLatest()) return
+
         setTimeline(tl)
+        setLoadingTimeline(false)
 
         const params = new URLSearchParams({ business_id: businessId })
         params.set("period_start", selectedPeriodStart!)
@@ -222,35 +285,105 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           params.set("previous_period_start", tl[idx - 1].period_start)
         }
 
-        const [metricsResult, activity, overdue] = await Promise.all([
-          fetchMetricsPayload(params),
-          fetchActivityItems(businessId),
-          fetchOverdueInvoiceCount(businessId),
+        const [metricsSettled, activitySettled, overdueSettled] = await Promise.allSettled([
+          runTimed("service-metrics fetch", () => fetchMetricsPayload(params, signal)),
+          runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
+          runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
         ])
-        applyMetricsResult(metricsResult)
-        setActivityItems(activity)
-        setOverdueCount(overdue)
+
+        if (!isLatest()) return
+
+        setLoadingMetrics(false)
+        if (metricsSettled.status === "fulfilled") {
+          applyMetricsResult(metricsSettled.value)
+        } else if (!isAbortOrCancelled(metricsSettled.reason)) {
+          setMetrics(null)
+          setMetricsError(
+            metricsSettled.reason instanceof Error
+              ? metricsSettled.reason.message
+              : "Failed to load metrics"
+          )
+        }
+
+        setLoadingActivity(false)
+        if (activitySettled.status === "fulfilled") {
+          setActivityItems(activitySettled.value)
+        } else if (!isAbortOrCancelled(activitySettled.reason)) {
+          setActivityItems([])
+        }
+
+        setLoadingOverdue(false)
+        if (overdueSettled.status === "fulfilled") {
+          setOverdueCount(overdueSettled.value)
+        } else if (!isAbortOrCancelled(overdueSettled.reason)) {
+          setOverdueCount(null)
+        }
       } else {
         const baseParams = new URLSearchParams({ business_id: businessId })
-        const [tl, metricsResult, activity, overdue] = await Promise.all([
-          fetchTimelineData(businessId),
-          fetchMetricsPayload(baseParams),
-          fetchActivityItems(businessId),
-          fetchOverdueInvoiceCount(businessId),
-        ])
-        setTimeline(tl)
-        applyMetricsResult(metricsResult)
-        setActivityItems(activity)
-        setOverdueCount(overdue)
+        const [timelineSettled, metricsSettled, activitySettled, overdueSettled] =
+          await Promise.allSettled([
+            runTimed("timeline fetch", () => fetchTimelineData(businessId, signal)),
+            runTimed("service-metrics fetch", () => fetchMetricsPayload(baseParams, signal)),
+            runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
+            runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
+          ])
+
+        if (!isLatest()) return
+
+        setLoadingTimeline(false)
+        if (timelineSettled.status === "fulfilled") {
+          setTimeline(timelineSettled.value)
+        } else if (!isAbortOrCancelled(timelineSettled.reason)) {
+          setTimeline([])
+        }
+
+        setLoadingMetrics(false)
+        if (metricsSettled.status === "fulfilled") {
+          applyMetricsResult(metricsSettled.value)
+        } else if (!isAbortOrCancelled(metricsSettled.reason)) {
+          setMetrics(null)
+          setMetricsError(
+            metricsSettled.reason instanceof Error
+              ? metricsSettled.reason.message
+              : "Failed to load metrics"
+          )
+        }
+
+        setLoadingActivity(false)
+        if (activitySettled.status === "fulfilled") {
+          setActivityItems(activitySettled.value)
+        } else if (!isAbortOrCancelled(activitySettled.reason)) {
+          setActivityItems([])
+        }
+
+        setLoadingOverdue(false)
+        if (overdueSettled.status === "fulfilled") {
+          setOverdueCount(overdueSettled.value)
+        } else if (!isAbortOrCancelled(overdueSettled.reason)) {
+          setOverdueCount(null)
+        }
       }
     } catch (e) {
+      if (!isLatest()) return
+      if (isAbortOrCancelled(e)) return
       setMetrics(null)
       setTimeline([])
+      setActivityItems([])
+      setOverdueCount(null)
       setMetricsError(e instanceof Error ? e.message : "Network or unexpected error")
+      setLoadingTimeline(false)
+      setLoadingMetrics(false)
+      setLoadingActivity(false)
+      setLoadingOverdue(false)
     } finally {
-      setLoading(false)
+      if (loadGenerationRef.current === gen) {
+        devServiceDashboardLog("total cockpit load", tCockpit)
+      }
     }
   }, [business?.id, selectedPeriodStart])
+
+  const anyLoading =
+    loadingMetrics || loadingTimeline || loadingActivity || loadingOverdue
 
   useEffect(() => {
     load()
@@ -295,7 +428,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     timeline.length > 0 ? timeline.map((t) => t[key] as number) : undefined
 
   const prev = metrics?.previousPeriod ?? null
-  const routes = getDashboardRoutes(business.id)
 
   const profitMarginPct =
     metrics && metrics.revenue > 0
@@ -331,7 +463,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           <button
             type="button"
             onClick={() => load()}
-            disabled={loading}
+            disabled={anyLoading}
             title="Refresh dashboard"
             className="flex items-center gap-1.5 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           >
@@ -349,7 +481,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       </div>
     ) : null
 
-  if (loading && !metrics) {
+  if (!business?.id) {
     return (
       <div className="space-y-6">
         {workspaceTopBar}
@@ -358,21 +490,18 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     )
   }
 
-  if (metrics === null && !loading) {
-    return (
-      <div className="space-y-6">
-        {workspaceTopBar}
-        <DashboardErrorBanner
-          message={metricsError ?? "Could not load dashboard metrics. Please try again."}
-          onRetry={load}
-        />
-      </div>
-    )
-  }
+  const routes = getDashboardRoutes(business.id)
 
   return (
     <div className="space-y-6">
       {workspaceTopBar}
+
+      {metricsError && !loadingMetrics && (
+        <DashboardErrorBanner
+          message={metricsError ?? "Could not load dashboard metrics. Please try again."}
+          onRetry={load}
+        />
+      )}
 
       <DashboardHeader
         periodLabel={periodLabel}
@@ -389,108 +518,134 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
       <QuickActionsBar actions={QUICK_ACTIONS} businessId={business.id} />
 
-      {/* Primary KPI grid */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard
-          title="Revenue"
-          value={metrics?.revenue ?? 0}
-          previousValue={prev?.revenue}
-          sparklineData={spark("revenue")}
-          sparklineColor="#10b981"
-          reportHref={routes.revenue}
-          currencyCode={currencyCode}
-          subtitle="billed this period"
-          variant="default"
-        />
-        <MetricCard
-          title="Expenses"
-          value={metrics?.expenses ?? 0}
-          previousValue={prev?.expenses}
-          sparklineData={spark("expenses")}
-          sparklineColor="#ef4444"
-          reportHref={routes.expenses}
-          currencyCode={currencyCode}
-          variant="default"
-        />
-        <MetricCard
-          title="Net Profit"
-          value={metrics?.netProfit ?? 0}
-          previousValue={prev?.netProfit}
-          sparklineData={spark("netProfit")}
-          sparklineColor={(metrics?.netProfit ?? 0) >= 0 ? "#3b82f6" : "#f97316"}
-          reportHref={routes.netProfit}
-          currencyCode={currencyCode}
-          subtitle={profitMarginPct != null ? `${profitMarginPct}% margin` : undefined}
-          variant={(metrics?.netProfit ?? 0) >= 0 ? "positive" : "negative"}
-        />
-        <MetricCard
-          title="Cash Balance"
-          value={metrics?.cashBalance ?? 0}
-          previousValue={prev?.cashBalance ?? undefined}
-          sparklineColor="#6366f1"
-          reportHref={routes.cashBalance}
-          currencyCode={currencyCode}
-          subtitle={`${positionAsOfPrefix}bank account balance`}
-          variant={(metrics?.cashBalance ?? 0) < 0 ? "negative" : "default"}
-        />
-      </div>
+      {loadingMetrics ? (
+        <div className="space-y-4">
+          <ServiceDashboardMetricsCardsSkeleton />
+        </div>
+      ) : metrics ? (
+        <>
+          {/* Primary KPI grid */}
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <MetricCard
+              title="Revenue"
+              value={metrics.revenue ?? 0}
+              previousValue={prev?.revenue}
+              sparklineData={spark("revenue")}
+              sparklineColor="#10b981"
+              reportHref={routes.revenue}
+              currencyCode={currencyCode}
+              subtitle="billed this period"
+              variant="default"
+            />
+            <MetricCard
+              title="Expenses"
+              value={metrics.expenses ?? 0}
+              previousValue={prev?.expenses}
+              sparklineData={spark("expenses")}
+              sparklineColor="#ef4444"
+              reportHref={routes.expenses}
+              currencyCode={currencyCode}
+              variant="default"
+            />
+            <MetricCard
+              title="Net Profit"
+              value={metrics.netProfit ?? 0}
+              previousValue={prev?.netProfit}
+              sparklineData={spark("netProfit")}
+              sparklineColor={(metrics.netProfit ?? 0) >= 0 ? "#3b82f6" : "#f97316"}
+              reportHref={routes.netProfit}
+              currencyCode={currencyCode}
+              subtitle={profitMarginPct != null ? `${profitMarginPct}% margin` : undefined}
+              variant={(metrics.netProfit ?? 0) >= 0 ? "positive" : "negative"}
+            />
+            <MetricCard
+              title="Cash Balance"
+              value={metrics.cashBalance ?? 0}
+              previousValue={prev?.cashBalance ?? undefined}
+              sparklineColor="#6366f1"
+              reportHref={routes.cashBalance}
+              currencyCode={currencyCode}
+              subtitle={`${positionAsOfPrefix}bank account balance`}
+              variant={(metrics.cashBalance ?? 0) < 0 ? "negative" : "default"}
+            />
+          </div>
 
-      {/* Secondary KPI grid */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <MetricCard
-          title="Accounts Receivable"
-          value={metrics?.accountsReceivable ?? 0}
-          previousValue={prev?.accountsReceivable ?? undefined}
-          reportHref={routes.accountsReceivable}
-          currencyCode={currencyCode}
-          subtitle={`${positionAsOfPrefix}outstanding from clients`}
-        />
-        <MetricCard
-          title="Accounts Payable"
-          value={metrics?.accountsPayable ?? 0}
-          previousValue={prev?.accountsPayable ?? undefined}
-          reportHref={routes.accountsPayable}
-          currencyCode={currencyCode}
-          subtitle={`${positionAsOfPrefix}owed to suppliers`}
-        />
-        <MetricCard
-          title="Cash Collected"
-          value={metrics?.cashCollected ?? 0}
-          previousValue={prev?.cashCollected}
-          currencyCode={currencyCode}
-          subtitle={collectionRatePct != null ? `${collectionRatePct}% of billed` : "payments received"}
-          reportHref={routes.cashBalance}
-          variant="default"
-        />
-        <MetricCard
-          title="Overdue Invoices"
-          value={overdueCount}
-          currencyCode={currencyCode}
-          valueFormat="count"
-          subtitle={overdueCount === 1 ? "invoice past due" : "invoices past due"}
-          variant={overdueCount != null && overdueCount > 0 ? "negative" : "default"}
-          static
-        />
-      </div>
+          {/* Secondary KPI grid */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <MetricCard
+              title="Accounts Receivable"
+              value={metrics.accountsReceivable ?? 0}
+              previousValue={prev?.accountsReceivable ?? undefined}
+              reportHref={routes.accountsReceivable}
+              currencyCode={currencyCode}
+              subtitle={`${positionAsOfPrefix}outstanding from clients`}
+            />
+            <MetricCard
+              title="Accounts Payable"
+              value={metrics.accountsPayable ?? 0}
+              previousValue={prev?.accountsPayable ?? undefined}
+              reportHref={routes.accountsPayable}
+              currencyCode={currencyCode}
+              subtitle={`${positionAsOfPrefix}owed to suppliers`}
+            />
+            <MetricCard
+              title="Cash Collected"
+              value={metrics.cashCollected ?? 0}
+              previousValue={prev?.cashCollected}
+              currencyCode={currencyCode}
+              subtitle={collectionRatePct != null ? `${collectionRatePct}% of billed` : "payments received"}
+              reportHref={routes.cashBalance}
+              variant="default"
+            />
+            <MetricCard
+              title="Overdue Invoices"
+              value={loadingOverdue ? null : overdueCount}
+              currencyCode={currencyCode}
+              valueFormat="count"
+              subtitle={
+                loadingOverdue
+                  ? "Loading…"
+                  : overdueCount === 1
+                    ? "invoice past due"
+                    : "invoices past due"
+              }
+              variant={
+                loadingOverdue || overdueCount == null
+                  ? "default"
+                  : overdueCount > 0
+                    ? "negative"
+                    : "default"
+              }
+              static
+            />
+          </div>
+        </>
+      ) : null}
 
       {/* Trends + Recent Activity */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <TrendsSectionLazy
-            data={chartData}
-            currencyCode={currencyCode}
-            currentRevenue={metrics?.revenue ?? 0}
-            currentExpenses={metrics?.expenses ?? 0}
-            currentNetProfit={metrics?.netProfit ?? 0}
-          />
-        </div>
-        <div>
+        {loadingTimeline ? (
+          <ServiceDashboardTrendsPanelSkeleton />
+        ) : (
+          <div className="lg:col-span-2">
+            <TrendsSectionLazy
+              data={chartData}
+              currencyCode={currencyCode}
+              currentRevenue={metrics?.revenue ?? 0}
+              currentExpenses={metrics?.expenses ?? 0}
+              currentNetProfit={metrics?.netProfit ?? 0}
+            />
+          </div>
+        )}
+        {loadingActivity ? (
+          <ServiceDashboardActivityPanelSkeleton />
+        ) : (
           <RecentActivityFeed
             items={activityItems}
             currencyCode={currencyCode}
             emptyMessage="No recent activity"
           />
-        </div>
+        )}
       </div>
     </div>
   )

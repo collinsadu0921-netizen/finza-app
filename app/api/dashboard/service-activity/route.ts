@@ -55,6 +55,11 @@ function resendOutboundDescription(eventType: string): string {
   return labels[eventType] ?? `Email: ${eventType.replace(/^email\./, "")}`
 }
 
+function devServiceActivityLog(label: string, startedAt: number) {
+  if (process.env.NODE_ENV === "production") return
+  console.info(`[service-activity] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
+}
+
 function inboundDescription(row: {
   subject: string | null
   processing_status: string
@@ -144,20 +149,37 @@ async function buildJournalActivityItems(
 }
 
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const finish = (res: NextResponse) => {
+    devServiceActivityLog("total route", routeT0)
+    return res
+  }
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!user) {
+      devServiceActivityLog("auth/business/access resolution", tAuth)
+      return finish(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+    }
 
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
-    if (!businessId) return NextResponse.json({ error: "Missing business_id" }, { status: 400 })
+    if (!businessId) {
+      devServiceActivityLog("auth/business/access resolution", tAuth)
+      return finish(NextResponse.json({ error: "Missing business_id" }, { status: 400 }))
+    }
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
-    if (!auth.authorized) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    if (!auth.authorized) {
+      devServiceActivityLog("auth/business/access resolution", tAuth)
+      return finish(NextResponse.json({ error: "Forbidden" }, { status: 403 }))
+    }
+    devServiceActivityLog("auth/business/access resolution", tAuth)
 
     const limit = Math.min(20, Math.max(1, parseInt(searchParams.get("limit") ?? "10", 10) || 10))
 
@@ -166,34 +188,49 @@ export async function GET(request: NextRequest) {
       { data: resendRows, error: resendError },
       { data: inboundRows, error: inboundError },
     ] = await Promise.all([
-      supabase
-        .from("journal_entries")
-        .select(
-          `
+      (async () => {
+        const t0 = performance.now()
+        const r = await supabase
+          .from("journal_entries")
+          .select(
+            `
         id, date, created_at, description, source_type, reference_type, reference_id,
         journal_entry_lines(debit, credit)
       `
-        )
-        .eq("business_id", businessId)
-        .order("created_at", { ascending: false })
-        .limit(limit),
-      supabase
-        .from("resend_email_events")
-        .select("id, event_type, event_occurred_at, received_at")
-        .eq("business_id", businessId)
-        .order("received_at", { ascending: false })
-        .limit(limit),
-      supabase
-        .from("inbound_email_messages")
-        .select("id, subject, received_at, processing_status")
-        .eq("business_id", businessId)
-        .order("received_at", { ascending: false })
-        .limit(limit),
+          )
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: false })
+          .limit(limit)
+        devServiceActivityLog("query: journal_entries", t0)
+        return r
+      })(),
+      (async () => {
+        const t0 = performance.now()
+        const r = await supabase
+          .from("resend_email_events")
+          .select("id, event_type, event_occurred_at, received_at")
+          .eq("business_id", businessId)
+          .order("received_at", { ascending: false })
+          .limit(limit)
+        devServiceActivityLog("query: resend_email_events", t0)
+        return r
+      })(),
+      (async () => {
+        const t0 = performance.now()
+        const r = await supabase
+          .from("inbound_email_messages")
+          .select("id, subject, received_at, processing_status")
+          .eq("business_id", businessId)
+          .order("received_at", { ascending: false })
+          .limit(limit)
+        devServiceActivityLog("query: inbound_email_messages", t0)
+        return r
+      })(),
     ])
 
     if (journalError) {
       console.error("[service-activity] journal_entries:", journalError.message)
-      return NextResponse.json({ error: journalError.message }, { status: 500 })
+      return finish(NextResponse.json({ error: journalError.message }, { status: 500 }))
     }
     if (resendError) {
       console.warn("[service-activity] resend_email_events:", resendError.message)
@@ -202,7 +239,9 @@ export async function GET(request: NextRequest) {
       console.warn("[service-activity] inbound_email_messages:", inboundError.message)
     }
 
+    const tJournalBuild = performance.now()
     const journalItems = await buildJournalActivityItems(supabase, (entries ?? []) as Record<string, unknown>[])
+    devServiceActivityLog("buildJournalActivityItems", tJournalBuild)
 
     const resendItems: ActivityFeedItem[] = (resendRows ?? []).map((r) => ({
       id: `resend-email:${r.id as string}`,
@@ -227,9 +266,9 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => activityTimestampMs(b.timestamp) - activityTimestampMs(a.timestamp))
       .slice(0, limit)
 
-    return NextResponse.json({ items: merged })
+    return finish(NextResponse.json({ items: merged }))
   } catch (err) {
     console.error("service-activity error:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    return finish(NextResponse.json({ error: "Server error" }, { status: 500 }))
   }
 }

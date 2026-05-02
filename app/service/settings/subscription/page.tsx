@@ -227,10 +227,33 @@ function SubscriptionCallbackHandler() {
         const j = await r.json()
         if (!alive) return
         if (j.status === "success") {
-          toast.showToast(
-            "Payment confirmed. Your plan will update shortly. Your billing period runs from this payment.",
-            "success"
-          )
+          const applied = j.activation_applied === true
+          const activationErr =
+            typeof j.activation_error === "string" && j.activation_error.trim()
+              ? j.activation_error.trim()
+              : ""
+          const activationMsg =
+            typeof j.activation_message === "string" ? j.activation_message : ""
+          const duplicateOrHandled =
+            !applied &&
+            !activationErr &&
+            /duplicate success|idempotent|already succeeded/i.test(activationMsg)
+
+          if (applied) {
+            toast.showToast("Payment confirmed. Your plan has been updated.", "success")
+          } else if (duplicateOrHandled) {
+            toast.showToast("Payment confirmed. Your plan is active.", "success")
+          } else if (activationErr || (!applied && activationMsg)) {
+            toast.showToast(
+              `Payment confirmed, but your plan could not be activated automatically. Contact support with reference: ${ref}`,
+              "error"
+            )
+          } else {
+            toast.showToast(
+              "Payment confirmed. Your plan will update shortly. Your billing period runs from this payment.",
+              "success"
+            )
+          }
           router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
           router.refresh()
           return

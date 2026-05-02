@@ -33,13 +33,22 @@ export async function GET(request: NextRequest) {
       .from("invoices")
       .select(
         `
-        *,
+        id,
+        invoice_number,
+        customer_id,
+        subtotal,
+        vat,
+        total,
+        currency_code,
+        currency_symbol,
+        status,
+        issue_date,
+        due_date,
+        tax_lines,
         customers (
           id,
           name,
-          email,
-          phone,
-          whatsapp_phone
+          email
         )
       `
       )
@@ -83,6 +92,7 @@ export async function GET(request: NextRequest) {
       const { data: matchingCustomers } = await supabase
         .from("customers")
         .select("id")
+        .eq("business_id", business.id)
         .ilike("name", `%${search}%`)
         .is("deleted_at", null)
 

@@ -9,6 +9,8 @@ export type BusinessLogoVariant =
   | "toolbar"
   | "hero"
   | "workspace"
+  /** Customer-facing public document links (invoice-public body); bounded box, object-contain. */
+  | "publicDocument"
 
 export type BusinessLogoDisplayProps = {
   /** Public URL from `businesses.logo_url` (or store logo where applicable). */
@@ -53,29 +55,62 @@ function initialsRoundedClass(rounded: BusinessLogoDisplayProps["rounded"]) {
   return "rounded-full"
 }
 
-/** Max bounds for real logos — transparent background, no crop. */
-function imageShell(variant: BusinessLogoVariant, size: BusinessLogoDisplayProps["size"]) {
+/** Same pixel caps as imageShell — applied on the img so flex parents cannot inflate intrinsic size via max-h-full. */
+function explicitLogoImgMaxClasses(variant: BusinessLogoVariant, size: BusinessLogoDisplayProps["size"]): string {
+  if (variant === "publicDocument") {
+    return "block h-auto w-auto max-h-[90px] max-w-[260px] md:max-h-[120px] md:max-w-[360px]"
+  }
   if (variant === "document" && size === "xl") {
-    return "max-h-24 max-w-[10rem] sm:max-h-28 sm:max-w-[11rem]"
+    return "block h-auto w-auto max-h-24 max-w-[10rem] sm:max-h-28 sm:max-w-[11rem]"
   }
   if (variant === "document" && size === "lg") {
-    return "max-h-[4.5rem] max-w-[13rem] sm:max-h-20 sm:max-w-[15rem]"
+    return "block h-auto w-auto max-h-[4.5rem] max-w-[13rem] sm:max-h-20 sm:max-w-[15rem]"
   }
   switch (variant) {
     case "sidebar":
-      return "max-h-8 max-w-24"
+      return "block h-auto w-auto max-h-8 max-w-24"
     case "document":
-      return "max-h-16 max-w-[12rem] sm:max-h-[4.5rem] sm:max-w-[13rem]"
+      return "block h-auto w-auto max-h-16 max-w-[12rem] sm:max-h-[4.5rem] sm:max-w-[13rem]"
     case "compact":
-      return "max-h-8 max-w-[6.5rem]"
+      return "block h-auto w-auto max-h-8 max-w-[6.5rem]"
     case "toolbar":
-      return "max-h-8 max-w-[7.5rem]"
+      return "block h-auto w-auto max-h-8 max-w-[7.5rem]"
     case "hero":
-      return "max-h-[6.5rem] w-auto max-w-[min(320px,100%)] sm:max-h-[7.5rem]"
+      return "block h-auto w-auto max-h-[6.5rem] max-w-[min(320px,100%)] sm:max-h-[7.5rem]"
     case "workspace":
-      return "max-h-10 max-w-10"
+      return "block h-auto w-auto max-h-10 max-w-10"
     default:
-      return "max-h-10 max-w-[9rem]"
+      return "block h-auto w-auto max-h-10 max-w-[9rem]"
+  }
+}
+
+/** Max bounds for real logos — transparent background, no crop. */
+function imageShell(variant: BusinessLogoVariant, size: BusinessLogoDisplayProps["size"]) {
+  if (variant === "publicDocument") {
+    /* overflow-hidden: belt-and-suspenders with explicit img max-* inside flex rows */
+    return "box-border flex max-h-[90px] max-w-[260px] w-full shrink-0 items-center justify-center overflow-hidden min-h-0 min-w-0 md:max-h-[120px] md:max-w-[360px] md:w-auto md:justify-start"
+  }
+  if (variant === "document" && size === "xl") {
+    return "max-h-24 max-w-[10rem] overflow-hidden min-h-0 min-w-0 sm:max-h-28 sm:max-w-[11rem]"
+  }
+  if (variant === "document" && size === "lg") {
+    return "max-h-[4.5rem] max-w-[13rem] overflow-hidden min-h-0 min-w-0 sm:max-h-20 sm:max-w-[15rem]"
+  }
+  switch (variant) {
+    case "sidebar":
+      return "max-h-8 max-w-24 overflow-hidden min-h-0 min-w-0"
+    case "document":
+      return "max-h-16 max-w-[12rem] overflow-hidden min-h-0 min-w-0 sm:max-h-[4.5rem] sm:max-w-[13rem]"
+    case "compact":
+      return "max-h-8 max-w-[6.5rem] overflow-hidden min-h-0 min-w-0"
+    case "toolbar":
+      return "max-h-8 max-w-[7.5rem] overflow-hidden min-h-0 min-w-0"
+    case "hero":
+      return "max-h-[6.5rem] w-auto max-w-[min(320px,100%)] overflow-hidden min-h-0 min-w-0 sm:max-h-[7.5rem]"
+    case "workspace":
+      return "max-h-10 max-w-10 overflow-hidden min-h-0 min-w-0"
+    default:
+      return "max-h-10 max-w-[9rem] overflow-hidden min-h-0 min-w-0"
   }
 }
 
@@ -99,6 +134,8 @@ function initialsShell(variant: BusinessLogoVariant, size: BusinessLogoDisplayPr
       return "h-8 w-8"
     case "hero":
       return "h-[4.25rem] w-[4.25rem] sm:h-[4.5rem] sm:w-[4.5rem]"
+    case "publicDocument":
+      return "flex h-[72px] w-full max-h-[90px] max-w-[260px] shrink-0 items-center justify-center md:h-[96px] md:max-h-[120px] md:max-w-[360px]"
     case "workspace":
       return "h-10 w-10"
     default:
@@ -121,6 +158,8 @@ function skeletonShell(variant: BusinessLogoVariant, size: BusinessLogoDisplayPr
       return "h-8 w-20 rounded-md"
     case "hero":
       return "h-16 w-40 sm:h-[7rem] sm:w-44 rounded-lg"
+    case "publicDocument":
+      return "h-[72px] w-full max-h-[90px] max-w-[260px] shrink-0 rounded-lg md:h-[96px] md:max-h-[120px] md:max-w-[360px]"
     case "workspace":
       return "h-10 w-10 rounded-lg"
     default:
@@ -131,6 +170,7 @@ function skeletonShell(variant: BusinessLogoVariant, size: BusinessLogoDisplayPr
 function initialsTextClass(size: BusinessLogoDisplayProps["size"], variant: BusinessLogoVariant) {
   if (variant === "document" && size === "xl") return "text-2xl sm:text-3xl"
   if (variant === "document" && size === "sm") return "text-base font-semibold"
+  if (variant === "publicDocument") return "text-xl font-semibold md:text-2xl"
   if (variant === "sidebar") return "text-sm"
   if (size === "sm" || variant === "compact" || variant === "toolbar") return "text-sm"
   if (size === "lg" || size === "xl") return "text-xl"
@@ -217,12 +257,13 @@ export default function BusinessLogoDisplay({
 
   if (showImage) {
     const shell = `relative flex flex-shrink-0 items-center justify-start ${imageShell(variant, size)} ${className}`
+    const imgClass = `${explicitLogoImgMaxClasses(variant, size)} object-contain ${imgRounded}`
     return (
       <div className={shell}>
         <img
           src={logoUrl!.trim()}
           alt={businessName?.trim() ? `${businessName.trim()} logo` : "Business logo"}
-          className={`max-h-full max-w-full object-contain ${imgRounded}`}
+          className={imgClass}
           loading="lazy"
           decoding="async"
           onError={() => setImgFailed(true)}
