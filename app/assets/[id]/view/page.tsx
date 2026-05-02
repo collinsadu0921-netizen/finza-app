@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
 
@@ -136,32 +135,29 @@ export default function AssetViewPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p>Loading...</p>
+      </div>
     )
   }
 
   if (!asset) {
     return (
-      <ProtectedLayout>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
           <div className="max-w-4xl mx-auto">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-200 dark:border-gray-700 text-center">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Asset Not Found
+                Fixed asset not found
               </h2>
               <p className="text-gray-600 dark:text-gray-400 mb-6">
-                Asset could not be loaded. Please refresh or return to the list.
+                This fixed asset could not be loaded. Please refresh or return to the list.
               </p>
               <div className="flex gap-4 justify-center">
                 <button
                   onClick={() => router.push("/assets")}
                   className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
                 >
-                  Back to All Assets
+                  Back to Fixed Assets
                 </button>
                 <button
                   onClick={() => loadAsset()}
@@ -173,7 +169,6 @@ export default function AssetViewPage() {
             </div>
           </div>
         </div>
-      </ProtectedLayout>
     )
   }
 
@@ -181,7 +176,7 @@ export default function AssetViewPage() {
   const monthlyDepreciation = annualDepreciation / 12
 
   return (
-    <ProtectedLayout>
+    <>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
@@ -191,7 +186,7 @@ export default function AssetViewPage() {
                 onClick={() => router.push("/assets")}
                 className="text-blue-600 dark:text-blue-400 hover:underline mb-2"
               >
-                ← Back to Assets
+                ← Back to Fixed Assets
               </button>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">{asset.name}</h1>
               <p className="text-gray-600 dark:text-gray-400">
@@ -217,7 +212,7 @@ export default function AssetViewPage() {
                     onClick={() => setShowDisposalModal(true)}
                     className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
                   >
-                    Dispose Asset
+                    Dispose fixed asset
                   </button>
                 </>
               )}
@@ -228,7 +223,7 @@ export default function AssetViewPage() {
             {/* Asset Details */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Asset Details</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Fixed asset details</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Purchase Date</p>
@@ -405,7 +400,7 @@ export default function AssetViewPage() {
       {showDisposalModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Dispose Asset</h3>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Dispose fixed asset</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Disposal Date *</label>
@@ -454,7 +449,7 @@ export default function AssetViewPage() {
                 onClick={handleDisposeAsset}
                 className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
               >
-                Dispose Asset
+                Dispose fixed asset
               </button>
               <button
                 onClick={() => setShowDisposalModal(false)}
@@ -466,7 +461,7 @@ export default function AssetViewPage() {
           </div>
         </div>
       )}
-    </ProtectedLayout>
+    </>
   )
 }
 

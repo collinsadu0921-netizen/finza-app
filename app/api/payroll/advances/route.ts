@@ -18,6 +18,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET() {
   try {
@@ -27,6 +28,14 @@ export async function GET() {
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierDeniedAdvGet = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedAdvGet) return tierDeniedAdvGet
 
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
@@ -146,6 +155,14 @@ export async function POST(request: NextRequest) {
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierDeniedAdvPost = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedAdvPost) return tierDeniedAdvPost
 
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_CREATE)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })

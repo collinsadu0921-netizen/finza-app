@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
 
@@ -114,11 +113,10 @@ export default function CreateAssetPage() {
   const categories = ["vehicle", "equipment", "furniture", "electronics", "tools", "other"]
 
   return (
-    <ProtectedLayout>
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Add New Asset</h1>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Add fixed asset</h1>
             <p className="text-gray-600 dark:text-gray-400">Record a fixed asset purchase</p>
           </div>
 
@@ -319,7 +317,7 @@ export default function CreateAssetPage() {
                 disabled={loading}
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
               >
-                {loading ? "Creating..." : "Create Asset"}
+                {loading ? "Creating..." : "Save fixed asset"}
               </button>
               <button
                 type="button"
@@ -332,7 +330,6 @@ export default function CreateAssetPage() {
           </form>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
 

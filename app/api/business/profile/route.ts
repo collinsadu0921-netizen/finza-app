@@ -236,7 +236,10 @@ export async function PUT(request: NextRequest) {
     if (email !== undefined) updateData.email = email
     if (website !== undefined) updateData.website = website
     if (tin !== undefined) updateData.tin = tin
-    if (logo_url !== undefined) updateData.logo_url = logo_url
+    if (logo_url !== undefined) {
+      updateData.logo_url =
+        logo_url === null || (typeof logo_url === "string" && logo_url.trim() === "") ? null : logo_url
+    }
     if (default_currency !== undefined) updateData.default_currency = default_currency
     if (start_date !== undefined) updateData.start_date = start_date || null
     if (cit_rate_code !== undefined) updateData.cit_rate_code = cit_rate_code

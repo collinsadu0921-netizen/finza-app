@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function GET(
   request: NextRequest,
@@ -21,6 +22,13 @@ export async function GET(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierBlockPerGet = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      business.id
+    )
+    if (tierBlockPerGet) return tierBlockPerGet
 
     // Verify account belongs to business
     const { data: account } = await supabase
@@ -82,6 +90,13 @@ export async function POST(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierBlockPerPost = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      business.id
+    )
+    if (tierBlockPerPost) return tierBlockPerPost
 
     const body = await request.json()
     const { period_start, period_end, bank_ending_balance, notes } = body

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import TierGate from "@/components/service/TierGate"
 
 type Account = {
   id: string
@@ -27,7 +28,7 @@ function isBankOrCash(acc: Account) {
   return sub === "bank" || sub === "cash"
 }
 
-export default function ServiceWithdrawalPage() {
+function ServiceWithdrawalPageInner() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [businessId, setBusinessId] = useState<string | null>(null)
@@ -319,5 +320,13 @@ export default function ServiceWithdrawalPage() {
         )}
       </div>
     
+  )
+}
+
+export default function ServiceWithdrawalPage() {
+  return (
+    <TierGate minTier="business">
+      <ServiceWithdrawalPageInner />
+    </TierGate>
   )
 }

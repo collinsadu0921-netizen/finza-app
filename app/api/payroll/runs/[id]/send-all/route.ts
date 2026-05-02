@@ -18,6 +18,7 @@ import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTag
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { buildPayslipEmailHtml } from "@/lib/email/templates/payslip"
 import { getCurrencySymbol } from "@/lib/currency"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(
   request: NextRequest,
@@ -32,6 +33,14 @@ export async function POST(
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierDeniedSendAll = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedSendAll) return tierDeniedSendAll
 
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_PAYSLIPS)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })

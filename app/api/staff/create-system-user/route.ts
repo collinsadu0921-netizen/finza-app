@@ -6,6 +6,7 @@ import { canActorCreateStaffRole } from "@/lib/staff/businessStaffPermissions"
 import { createClient } from "@supabase/supabase-js"
 import { randomUUID } from "node:crypto"
 import { findAuthUserIdByEmail } from "@/lib/authAdminLookup"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 // Service role client for admin operations (creating users)
 const getSupabaseAdmin = () => {
@@ -53,6 +54,17 @@ export async function POST(request: NextRequest) {
     }
 
     console.log("Business found:", business.id)
+
+    const ind = String((business as { industry?: string }).industry ?? "").toLowerCase()
+    if (ind === "service" || ind === "professional") {
+      const tierDenied = await enforceServiceIndustryMinTier(
+        supabase,
+        user.id,
+        business.id,
+        "professional"
+      )
+      if (tierDenied) return tierDenied
+    }
 
     const actorRole = await getUserRole(supabase, user.id, business.id)
     if (!actorRole || actorRole === "cashier") {

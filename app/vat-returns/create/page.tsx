@@ -88,11 +88,11 @@ function CreateVatReturnContent() {
       if (response.ok) {
         router.push(`/vat-returns/${data.vatReturn.id}`)
       } else {
-        toast.showToast(data.error || "Error creating VAT return", "error")
+        toast.showToast(data.error || "Error creating VAT filing", "error")
       }
     } catch (error) {
       console.error("Error creating VAT return:", error)
-      toast.showToast("Error creating VAT return", "error")
+      toast.showToast("Error creating VAT filing", "error")
     } finally {
       setLoading(false)
     }
@@ -126,11 +126,11 @@ function CreateVatReturnContent() {
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
-              VAT Returns
+              VAT Filings
             </button>
             <span className="text-slate-300 dark:text-slate-600">|</span>
             <span className="font-mono text-xs tracking-widest text-slate-400 uppercase">
-              New Return
+              New filing
             </span>
           </div>
 
@@ -141,7 +141,7 @@ function CreateVatReturnContent() {
               {/* Card header */}
               <div className="px-6 py-4 border-b border-slate-100 dark:border-gray-700 flex items-center justify-between">
                 <h1 className="text-lg font-semibold text-slate-800 dark:text-white tracking-tight">
-                  Create VAT Return
+                  Create VAT filing
                 </h1>
                 {calculating && (
                   <span className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -385,7 +385,7 @@ function CreateVatReturnContent() {
                       Saving…
                     </>
                   ) : (
-                    "Create Return →"
+                    "Create filing →"
                   )}
                 </button>
               </div>

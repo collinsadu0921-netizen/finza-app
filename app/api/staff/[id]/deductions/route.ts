@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeDeductionType, DEDUCTION_TYPES } from "@/lib/payrollTypes"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(
   request: NextRequest,
@@ -26,9 +26,12 @@ export async function POST(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "professional",
-    })
+    const denied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
     if (denied) return denied
 
     // Verify staff exists

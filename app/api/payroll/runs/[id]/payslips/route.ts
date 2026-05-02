@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET(
   _request: NextRequest,
@@ -21,6 +22,14 @@ export async function GET(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDeniedPayslips = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedPayslips) return tierDeniedPayslips
 
     const { allowed } = await requirePermission(
       supabase,

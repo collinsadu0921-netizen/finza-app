@@ -272,14 +272,18 @@ export default function NewInvoicePage() {
     }
     let cancelled = false
     ;(async () => {
-      const { data } = await supabase
-        .from("service_job_material_usage")
-        .select("total_cost")
-        .eq("job_id", selectedJobId)
-        .eq("business_id", businessId)
-      if (cancelled || !data) return
-      const total = (data as { total_cost: number }[]).reduce((s, r) => s + Number(r.total_cost || 0), 0)
-      if (!cancelled) setJobMaterialCost(total)
+      const res = await fetch(
+        `/api/service/jobs/${encodeURIComponent(selectedJobId)}/material-cost`
+      )
+      const j = await res.json().catch(() => ({}))
+      if (cancelled) return
+      if (!res.ok) {
+        setJobMaterialCost(null)
+        return
+      }
+      if (typeof j.total_material_cost === "number" && !cancelled) {
+        setJobMaterialCost(j.total_material_cost)
+      }
     })()
     return () => { cancelled = true }
   }, [businessIndustry, selectedJobId, businessId])
@@ -346,14 +350,14 @@ export default function NewInvoicePage() {
         } else {
           setProducts([])
         }
-        // Load jobs for "Invoice from Job" dropdown (draft + in_progress)
-        const { data: jobsData } = await supabase
-          .from("service_jobs")
-          .select("id, status, start_date, end_date, customers(name)")
-          .eq("business_id", business.id)
-          .in("status", ["draft", "in_progress"])
-          .order("created_at", { ascending: false })
-        setJobs((jobsData || []) as any[])
+        // Load jobs for "Invoice from Job" dropdown (tier-gated API)
+        const jobsRes = await fetch("/api/service/jobs/for-invoice")
+        const jobsPayload = await jobsRes.json().catch(() => ({}))
+        if (jobsRes.ok && Array.isArray(jobsPayload.jobs)) {
+          setJobs(jobsPayload.jobs as any[])
+        } else {
+          setJobs([])
+        }
       } else {
       // Load products_services (non-service workspace)
       const { data: productsData } = await supabase
@@ -629,13 +633,17 @@ export default function NewInvoicePage() {
 
       setCreatedInvoiceId(invoiceId)
 
-      // Link invoice to job if "Invoice from Job" was used (service workspace only)
+      // Link invoice to job if "Invoice from Job" was used (tier-gated API)
       if (selectedJobId && businessId) {
-        await supabase
-          .from("service_jobs")
-          .update({ invoice_id: invoiceId })
-          .eq("id", selectedJobId)
-          .eq("business_id", businessId)
+        const linkRes = await fetch(`/api/service/jobs/${encodeURIComponent(selectedJobId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invoice_id: invoiceId }),
+        })
+        if (!linkRes.ok) {
+          const errBody = await linkRes.json().catch(() => ({}))
+          console.warn("Failed to link invoice to job:", errBody)
+        }
       }
 
       if (status === 'sent') {

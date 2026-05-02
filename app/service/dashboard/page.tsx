@@ -7,6 +7,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
 import ServiceDashboardCockpit from "@/components/dashboard/service/ServiceDashboardCockpit"
 import ServiceDashboardSkeleton from "@/components/dashboard/service/ServiceDashboardSkeleton"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 function getGreeting(): string {
   const hour = new Date().getHours()
@@ -21,6 +22,7 @@ type BusinessState = {
   trading_name?: string
   legal_name?: string
   name?: string
+  logo_url?: string | null
 }
 
 export default function ServiceDashboardPage() {
@@ -107,23 +109,36 @@ export default function ServiceDashboardPage() {
 
   const firstName = userName?.split(" ")[0] ?? null
 
-  return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-0.5">
-            {getGreeting()}{firstName ? `, ${firstName}` : ""}
-          </p>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            {bizName}
-          </h1>
-        </div>
-        <p className="text-xs text-slate-400 hidden sm:block">
-          {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
-        </p>
-      </div>
+  const logoUrl =
+    typeof business.logo_url === "string" && business.logo_url.trim() ? business.logo_url.trim() : null
 
-      <ServiceDashboardCockpit business={business} />
+  return (
+    <div className="p-6">
+      <ServiceDashboardCockpit
+        business={business}
+        headerLead={
+          <div className="flex min-w-0 items-start gap-2.5">
+            <BusinessLogoDisplay
+              logoUrl={logoUrl}
+              businessName={bizName}
+              variant="document"
+              size="sm"
+              rounded="lg"
+              brandingResolved
+              className="shrink-0 self-start"
+            />
+            <div className="min-w-0 flex-1">
+              <h1 className="text-2xl font-bold leading-snug text-slate-900 break-words dark:text-white">
+                {bizName}
+              </h1>
+              <p className="mt-1 text-xs font-medium uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                {getGreeting()}
+                {firstName ? `, ${firstName}` : ""}
+              </p>
+            </div>
+          </div>
+        }
+      />
     </div>
   )
 }

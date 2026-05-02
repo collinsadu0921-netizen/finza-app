@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { logFirmActivity } from "@/lib/firmActivityLog"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function PATCH(
   request: NextRequest,
@@ -86,12 +86,12 @@ export async function PATCH(
       )
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceIndustryMinTier(
       supabase,
-      userId: user.id,
-      businessId: engagement.client_business_id as string,
-      minTier: "starter",
-    })
+      user.id,
+      engagement.client_business_id as string,
+      "professional"
+    )
     if (denied) return denied
 
     if (engagement.status !== "pending") {

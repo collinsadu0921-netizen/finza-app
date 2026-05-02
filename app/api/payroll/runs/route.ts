@@ -6,6 +6,7 @@ import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngin
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; position?: string | null }): boolean {
   const employmentType = String(staff.employment_type || "").toLowerCase()
@@ -28,6 +29,14 @@ export async function GET(request: NextRequest) {
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDenied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDenied) return tierDenied
 
     const { allowed: canView } = await requirePermission(
       supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW
@@ -76,6 +85,14 @@ export async function POST(request: NextRequest) {
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDeniedPost = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedPost) return tierDeniedPost
 
     const { allowed: canCreate } = await requirePermission(
       supabase, user.id, business.id, PERMISSIONS.PAYROLL_CREATE

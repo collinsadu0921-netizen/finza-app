@@ -1,21 +1,35 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
-import { buildServiceRoute } from "@/lib/service/routes"
+import { buildServiceRoute, buildServiceSubscriptionSettingsRoute } from "@/lib/service/routes"
+import {
+  computeWinningSidebarNavPathBases,
+  isServiceSidebarNavItemActive,
+  pathOnlyFromSidebarRoute,
+} from "@/lib/service/sidebarNavActive"
 import { retailPaths } from "@/lib/retail/routes"
 import { clearSelectedBusinessId } from "@/lib/business"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import {
+  BUSINESS_BRANDING_UPDATED_EVENT,
+  type BusinessBrandingUpdatedDetail,
+} from "@/lib/business/businessBrandingEvents"
 import { getUserRole } from "@/lib/userRoles"
 import type { CustomPermissions } from "@/lib/permissions"
 import { filterServiceNavSections } from "@/lib/nav/filterServiceNavSections"
+import {
+  getServiceSidebarNavIcon,
+  ServiceSidebarCediMark,
+} from "@/lib/service/serviceSidebarNavIcons"
+import { ChevronDown, Lock } from "lucide-react"
 
 /** Match service dashboard + public documents — not `name` first (legal entity vs trading name). */
 function sidebarBusinessLabel(row: {
@@ -53,7 +67,17 @@ export default function Sidebar() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [isAccountantFirmUser, setIsAccountantFirmUser] = useState<boolean>(false)
   const [serviceBusinessId, setServiceBusinessId] = useState<string | null>(null)
-  const [businessDisplay, setBusinessDisplay] = useState<{ name: string | null; logo_url: string | null }>({ name: null, logo_url: null })
+  const [businessDisplay, setBusinessDisplay] = useState<{ name: string | null; logo_url: string | null }>({
+    name: null,
+    logo_url: null,
+  })
+  /** False until sidebar branding fetch finishes — avoids initials flash while `logo_url` is still unknown. */
+  const [sidebarBrandingResolved, setSidebarBrandingResolved] = useState(false)
+
+  const commitSidebarBranding = useCallback((next: { name: string | null; logo_url: string | null }) => {
+    setBusinessDisplay(next)
+    setSidebarBrandingResolved(true)
+  }, [])
   const [navRole, setNavRole] = useState<string | null>(null)
   const [navCustomPermissions, setNavCustomPermissions] = useState<CustomPermissions | null>(null)
   const [navPermsResolved, setNavPermsResolved] = useState(false)
@@ -65,9 +89,21 @@ export default function Sidebar() {
   const sidebarBusinessId = urlBusinessId ?? (isAccountantFirmUser ? null : serviceBusinessId)
 
   useEffect(() => {
+    setSidebarBrandingResolved(false)
+  }, [pathname, urlBusinessId])
+
+  useEffect(() => {
     loadIndustry(urlBusinessId, pathname ?? "")
     checkAccountantFirmUser()
   }, [pathname, urlBusinessId])
+
+  /** Firm users on `/service/*` without `business_id` never hit `getCurrentBusiness` branding — unblock resolved state. */
+  useEffect(() => {
+    if (!isAccountantFirmUser) return
+    if (!pathname?.startsWith("/service/")) return
+    if (urlBusinessId) return
+    setSidebarBrandingResolved(true)
+  }, [isAccountantFirmUser, pathname, urlBusinessId])
 
   // Phase B: role + custom_permissions for service nav (firm users: no filter)
   useEffect(() => {
@@ -196,7 +232,7 @@ export default function Sidebar() {
         const business = await getCurrentBusiness(supabase, user.id)
         if (!cancelled) {
           setServiceBusinessId(business?.id ?? null)
-          setBusinessDisplay(
+          commitSidebarBranding(
             business
               ? {
                   name: sidebarBusinessLabel(business as any),
@@ -206,11 +242,59 @@ export default function Sidebar() {
           )
         }
       } catch {
-        if (!cancelled) setServiceBusinessId(null)
+        if (!cancelled) {
+          setServiceBusinessId(null)
+          setSidebarBrandingResolved(true)
+        }
       }
     })()
     return () => { cancelled = true }
-  }, [urlBusinessId, isAccountingPath, businessIndustry, isAccountantFirmUser])
+  }, [urlBusinessId, isAccountingPath, businessIndustry, isAccountantFirmUser, commitSidebarBranding])
+
+  // Logo upload/remove on Business Profile: refresh sidebar branding without full page reload.
+  useEffect(() => {
+    const onBrandingUpdated = async (ev: Event) => {
+      const detail = (ev as CustomEvent<BusinessBrandingUpdatedDetail>).detail
+      if (!detail?.businessId) return
+
+      let apply = false
+      if (urlBusinessId && detail.businessId === urlBusinessId) apply = true
+      else if (getSelectedBusinessId() && detail.businessId === getSelectedBusinessId()) apply = true
+      else if (!urlBusinessId && serviceBusinessId && detail.businessId === serviceBusinessId) apply = true
+      else {
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser()
+          if (user) {
+            const b = await getCurrentBusiness(supabase, user.id)
+            if (b?.id === detail.businessId) apply = true
+          }
+        } catch {
+          /* noop */
+        }
+      }
+
+      if (!apply) return
+
+      const { data: row } = await supabase
+        .from("businesses")
+        .select("trading_name, legal_name, name, logo_url")
+        .eq("id", detail.businessId)
+        .is("archived_at", null)
+        .maybeSingle()
+
+      if (row) {
+        commitSidebarBranding({
+          name: sidebarBusinessLabel(row),
+          logo_url: row.logo_url ?? null,
+        })
+      }
+    }
+
+    window.addEventListener(BUSINESS_BRANDING_UPDATED_EVENT, onBrandingUpdated)
+    return () => window.removeEventListener(BUSINESS_BRANDING_UPDATED_EVENT, onBrandingUpdated)
+  }, [urlBusinessId, serviceBusinessId, commitSidebarBranding])
 
   // Auto-close mobile menu when route changes
   useEffect(() => {
@@ -221,6 +305,7 @@ export default function Sidebar() {
     try {
       const { isCashierAuthenticated } = await import("@/lib/cashierSession")
       if (isCashierAuthenticated()) {
+        setSidebarBrandingResolved(true)
         return
       }
 
@@ -269,7 +354,7 @@ export default function Sidebar() {
           .maybeSingle()
         if (business) {
           setBusinessIndustry(business.industry ?? null)
-          setBusinessDisplay({
+          commitSidebarBranding({
             name: sidebarBusinessLabel(business),
             logo_url: business.logo_url ?? null,
           })
@@ -277,16 +362,17 @@ export default function Sidebar() {
         }
         if (error) console.error("Error loading business for sidebar:", error)
         setBusinessIndustry(null)
-        setBusinessDisplay({ name: null, logo_url: null })
+        commitSidebarBranding({ name: null, logo_url: null })
         return
       }
 
       // No workspace hint: use industry from sessionStorage only (set by dashboard/layout).
       setBusinessIndustry(getTabIndustryMode())
-      setBusinessDisplay({ name: null, logo_url: null })
+      commitSidebarBranding({ name: null, logo_url: null })
     } catch (err) {
       console.error("Error loading industry:", err)
       setBusinessIndustry(null)
+      commitSidebarBranding({ name: null, logo_url: null })
     }
   }
 
@@ -321,6 +407,9 @@ export default function Sidebar() {
   // Do not block menu when URL has business_id on /service/* (direct deep link).
   const effectiveIndustry = businessIndustry ?? (pathname?.startsWith("/service/") && urlBusinessId ? "service" : null)
 
+  const effectiveServiceBusinessId =
+    effectiveIndustry === "service" ? urlBusinessId ?? serviceBusinessId ?? null : null
+
   const getMenuSections = (): MenuSection[] => {
     // If industry is not loaded yet and we don't have service deep-link context, return empty array (no menu)
     if (!effectiveIndustry) {
@@ -328,11 +417,9 @@ export default function Sidebar() {
     }
 
     if (effectiveIndustry === "service") {
-      // Resolve business for service-scoped links (REPORTS and Accounting).
-      const effectiveServiceBusinessId = urlBusinessId ?? serviceBusinessId ?? null
       const sections: MenuSection[] = [
         {
-          title: "OPERATIONS",
+          title: "Operations",
           items: [
             { label: "Dashboard", route: "/service/dashboard", minTier: "starter" },
             { label: "Customers", route: "/service/customers", minTier: "starter" },
@@ -342,18 +429,18 @@ export default function Sidebar() {
               minTier: "starter",
             },
             { label: "Proposals", route: "/service/proposals", minTier: "starter" },
-            { label: "Projects", route: "/service/jobs", minTier: "professional" },
+            { label: "Jobs & Projects", route: "/service/jobs", minTier: "professional" },
           ],
         },
         {
-          title: "CATALOG",
+          title: "Catalog",
           items: [
             { label: "Services", route: "/service/services", minTier: "starter" },
             { label: "Materials", route: "/service/materials", minTier: "professional" },
           ],
         },
         {
-          title: "BILLING",
+          title: "Billing",
           items: [
             { label: "Proforma Invoices", route: "/service/proforma", minTier: "starter" },
             { label: "Invoices", route: "/service/invoices", minTier: "starter" },
@@ -374,7 +461,7 @@ export default function Sidebar() {
           ],
         },
         {
-          title: "PAYROLL",
+          title: "Payroll",
           items: [
             { label: "Payroll", route: "/service/payroll", minTier: "professional" },
             { label: "Employees", route: "/service/settings/staff", minTier: "professional" },
@@ -384,20 +471,20 @@ export default function Sidebar() {
       ]
       if (!isAccountantFirmUser) {
         sections.push({
-          title: "REPORTS",
+          title: "Reports",
           items: [
             { label: "Profit & Loss", route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
             { label: "Balance Sheet", route: buildServiceRoute("/service/reports/balance-sheet", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
             { label: "Cash Flow", route: buildServiceRoute("/service/reports/cash-flow", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
             { label: "Changes in Equity", route: buildServiceRoute("/service/reports/equity-changes", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
-            { label: "Assets", route: "/service/assets", minTier: "professional" },
+            { label: "Fixed Assets", route: "/service/assets", minTier: "professional" },
           ],
         })
         sections.push({
-          title: "TAX & COMPLIANCE",
+          title: "Tax & compliance",
           items: [
             { label: "VAT Report", route: buildServiceRoute("/reports/vat", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
-            { label: "VAT Returns", route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "VAT Filings", route: buildServiceRoute("/vat-returns", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
             {
               label: "Withholding Tax",
               route: buildServiceRoute("/service/accounting/wht", effectiveServiceBusinessId ?? undefined),
@@ -438,27 +525,30 @@ export default function Sidebar() {
                 { label: "Tenants", route: "/admin/accounting/tenants" },
               ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)
             : ([
-                { label: "Loans & Equity", route: "/service/accounting/loan", minTier: "business" as const },
-                { label: "Journal Entry Activity", route: buildServiceRoute("/service/accounting/audit", accountingBusinessId ?? undefined), minTier: "professional" as const },
+                {
+                  label: "Loans & Equity",
+                  route: buildServiceRoute("/service/accounting/loan", accountingBusinessId ?? undefined),
+                  minTier: "business" as const,
+                },
+                { label: "Accounting Audit Log", route: buildServiceRoute("/service/accounting/audit", accountingBusinessId ?? undefined), minTier: "professional" as const },
               ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)),
         ]
         sections.push({
-          title: "ACCOUNTING",
+          title: "Advanced accounting",
           items: accountingItems,
         })
       }
       if (!isAccountantFirmUser) {
         sections.push({
-          title: "ORGANIZATION",
+          title: "Organization",
           items: [
             { label: "Team members", route: buildServiceRoute("/service/settings/team", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
-            { label: "Staff management", route: buildServiceRoute("/service/settings/staff", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
             { label: "Accountant requests", route: buildServiceRoute("/service/invitations", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
           ],
         })
       }
       sections.push({
-          title: "SETTINGS",
+          title: "Settings",
           items: [
             { label: "All settings",        route: "/service/settings",              minTier: "starter" },
             { label: "Subscription & plan", route: "/service/settings/subscription", minTier: "starter" },
@@ -466,7 +556,7 @@ export default function Sidebar() {
         })
       if (!isAccountantFirmUser) {
         sections.push({
-          title: "ADMIN",
+          title: "Admin",
           items: [
             { label: "Full Audit Log", route: buildServiceRoute("/audit-log", effectiveServiceBusinessId ?? undefined), minTier: "business" },
           ],
@@ -598,33 +688,48 @@ export default function Sidebar() {
     navCustomPermissions,
     effectiveIndustry,
     sidebarBusinessId,
+    effectiveServiceBusinessId,
   ])
 
-  const isActive = (route: string) => {
-    const pathOnly = route.split("?")[0]
-    if (pathOnly === "/dashboard" || pathOnly === "/retail/dashboard") {
-      return pathname === "/dashboard" || pathname === "/retail/dashboard"
-    }
-    // Quotes nav uses /service/quotes (alias); estimates are the internal model for quotes.
-    if (pathOnly === "/service/quotes") {
-      return (
-        pathname === "/service/quotes" ||
-        pathname === "/service/estimates" ||
-        pathname?.startsWith("/service/estimates/")
-      )
-    }
-    return pathname === pathOnly || (pathOnly !== "/" && pathname?.startsWith(pathOnly + "/"))
-  }
+  // Keep the section that contains the current route expanded so the active item is visible.
+  useEffect(() => {
+    if (!effectiveIndustry) return
+    setExpandedSections((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const section of menuSections) {
+        const hasActive = section.items.some(
+          (item) =>
+            !item.skipActiveHighlight &&
+            isServiceSidebarNavItemActive(pathname ?? "", item.route)
+        )
+        if (hasActive && next[section.title] !== true) {
+          next[section.title] = true
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [pathname, effectiveIndustry, menuSections])
+
+  const winningNavPathBases = useMemo(
+    () => computeWinningSidebarNavPathBases(pathname, menuSections),
+    [pathname, menuSections]
+  )
+
+  /** Service workspace: sidebar chrome is Finza platform branding; business identity lives on the dashboard. */
+  const isServiceWorkspaceRoute = (pathname ?? "").startsWith("/service/")
+  const [finzaSidebarSvgFailed, setFinzaSidebarSvgFailed] = useState(false)
 
   return (
     <>
       {/* Mobile menu button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-slate-200"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700"
         aria-label="Toggle menu"
       >
-        <svg className="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-6 h-6 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           {isOpen ? (
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           ) : (
@@ -644,94 +749,198 @@ export default function Sidebar() {
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 left-0 h-full w-64 bg-white border-r border-slate-200 z-40
+          fixed top-0 left-0 h-full w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-40
           transform transition-transform duration-300 ease-in-out
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
           lg:translate-x-0
         `}
       >
         <div className="flex flex-col h-full">
-          {/* Sidebar Header — business identity only */}
-          <div className="p-4 border-b border-slate-200">
-            <button
-              type="button"
-              onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
-              className="text-left w-full min-w-0 rounded-lg outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <BusinessLogoDisplay
-                  logoUrl={businessDisplay.logo_url}
-                  businessName={businessDisplay.name?.trim() || "Workspace"}
-                  size="lg"
-                  rounded="lg"
-                  className="border border-slate-200/80 bg-white dark:border-slate-600 dark:bg-slate-800"
-                />
-                {businessDisplay.name ? (
-                  <p className="min-w-0 flex-1 text-sm font-bold leading-snug text-slate-900 line-clamp-2 dark:text-white">
-                    {businessDisplay.name}
-                  </p>
+          {/* Sidebar header: Finza platform (service) vs workspace business (retail / legacy routes) */}
+          <div
+            className={`border-b border-slate-200 dark:border-slate-800 ${
+              isServiceWorkspaceRoute
+                ? "box-border flex h-16 items-center pl-6 pr-4"
+                : "px-3 py-2"
+            }`}
+          >
+            {isServiceWorkspaceRoute ? (
+              <button
+                type="button"
+                onClick={() => router.push("/service/dashboard")}
+                className="flex min-h-0 w-full min-w-0 items-center justify-start rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
+                aria-label="Finza — Service dashboard"
+              >
+                {!finzaSidebarSvgFailed ? (
+                  <img
+                    src="/brand/finza-logo-colored-solid.svg"
+                    alt="Finza"
+                    width={220}
+                    height={56}
+                    decoding="async"
+                    loading="eager"
+                    className="block h-[34px] w-auto max-h-[40px] max-w-[200px] object-contain object-left dark:brightness-[1.06]"
+                    onError={() => setFinzaSidebarSvgFailed(true)}
+                  />
                 ) : (
-                  <p className="min-w-0 flex-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                    Dashboard
-                  </p>
+                  <>
+                    <span
+                      className="mr-3 h-[10px] w-[10px] shrink-0 rounded-[3px] bg-blue-600 dark:bg-blue-500"
+                      aria-hidden
+                    />
+                    <span className="text-[30px] font-extrabold leading-none tracking-[-0.03em] text-slate-900 dark:text-white">
+                      Finza
+                    </span>
+                  </>
                 )}
-              </div>
-            </button>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
+                className="w-full min-w-0 rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <BusinessLogoDisplay
+                    logoUrl={businessDisplay.logo_url}
+                    businessName={businessDisplay.name?.trim() || "Workspace"}
+                    variant="sidebar"
+                    rounded="lg"
+                    brandingResolved={sidebarBrandingResolved}
+                    className="shrink-0"
+                  />
+                  {businessDisplay.name ? (
+                    <p
+                      className="min-w-0 flex-1 text-sm font-semibold leading-tight text-slate-900 line-clamp-1 dark:text-white"
+                      title={businessDisplay.name}
+                    >
+                      {businessDisplay.name}
+                    </p>
+                  ) : (
+                    <p className="min-w-0 flex-1 text-sm font-semibold leading-tight text-slate-500 dark:text-slate-400">
+                      Dashboard
+                    </p>
+                  )}
+                </div>
+              </button>
+            )}
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto p-4">
+          <nav
+            className="flex-1 overflow-y-auto p-3 sm:p-4 [scrollbar-width:thin] [scrollbar-color:rgba(148,163,184,0.35)_transparent] dark:[scrollbar-color:rgba(100,116,139,0.3)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/30 dark:[&::-webkit-scrollbar-thumb]:bg-slate-500/25"
+          >
             {/* Menu Sections */}
             <div className="space-y-1">
               {effectiveIndustry ? (
                 menuSections.map((section, sectionIdx) => {
-                  // OPERATIONS and BILLING expanded by default, others collapsed
-                  const defaultExpanded = section.title === "OPERATIONS" || section.title === "BILLING"
+                  const isServiceMenu = effectiveIndustry === "service"
+                  const defaultExpanded =
+                    section.title === "Operations" ||
+                    section.title === "Billing" ||
+                    section.title === "OPERATIONS" ||
+                    section.title === "BILLING" ||
+                    section.title === "RETAIL OPERATIONS"
                   const isExpanded = expandedSections[section.title] ?? defaultExpanded
-                  
+
                   return (
-                    <div key={sectionIdx} className="mb-2">
-                      {/* Section Header with Divider */}
+                    <div key={sectionIdx} className={isServiceMenu ? "mb-3" : "mb-2"}>
                       {sectionIdx > 0 && (
-                        <div className="h-px bg-slate-100 my-2 mx-3"></div>
+                        <div
+                          className={`h-px bg-slate-100 dark:bg-slate-800 ${isServiceMenu ? "my-3 mx-2" : "my-2 mx-3"}`}
+                        />
                       )}
                       <button
+                        type="button"
                         onClick={() => toggleSection(section.title)}
-                        className="w-full text-left px-3 py-2 rounded-lg flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400 hover:bg-slate-50 transition-all duration-150"
+                        className={
+                          isServiceMenu
+                            ? "w-full text-left px-3 py-2.5 rounded-lg flex items-center justify-between gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 tracking-wide hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors duration-150"
+                            : "w-full text-left px-3 py-2 rounded-lg flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-150"
+                        }
                       >
                         <span>{section.title}</span>
-                        <svg
-                          className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
+                        <ChevronDown
+                          className={`w-4 h-4 shrink-0 text-slate-500 dark:text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                          aria-hidden="true"
+                          strokeWidth={2}
+                        />
                       </button>
                       {isExpanded && (
                         <div className="mt-1 space-y-0.5">
                           {section.items.map((item, itemIdx) => {
                             const active =
-                              !item.skipActiveHighlight && isActive(item.route)
-                            // Client-scoped accounting links (not Control Tower) require sidebarBusinessId (Wave 11).
+                              !item.skipActiveHighlight &&
+                              winningNavPathBases.has(
+                                pathOnlyFromSidebarRoute(item.route)
+                              )
                             const isAccountingClientRoute =
-                              item.route.startsWith("/accounting") && !item.route.includes("control-tower")
+                              item.route.startsWith("/accounting") &&
+                              !item.route.includes("control-tower")
                             const isServiceClientRoute =
-                              item.route.startsWith("/service/ledger") || item.route.startsWith("/service/accounting") || item.route.startsWith("/service/reports")
+                              item.route.startsWith("/service/ledger") ||
+                              item.route.startsWith("/service/accounting") ||
+                              item.route.startsWith("/service/reports")
                             const tierBlocked =
                               effectiveIndustry === "service" &&
                               !isAccountantFirmUser &&
                               item.minTier != null &&
                               !canAccessTier(item.minTier)
                             const contextBlocked =
-                              (isAccountingClientRoute || isServiceClientRoute) && !sidebarBusinessId
+                              (isAccountingClientRoute || isServiceClientRoute) &&
+                              !sidebarBusinessId
                             const navLocked = contextBlocked || tierBlocked
                             const target = item.route
+                            const tierUpgradeAriaLabel = tierBlocked
+                              ? `${upgradeLabel(item.minTier!)}. Opens subscription page.`
+                              : undefined
+
+                            const iconRes = isServiceMenu
+                              ? getServiceSidebarNavIcon(item.label)
+                              : null
+                            const IconComponent =
+                              iconRes && iconRes !== "cedi" ? iconRes : null
+                            let iconClass =
+                              "h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300"
+                            if (active) {
+                              iconClass =
+                                "h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400"
+                            } else if (tierBlocked) {
+                              iconClass =
+                                "h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400"
+                            } else if (contextBlocked) {
+                              iconClass =
+                                "h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500"
+                            }
+
+                            let rowClass =
+                              "flex w-full items-center gap-2.5 rounded-md border-l-2 py-2 pl-2 pr-2 text-left text-sm transition-colors duration-150 "
+                            if (active) {
+                              rowClass +=
+                                "border-blue-600 bg-blue-50/90 dark:bg-blue-950/35 dark:border-blue-500 font-semibold text-slate-900 dark:text-slate-100 "
+                              if (tierBlocked) {
+                                rowClass +=
+                                  "cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/50 "
+                              }
+                            } else if (navLocked) {
+                              rowClass += "border-transparent "
+                              if (tierBlocked) {
+                                rowClass +=
+                                  "text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 "
+                              } else {
+                                rowClass +=
+                                  "text-slate-500 dark:text-slate-400 cursor-not-allowed opacity-90 "
+                              }
+                            } else {
+                              rowClass +=
+                                "border-transparent text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 "
+                            }
+
                             return (
                               <button
                                 key={itemIdx}
                                 type="button"
+                                aria-label={tierUpgradeAriaLabel}
                                 title={
                                   tierBlocked
                                     ? upgradeLabel(item.minTier!)
@@ -741,7 +950,11 @@ export default function Sidebar() {
                                 }
                                 onClick={() => {
                                   if (tierBlocked) {
-                                    router.push("/service/settings/subscription")
+                                    router.push(
+                                      buildServiceSubscriptionSettingsRoute(
+                                        effectiveServiceBusinessId
+                                      )
+                                    )
                                     setIsOpen(false)
                                     return
                                   }
@@ -749,25 +962,25 @@ export default function Sidebar() {
                                   router.push(target)
                                   setIsOpen(false)
                                 }}
-                                aria-disabled={contextBlocked || undefined}
-                                className={`w-full text-left px-3 py-1.5 rounded-md text-sm transition-all duration-150 relative ${
-                                  navLocked
-                                    ? tierBlocked
-                                      ? "text-slate-500 opacity-90 cursor-pointer hover:bg-slate-50/80"
-                                      : "text-slate-300 cursor-not-allowed opacity-60"
-                                    : active
-                                      ? "bg-slate-100 text-slate-900 font-semibold"
-                                      : "text-slate-600 hover:bg-slate-50"
-                                }`}
+                                aria-disabled={
+                                  contextBlocked && !tierBlocked ? true : undefined
+                                }
+                                className={rowClass}
                               >
-                                <span className="flex items-center justify-between gap-2">
-                                  <span>{item.label}</span>
-                                  {tierBlocked && (
-                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 shrink-0">
-                                      Upgrade
-                                    </span>
-                                  )}
-                                </span>
+                                {iconRes === "cedi" ? (
+                                  <ServiceSidebarCediMark className={iconClass} />
+                                ) : IconComponent ? (
+                                  <IconComponent className={iconClass} aria-hidden="true" />
+                                ) : isServiceMenu ? (
+                                  <span className="w-4 shrink-0" aria-hidden />
+                                ) : null}
+                                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                                {tierBlocked && (
+                                  <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                                    <Lock className="h-3 w-3 opacity-90" aria-hidden="true" />
+                                    Upgrade
+                                  </span>
+                                )}
                               </button>
                             )
                           })}
@@ -777,7 +990,7 @@ export default function Sidebar() {
                   )
                 })
               ) : (
-                <div className="px-3 py-2 text-sm text-slate-400">
+                <div className="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">
                   Loading menu...
                 </div>
               )}
@@ -785,7 +998,7 @@ export default function Sidebar() {
           </nav>
 
           {/* Sidebar Footer */}
-          <div className="p-3 border-t border-slate-200 space-y-1">
+          <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-1">
             <button
               onClick={async () => {
                 clearTabIndustryMode()
@@ -793,9 +1006,9 @@ export default function Sidebar() {
                 await supabase.auth.signOut()
                 router.push("/login")
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-slate-600 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 dark:hover:text-red-400 transition-colors"
             >
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
               Logout

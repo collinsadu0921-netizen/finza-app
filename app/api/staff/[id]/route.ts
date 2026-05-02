@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { hasPermission, requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET(
   request: NextRequest,
@@ -25,6 +26,14 @@ export async function GET(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDenied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDenied) return tierDenied
 
     const canViewPayroll = await hasPermission(
       supabase,
@@ -110,6 +119,14 @@ export async function PUT(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDeniedPut = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedPut) return tierDeniedPut
 
     const { allowed } = await requirePermission(
       supabase,
@@ -201,6 +218,14 @@ export async function DELETE(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDeniedDel = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedDel) return tierDeniedDel
 
     const { allowed } = await requirePermission(
       supabase,

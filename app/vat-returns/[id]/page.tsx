@@ -116,11 +116,11 @@ export default function VatReturnViewPage() {
       if (response.ok) {
         loadReturn()
       } else {
-        toast.showToast(data.error || "Error updating VAT return", "error")
+        toast.showToast(data.error || "Error updating VAT filing", "error")
       }
     } catch (error) {
       console.error("Error updating VAT return:", error)
-      toast.showToast("Error updating VAT return", "error")
+      toast.showToast("Error updating VAT filing", "error")
     } finally {
       setUpdating(false)
     }
@@ -129,7 +129,7 @@ export default function VatReturnViewPage() {
   const handleRecalculate = async () => {
     if (!vatReturn) return
     openConfirm({
-      title: "Recalculate VAT return",
+      title: "Recalculate VAT filing",
       description:
         "This will re-read the tax control accounts (2100–2130) from the immutable ledger for this period and update all totals. Continue?",
       onConfirm: () => runRecalculate(),
@@ -187,14 +187,14 @@ export default function VatReturnViewPage() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.showToast("VAT return recalculated from ledger successfully!", "success")
+        toast.showToast("VAT filing recalculated from ledger successfully!", "success")
         loadReturn()
       } else {
-        toast.showToast(data.error || "Error recalculating VAT return", "error")
+        toast.showToast(data.error || "Error recalculating VAT filing", "error")
       }
     } catch (error) {
       console.error("Error recalculating VAT return:", error)
-      toast.showToast("Error recalculating VAT return", "error")
+      toast.showToast("Error recalculating VAT filing", "error")
     } finally {
       setUpdating(false)
     }
@@ -303,12 +303,12 @@ export default function VatReturnViewPage() {
       <ProtectedLayout>
         <div className="flex items-center justify-center min-h-[60vh]">
           <div className="text-center">
-            <p className="text-gray-500 mb-4">VAT return not found.</p>
+            <p className="text-gray-500 mb-4">VAT filing not found.</p>
             <button
               onClick={() => router.push("/vat-returns")}
               className="text-blue-600 hover:underline text-sm"
             >
-              Back to VAT Returns
+              Back to VAT Filings
             </button>
           </div>
         </div>
@@ -364,13 +364,13 @@ export default function VatReturnViewPage() {
               <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
-              Back to VAT Returns
+              Back to VAT Filings
             </button>
 
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                  VAT Return — {formatPeriod(vatReturn.period_start_date)}
+                  VAT filing — {formatPeriod(vatReturn.period_start_date)}
                 </h1>
                 <div className="flex items-center gap-3 flex-wrap">
                   <StatusBadge status={vatReturn.status} />

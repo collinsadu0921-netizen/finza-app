@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET(
   request: NextRequest,
@@ -25,9 +25,12 @@ export async function GET(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "business",
-    })
+    const denied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
     if (denied) return denied
 
     // Get asset — scoped to the authenticated business
@@ -92,10 +95,13 @@ export async function PUT(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "business",
-    })
-    if (denied) return denied
+    const deniedPut = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (deniedPut) return deniedPut
 
     // Verify asset exists and belongs to this business
     const { data: existingAsset } = await supabase
@@ -226,10 +232,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "business",
-    })
-    if (denied) return denied
+    const deniedDel = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (deniedDel) return deniedDel
 
     // Soft delete — scoped to authenticated business
     const { error: deleteError } = await supabase

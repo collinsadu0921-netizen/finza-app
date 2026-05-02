@@ -103,7 +103,7 @@ export default function VatReturnsPage() {
 
           <div className="flex items-start justify-between mb-6 flex-wrap gap-4">
             <PageHeader
-              title="VAT Returns"
+              title="VAT Filings"
               subtitle="Monthly VAT from the immutable ledger (accounts 2100–2130)"
             />
             <button
@@ -113,7 +113,7 @@ export default function VatReturnsPage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              New Return
+              New filing
             </button>
           </div>
 
@@ -186,14 +186,14 @@ export default function VatReturnsPage() {
                                     onClick={() => router.push(`/vat-returns/${filed.id}`)}
                                     className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
                                   >
-                                    View Return
+                                    View filing
                                   </button>
                                 ) : (
                                   <button
                                     onClick={() => router.push(`/vat-returns/create?start=${monthReturn.month}-01&end=${monthReturn.month}-${new Date(parseInt(monthReturn.month.split("-")[0]), parseInt(monthReturn.month.split("-")[1]), 0).getDate()}`)}
                                     className="text-green-600 hover:text-green-800 font-medium transition-colors"
                                   >
-                                    File Return
+                                    Start filing
                                   </button>
                                 )}
                               </div>
@@ -247,7 +247,7 @@ export default function VatReturnsPage() {
                       }}
                       className="px-3 py-1.5 bg-slate-900 text-white text-xs font-medium rounded-lg hover:bg-black transition-colors"
                     >
-                      File Return for this Month
+                      File VAT for this month
                     </button>
                   )}
                   {filedByMonth[selectedMonth.month] && (
@@ -258,7 +258,7 @@ export default function VatReturnsPage() {
                       }}
                       className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
                     >
-                      View Filed Return
+                      View filed VAT
                     </button>
                   )}
                   <button

@@ -6,15 +6,9 @@ import { buildServiceRoute } from "@/lib/service/routes"
 import { SERVICE_TIER_LABEL } from "@/lib/serviceWorkspace/subscriptionTiers"
 
 /**
- * TrialBanner
+ * TrialBanner — global Service workspace strip during an active free trial.
  *
- * Persistent top-of-page banner shown during an active free trial.
- * Renders nothing when the user is not on a trial or when loading.
- *
- * Examples:
- *   "Essentials trial — 14 days left · Subscribe now"
- *   "Professional trial — 1 day left · Subscribe now"
- *   "Business trial — Last day · Subscribe now"
+ * Copy pattern: "14-day trial active · {tier} · {N days left | Last day}"
  */
 export default function TrialBanner() {
   const { isTrialing, trialDaysLeft, tier, trialEndsAt, entitlementResolved, businessId } =
@@ -24,29 +18,30 @@ export default function TrialBanner() {
 
   const tierLabel = SERVICE_TIER_LABEL[tier]
   const subscribeHref = buildServiceRoute("/service/settings/subscription", businessId ?? undefined)
-  const daysText =
-    trialDaysLeft === null
-      ? ""
-      : trialDaysLeft === 0
-      ? "Last day"
-      : trialDaysLeft === 1
-      ? "1 day left"
-      : `${trialDaysLeft} days left`
 
-  const isUrgent = trialDaysLeft !== null && trialDaysLeft <= 3
+  const daysSegment =
+    trialDaysLeft === null
+      ? null
+      : trialDaysLeft <= 0
+        ? "Last day"
+        : trialDaysLeft === 1
+          ? "1 day left"
+          : `${trialDaysLeft} days left`
+
+  const isUrgent = trialDaysLeft !== null && trialDaysLeft <= 3 && trialDaysLeft > 0
 
   return (
     <div
-      className={`border-b px-4 py-2.5 ${
-        isUrgent
+      className={`relative z-[41] border-b px-4 py-2.5 sm:px-6 ${
+        isUrgent || (trialDaysLeft !== null && trialDaysLeft <= 0)
           ? "border-orange-200 bg-orange-50"
           : "border-blue-100 bg-blue-50"
       }`}
     >
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5">
+      <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <svg
-            className={`h-4 w-4 shrink-0 ${isUrgent ? "text-orange-500" : "text-blue-500"}`}
+            className={`mt-0.5 h-4 w-4 shrink-0 ${isUrgent || trialDaysLeft === 0 ? "text-orange-500" : "text-blue-500"}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -58,22 +53,28 @@ export default function TrialBanner() {
               d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          <div className={`text-sm ${isUrgent ? "text-orange-800" : "text-blue-800"}`}>
-            <p>
-              <span className="font-semibold">Trial active</span>
-              {" · "}
-              <span className="font-medium">14-day trial</span>
+          <div
+            className={`min-w-0 flex-1 text-sm leading-snug ${isUrgent || trialDaysLeft === 0 ? "text-orange-900" : "text-blue-900"}`}
+          >
+            <p className="break-words">
+              <span className="font-semibold">14-day trial active</span>
               {" · "}
               <span className="font-medium">{tierLabel}</span>
-              {daysText && (
+              {daysSegment ? (
                 <>
-                  {" "}—{" "}
-                  <span className={isUrgent ? "font-semibold text-orange-700" : ""}>{daysText}</span>
+                  {" · "}
+                  <span
+                    className={
+                      isUrgent || trialDaysLeft === 0 ? "font-semibold text-orange-800" : "font-medium text-blue-900"
+                    }
+                  >
+                    {daysSegment}
+                  </span>
                 </>
-              )}
+              ) : null}
             </p>
             {trialEndsAt && (
-              <p className={`mt-0.5 text-xs ${isUrgent ? "text-orange-700" : "text-blue-700"}`}>
+              <p className={`mt-0.5 text-xs ${isUrgent || trialDaysLeft === 0 ? "text-orange-800" : "text-blue-800"}`}>
                 Ends{" "}
                 {trialEndsAt.toLocaleDateString("en-GB", {
                   day: "numeric",
@@ -86,11 +87,11 @@ export default function TrialBanner() {
         </div>
         <Link
           href={subscribeHref}
-          className={`shrink-0 rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
-            isUrgent
+          className={`inline-flex shrink-0 items-center justify-center rounded-md px-3 py-1.5 text-xs font-semibold transition-colors sm:self-center ${
+            isUrgent || trialDaysLeft === 0
               ? "bg-orange-600 text-white hover:bg-orange-700"
               : "bg-blue-600 text-white hover:bg-blue-700"
-          }`}
+          } w-full sm:w-auto`}
         >
           Subscribe now
         </Link>

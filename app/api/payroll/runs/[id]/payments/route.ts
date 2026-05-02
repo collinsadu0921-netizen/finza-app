@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 async function getRunPaymentData(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -108,6 +109,14 @@ export async function GET(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
+    const tierDeniedPayGet = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedPayGet) return tierDeniedPayGet
+
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
 
@@ -150,6 +159,14 @@ export async function POST(
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierDeniedPayPost = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedPayPost) return tierDeniedPayPost
 
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_PAY)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })

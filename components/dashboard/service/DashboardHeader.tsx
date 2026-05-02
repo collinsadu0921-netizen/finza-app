@@ -12,6 +12,8 @@ export type DashboardHeaderProps = {
   showEmptyPeriodCta?: boolean
   onSwitchToLastActive?: () => void
   onRefresh?: () => void
+  /** When false, hide the Refresh control (e.g. moved next to workspace title). @default true */
+  showRefreshButton?: boolean
 }
 
 export default function DashboardHeader({
@@ -24,9 +26,10 @@ export default function DashboardHeader({
   showEmptyPeriodCta = false,
   onSwitchToLastActive,
   onRefresh,
+  showRefreshButton = true,
 }: DashboardHeaderProps) {
   return (
-    <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <header className="flex w-full min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -76,7 +79,7 @@ export default function DashboardHeader({
             Switch to last active period
           </button>
         )}
-        {onRefresh && (
+        {onRefresh && showRefreshButton && (
           <button
             type="button"
             onClick={onRefresh}

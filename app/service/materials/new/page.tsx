@@ -1,9 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
 
@@ -11,22 +9,12 @@ export default function ServiceNewMaterialPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [businessId, setBusinessId] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [sku, setSku] = useState("")
   const [unit, setUnit] = useState("")
   const [reorder_level, setReorderLevel] = useState("0")
   const [initial_quantity, setInitialQuantity] = useState("0")
   const [is_active, setIsActive] = useState(true)
-
-  useEffect(() => {
-    ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (business) setBusinessId(business.id)
-    })()
-  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,10 +25,6 @@ export default function ServiceNewMaterialPage() {
     }
     if (!unit.trim()) {
       setError("Unit is required")
-      return
-    }
-    if (!businessId) {
-      setError("Business context not found")
       return
     }
     const reorder = parseFloat(reorder_level)
@@ -55,33 +39,21 @@ export default function ServiceNewMaterialPage() {
     }
     setLoading(true)
     try {
-      const { data: inserted, error: insertErr } = await supabase
-        .from("service_material_inventory")
-        .insert({
-          business_id: businessId,
+      const res = await fetch("/api/service/materials/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: name.trim(),
           sku: sku.trim() || null,
           unit: unit.trim(),
-          quantity_on_hand: initialQty,
-          average_cost: 0,
           reorder_level: reorder,
+          initial_quantity: initialQty,
           is_active,
-        })
-        .select("id")
-        .single()
-
-      if (insertErr) throw insertErr
-      if (!inserted) throw new Error("Failed to create material")
-
-      if (initialQty > 0) {
-        await supabase.from("service_material_movements").insert({
-          business_id: businessId,
-          material_id: inserted.id,
-          movement_type: "adjustment",
-          quantity: initialQty,
-          unit_cost: 0,
-          reference_id: null,
-        })
+        }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : "Failed to create material")
       }
 
       router.push("/service/materials")

@@ -9,6 +9,7 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getLedgerAdjustmentPolicy } from "@/lib/accounting/reconciliation/governance"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function GET(request: NextRequest) {
   try {
@@ -48,6 +49,13 @@ export async function GET(request: NextRequest) {
     if (!authResult.authorized) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 })
     }
+
+    const tierBlockPol = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockPol) return tierBlockPol
 
     const policy = await getLedgerAdjustmentPolicy(supabase, resolvedBusinessId)
     return NextResponse.json({ policy })

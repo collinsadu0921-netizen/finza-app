@@ -15,6 +15,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { getUserRole } from "@/lib/userRoles"
 import { logAudit } from "@/lib/auditLog"
 import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
@@ -116,6 +117,13 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockRes = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockRes) return tierBlockRes
 
     try {
       await assertBusinessNotArchived(supabase, resolvedBusinessId)

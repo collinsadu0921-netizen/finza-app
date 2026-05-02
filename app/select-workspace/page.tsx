@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getAllUserBusinesses, setSelectedBusinessId, clearSelectedBusinessId } from "@/lib/business"
 import { setTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 type WorkspaceBusiness = {
   id: string
@@ -185,7 +186,13 @@ export default function SelectWorkspacePage() {
                     {/* Logo or industry icon */}
                     <div className={`w-12 h-12 rounded-xl ${cfg.bg} ${cfg.border} border flex items-center justify-center shrink-0 ${cfg.color}`}>
                       {biz.logo_url ? (
-                        <img src={biz.logo_url} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                        <BusinessLogoDisplay
+                          logoUrl={biz.logo_url}
+                          businessName={displayName}
+                          variant="workspace"
+                          rounded="lg"
+                          brandingResolved
+                        />
                       ) : (
                         cfg.icon
                       )}

@@ -1,11 +1,16 @@
 "use client"
 
+import TierGate from "@/components/service/TierGate"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
 /**
- * Auth shell for standalone `/payroll/*`.
- * Service payroll uses `app/service/payroll/layout.tsx` (tier gate + `/service/payroll` base path).
+ * Legacy `/payroll/*` shell — mirrors `/service/payroll` plan gate so Essentials
+ * cannot use bookmarked URLs to bypass subscription.
  */
 export default function PayrollLayout({ children }: { children: React.ReactNode }) {
-  return <ProtectedLayout>{children}</ProtectedLayout>
+  return (
+    <ProtectedLayout>
+      <TierGate minTier="professional">{children}</TierGate>
+    </ProtectedLayout>
+  )
 }

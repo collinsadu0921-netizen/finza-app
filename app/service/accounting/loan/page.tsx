@@ -11,6 +11,7 @@ import {
 } from "@/lib/service/accounting/intentTypes"
 import { formatMoney } from "@/lib/money"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import TierGate from "@/components/service/TierGate"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ function JournalPreview({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function FinancingPage() {
+function FinancingPageInner() {
   const router = useRouter()
 
   // ── Business / loading ──────────────────────────────────────────────────────
@@ -695,6 +696,14 @@ export default function FinancingPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function FinancingPage() {
+  return (
+    <TierGate minTier="business">
+      <FinancingPageInner />
+    </TierGate>
   )
 }
 

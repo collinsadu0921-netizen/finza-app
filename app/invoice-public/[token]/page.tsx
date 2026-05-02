@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import { InvoiceDocument } from "@/components/invoices/InvoiceDocument"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { invoiceCustomerStatusLabel } from "@/lib/invoices/invoiceCustomerPaymentDisplay"
 import { formatMoney } from "@/lib/money"
 
@@ -201,13 +202,13 @@ export default function PublicInvoicePage() {
           {/* Client toolbar — minimal */}
           <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5 shadow-sm">
             <div className="flex items-center gap-2 min-w-0">
-              {business?.logo_url ? (
-                <img src={business.logo_url} alt="" className="h-8 w-8 rounded-lg object-cover shrink-0" />
-              ) : (
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ backgroundColor: brand }}>
-                  {bizName.charAt(0).toUpperCase()}
-                </div>
-              )}
+              <BusinessLogoDisplay
+                logoUrl={business?.logo_url}
+                businessName={bizName}
+                variant="toolbar"
+                rounded="lg"
+                brandingResolved
+              />
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Invoice</p>
                 <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>

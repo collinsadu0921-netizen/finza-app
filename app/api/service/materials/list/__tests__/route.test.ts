@@ -24,6 +24,7 @@ describe("GET /api/service/materials/list", () => {
       id: BIZ,
       owner_id: USER,
       name: "Locked Co",
+      industry: "service",
       service_subscription_tier: "professional",
       service_subscription_status: "locked",
       subscription_grace_until: null,
@@ -42,6 +43,14 @@ describe("GET /api/service/materials/list", () => {
         }),
       },
       from: jest.fn((table: string) => {
+        if (table === "accounting_firm_users") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            limit: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+          }
+        }
         if (table === "businesses") {
           return {
             select: jest.fn().mockReturnThis(),

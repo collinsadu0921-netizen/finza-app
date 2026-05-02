@@ -11,6 +11,7 @@ import { requireBusinessRole } from "@/lib/auth/requireBusinessRole"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
 import { ReconciliationContext } from "@/lib/accounting/reconciliation/types"
 import { produceLedgerCorrectionProposal } from "@/lib/accounting/reconciliation/resolution"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 type RouteParams = { scopeType: string; id: string }
 
@@ -33,6 +34,13 @@ export async function GET(
       allowedRoles: ["owner", "admin", "accountant"],
     })
     if (auth instanceof NextResponse) return auth
+
+    const tierBlockScope = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      auth.userId,
+      auth.businessId
+    )
+    if (tierBlockScope) return tierBlockScope
 
     const params = await context.params
     const scopeType = (params.scopeType ?? "").toLowerCase()

@@ -8,3 +8,8 @@ export function buildServiceRoute(path: string, businessId?: string | null): str
   const separator = path.includes("?") ? "&" : "?"
   return `${path}${separator}business_id=${businessId}`
 }
+
+/** Subscription settings with optional business scope (sidebar upgrade CTAs). */
+export function buildServiceSubscriptionSettingsRoute(businessId?: string | null): string {
+  return buildServiceRoute("/service/settings/subscription", businessId ?? undefined)
+}

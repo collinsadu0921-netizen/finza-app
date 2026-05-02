@@ -303,7 +303,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
             className="min-h-screen bg-gray-50 dark:bg-gray-900"
             data-export-mode={isExportMode ? "true" : undefined}
           >
-            <ServiceWorkspaceSubscriptionBanners />
+            <ServiceWorkspaceSubscriptionBanners
+              contentOffsetClassName={hideRetailOwnerChrome || isAccountingRoute ? "" : "lg:pl-64"}
+            />
             {/* Sidebar - hidden in print/export/preview (export-hide) */}
             {!hideRetailOwnerChrome && !isAccountingRoute && (
               <div className="export-hide print-hide">

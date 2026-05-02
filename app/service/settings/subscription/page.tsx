@@ -20,6 +20,7 @@ import {
 import { formatMoney } from "@/lib/money"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { FINZA_SUPPORT_EMAIL } from "@/lib/finzaSupportEmail"
 
 const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
 
@@ -255,13 +256,18 @@ function SubscriptionCallbackHandler() {
 type SubscriptionGatewayOption = "paystack" | "mtn_momo_sandbox"
 type SubscriptionProviderFlagState = { mock_checkout_enabled: boolean }
 
-function tierPrimaryCtaLine(
+/** Paystack subscription MoMo failure — shown inline; backend detail may appear below. */
+const PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY =
+  "Mobile Money payment was not completed. Retry and approve the prompt on your phone."
+
+/** Label for Paystack card checkout only (`channel: "card"`). */
+function tierPrimaryCardCtaLine(
   currentTier: ServiceSubscriptionTier,
   targetTier: ServiceSubscriptionTier
 ): string {
   const label = SERVICE_TIER_LABEL[targetTier]
   const upgradeTier = SERVICE_TIER_RANK[targetTier] > SERVICE_TIER_RANK[currentTier]
-  return upgradeTier ? `Upgrade to ${label}` : `Start ${label} plan`
+  return upgradeTier ? `Upgrade to ${label} with card` : `Start ${label} with card`
 }
 
 function SubscriptionPaystackActions({
@@ -285,6 +291,9 @@ function SubscriptionPaystackActions({
   const [momoProvider, setMomoProvider] = useState<"mtn" | "vodafone" | "airteltigo">("mtn")
   const [gateways, setGateways] = useState<{ paystack: boolean; mtn_momo_sandbox: boolean } | null>(null)
   const [gateway, setGateway] = useState<SubscriptionGatewayOption>("paystack")
+  const [momoError, setMomoError] = useState<string | null>(null)
+  const [momoDetail, setMomoDetail] = useState<string | null>(null)
+  const [momoAttempted, setMomoAttempted] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -368,6 +377,10 @@ function SubscriptionPaystackActions({
       toast.showToast("MTN sandbox checkout supports MTN MoMo only. Switch gateway to Paystack for other networks.", "error")
       return
     }
+    if (gateway === "paystack") {
+      setMomoError(null)
+      setMomoDetail(null)
+    }
     setBusy(true)
     try {
       const res = await fetch("/api/payments/subscription/initiate", {
@@ -384,14 +397,41 @@ function SubscriptionPaystackActions({
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Could not start MoMo charge")
+      if (!res.ok) {
+        const backendDetail =
+          (typeof data.gateway_response === "string" && data.gateway_response.trim()) ||
+          (typeof data.error === "string" && data.error.trim()) ||
+          ""
+        if (gateway === "paystack") {
+          setMomoAttempted(true)
+          setMomoError(PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY)
+          setMomoDetail(
+            backendDetail && backendDetail !== PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY
+              ? backendDetail
+              : null
+          )
+          return
+        }
+        throw new Error(backendDetail || "Could not start MoMo charge")
+      }
 
       let reference = data.reference as string
+
+      let effectiveStatus =
+        typeof data.status === "string" ? data.status.toLowerCase() : ""
+      const displayText =
+        typeof data.display_text === "string" && data.display_text.trim()
+          ? data.display_text.trim()
+          : ""
+      let gatewayResponse =
+        typeof data.gateway_response === "string" && data.gateway_response.trim()
+          ? data.gateway_response.trim()
+          : ""
 
       if (gateway === "paystack" && data.otp_required) {
         const otp =
           typeof window !== "undefined"
-            ? window.prompt("Enter the OTP sent to your phone (Vodafone Cash)")
+            ? window.prompt("Enter the OTP sent to your Mobile Money phone")
             : null
         if (!otp?.trim()) {
           toast.showToast("OTP is required to complete payment", "error")
@@ -404,12 +444,26 @@ function SubscriptionPaystackActions({
         })
         const otpJson = await otpRes.json()
         if (!otpRes.ok || !otpJson.success) {
-          throw new Error(otpJson.error || "OTP verification failed")
+          const otpErr =
+            (typeof otpJson.error === "string" && otpJson.error.trim()) || "OTP verification failed"
+          if (gateway === "paystack") {
+            setMomoAttempted(true)
+            setMomoError(PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY)
+            setMomoDetail(otpErr !== PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY ? otpErr : null)
+            return
+          }
+          throw new Error(otpErr)
         }
         reference = otpJson.reference || reference
+        if (typeof otpJson.status === "string") {
+          effectiveStatus = otpJson.status.toLowerCase()
+        }
       }
 
       if (gateway === "mtn_momo_sandbox") {
+        setMomoError(null)
+        setMomoDetail(null)
+        setMomoAttempted(false)
         toast.showToast(
           "Approve the payment on your phone. We will confirm with MTN and update your plan when payment succeeds.",
           "success"
@@ -451,13 +505,61 @@ function SubscriptionPaystackActions({
         return
       }
 
-      toast.showToast(
-        "Approve the payment on your phone. When it succeeds, your plan updates and a new billing period starts from that time.",
-        "success"
-      )
-      setShowMomo(false)
+      if (gateway === "paystack") {
+        if (effectiveStatus === "failed" || effectiveStatus === "error") {
+          setMomoAttempted(true)
+          setMomoError(PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY)
+          setMomoDetail(
+            gatewayResponse && gatewayResponse !== PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY
+              ? gatewayResponse
+              : null
+          )
+          return
+        }
+
+        if (effectiveStatus === "success") {
+          setMomoError(null)
+          setMomoDetail(null)
+          setMomoAttempted(false)
+          toast.showToast(
+            displayText ||
+              "Payment completed. Your plan will update when we confirm the transaction.",
+            "success"
+          )
+          setShowMomo(false)
+          router.refresh()
+          return
+        }
+
+        if (effectiveStatus === "pay_offline" || effectiveStatus === "pending") {
+          setMomoError(null)
+          setMomoDetail(null)
+          setMomoAttempted(false)
+          const base = "Mobile Money charge started. Approve the payment on your phone."
+          toast.showToast(displayText ? `${base} ${displayText}` : base, "success")
+          setShowMomo(false)
+          return
+        }
+
+        setMomoError(null)
+        setMomoDetail(null)
+        setMomoAttempted(false)
+        toast.showToast(
+          displayText ||
+            "Approve the payment on your phone. When it succeeds, your plan updates and a new billing period starts from that time.",
+          "success"
+        )
+        setShowMomo(false)
+      }
     } catch (e: unknown) {
-      toast.showToast(e instanceof Error ? e.message : "MoMo payment failed", "error")
+      const msg = e instanceof Error ? e.message : "MoMo payment failed"
+      if (gateway === "paystack") {
+        setMomoAttempted(true)
+        setMomoError(PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY)
+        setMomoDetail(msg !== PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY ? msg : null)
+      } else {
+        toast.showToast(msg, "error")
+      }
     } finally {
       setBusy(false)
     }
@@ -468,7 +570,9 @@ function SubscriptionPaystackActions({
   const optionsReady = gateways !== null
   const noGatewayConfigured =
     optionsReady && gateways && !gateways.paystack && !gateways.mtn_momo_sandbox
-  const primaryLine = tierPrimaryCtaLine(currentTier, targetTier)
+  const primaryCardLine = tierPrimaryCardCtaLine(currentTier, targetTier)
+  /** Card CTA + separate MoMo CTA (Paystack path). */
+  const showDualPaymentChoice = Boolean(gateways?.paystack && gateway === "paystack")
 
   if (noGatewayConfigured) {
     return (
@@ -480,10 +584,10 @@ function SubscriptionPaystackActions({
           keys. You can still reach us below.
         </p>
         <a
-          href={`mailto:hello@finza.app?subject=${encodeURIComponent(`Upgrade — ${SERVICE_TIER_LABEL[targetTier]}`)}`}
+          href={`mailto:${FINZA_SUPPORT_EMAIL}?subject=${encodeURIComponent(`Upgrade — ${SERVICE_TIER_LABEL[targetTier]}`)}`}
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700"
         >
-          Email hello@finza.app
+          Email {FINZA_SUPPORT_EMAIL}
         </a>
       </div>
     )
@@ -523,6 +627,11 @@ function SubscriptionPaystackActions({
           </div>
         </div>
       )}
+      {showDualPaymentChoice && (
+        <p className="text-[11px] font-medium leading-snug text-slate-700">
+          Choose how you want to pay.
+        </p>
+      )}
       {gateways?.paystack && gateway === "paystack" && (
       <button
         type="button"
@@ -530,14 +639,19 @@ function SubscriptionPaystackActions({
         onClick={() => void startCard()}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 py-2 text-center text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {primaryLine}
+        {primaryCardLine}
       </button>
       )}
       {!showMomo ? (
         <button
           type="button"
           disabled={disabled || busy || !businessId || !optionsReady}
-          onClick={() => setShowMomo(true)}
+          onClick={() => {
+            setShowMomo(true)
+            setMomoError(null)
+            setMomoDetail(null)
+            setMomoAttempted(false)
+          }}
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white py-2 text-center text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Pay with Mobile Money
@@ -548,16 +662,24 @@ function SubscriptionPaystackActions({
           <input
             type="tel"
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => {
+              setPhone(e.target.value)
+              setMomoError(null)
+              setMomoDetail(null)
+              setMomoAttempted(false)
+            }}
             placeholder="e.g. 0241234567"
             className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
           />
           <label className="block text-xs font-medium text-slate-600">Network</label>
           <NativeSelect
             value={momoProvider}
-            onChange={(e) =>
+            onChange={(e) => {
               setMomoProvider(e.target.value as "mtn" | "vodafone" | "airteltigo")
-            }
+              setMomoError(null)
+              setMomoDetail(null)
+              setMomoAttempted(false)
+            }}
             size="sm"
             disabled={gateway === "mtn_momo_sandbox"}
           >
@@ -568,6 +690,17 @@ function SubscriptionPaystackActions({
           {gateway === "mtn_momo_sandbox" && (
             <p className="text-[11px] text-slate-500">Sandbox gateway: MTN wallets only.</p>
           )}
+          {gateway === "paystack" && momoError && (
+            <div
+              role="alert"
+              className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950"
+            >
+              <p className="font-medium leading-snug">{momoError}</p>
+              {momoDetail ? (
+                <p className="mt-1 text-[11px] leading-relaxed text-amber-900/85">{momoDetail}</p>
+              ) : null}
+            </div>
+          )}
           <div className="flex gap-2 pt-1">
             <button
               type="button"
@@ -575,12 +708,21 @@ function SubscriptionPaystackActions({
               onClick={() => void startMomo()}
               className="flex-1 rounded-lg bg-slate-800 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
             >
-              {busy ? "…" : "Charge MoMo"}
+              {busy
+                ? "…"
+                : gateway === "paystack" && momoAttempted
+                  ? "Retry Mobile Money"
+                  : "Charge MoMo"}
             </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() => setShowMomo(false)}
+              onClick={() => {
+                setShowMomo(false)
+                setMomoError(null)
+                setMomoDetail(null)
+                setMomoAttempted(false)
+              }}
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
             >
               Cancel
@@ -588,8 +730,13 @@ function SubscriptionPaystackActions({
           </div>
         </div>
       )}
+      {showDualPaymentChoice && (
+        <p className="text-[11px] leading-relaxed text-slate-500">
+          Card payments use secure Paystack checkout. Mobile Money is processed separately.
+        </p>
+      )}
       <a
-        href={`mailto:hello@finza.app?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[targetTier])}%20—%20help`}
+        href={`mailto:${FINZA_SUPPORT_EMAIL}?subject=Upgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[targetTier])}%20—%20help`}
         className="block text-center text-[11px] text-slate-400 underline hover:text-slate-600"
       >
         Need help or invoice billing? Email us
@@ -1156,7 +1303,7 @@ function SubscriptionPageInner() {
                 {isDowngrade && (
                   <div className="mt-4 space-y-1.5">
                     <a
-                      href={`mailto:hello@finza.app?subject=Downgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
+                      href={`mailto:${FINZA_SUPPORT_EMAIL}?subject=Downgrade%20to%20${encodeURIComponent(SERVICE_TIER_LABEL[t])}%20request`}
                       className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
                     >
                       Email to request {SERVICE_TIER_LABEL[t]}
@@ -1175,8 +1322,8 @@ function SubscriptionPageInner() {
 
         <p className="mt-6 text-center text-xs text-slate-400">
           Questions about billing or plan changes?{" "}
-          <a href="mailto:hello@finza.app" className="underline hover:text-slate-600">
-            hello@finza.app
+          <a href={`mailto:${FINZA_SUPPORT_EMAIL}`} className="underline hover:text-slate-600">
+            {FINZA_SUPPORT_EMAIL}
           </a>
         </p>
       </div>

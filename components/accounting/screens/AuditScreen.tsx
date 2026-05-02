@@ -137,7 +137,7 @@ export default function AuditScreen({ mode, businessId }: ScreenProps) {
               ← Accounting
             </Link>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mt-2">
-              Audit timeline
+              {mode === "service" ? "Accounting Audit Log" : "Audit timeline"}
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mt-1">
               Read-only operational activity history. Newest first.

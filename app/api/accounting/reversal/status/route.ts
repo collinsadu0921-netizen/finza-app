@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/reversal/status
@@ -58,6 +59,13 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockRevSt = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockRevSt) return tierBlockRevSt
 
     const statuses: Record<string, { can_reverse: boolean; reason?: string; reversal_je_id?: string }> = {}
 

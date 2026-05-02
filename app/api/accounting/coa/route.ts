@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/coa?business_id=...
@@ -61,6 +62,9 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockCoa = await enforceServiceIndustryBusinessTierForAccountingApi(supabase, user.id, businessId)
+    if (tierBlockCoa) return tierBlockCoa
 
     // Get all accounts for business (read-only, no mutations)
     const { data: accounts, error } = await supabase

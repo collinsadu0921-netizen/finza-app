@@ -10,6 +10,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 500
@@ -47,6 +48,14 @@ export async function GET(request: NextRequest) {
       )
     }
     const businessId = resolved.businessId
+
+    const tierDenied = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      businessId,
+      "professional"
+    )
+    if (tierDenied) return tierDenied
 
     const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!authResult.authorized) {

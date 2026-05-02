@@ -22,6 +22,7 @@ import {
   proposalHashFromResultAndProposal,
 } from "@/lib/accounting/reconciliation/governance"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { produceLedgerCorrectionProposal } from "@/lib/accounting/reconciliation/resolution"
 import { runWithConcurrencyLimit } from "@/lib/accounting/concurrencyLimit"
@@ -75,6 +76,13 @@ export async function GET(request: NextRequest) {
     if (!auth.authorized) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 })
     }
+
+    const tierBlockMm = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockMm) return tierBlockMm
 
     const writeAuth = await checkAccountingAuthority(
       supabase,

@@ -7,7 +7,7 @@ import { hasPermission, type CustomPermissions } from "@/lib/permissions"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { logAudit } from "@/lib/auditLog"
 import { findAuthUserIdByEmail, isLikelyDuplicateAuthUserError } from "@/lib/authAdminLookup"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 const VALID_ROLES = ["admin", "manager", "accountant", "staff"]
 
@@ -50,12 +50,12 @@ export async function GET(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const subDenied = await enforceServiceWorkspaceAccess({
+    const subDenied = await enforceServiceIndustryMinTier(
       supabase,
-      userId: user.id,
-      businessId: business.id,
-      minTier: "starter",
-    })
+      user.id,
+      business.id,
+      "professional"
+    )
     if (subDenied) return subDenied
 
     // Check caller has team.manage permission (respects custom_permissions overrides)
@@ -90,12 +90,12 @@ export async function POST(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const subDenied = await enforceServiceWorkspaceAccess({
+    const subDenied = await enforceServiceIndustryMinTier(
       supabase,
-      userId: user.id,
-      businessId: business.id,
-      minTier: "starter",
-    })
+      user.id,
+      business.id,
+      "professional"
+    )
     if (subDenied) return subDenied
 
     // Inviting requires team.manage permission

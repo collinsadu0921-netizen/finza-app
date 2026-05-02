@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import LoadingScreen from "@/components/ui/LoadingScreen"
 import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
@@ -43,34 +41,33 @@ export default function ServiceMaterialAdjustPage() {
   const load = async () => {
     try {
       setError("")
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      const res = await fetch(`/api/service/materials/inventory/${id}`)
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (res.status === 404) {
+          setNotFound(true)
+          setLoading(false)
+          return
+        }
+        setError(typeof payload?.error === "string" ? payload.error : "Failed to load material")
         setLoading(false)
         return
       }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setLoading(false)
-        return
-      }
-      setBusinessId(business.id)
-      const { data, error: qErr } = await supabase
-        .from("service_material_inventory")
-        .select("id, business_id, name, unit, quantity_on_hand, average_cost")
-        .eq("id", id)
-        .eq("business_id", business.id)
-        .maybeSingle()
-      if (qErr) {
-        setError(qErr.message || "Failed to load material")
-        setLoading(false)
-        return
-      }
+      const data = payload.material as Material | undefined
       if (!data) {
         setNotFound(true)
         setLoading(false)
         return
       }
-      setMaterial(data as Material)
+      setBusinessId(data.business_id)
+      setMaterial({
+        id: data.id,
+        business_id: data.business_id,
+        name: data.name,
+        unit: data.unit,
+        quantity_on_hand: Number(data.quantity_on_hand ?? 0),
+        average_cost: Number(data.average_cost ?? 0),
+      })
       setLoading(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load")
@@ -90,41 +87,24 @@ export default function ServiceMaterialAdjustPage() {
     }
 
     const qty = Number(material.quantity_on_hand ?? 0)
-    let new_quantity: number
-
-    if (direction === "increase") {
-      new_quantity = qty + amount
-    } else {
-      if (qty < amount) {
-        setError(`Insufficient stock. On hand: ${qty}. Cannot decrease by ${amount}.`)
-        return
-      }
-      new_quantity = qty - amount
+    if (direction === "decrease" && qty < amount) {
+      setError(`Insufficient stock. On hand: ${qty}. Cannot decrease by ${amount}.`)
+      return
     }
 
     setSaving(true)
     try {
-      const { error: uErr } = await supabase
-        .from("service_material_inventory")
-        .update({ quantity_on_hand: new_quantity })
-        .eq("id", material.id)
-        .eq("business_id", businessId)
-      if (uErr) {
-        setError(uErr.message || "Failed to update stock")
-        setSaving(false)
-        return
-      }
-
-      const movementQuantity = direction === "increase" ? amount : -amount
-      const { error: mErr } = await supabase.from("service_material_movements").insert({
-        business_id: businessId,
-        material_id: material.id,
-        movement_type: "adjustment",
-        quantity: movementQuantity,
-        unit_cost: Number(material.average_cost ?? 0),
+      const res = await fetch(`/api/service/materials/inventory/${material.id}/adjust`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          direction,
+          amount,
+        }),
       })
-      if (mErr) {
-        setError(mErr.message || "Stock updated but movement log failed")
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof payload?.error === "string" ? payload.error : "Failed to adjust stock")
         setSaving(false)
         return
       }

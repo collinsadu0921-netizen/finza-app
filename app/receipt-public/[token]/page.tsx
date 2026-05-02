@@ -319,9 +319,9 @@ export default function PublicReceiptPage() {
                 <BusinessLogoDisplay
                   logoUrl={business?.logo_url}
                   businessName={businessName}
-                  size="sm"
+                  variant="compact"
                   rounded="lg"
-                  surface="document"
+                  brandingResolved
                 />
                 <div className="min-w-0 pt-0.5">
                   <p className="text-[8px] font-bold uppercase tracking-wider text-emerald-800 leading-none print:text-[9px] print:tracking-wide">

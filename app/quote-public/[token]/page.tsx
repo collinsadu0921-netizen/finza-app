@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
 import { taxLinesFromEstimateRow } from "@/lib/documents/estimateTaxLinesForDocument"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 // Lazy-load signature pad (canvas — SSR-incompatible)
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
@@ -94,8 +95,6 @@ export default function QuotePublicPage() {
   const [quoteTerms, setQuoteTerms] = useState<string | null>(null)
   const [paymentTermsClient, setPaymentTermsClient] = useState<string | null>(null)
   const [footerMessageClient, setFooterMessageClient] = useState<string | null>(null)
-  const [logoFailed, setLogoFailed] = useState(false)
-
   // Accept modal
   const [showAccept, setShowAccept] = useState(false)
   const [sigEmpty, setSigEmpty] = useState(true)
@@ -155,11 +154,6 @@ export default function QuotePublicPage() {
     const issuer = business.trading_name ?? business.legal_name ?? "Business"
     document.title = `Quote ${estimate.estimate_number} — ${issuer}`
   }, [estimate, business])
-
-  const logoSrc = business?.logo_url?.trim() || null
-  useEffect(() => {
-    setLogoFailed(false)
-  }, [logoSrc])
 
   const sym = estimate?.currency_symbol ?? "₵"
   const quoteTokenEnc = token ? encodeURIComponent(token) : ""
@@ -270,21 +264,13 @@ export default function QuotePublicPage() {
       <div className="no-print sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur px-4 py-2.5">
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            {logoSrc && !logoFailed ? (
-              <img
-                src={logoSrc}
-                alt=""
-                className="h-8 w-auto rounded-md shrink-0 object-contain"
-                onError={() => setLogoFailed(true)}
-              />
-            ) : (
-              <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
-                style={{ backgroundColor: brand }}
-              >
-                {bizName.charAt(0).toUpperCase()}
-              </div>
-            )}
+            <BusinessLogoDisplay
+              logoUrl={business?.logo_url}
+              businessName={bizName}
+              variant="toolbar"
+              rounded="lg"
+              brandingResolved
+            />
             <div className="min-w-0">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Quote</p>
               <p className="text-sm font-semibold text-slate-800 truncate">{bizName}</p>
@@ -378,20 +364,16 @@ export default function QuotePublicPage() {
               <div className="flex items-start justify-between gap-6">
                 {/* Business identity */}
                 <div className="flex-1 min-w-0">
-                  {logoSrc && !logoFailed ? (
-                    <div className="mb-4 inline-flex max-w-[220px] rounded-xl bg-white p-2 shadow-sm">
-                      <img
-                        src={logoSrc}
-                        alt=""
-                        className="h-11 w-auto max-h-11 object-contain object-left"
-                        onError={() => setLogoFailed(true)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center text-white text-xl font-bold mb-4">
-                      {bizName.charAt(0).toUpperCase()}
-                    </div>
-                  )}
+                  <div className="mb-4">
+                    <BusinessLogoDisplay
+                      logoUrl={business?.logo_url}
+                      businessName={bizName}
+                      variant="hero"
+                      rounded="lg"
+                      brandingResolved
+                      className="max-w-[220px]"
+                    />
+                  </div>
                   <h1 className="text-lg font-bold text-white leading-tight">{bizName}</h1>
                   {bizAddress && <p className="text-white/60 text-xs mt-1">{bizAddress}</p>}
                   {business?.phone && <p className="text-white/60 text-xs mt-0.5">{business.phone}</p>}

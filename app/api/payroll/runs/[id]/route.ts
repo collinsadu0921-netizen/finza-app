@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET(
   request: NextRequest,
@@ -27,6 +28,14 @@ export async function GET(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDeniedGet = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedGet) return tierDeniedGet
 
     const { allowed: canView } = await requirePermission(
       supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW
@@ -148,6 +157,14 @@ export async function PUT(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierDeniedPut = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedPut) return tierDeniedPut
 
     const body = await request.json()
     const { status, notes } = body

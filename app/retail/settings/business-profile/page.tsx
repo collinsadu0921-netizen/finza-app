@@ -1,10 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { dispatchBusinessBrandingUpdated } from "@/lib/business/businessBrandingEvents"
+import { tryBusinessAssetsLogoStoragePath } from "@/lib/business/businessLogoStorage"
 import { retailPaths } from "@/lib/retail/routes"
 import { normalizeRetailReturnUrl } from "@/lib/retail/normalizeRetailReturnUrl"
 import { getUserRole } from "@/lib/userRoles"
@@ -48,6 +51,9 @@ export default function RetailBusinessProfilePage() {
   })
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [selectedLogoFileName, setSelectedLogoFileName] = useState<string | null>(null)
+  const [logoActionLoading, setLogoActionLoading] = useState(false)
+  const logoFileInputRef = useRef<HTMLInputElement>(null)
   const [canEditProfile, setCanEditProfile] = useState(false)
 
   useEffect(() => {
@@ -106,7 +112,8 @@ export default function RetailBusinessProfilePage() {
         start_date: businessData.start_date ? new Date(businessData.start_date).toISOString().split("T")[0] : "",
       })
 
-      if (businessData.logo_url) setLogoPreview(businessData.logo_url)
+      setLogoPreview(businessData.logo_url?.trim() ? businessData.logo_url : null)
+      setSelectedLogoFileName(null)
       setBusinessIndustry(businessData.industry || "")
       setLoading(false)
     } catch (err: any) {
@@ -126,16 +133,23 @@ export default function RetailBusinessProfilePage() {
       return
     }
 
+    const restoreLogoPreview = formData.logo_url?.trim() ? formData.logo_url : null
+
     const allowedTypes = ["image/png", "image/jpeg", "image/webp"]
     if (!allowedTypes.includes(file.type) || file.size > 2 * 1024 * 1024) {
       const message = "Logo must be PNG, JPG, or WebP under 2MB"
       toast.showToast(message, "error")
       setError(message)
+      e.target.value = ""
+      setSelectedLogoFileName(null)
       return
     }
 
+    setSelectedLogoFileName(file.name)
     const previewUrl = URL.createObjectURL(file)
     setLogoPreview(previewUrl)
+    setLogoActionLoading(true)
+    setError("")
 
     try {
       const fileExt = file.name.split(".").pop()?.toLowerCase() || "png"
@@ -147,7 +161,9 @@ export default function RetailBusinessProfilePage() {
 
       if (uploadError || !uploadData) throw new Error("Logo upload failed")
 
-      const { data: { publicUrl } } = supabase.storage.from("business-assets").getPublicUrl(filePath)
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("business-assets").getPublicUrl(filePath)
 
       const profileRes = await fetch("/api/business/profile", {
         method: "PUT",
@@ -160,20 +176,85 @@ export default function RetailBusinessProfilePage() {
         throw new Error((profileJson as { error?: string }).error || "Failed to save logo on profile")
       }
 
+      URL.revokeObjectURL(previewUrl)
       setFormData((prev) => ({ ...prev, logo_url: publicUrl }))
+      setLogoPreview(publicUrl)
+      setSelectedLogoFileName(null)
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ""
+      dispatchBusinessBrandingUpdated({ businessId, logo_url: publicUrl })
       setSuccess("Logo uploaded successfully!")
       toast.showToast("Logo uploaded successfully!", "success")
     } catch {
+      URL.revokeObjectURL(previewUrl)
+      setLogoPreview(restoreLogoPreview)
+      setSelectedLogoFileName(null)
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ""
       setError("Logo upload failed. Please try again.")
       toast.showToast("Logo upload failed. Please try again.", "error")
     } finally {
-      try {
-        URL.revokeObjectURL(previewUrl)
-      } catch {
-        // noop
-      }
+      setLogoActionLoading(false)
     }
   }
+
+  const handleRemoveLogo = async () => {
+    if (!businessId || logoActionLoading || !canEditProfile) return
+
+    const hadStoredUrl = Boolean(formData.logo_url?.trim())
+    const prevPublicUrl = formData.logo_url.trim()
+
+    if (!hadStoredUrl && logoPreview?.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(logoPreview)
+      } catch {
+        /* noop */
+      }
+      setLogoPreview(null)
+      setSelectedLogoFileName(null)
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ""
+      return
+    }
+
+    setLogoActionLoading(true)
+    setError("")
+    try {
+      const profileRes = await fetch("/api/business/profile", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business_id: businessId, logo_url: null }),
+      })
+      const profileJson = await profileRes.json().catch(() => ({}))
+      if (!profileRes.ok) {
+        throw new Error((profileJson as { error?: string }).error || "Failed to remove logo")
+      }
+
+      const storagePath = tryBusinessAssetsLogoStoragePath(prevPublicUrl, businessId)
+      if (storagePath) {
+        const { error: rmErr } = await supabase.storage.from("business-assets").remove([storagePath])
+        if (rmErr) console.warn("[retail business-profile] logo storage remove:", rmErr.message)
+      }
+
+      setFormData((prev) => ({ ...prev, logo_url: "" }))
+      setLogoPreview(null)
+      setSelectedLogoFileName(null)
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ""
+      dispatchBusinessBrandingUpdated({ businessId, logo_url: null })
+      setSuccess("Logo removed.")
+      toast.showToast("Logo removed", "success")
+    } catch (err: any) {
+      const message = err?.message || "Failed to remove logo"
+      setError(message)
+      toast.showToast(message, "error")
+    } finally {
+      setLogoActionLoading(false)
+    }
+  }
+
+  const showRemoveLogo =
+    canEditProfile &&
+    (Boolean(formData.logo_url?.trim()) ||
+      Boolean(logoPreview?.startsWith("blob:")) ||
+      Boolean(logoPreview && /^https?:\/\//i.test(logoPreview)))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -263,13 +344,50 @@ export default function RetailBusinessProfilePage() {
           <div className={RS.formSectionCard}>
             <h2 className={`${RS.sectionTitle} mb-1`}>Logo</h2>
             <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">PNG, JPG, or WebP, up to 2 MB.</p>
-            {logoPreview ? (
-              <img src={logoPreview} alt="Business logo preview" className="mb-4 h-24 w-24 rounded border border-gray-200 object-contain dark:border-gray-600" />
-            ) : null}
-            <label className={retailLabelClass} htmlFor="business-logo">
-              Upload file
-            </label>
-            <input id="business-logo" type="file" accept="image/*" onChange={handleLogoUpload} className={retailFieldClass} />
+            <div className="mb-4 inline-flex max-w-full rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-600">
+              <BusinessLogoDisplay
+                logoUrl={logoPreview}
+                businessName={formData.trading_name || formData.legal_name}
+                variant="document"
+                size="xl"
+                rounded="lg"
+                brandingResolved={!loading}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                ref={logoFileInputRef}
+                id="business-logo"
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={logoActionLoading}
+                onChange={handleLogoUpload}
+              />
+              <label
+                htmlFor="business-logo"
+                className={`inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 ${logoActionLoading ? "pointer-events-none opacity-60" : "cursor-pointer"}`}
+              >
+                {logoActionLoading ? "Uploading…" : "Choose image"}
+              </label>
+              {selectedLogoFileName ? (
+                <span className="text-sm text-gray-600 dark:text-gray-400 truncate max-w-[12rem] sm:max-w-xs" title={selectedLogoFileName}>
+                  Selected: {selectedLogoFileName}
+                </span>
+              ) : formData.logo_url?.trim() && !logoPreview?.startsWith("blob:") ? (
+                <span className="text-sm text-gray-600 dark:text-gray-400">Current logo saved</span>
+              ) : null}
+              {showRemoveLogo ? (
+                <button
+                  type="button"
+                  onClick={handleRemoveLogo}
+                  disabled={logoActionLoading}
+                  className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  Remove logo
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className={`${RS.formSectionCard} grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-x-5 md:gap-y-4`}>

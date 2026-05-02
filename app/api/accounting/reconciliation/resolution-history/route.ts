@@ -9,6 +9,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,6 +51,13 @@ export async function GET(request: NextRequest) {
     if (!authResult.authorized) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 })
     }
+
+    const tierBlockRh = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockRh) return tierBlockRh
 
     // Fetch resolution (posted adjustment)
     const { data: resolution, error: resolutionError } = await supabase

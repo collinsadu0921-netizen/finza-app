@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import {
   normalizeBankImportRow,
   sanitizeImportFilename,
@@ -30,6 +31,13 @@ export async function POST(
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierBlockImp = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      business.id
+    )
+    if (tierBlockImp) return tierBlockImp
 
     const { data: account } = await supabase
       .from("accounts")

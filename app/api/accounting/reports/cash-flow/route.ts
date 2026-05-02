@@ -6,6 +6,7 @@ import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getCashFlowReport } from "@/lib/accounting/reports/getCashFlowReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/reports/cash-flow
@@ -47,6 +48,14 @@ export async function GET(request: NextRequest) {
       )
     }
     const businessId = resolved.businessId
+
+    const tierDenied = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      businessId,
+      "professional"
+    )
+    if (tierDenied) return tierDenied
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {

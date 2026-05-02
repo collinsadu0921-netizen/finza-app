@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveServiceBusinessContext } from "@/lib/serviceBusinessContext"
 import TrialBalanceScreen from "@/components/accounting/screens/TrialBalanceScreen"
+import TierGate from "@/components/service/TierGate"
 
 type Props = {
   searchParams: Promise<{ business_id?: string }>
@@ -13,5 +14,9 @@ export default async function ServiceTrialBalancePage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   const ctx = user ? await resolveServiceBusinessContext(supabase, user.id) : { error: "NO_CONTEXT" as const }
   const businessId = businessIdFromUrl ?? ("businessId" in ctx ? ctx.businessId : null)
-  return <TrialBalanceScreen mode="service" businessId={businessId} />
+  return (
+    <TierGate minTier="business">
+      <TrialBalanceScreen mode="service" businessId={businessId} />
+    </TierGate>
+  )
 }

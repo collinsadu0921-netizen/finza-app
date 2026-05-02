@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import LoadingScreen from "@/components/ui/LoadingScreen"
 import PageHeader from "@/components/ui/PageHeader"
@@ -125,11 +124,7 @@ export default function AssetsPage() {
   const categories = ["vehicle", "equipment", "furniture", "electronics", "tools", "other"]
 
   if (loading) {
-    return (
-      <ProtectedLayout>
-        <LoadingScreen />
-      </ProtectedLayout>
-    )
+    return <LoadingScreen />
   }
 
   const totalCost = filteredAssets.reduce((sum, a) => sum + Number(a.purchase_amount), 0)
@@ -140,11 +135,10 @@ export default function AssetsPage() {
   const totalNetValue = filteredAssets.reduce((sum, a) => sum + Number(a.current_value || 0), 0)
 
   return (
-    <ProtectedLayout>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <PageHeader
-            title="Assets"
+            title="Fixed Assets"
             subtitle="Manage fixed assets and depreciation"
             actions={
               <Button
@@ -155,7 +149,7 @@ export default function AssetsPage() {
                   </svg>
                 }
               >
-                Add Asset
+                Add fixed asset
               </Button>
             }
           />
@@ -240,9 +234,9 @@ export default function AssetsPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
               }
-              title="No assets found"
-              description="Start tracking your fixed assets by adding your first asset."
-              actionLabel="Add Asset"
+              title="No fixed assets found"
+              description="Start tracking your fixed assets by adding your first one."
+              actionLabel="Add fixed asset"
               onAction={() => router.push("/assets/create")}
             />
           ) : (
@@ -330,7 +324,6 @@ export default function AssetsPage() {
           )}
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
 

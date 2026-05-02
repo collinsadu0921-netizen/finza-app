@@ -5,6 +5,7 @@ import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { ensureAccountingInitialized } from "@/lib/accounting/bootstrap"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * POST /api/accounting/initialize
@@ -62,6 +63,13 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockInit = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockInit) return tierBlockInit
 
     if (!canUserInitializeAccounting(auth.authority_source)) {
       return NextResponse.json(

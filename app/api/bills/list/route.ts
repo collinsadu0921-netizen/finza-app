@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 const BILL_ID_IN_CHUNK = 150
 
@@ -57,6 +58,15 @@ export async function GET(request: NextRequest) {
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const tierDenied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      scope.businessId,
+      "professional"
+    )
+    if (tierDenied) return tierDenied
+
     const business = { id: scope.businessId }
     const supplierName = searchParams.get("supplier_name")
     const status = searchParams.get("status")

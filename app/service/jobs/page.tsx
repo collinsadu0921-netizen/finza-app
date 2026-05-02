@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
@@ -62,40 +60,31 @@ export default function ServiceJobsPage() {
   const load = async () => {
     try {
       setError("")
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) { setLoading(false); return }
+      const res = await fetch("/api/service/jobs/workspace")
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof json?.error === "string" ? json.error : "Failed to load jobs")
+        setLoading(false)
+        return
+      }
 
-      const [{ data: jobs, error: jobErr }, { data: usages }] = await Promise.all([
-        supabase
-          .from("service_jobs")
-          .select("id, customer_id, title, status, start_date, end_date, created_at, customers(name)")
-          .eq("business_id", business.id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("service_job_material_usage")
-          .select("job_id, total_cost")
-          .eq("business_id", business.id),
-      ])
+      const jobs = (json.jobs ?? []) as Record<string, unknown>[]
+      const usages = (json.usageRows ?? []) as { job_id: string; total_cost: number }[]
 
-      if (jobErr) { setError(jobErr.message || "Failed to load projects"); setLoading(false); return }
-
-      // Aggregate material cost + count per job
       const costMap: Record<string, { cost: number; count: number }> = {}
-      for (const u of (usages ?? []) as { job_id: string; total_cost: number }[]) {
+      for (const u of usages) {
         if (!costMap[u.job_id]) costMap[u.job_id] = { cost: 0, count: 0 }
         costMap[u.job_id].cost += Number(u.total_cost ?? 0)
         costMap[u.job_id].count += 1
       }
 
       setRows(
-        ((jobs ?? []) as any[]).map((j) => ({
+        jobs.map((j) => ({
           ...j,
-          customers: Array.isArray(j.customers) ? (j.customers[0] ?? null) : (j.customers ?? null),
-          materialCost: costMap[j.id]?.cost ?? 0,
-          materialCount: costMap[j.id]?.count ?? 0,
-        }))
+          customers: Array.isArray(j.customers) ? (j.customers[0] ?? null) : ((j.customers ?? null) as { name: string } | null),
+          materialCost: costMap[String(j.id)]?.cost ?? 0,
+          materialCount: costMap[String(j.id)]?.count ?? 0,
+        })) as JobRow[]
       )
       setLoading(false)
     } catch (err: unknown) {
@@ -144,7 +133,7 @@ export default function ServiceJobsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Jobs & Projects</h1>
             <p className="text-sm text-slate-500 mt-0.5">Track service jobs, materials, and linked proformas</p>
           </div>
           <button
@@ -154,7 +143,7 @@ export default function ServiceJobsPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            New Project
+            New job
           </button>
         </div>
 
@@ -241,19 +230,19 @@ export default function ServiceJobsPage() {
               </svg>
             </div>
             <p className="text-slate-700 font-semibold mb-1">
-              {filtersActive ? "No projects match your filters" : "No projects yet"}
+              {filtersActive ? "No jobs match your filters" : "No jobs yet"}
             </p>
             <p className="text-slate-500 text-sm mb-4">
               {filtersActive
                 ? "Try adjusting your search or status filter."
-                : "Create your first project to start tracking service jobs."}
+                : "Create your first job to start tracking service work."}
             </p>
             {!filtersActive && (
               <button
                 onClick={() => router.push("/service/jobs/new")}
                 className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
               >
-                New Project
+                New job
               </button>
             )}
           </div>
@@ -264,7 +253,7 @@ export default function ServiceJobsPage() {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Project</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Job</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Start</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">End</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Materials</th>

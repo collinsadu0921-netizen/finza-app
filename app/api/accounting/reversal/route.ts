@@ -4,6 +4,7 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { logAudit } from "@/lib/auditLog"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 const MIN_REASON_LENGTH = 10
 
@@ -107,6 +108,13 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockRev = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockRev) return tierBlockRev
 
     const { data: existingReversal } = await supabase
       .from("journal_entries")

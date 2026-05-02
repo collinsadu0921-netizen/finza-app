@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function POST(
   request: NextRequest,
@@ -19,6 +20,13 @@ export async function POST(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierBlockUm = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      business.id
+    )
+    if (tierBlockUm) return tierBlockUm
 
     const body = await request.json()
     const { bank_transaction_id } = body

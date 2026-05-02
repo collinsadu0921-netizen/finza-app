@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
@@ -47,55 +45,14 @@ export default function ServiceMaterialsPage() {
   const load = async () => {
     try {
       setError("")
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) { setLoading(false); return }
-
-      const { data, error: qErr } = await supabase
-        .from("service_material_inventory")
-        .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active")
-        .eq("business_id", business.id)
-        .order("name", { ascending: true })
-
-      if (qErr) {
-        setError(qErr.message || "Failed to load materials")
+      const res = await fetch("/api/service/materials/workspace")
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data?.error === "string" ? data.error : "Failed to load materials")
         setLoading(false)
         return
       }
-
-      const materials = (data ?? []) as Omit<MaterialRow, "last_movement_at" | "last_movement_type" | "last_movement_reference_id">[]
-
-      // Fetch last movement per material
-      const lastByMaterial: Record<string, { created_at: string; movement_type: string; reference_id: string | null }> = {}
-      if (materials.length > 0) {
-        const { data: movements } = await supabase
-          .from("service_material_movements")
-          .select("material_id, created_at, movement_type, reference_id")
-          .eq("business_id", business.id)
-          .in("material_id", materials.map((m) => m.id))
-          .order("created_at", { ascending: false })
-
-        if (movements) {
-          for (const m of movements as { material_id: string; created_at: string; movement_type: string; reference_id: string | null }[]) {
-            if (!lastByMaterial[m.material_id]) {
-              lastByMaterial[m.material_id] = { created_at: m.created_at, movement_type: m.movement_type, reference_id: m.reference_id ?? null }
-            }
-          }
-        }
-      }
-
-      setRows(
-        materials.map((m) => {
-          const last = lastByMaterial[m.id]
-          return {
-            ...m,
-            last_movement_at: last?.created_at ?? null,
-            last_movement_type: last?.movement_type ?? null,
-            last_movement_reference_id: last?.reference_id ?? null,
-          }
-        })
-      )
+      setRows((data.rows ?? []) as MaterialRow[])
       setLoading(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load")

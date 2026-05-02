@@ -11,6 +11,7 @@ import {
   PROPOSAL_PRICING_SECTION_INTRO,
 } from "@/lib/proposals/pricingSectionCopy"
 import { formatMoney } from "@/lib/money"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 function CustomPricingBlocks({ notes }: { notes: string }) {
   const chunks = useMemo(() => chunkCustomPricingForDisplay(parseCustomPricingNotes(notes)), [notes])
@@ -338,15 +339,15 @@ export function ProposalDocumentView({
         {unifiedDocument ? (
           <>
             <div className="flex min-w-0 flex-col gap-1.5 sm:min-w-[8.5rem]">
-              {model.business.logo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={model.business.logo_url}
-                  alt=""
-                  className="h-[6.5rem] w-auto max-w-[min(320px,100%)] object-contain sm:h-[7.5rem] sm:max-w-full"
-                />
-              ) : null}
-              <div className={model.business.logo_url ? "" : "sm:pt-0.5"}>
+              <BusinessLogoDisplay
+                logoUrl={model.business.logo_url}
+                businessName={bizLabel}
+                variant="hero"
+                rounded="lg"
+                brandingResolved
+                className="sm:max-w-full"
+              />
+              <div className="sm:pt-0.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared by</p>
                 <p className="mt-1 text-lg font-semibold leading-snug tracking-tight text-slate-900 sm:text-xl lg:whitespace-nowrap">
                   {bizLabel}
@@ -374,14 +375,14 @@ export function ProposalDocumentView({
         ) : (
           <>
             <div className="flex items-start gap-3.5">
-              {model.business.logo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={model.business.logo_url}
-                  alt=""
-                  className="h-[4.25rem] w-auto max-w-[240px] object-contain"
-                />
-              ) : null}
+              <BusinessLogoDisplay
+                logoUrl={model.business.logo_url}
+                businessName={bizLabel}
+                variant="hero"
+                rounded="lg"
+                brandingResolved
+                className="max-w-[240px] shrink-0"
+              />
               <div>
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">{model.title || "Proposal"}</h1>
                 <p className="mt-1.5 text-sm font-semibold text-slate-800">{bizLabel}</p>

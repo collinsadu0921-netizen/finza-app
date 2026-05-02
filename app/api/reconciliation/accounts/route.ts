@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,6 +10,13 @@ export async function GET(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierBlockRecAccGet = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      business.id
+    )
+    if (tierBlockRecAccGet) return tierBlockRecAccGet
 
     const { searchParams } = new URL(request.url)
     const typesParam = searchParams.get("types") ?? "asset"
@@ -48,6 +56,13 @@ export async function PUT(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+
+    const tierBlockRecAccPut = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      business.id
+    )
+    if (tierBlockRecAccPut) return tierBlockRecAccPut
 
     const body = await request.json()
     const { account_id, is_reconcilable } = body

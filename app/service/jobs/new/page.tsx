@@ -1,9 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabaseClient"
 import { useRouter } from "next/navigation"
-import { getCurrentBusiness } from "@/lib/business"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 
 type Customer = { id: string; name: string }
@@ -28,34 +26,11 @@ export default function ServiceJobsNewPage() {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user || cancelled) return
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business || cancelled) return
-
-      const { data: customerData } = await supabase
-        .from("customers")
-        .select("id, name")
-        .eq("business_id", business.id)
-        .order("name")
-      if (!cancelled && customerData) setCustomers(customerData as Customer[])
-
-      const { data: proformaData } = await supabase
-        .from("proforma_invoices")
-        .select("id, proforma_number, customers(name)")
-        .eq("business_id", business.id)
-        .in("status", ["sent", "accepted"])
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-      if (!cancelled && proformaData) {
-        setProformas(
-          (proformaData as any[]).map((p) => ({
-            id: p.id,
-            proforma_number: p.proforma_number,
-            customer_name: Array.isArray(p.customers) ? (p.customers[0]?.name ?? null) : (p.customers?.name ?? null),
-          }))
-        )
-      }
+      const res = await fetch("/api/service/jobs/form-options")
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || cancelled) return
+      if (json.customers) setCustomers(json.customers as Customer[])
+      if (json.proformas) setProformas(json.proformas as ProformaOption[])
     }
     load()
     return () => { cancelled = true }
@@ -66,7 +41,7 @@ export default function ServiceJobsNewPage() {
     setError("")
 
     // Validation
-    if (!title.trim()) { setError("Project title is required"); return }
+    if (!title.trim()) { setError("Job title is required"); return }
     if (startDate && endDate && endDate < startDate) {
       setError("End date cannot be before the start date")
       return
@@ -74,15 +49,10 @@ export default function ServiceJobsNewPage() {
 
     setLoading(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("Not authenticated")
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) throw new Error("Business not found")
-
-      const { data: job, error: err } = await supabase
-        .from("service_jobs")
-        .insert({
-          business_id: business.id,
+      const res = await fetch("/api/service/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           title: title.trim(),
           description: description.trim() || null,
           customer_id: customerId || null,
@@ -90,13 +60,15 @@ export default function ServiceJobsNewPage() {
           start_date: startDate || null,
           end_date: endDate || null,
           proforma_invoice_id: proformaInvoiceId || null,
-        })
-        .select("id")
-        .single()
-      if (err) throw err
-      if (job) router.push(`/service/jobs/${job.id}`)
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : "Failed to create job")
+      }
+      if (data?.id) router.push(`/service/jobs/${data.id}`)
     } catch (e: any) {
-      setError(e.message || "Failed to create project")
+      setError(e.message || "Failed to create job")
     } finally {
       setLoading(false)
     }
@@ -115,9 +87,9 @@ export default function ServiceJobsNewPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Projects
+            Back to Jobs & Projects
           </button>
-          <h1 className="text-2xl font-bold text-slate-900">New Project</h1>
+          <h1 className="text-2xl font-bold text-slate-900">New job</h1>
           <p className="text-sm text-slate-500 mt-0.5">Create a new service engagement</p>
         </div>
 
@@ -130,7 +102,7 @@ export default function ServiceJobsNewPage() {
           {/* Title */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Project Title <span className="text-red-500">*</span>
+              Job title <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -231,7 +203,7 @@ export default function ServiceJobsNewPage() {
               disabled={loading}
               className="px-5 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
             >
-              {loading ? "Creating…" : "Create Project"}
+              {loading ? "Creating…" : "Create job"}
             </button>
             <button
               type="button"

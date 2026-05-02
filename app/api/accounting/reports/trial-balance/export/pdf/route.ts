@@ -6,6 +6,7 @@ import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/reports/trial-balance/export/pdf
@@ -65,6 +66,13 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockTbPdf = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockTbPdf) return tierBlockTbPdf
 
     if (!canUserInitializeAccounting(auth.authority_source)) {
       const { ready } = await checkAccountingReadiness(supabase, resolvedBusinessId)

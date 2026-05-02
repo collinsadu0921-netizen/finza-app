@@ -18,8 +18,93 @@ export type PaystackInitiateMomoResult =
       status: string
       otp_required: boolean
       display_text: string | null
+      gateway_response: string | null
     }
   | { success: false; error: string; httpStatus: number }
+
+const PAYSTACK_SUBSCRIPTION_MOMO_OK_STATUSES = new Set(["send_otp", "pay_offline", "pending", "success"])
+const PAYSTACK_SUBSCRIPTION_MOMO_FAILED_STATUSES = new Set(["failed", "error"])
+
+/** Paystack often sets message to this even when data.status is failed — avoid showing it as the user-facing error. */
+const PAYSTACK_CHARGE_ATTEMPTED_MESSAGE = "Charge attempted"
+
+const SUBSCRIPTION_MOMO_FAILED_FALLBACK =
+  "Mobile Money charge failed. Please check the number and try again."
+
+function subscriptionMomoFailedChargeUserMessage(
+  gatewayResponse: string | null,
+  topMessage: string | null
+): string {
+  if (gatewayResponse) return gatewayResponse
+  if (!topMessage || topMessage === PAYSTACK_CHARGE_ATTEMPTED_MESSAGE) {
+    return SUBSCRIPTION_MOMO_FAILED_FALLBACK
+  }
+  return topMessage
+}
+
+function subscriptionMomoSafeString(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+
+/**
+ * Interprets Paystack `/charge` JSON for subscription Mobile Money.
+ * Exported for unit tests. Do not log secrets or phone numbers here.
+ */
+export function interpretPaystackSubscriptionMomoChargeResponse(
+  psData: Record<string, unknown>,
+  paystackHttpOk: boolean,
+  ctxReference: string
+): PaystackInitiateMomoResult {
+  const dataObj = asRecord(psData.data)
+
+  const rawStatus = dataObj ? subscriptionMomoSafeString(dataObj.status) : null
+  const chargeNorm = rawStatus ? rawStatus.toLowerCase() : ""
+
+  const gatewayResponse = dataObj ? subscriptionMomoSafeString(dataObj.gateway_response) : null
+  const displayText = dataObj ? subscriptionMomoSafeString(dataObj.display_text) : null
+  const topMessage = subscriptionMomoSafeString(psData.message)
+
+  const topStatusOk = psData.status === true
+
+  if (chargeNorm && PAYSTACK_SUBSCRIPTION_MOMO_FAILED_STATUSES.has(chargeNorm)) {
+    return {
+      success: false,
+      error: subscriptionMomoFailedChargeUserMessage(gatewayResponse, topMessage),
+      httpStatus: 402,
+    }
+  }
+
+  if (chargeNorm && PAYSTACK_SUBSCRIPTION_MOMO_OK_STATUSES.has(chargeNorm)) {
+    return {
+      success: true,
+      channel: "momo",
+      reference: ctxReference,
+      status: rawStatus!,
+      otp_required: chargeNorm === "send_otp",
+      display_text: displayText,
+      gateway_response: gatewayResponse,
+    }
+  }
+
+  // No usable data.status — rely on HTTP / top-level API flag
+  if (!paystackHttpOk || !topStatusOk) {
+    return {
+      success: false,
+      error: gatewayResponse || topMessage || "Paystack charge failed",
+      httpStatus: 502,
+    }
+  }
+
+  return {
+    success: false,
+    error: gatewayResponse || topMessage || "Paystack charge failed",
+    httpStatus: 502,
+  }
+}
 
 export type PaystackInitiateCardResult =
   | {
@@ -60,25 +145,15 @@ export async function paystackInitiateSubscriptionMomo(
     }),
   })
 
-  const psData = await paystackRes.json()
-  if (!paystackRes.ok || !psData.status) {
-    return { success: false, error: psData.message || "Paystack charge failed", httpStatus: 502 }
+  let psData: Record<string, unknown>
+  try {
+    const raw: unknown = await paystackRes.json()
+    psData = asRecord(raw) ?? {}
+  } catch {
+    return { success: false, error: "Paystack charge failed", httpStatus: 502 }
   }
 
-  const chargeStatus: string = psData.data?.status ?? "pending"
-  const failed = chargeStatus === "failed" || chargeStatus === "error"
-  if (failed) {
-    return { success: false, error: psData.data?.gateway_response || "Charge was declined", httpStatus: 402 }
-  }
-
-  return {
-    success: true,
-    channel: "momo",
-    reference: ctx.reference,
-    status: chargeStatus,
-    otp_required: chargeStatus === "send_otp",
-    display_text: psData.data?.display_text ?? null,
-  }
+  return interpretPaystackSubscriptionMomoChargeResponse(psData, paystackRes.ok, ctx.reference)
 }
 
 export async function paystackInitiateSubscriptionCard(

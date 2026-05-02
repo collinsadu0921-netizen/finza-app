@@ -8,6 +8,7 @@ import {
   ManualInvoicePaymentDetails,
   type InvoiceManualPaymentDetailsProps,
 } from "@/components/invoices/ManualInvoicePaymentDetails"
+import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 
 type Business = {
   id: string
@@ -281,9 +282,16 @@ export default function InvoiceViewPage() {
             <div className="flex items-start justify-between">
               {/* Business */}
               <div>
-                {business?.logo_url && (
-                  <img src={business.logo_url} alt={business.name} className="h-12 object-contain mb-3" />
-                )}
+                <div className="mb-3">
+                  <BusinessLogoDisplay
+                    logoUrl={business?.logo_url}
+                    businessName={business?.name}
+                    variant="document"
+                    size="lg"
+                    rounded="lg"
+                    brandingResolved
+                  />
+                </div>
                 <h2 className="text-xl font-bold text-gray-900">{business?.name || "—"}</h2>
                 {business?.address && <p className="text-sm text-gray-500 mt-0.5">{business.address}</p>}
                 {business?.phone   && <p className="text-sm text-gray-500">{business.phone}</p>}

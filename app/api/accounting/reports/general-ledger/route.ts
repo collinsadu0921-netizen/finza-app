@@ -4,6 +4,7 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/reports/general-ledger
@@ -74,6 +75,13 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlock = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlock) return tierBlock
 
     const { data: account, error: accountError } = await supabase
       .from("accounts")

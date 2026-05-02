@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import { supabase } from "@/lib/supabaseClient"
 import MetricCard from "./MetricCard"
@@ -61,6 +61,8 @@ const SERVICE_ANALYTICS_V2 = process.env.NEXT_PUBLIC_SERVICE_ANALYTICS_V2 === "t
 
 export type ServiceDashboardCockpitProps = {
   business: Business
+  /** Workspace identity (logo + title); date + Refresh align to the right when set. */
+  headerLead?: ReactNode
 }
 
 /** Returns "Mar '26" for same-month periods, "Jan '26 – Mar '26" for ranges. */
@@ -169,7 +171,7 @@ async function fetchOverdueInvoiceCount(businessId: string): Promise<number | nu
   }
 }
 
-export default function ServiceDashboardCockpit({ business }: ServiceDashboardCockpitProps) {
+export default function ServiceDashboardCockpit({ business, headerLead }: ServiceDashboardCockpitProps) {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
@@ -313,13 +315,53 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
     ? `As of ${formatShortIsoDate(metrics.positionAsOfDate!)} · `
     : ""
 
+  const workspaceTopBar =
+    headerLead != null ? (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+        <div className="min-w-0 flex-1">{headerLead}</div>
+        <div className="flex shrink-0 flex-col items-end gap-2 sm:pt-0.5">
+          <p className="max-w-[16rem] text-right text-xs text-slate-400 dark:text-slate-500">
+            {new Date().toLocaleDateString("en-GB", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })}
+          </p>
+          <button
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
+            title="Refresh dashboard"
+            className="flex items-center gap-1.5 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+    ) : null
+
   if (loading && !metrics) {
-    return <ServiceDashboardSkeleton />
+    return (
+      <div className="space-y-6">
+        {workspaceTopBar}
+        <ServiceDashboardSkeleton />
+      </div>
+    )
   }
 
   if (metrics === null && !loading) {
     return (
       <div className="space-y-6">
+        {workspaceTopBar}
         <DashboardErrorBanner
           message={metricsError ?? "Could not load dashboard metrics. Please try again."}
           onRetry={load}
@@ -330,6 +372,8 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
 
   return (
     <div className="space-y-6">
+      {workspaceTopBar}
+
       <DashboardHeader
         periodLabel={periodLabel}
         currencyCode={currencyCode}
@@ -340,6 +384,7 @@ export default function ServiceDashboardCockpit({ business }: ServiceDashboardCo
         showEmptyPeriodCta={showEmptyPeriodCta}
         onSwitchToLastActive={handleSwitchToLastActive}
         onRefresh={load}
+        showRefreshButton={headerLead == null}
       />
 
       <QuickActionsBar actions={QUICK_ACTIONS} businessId={business.id} />

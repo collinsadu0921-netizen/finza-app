@@ -13,6 +13,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export interface AuditReadinessFailure {
   code: string
@@ -75,6 +76,13 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockAr = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      resolvedBusinessId
+    )
+    if (tierBlockAr) return tierBlockAr
 
     // Call run_period_close_checks RPC
     const { data: checks, error: checksError } = await supabase.rpc(

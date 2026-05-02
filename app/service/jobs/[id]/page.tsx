@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { NativeSelect } from "@/components/ui/NativeSelect"
@@ -116,57 +114,32 @@ export default function ServiceJobDetailPage() {
     try {
       setLoading(true)
       setError("")
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) { setError("Business not found"); setLoading(false); return }
-      setBusinessId(business.id)
+      const res = await fetch(`/api/service/jobs/${jobId}/workspace`)
+      const bundle = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof bundle?.error === "string" ? bundle.error : "Failed to load job")
+        setLoading(false)
+        return
+      }
 
-      const [jobRes, proformaRes, usageRes, matRes, custRes] = await Promise.all([
-        supabase
-          .from("service_jobs")
-          .select("id, business_id, customer_id, title, description, status, start_date, end_date, invoice_id, proforma_invoice_id, materials_reversed, created_at, customers(name, email, phone)")
-          .eq("id", jobId)
-          .eq("business_id", business.id)
-          .single(),
-        supabase
-          .from("proforma_invoices")
-          .select("id, proforma_number, customers(name)")
-          .eq("business_id", business.id)
-          .in("status", ["sent", "accepted"])
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("service_job_material_usage")
-          .select("id, material_id, quantity_used, unit_cost, total_cost, status, created_at, service_material_inventory(name, unit)")
-          .eq("job_id", jobId)
-          .eq("business_id", business.id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("service_material_inventory")
-          .select("id, name, unit, quantity_on_hand, average_cost")
-          .eq("business_id", business.id)
-          .eq("is_active", true)
-          .order("name"),
-        supabase
-          .from("customers")
-          .select("id, name")
-          .eq("business_id", business.id)
-          .order("name"),
-      ])
+      const jobRow = bundle.job as Record<string, unknown> | undefined
+      if (!jobRow) {
+        setError("Job not found")
+        setLoading(false)
+        return
+      }
 
-      if (jobRes.error || !jobRes.data) { setError("Project not found"); setLoading(false); return }
+      setBusinessId(String(jobRow.business_id ?? ""))
 
       const normalised = {
-        ...jobRes.data,
-        customers: Array.isArray((jobRes.data as any).customers)
-          ? ((jobRes.data as any).customers[0] ?? null)
-          : ((jobRes.data as any).customers ?? null),
+        ...jobRow,
+        customers: Array.isArray(jobRow.customers)
+          ? ((jobRow.customers as unknown[])[0] ?? null)
+          : ((jobRow.customers ?? null) as Job["customers"]),
       } as Job
       setJob(normalised)
       setSelectedProformaId(normalised.proforma_invoice_id ?? "")
 
-      // Prime edit fields
       setEditTitle(normalised.title ?? "")
       setEditDescription(normalised.description ?? "")
       setEditCustomerId(normalised.customer_id ?? "")
@@ -175,39 +148,39 @@ export default function ServiceJobDetailPage() {
       setEditStatus(normalised.status)
 
       setProformas(
-        ((proformaRes.data ?? []) as any[]).map((p) => ({
-          id: p.id,
-          proforma_number: p.proforma_number,
-          customer_name: Array.isArray(p.customers) ? (p.customers[0]?.name ?? null) : (p.customers?.name ?? null),
+        ((bundle.proformas ?? []) as Record<string, unknown>[]).map((p) => ({
+          id: String(p.id),
+          proforma_number: (p.proforma_number as string | null) ?? null,
+          customer_name: Array.isArray(p.customers)
+            ? (((p.customers as { name?: string }[])[0]?.name ?? null) as string | null)
+            : ((p.customers as { name?: string } | null)?.name ?? null),
         }))
       )
 
-      if (!usageRes.error) {
-        setUsages(
-          ((usageRes.data ?? []) as any[]).map((u) => ({
-            ...u,
-            quantity_used: Number(u.quantity_used),
-            unit_cost: Number(u.unit_cost),
-            total_cost: Number(u.total_cost),
-            status: u.status ?? "allocated",
-            service_material_inventory: Array.isArray(u.service_material_inventory)
-              ? (u.service_material_inventory[0] ?? null)
-              : (u.service_material_inventory ?? null),
-          }))
-        )
-      }
+      setUsages(
+        ((bundle.usages ?? []) as Record<string, unknown>[]).map((u) => ({
+          ...u,
+          quantity_used: Number(u.quantity_used),
+          unit_cost: Number(u.unit_cost),
+          total_cost: Number(u.total_cost),
+          status: (u.status as string) ?? "allocated",
+          service_material_inventory: Array.isArray(u.service_material_inventory)
+            ? (u.service_material_inventory[0] ?? null)
+            : ((u.service_material_inventory ?? null) as Usage["service_material_inventory"]),
+        })) as Usage[]
+      )
 
       setMaterials(
-        ((matRes.data ?? []) as any[]).map((m) => ({
+        ((bundle.materials ?? []) as Record<string, unknown>[]).map((m) => ({
           ...m,
           quantity_on_hand: Number(m.quantity_on_hand ?? 0),
           average_cost: Number(m.average_cost ?? 0),
-        }))
+        })) as Material[]
       )
 
-      setCustomers((custRes.data ?? []) as Customer[])
-    } catch (e: any) {
-      setError(e.message || "Failed to load project")
+      setCustomers((bundle.customers ?? []) as Customer[])
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load job")
     } finally {
       setLoading(false)
     }
@@ -226,23 +199,26 @@ export default function ServiceJobDetailPage() {
 
     setSavingEdit(true)
     try {
-      const { error: err } = await supabase
-        .from("service_jobs")
-        .update({
+      const res = await fetch(`/api/service/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           title: editTitle.trim(),
           description: editDescription.trim() || null,
           customer_id: editCustomerId || null,
           status: editStatus,
           start_date: editStartDate || null,
           end_date: editEndDate || null,
-        })
-        .eq("id", jobId)
-        .eq("business_id", businessId)
-      if (err) throw err
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : "Failed to save changes")
+      }
       setEditing(false)
       load()
-    } catch (e: any) {
-      setEditError(e.message || "Failed to save changes")
+    } catch (e: unknown) {
+      setEditError(e instanceof Error ? e.message : "Failed to save changes")
     } finally {
       setSavingEdit(false)
     }
@@ -340,25 +316,28 @@ export default function ServiceJobDetailPage() {
     setLinkingProforma(true)
     setError("")
     try {
-      const { error: err } = await supabase
-        .from("service_jobs")
-        .update({ proforma_invoice_id: newId })
-        .eq("id", jobId)
-        .eq("business_id", businessId)
-      if (err) throw err
+      const res = await fetch(`/api/service/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proforma_invoice_id: newId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : "Failed to update proforma link")
+      }
       setJob((j) => j ? { ...j, proforma_invoice_id: newId } : j)
       setSelectedProformaId(newId ?? "")
-    } catch (e: any) {
-      setError(e.message || "Failed to update proforma link")
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update proforma link")
     } finally {
       setLinkingProforma(false)
     }
   }
 
-  // --- Cancel project ---
+  // --- Cancel job ---
   const handleCancelJob = () => {
     openConfirm({
-      title: "Cancel Project",
+      title: "Cancel job",
       description: "Cancelling will restore all material stock and reverse any COGS entries. This cannot be undone.",
       onConfirm: async () => {
         setCancelling(true)
@@ -367,10 +346,10 @@ export default function ServiceJobDetailPage() {
           const q = businessId ? `?business_id=${encodeURIComponent(businessId)}` : ""
           const res = await fetch(`/api/service/jobs/${jobId}/cancel${q}`, { method: "POST" })
           const data = await res.json()
-          if (!res.ok) throw new Error(data.error || "Failed to cancel project")
+          if (!res.ok) throw new Error(data.error || "Failed to cancel job")
           load()
         } catch (err: unknown) {
-          setError(err instanceof Error ? err.message : "Failed to cancel project")
+          setError(err instanceof Error ? err.message : "Failed to cancel job")
         } finally {
           setCancelling(false)
         }
@@ -383,7 +362,7 @@ export default function ServiceJobDetailPage() {
     if (!job) return
     const params = new URLSearchParams()
     if (job.customer_id) params.set("customer_id", job.customer_id)
-    if (job.title) params.set("notes", `Project: ${job.title}`)
+    if (job.title) params.set("notes", `Job: ${job.title}`)
     params.set("from_job", jobId)
     router.push(`/service/invoices/new?${params.toString()}`)
   }
@@ -404,10 +383,10 @@ export default function ServiceJobDetailPage() {
       <div className="min-h-screen bg-slate-50 flex items-start justify-center p-8">
         <div className="w-full max-w-md space-y-4">
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
-            {error || "Project not found."}
+            {error || "Job not found."}
           </div>
           <button onClick={() => router.push("/service/jobs")} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors">
-            Back to Projects
+            Back to Jobs & Projects
           </button>
         </div>
       </div>
@@ -448,7 +427,7 @@ export default function ServiceJobDetailPage() {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to Projects
+          Back to Jobs & Projects
         </button>
 
         {/* Header card */}
@@ -457,7 +436,7 @@ export default function ServiceJobDetailPage() {
             <div>
               <div className="flex items-center gap-3 mb-1">
                 <h1 className="text-xl font-bold text-slate-900">
-                  {job.title ?? <span className="text-slate-400 italic font-normal">Untitled Project</span>}
+                  {job.title ?? <span className="text-slate-400 italic font-normal">Untitled job</span>}
                 </h1>
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700">
                   <span className={`w-2 h-2 rounded-full ${STATUS_DOT[job.status] ?? "bg-slate-400"}`} />
@@ -497,7 +476,7 @@ export default function ServiceJobDetailPage() {
                   disabled={cancelling}
                   className="px-3 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50"
                 >
-                  {cancelling ? "Cancelling…" : "Cancel Project"}
+                  {cancelling ? "Cancelling…" : "Cancel job"}
                 </button>
               )}
               {materialsAlreadyReversed && (
@@ -517,7 +496,7 @@ export default function ServiceJobDetailPage() {
         {editing && (
           <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-6 space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">Edit Project</h2>
+              <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wide">Edit job</h2>
               <button onClick={() => setEditing(false)} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
             </div>
 
@@ -737,7 +716,7 @@ export default function ServiceJobDetailPage() {
                     <p className="text-xs text-amber-600 mt-1">⚠ No stock available. Adjust via Materials → Adjust Stock.</p>
                   )}
                   {isDuplicateMaterial && (
-                    <p className="text-xs text-amber-600 mt-1">⚠ This material is already allocated to this project. Adding again will create a second line.</p>
+                    <p className="text-xs text-amber-600 mt-1">⚠ This material is already allocated to this job. Adding again will create a second line.</p>
                   )}
                 </div>
                 <div>

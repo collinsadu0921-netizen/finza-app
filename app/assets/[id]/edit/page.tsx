@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
 
@@ -117,17 +116,14 @@ export default function EditAssetPage() {
 
   if (loading) {
     return (
-      <ProtectedLayout>
-        <div className="p-6">
-          <p>Loading...</p>
-        </div>
-      </ProtectedLayout>
+      <div className="p-6">
+        <p>Loading...</p>
+      </div>
     )
   }
 
   return (
-    <ProtectedLayout>
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="mb-6">
             <button
@@ -136,7 +132,7 @@ export default function EditAssetPage() {
             >
               ← Back to Asset
             </button>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Edit Asset</h1>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Edit fixed asset</h1>
           </div>
 
           <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
@@ -320,7 +316,6 @@ export default function EditAssetPage() {
           </form>
         </div>
       </div>
-    </ProtectedLayout>
   )
 }
 

@@ -9,6 +9,10 @@ import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 
+function isPayrollStaffIndustry(mode: string | null): boolean {
+  return mode === "service" || mode === "professional"
+}
+
 // Service business staff (payroll employees)
 type StaffMember = {
   id: string
@@ -118,22 +122,20 @@ export default function ServiceStaffSettingsPage() {
       const tabIndustry = getTabIndustryMode() || business.industry
       setBusinessIndustry(tabIndustry)
 
-      if (tabIndustry === "service") {
-        // For service businesses, use the staff table (payroll staff)
-        const { data: staffData, error: staffError } = await supabase
-          .from("staff")
-          .select("*")
-          .eq("business_id", business.id)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false })
-
-        if (staffError) {
-          setError(`Error loading staff: ${staffError.message}`)
+      if (isPayrollStaffIndustry(tabIndustry)) {
+        const res = await fetch("/api/staff/list")
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setError(
+            typeof payload?.error === "string"
+              ? payload.error
+              : `Error loading staff (${res.status})`
+          )
           setLoading(false)
           return
         }
 
-        setStaff(staffData || [])
+        setStaff((payload.staff as StaffMember[]) || [])
       } else {
         // For retail businesses, use business_users (system users)
         const { data: businessUsersData, error: usersError } = await supabase
@@ -221,10 +223,10 @@ export default function ServiceStaffSettingsPage() {
 
     try {
       setError("")
-      const { error: insertError } = await supabase
-        .from("staff")
-        .insert({
-          business_id: businessId,
+      const res = await fetch("/api/staff/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: formData.name.trim(),
           position: formData.position.trim() || null,
           phone: formData.phone.trim() || null,
@@ -237,12 +239,16 @@ export default function ServiceStaffSettingsPage() {
           ssnit_number: formData.ssnit_number.trim() || null,
           tin_number: formData.tin_number.trim() || null,
           start_date: formData.start_date,
-          status: "active",
-        })
-
-      if (insertError) {
-        console.error("Error adding staff:", insertError)
-        setError(`Error adding staff: ${insertError.message}`)
+        }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.error("Error adding staff:", payload)
+        setError(
+          typeof payload?.error === "string"
+            ? payload.error
+            : `Error adding staff (${res.status})`
+        )
         return
       }
 
@@ -279,14 +285,14 @@ export default function ServiceStaffSettingsPage() {
 
   const runDeleteStaff = async (staffId: string, staffName: string) => {
     try {
-      const { error } = await supabase
-        .from("staff")
-        .update({ deleted_at: new Date().toISOString(), status: "terminated" })
-        .eq("id", staffId)
-        .eq("business_id", businessId)
-
-      if (error) {
-        setError(`Error removing staff: ${error.message}`)
+      const res = await fetch(`/api/staff/${staffId}`, { method: "DELETE" })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(
+          typeof payload?.error === "string"
+            ? payload.error
+            : `Error removing staff (${res.status})`
+        )
         return
       }
 
@@ -515,8 +521,8 @@ export default function ServiceStaffSettingsPage() {
     )
   }
 
-  // Service Business: Show payroll staff
-  if (businessIndustry === "service") {
+  // Service / professional industry: payroll staff (tab mode — not retail POS staff)
+  if (isPayrollStaffIndustry(businessIndustry)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

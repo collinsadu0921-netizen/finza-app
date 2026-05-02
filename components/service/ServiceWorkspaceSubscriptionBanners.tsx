@@ -24,7 +24,12 @@ function graceDaysRemaining(graceEndsAt: Date | null): number | null {
  * Service workspace only: trial, payment grace, and subscription lock alerts.
  * Mounted once under {@link ServiceSubscriptionProvider} in ProtectedLayout.
  */
-export default function ServiceWorkspaceSubscriptionBanners() {
+export default function ServiceWorkspaceSubscriptionBanners({
+  contentOffsetClassName = "",
+}: {
+  /** Align with main content when the fixed sidebar is visible (e.g. `lg:pl-64`). */
+  contentOffsetClassName?: string
+}) {
   const pathname = usePathname()
   const {
     businessId,
@@ -46,9 +51,9 @@ export default function ServiceWorkspaceSubscriptionBanners() {
   const graceDays = graceDaysRemaining(graceEndsAt)
 
   return (
-    <div className="export-hide print-hide">
+    <div className={`export-hide print-hide ${contentOffsetClassName}`.trim()}>
       {subscriptionLocked && (
-        <div className="border-b border-red-200 bg-red-50 px-4 py-2.5">
+        <div className="relative z-[41] border-b border-red-200 bg-red-50 px-4 py-2.5 sm:px-6">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-red-800">
               <span className="font-semibold">Subscription payment overdue.</span>{" "}
@@ -65,7 +70,7 @@ export default function ServiceWorkspaceSubscriptionBanners() {
       )}
 
       {!subscriptionLocked && inGracePeriod && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5">
+        <div className="relative z-[41] border-b border-amber-200 bg-amber-50 px-4 py-2.5 sm:px-6">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-amber-900">
               {periodExpired ? (

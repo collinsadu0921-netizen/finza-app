@@ -8,6 +8,7 @@ import {
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
 import { getCurrencySymbol } from "@/lib/currency"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,6 +104,14 @@ export async function POST(request: NextRequest) {
     if (!business || business.id !== business_id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
+
+    const tierDenied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      business_id,
+      "professional"
+    )
+    if (tierDenied) return tierDenied
 
     let supplierNameValue = supplier_name?.trim() || ""
     let supplierPhoneValue = supplier_phone?.trim() || null

@@ -3,20 +3,23 @@
  * GET  /api/assets/[id]/depreciation  — list depreciation entries for an asset
  * DELETE /api/assets/[id]/depreciation — delete a depreciation entry
  *
- * Requires: authenticated user, business membership, Business tier
+ * Requires: authenticated user, business membership, Professional tier for Service businesses
  */
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 async function resolveAndEnforce(supabase: any, user: any) {
   if (!user) return { denied: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   const business = await getCurrentBusiness(supabase, user.id)
   if (!business) return { denied: NextResponse.json({ error: "Business not found" }, { status: 404 }) }
-  const denied = await enforceServiceWorkspaceAccess({
-    supabase, userId: user.id, businessId: business.id, minTier: "business",
-  })
+  const denied = await enforceServiceIndustryMinTier(
+    supabase,
+    user.id,
+    business.id,
+    "professional"
+  )
   if (denied) return { denied }
   return { business }
 }

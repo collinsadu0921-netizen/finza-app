@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import LoadingScreen from "@/components/ui/LoadingScreen"
 import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
@@ -49,34 +47,26 @@ export default function ServiceMaterialEditPage() {
   const load = async () => {
     try {
       setError("")
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      const res = await fetch(`/api/service/materials/inventory/${id}`)
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (res.status === 404) {
+          setNotFound(true)
+          setLoading(false)
+          return
+        }
+        setError(typeof payload?.error === "string" ? payload.error : "Failed to load material")
         setLoading(false)
         return
       }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setLoading(false)
-        return
-      }
-      setBusinessId(business.id)
-      const { data, error: qErr } = await supabase
-        .from("service_material_inventory")
-        .select("id, business_id, name, sku, unit, average_cost, reorder_level, is_active")
-        .eq("id", id)
-        .eq("business_id", business.id)
-        .maybeSingle()
-      if (qErr) {
-        setError(qErr.message || "Failed to load material")
-        setLoading(false)
-        return
-      }
+      const data = payload.material as Material | undefined
       if (!data) {
         setNotFound(true)
         setLoading(false)
         return
       }
-      const row = data as Material
+      setBusinessId(data.business_id)
+      const row = data
       setMaterial(row)
       setName(row.name)
       setSku(row.sku ?? "")
@@ -115,20 +105,21 @@ export default function ServiceMaterialEditPage() {
     }
     setSaving(true)
     try {
-      const { error: uErr } = await supabase
-        .from("service_material_inventory")
-        .update({
+      const res = await fetch(`/api/service/materials/inventory/${material.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: name.trim(),
           sku: sku.trim() || null,
           unit: unit.trim(),
           average_cost: avgCost,
           reorder_level: reorder,
           is_active,
-        })
-        .eq("id", material.id)
-        .eq("business_id", businessId)
-      if (uErr) {
-        setError(uErr.message || "Failed to update material")
+        }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof payload?.error === "string" ? payload.error : "Failed to update material")
         setSaving(false)
         return
       }

@@ -7,6 +7,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import TierGate from "@/components/service/TierGate"
 
 type Account = {
   id: string
@@ -29,7 +30,7 @@ function isBankOrCash(acc: Account) {
   return sub === "bank" || sub === "cash"
 }
 
-export default function ServiceContributionPage() {
+function ServiceContributionPageInner() {
   const router = useRouter()
   const { format } = useBusinessCurrency()
   const [loading, setLoading] = useState(true)
@@ -368,5 +369,13 @@ export default function ServiceContributionPage() {
         )}
       </div>
     
+  )
+}
+
+export default function ServiceContributionPage() {
+  return (
+    <TierGate minTier="business">
+      <ServiceContributionPageInner />
+    </TierGate>
   )
 }

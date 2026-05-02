@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { performServiceJobReversal } from "@/lib/service/jobReversal"
 import { logAudit } from "@/lib/auditLog"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 /**
  * POST /api/service/jobs/[id]/cancel
@@ -35,12 +35,7 @@ export async function POST(
     }
     const businessId = scope.businessId
 
-    const denied = await enforceServiceWorkspaceAccess({
-      supabase,
-      userId: user.id,
-      businessId,
-      minTier: "professional",
-    })
+    const denied = await enforceServiceIndustryMinTier(supabase, user.id, businessId, "professional")
     if (denied) return denied
 
     const { data: job, error: jobErr } = await supabase

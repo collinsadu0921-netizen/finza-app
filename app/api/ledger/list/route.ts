@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accountingBootstrap"
+import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function GET(request: NextRequest) {
   try {
@@ -31,6 +32,13 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const tierBlockLedgerList = await enforceServiceIndustryBusinessTierForAccountingApi(
+      supabase,
+      user.id,
+      businessId
+    )
+    if (tierBlockLedgerList) return tierBlockLedgerList
 
     if (canUserInitializeAccounting(authResult.authority_source)) {
       const bootstrap = await ensureAccountingInitialized(supabase, businessId)
