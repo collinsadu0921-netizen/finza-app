@@ -1,3 +1,5 @@
+import { DEFAULT_PLATFORM_CURRENCY_CODE, getCurrencySymbol } from "@/lib/currency"
+
 export type CurrencyContext = {
   currency_symbol?: string | null
   currency_code?: string | null
@@ -22,5 +24,5 @@ export function resolveCurrencyDisplay(
     }
   }
 
-  return "$"
+  return getCurrencySymbol(DEFAULT_PLATFORM_CURRENCY_CODE) || DEFAULT_PLATFORM_CURRENCY_CODE
 }

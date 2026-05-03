@@ -1,5 +1,6 @@
 "use client"
 
+import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
 
 export type ServiceHealthPanelProps = {
@@ -15,7 +16,7 @@ export default function ServiceHealthPanel({
   payablesAging,
   receivablesAging,
   burnRate,
-  currencyCode = "USD",
+  currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
 }: ServiceHealthPanelProps) {
   return (
     <div className="rounded-xl border border-gray-200/80 bg-white p-5 shadow-sm dark:border-gray-700/80 dark:bg-gray-800/80 space-y-5">

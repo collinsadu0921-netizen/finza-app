@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   TooltipProps,
 } from "recharts"
+import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
 
 export type TimelinePoint = {
@@ -83,7 +84,7 @@ const LEGEND = [
 
 export default function TrendsSection({
   data,
-  currencyCode = "USD",
+  currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
   currentRevenue = 0,
   currentExpenses = 0,
   currentNetProfit = 0,

@@ -18,7 +18,7 @@ const COUNTRY_CURRENCY_MAP: Record<string, string> = {
   "United Kingdom": "GBP",
   Germany: "EUR",
   France: "EUR",
-  Other: "USD",
+  Other: "GHS",
 }
 
 const COUNTRIES = [

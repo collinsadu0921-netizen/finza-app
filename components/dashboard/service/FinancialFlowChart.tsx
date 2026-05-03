@@ -12,6 +12,7 @@ import {
   Legend,
   TooltipProps,
 } from "recharts"
+import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
 
 export type TimelinePoint = {
@@ -66,7 +67,7 @@ function FinancialFlowTooltip({
 
 export default function FinancialFlowChart({
   data,
-  currencyCode = "USD",
+  currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
   showCash = false,
 }: FinancialFlowChartProps) {
   const [showRevenue, setShowRevenue] = useState(true)

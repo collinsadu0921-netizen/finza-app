@@ -29,7 +29,6 @@ import {
   ListTree,
   Mail,
   PieChart,
-  Receipt,
   ReceiptText,
   Repeat,
   Scale,
@@ -57,7 +56,45 @@ export function ServiceSidebarCediMark({ className }: { className?: string }) {
   )
 }
 
-export type ServiceSidebarNavIconResult = LucideIcon | "cedi" | null
+/** Receipt silhouette + official Ghana cedi glyph (U+20B5). Hand-drawn beziers read as “q”; real ₵ must use font outlines. */
+export function ServiceSidebarInvoiceCediIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+      shapeRendering="geometricPrecision"
+    >
+      {/* Slight inset so the rim stroke matches sibling Lucide icons */}
+      <g transform="translate(12 12) scale(0.92) translate(-12 -12)">
+        <path
+          d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </g>
+      {/* Unicode ₵ — user-agent renders correct capital-C-plus-bar shape (single SVG user-unit size, no px) */}
+      <text
+        x={12}
+        y={12}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="currentColor"
+        fontSize={10.25}
+        fontWeight={700}
+        fontFamily='ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
+      >
+        ₵
+      </text>
+    </svg>
+  )
+}
+
+export type ServiceSidebarNavIconResult = LucideIcon | "cedi" | "invoice_cedi" | null
 
 /** Lucide icon per Service sidebar label (exact match). Payroll uses cedi mark separately. */
 const SERVICE_SIDEBAR_ICON_BY_LABEL: Record<string, LucideIcon> = {
@@ -69,7 +106,6 @@ const SERVICE_SIDEBAR_ICON_BY_LABEL: Record<string, LucideIcon> = {
   Services: Wrench,
   Materials: Boxes,
   "Proforma Invoices": FileSpreadsheet,
-  Invoices: Receipt,
   "Recurring invoices": Repeat,
   Payments: Wallet,
   "Credit Notes": FileMinus,
@@ -108,5 +144,6 @@ const SERVICE_SIDEBAR_ICON_BY_LABEL: Record<string, LucideIcon> = {
 
 export function getServiceSidebarNavIcon(label: string): ServiceSidebarNavIconResult {
   if (label === "Payroll") return "cedi"
+  if (label === "Invoices") return "invoice_cedi"
   return SERVICE_SIDEBAR_ICON_BY_LABEL[label] ?? null
 }

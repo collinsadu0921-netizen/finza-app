@@ -14,6 +14,7 @@ import ServiceDashboardSkeleton, {
   ServiceDashboardTrendsPanelSkeleton,
 } from "./ServiceDashboardSkeleton"
 import DashboardErrorBanner from "./DashboardErrorBanner"
+import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 
 const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
   loading: () => (
@@ -216,7 +217,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const metricsCurrencyCode = typeof rawMetricsCurrency === "object" && rawMetricsCurrency !== null
     ? rawMetricsCurrency.code
     : rawMetricsCurrency as string | undefined
-  const currencyCode = business?.default_currency ?? metricsCurrencyCode ?? "USD"
+  const currencyCode =
+    business?.default_currency ?? metricsCurrencyCode ?? DEFAULT_PLATFORM_CURRENCY_CODE
 
   const load = useCallback(async () => {
     const businessId = business?.id

@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatDate } from "@/lib/exportUtils"
 import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { MenuSelect } from "@/components/ui/MenuSelect"
@@ -48,7 +49,7 @@ function formatInvoiceListAmount(
   if (code) return formatMoney(amount, code)
   const sym = inv.currency_symbol?.trim()
   if (sym) return formatMoneyWithSymbol(amount, sym)
-  return formatMoney(amount, businessCurrencyCode)
+  return formatMoney(amount, businessCurrencyCode ?? DEFAULT_PLATFORM_CURRENCY_CODE)
 }
 
 const STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string }> = {

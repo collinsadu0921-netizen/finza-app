@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
 
 export type ServiceFinanceSummaryCardProps = {
@@ -19,7 +20,7 @@ export default function ServiceFinanceSummaryCard({
   previousValue,
   sparklineData,
   reportHref,
-  currencyCode = "USD",
+  currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
   variant = "default",
 }: ServiceFinanceSummaryCardProps) {
   const pct =

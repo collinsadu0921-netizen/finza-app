@@ -3,6 +3,9 @@
  * Maps currency codes to symbols and names
  */
 
+/** ISO code used when business/document currency is unset — Finza primary market (see resolveCurrencyDisplay). */
+export const DEFAULT_PLATFORM_CURRENCY_CODE = "GHS" as const
+
 /**
  * Get currency symbol from currency code
  * @param currencyCode - ISO currency code (e.g., 'GHS', 'USD', 'KES')

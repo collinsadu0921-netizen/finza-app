@@ -29,6 +29,7 @@ import { filterServiceNavSections } from "@/lib/nav/filterServiceNavSections"
 import {
   getServiceSidebarNavIcon,
   ServiceSidebarCediMark,
+  ServiceSidebarInvoiceCediIcon,
 } from "@/lib/service/serviceSidebarNavIcons"
 import { ChevronDown, Lock } from "lucide-react"
 
@@ -913,7 +914,9 @@ export default function Sidebar() {
                               ? getServiceSidebarNavIcon(item.label)
                               : null
                             const IconComponent =
-                              iconRes && iconRes !== "cedi" ? iconRes : null
+                              iconRes && iconRes !== "cedi" && iconRes !== "invoice_cedi"
+                                ? iconRes
+                                : null
                             let iconClass =
                               "h-4 w-4 shrink-0 text-slate-600 dark:text-slate-300"
                             if (active) {
@@ -990,6 +993,8 @@ export default function Sidebar() {
                               >
                                 {iconRes === "cedi" ? (
                                   <ServiceSidebarCediMark className={iconClass} />
+                                ) : iconRes === "invoice_cedi" ? (
+                                  <ServiceSidebarInvoiceCediIcon className={iconClass} />
                                 ) : IconComponent ? (
                                   <IconComponent className={iconClass} aria-hidden="true" />
                                 ) : isServiceMenu ? (
