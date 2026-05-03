@@ -13,6 +13,7 @@ import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
 import EmptyState from "@/components/ui/EmptyState"
 import type { ScreenProps } from "./types"
+import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 
 type AccountingPeriod = {
   id: string
@@ -163,7 +164,7 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
     return labels[type] || type
   }
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (!businessId) return
     if (!selectedPeriodStart && !(useDateRange && startDate && endDate)) {
       toast.showToast("Please select a period or date range first", "warning")
@@ -177,10 +178,14 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
       url += `&start_date=${startDate}&end_date=${endDate}`
     }
 
-    window.open(url, "_blank")
+    try {
+      await downloadFileFromApi(url, { fallbackFilename: "trial-balance.csv" })
+    } catch (err: unknown) {
+      toast.showToast(err instanceof Error ? err.message : "Could not download CSV", "error")
+    }
   }
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!businessId) return
     if (!selectedPeriodStart && !(useDateRange && startDate && endDate)) {
       toast.showToast("Please select a period or date range first", "warning")
@@ -194,7 +199,14 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
       url += `&start_date=${startDate}&end_date=${endDate}`
     }
 
-    window.open(url, "_blank")
+    try {
+      await downloadFileFromApi(url, {
+        fallbackFilename: "trial-balance.pdf",
+        expectedMimePrefix: "application/pdf",
+      })
+    } catch (err: unknown) {
+      toast.showToast(err instanceof Error ? err.message : "Could not download PDF", "error")
+    }
   }
 
   const backUrl = mode === "service" ? buildServiceRoute("/service/accounting", businessId) : (businessId ? `/accounting?business_id=${businessId}` : "/accounting")

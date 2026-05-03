@@ -6,6 +6,7 @@ import { getTaxLinesForDisplay, sumTaxLines } from "@/lib/taxes/readTaxLines"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
+import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 
 const safeNumber = (v: unknown): number =>
   Number.isFinite(Number(v)) ? Number(v) : 0
@@ -226,19 +227,12 @@ Thank you.`
 
   const downloadPDF = async () => {
     if (!creditNote) return
+    const fallbackFilename = `${creditNote.credit_number.replace(/[/\\?%*:|"<>]/g, "-")}.pdf`
     try {
-      const res = await fetch(`/api/credit-notes/${id}/pdf`)
-      if (!res.ok) throw new Error("Failed to generate PDF")
-      const data = await res.json()
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `${creditNote.credit_number}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      await downloadFileFromApi(`/api/credit-notes/${id}/pdf`, {
+        fallbackFilename,
+        expectedMimePrefix: "application/pdf",
+      })
     } catch (err: unknown) {
       toast.showToast(err instanceof Error ? err.message : "Failed to download PDF", "error")
     }

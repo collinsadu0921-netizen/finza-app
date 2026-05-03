@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
 import type { ScreenProps } from "./types"
+import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 
 type AccountingPeriod = {
   id: string
@@ -164,13 +165,25 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
     return url
   }
 
-  const handleExport = (format: "csv" | "pdf") => {
+  const handleExport = async (format: "csv" | "pdf") => {
     if (!businessId) return
     if (!hasData) {
       toast.showToast("No data to export", "warning")
       return
     }
-    window.open(buildExportUrl(format), "_blank")
+    const url = buildExportUrl(format)
+    const fallback = format === "pdf" ? "profit-and-loss.pdf" : "profit-and-loss.csv"
+    try {
+      await downloadFileFromApi(url, {
+        fallbackFilename: fallback,
+        ...(format === "pdf" ? { expectedMimePrefix: "application/pdf" as const } : {}),
+      })
+    } catch (err: unknown) {
+      toast.showToast(
+        err instanceof Error ? err.message : format === "pdf" ? "Could not download PDF" : "Could not download CSV",
+        "error"
+      )
+    }
   }
 
   const backUrl = mode === "service" ? buildServiceRoute("/service/accounting", businessId) : "/accounting"

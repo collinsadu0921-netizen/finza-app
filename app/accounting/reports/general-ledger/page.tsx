@@ -11,6 +11,7 @@ import { logAccountingRouteWithoutBusinessId } from "@/lib/accounting/devContext
 import { getUserRole } from "@/lib/userRoles"
 import { isUserAccountantReadonly } from "@/lib/userRoles"
 import { useToast } from "@/components/ui/ToastProvider"
+import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 
 type AccountingPeriod = {
@@ -242,7 +243,7 @@ export default function GeneralLedgerReportPage() {
     return labels[referenceType] || referenceType
   }
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (!businessId || !selectedAccountId) {
       toast.showToast("Please select an account first", "warning")
       return
@@ -259,10 +260,14 @@ export default function GeneralLedgerReportPage() {
       url += `&start_date=${startDate}&end_date=${endDate}`
     }
 
-    window.open(url, "_blank")
+    try {
+      await downloadFileFromApi(url, { fallbackFilename: "general-ledger.csv" })
+    } catch (err: unknown) {
+      toast.showToast(err instanceof Error ? err.message : "Could not download CSV", "error")
+    }
   }
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!businessId || !selectedAccountId) {
       toast.showToast("Please select an account first", "warning")
       return
@@ -279,7 +284,14 @@ export default function GeneralLedgerReportPage() {
       url += `&start_date=${startDate}&end_date=${endDate}`
     }
 
-    window.open(url, "_blank")
+    try {
+      await downloadFileFromApi(url, {
+        fallbackFilename: "general-ledger.pdf",
+        expectedMimePrefix: "application/pdf",
+      })
+    } catch (err: unknown) {
+      toast.showToast(err instanceof Error ? err.message : "Could not download PDF", "error")
+    }
   }
 
   if (loading && !account) {

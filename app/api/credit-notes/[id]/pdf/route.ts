@@ -2,13 +2,19 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { buildCreditNoteDocumentHtml } from "@/lib/creditNotes/buildCreditNoteDocumentHtml"
+import { buildCreditNotePdfAttachmentDisposition } from "@/lib/creditNotes/creditNotePdfAttachment"
+import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
+
+export const runtime = "nodejs"
+/** Same ceiling as invoice PDF — Chromium render can be slow on cold start. */
+export const maxDuration = 60
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
-    // Handle Next.js 16 params (can be a Promise)
     const resolvedParams = await Promise.resolve(params)
     const creditNoteId = resolvedParams.id
 
@@ -27,73 +33,53 @@ export async function GET(
     }
 
     const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "starter",
+      supabase,
+      userId: user.id,
+      businessId: business.id,
+      minTier: "starter",
     })
     if (denied) return denied
 
-    // Fetch credit note with all details
-    const { data: creditNote, error: creditNoteError } = await supabase
-      .from("credit_notes")
-      .select(
-        `
-        id, business_id, invoice_id, credit_number, date, reason, subtotal, nhil, getfund, covid, vat, total_tax, total, status, notes, public_token, created_at, updated_at, deleted_at, tax_lines, tax_engine_code, tax_engine_effective_from, tax_jurisdiction,
-        invoices (
-          id,
-          invoice_number,
-          customers (
-            id,
-            name,
-            email,
-            phone,
-            address
-          )
-        )
-      `
-      )
-      .eq("id", creditNoteId)
-      .eq("business_id", business.id)
-      .is("deleted_at", null)
-      .single()
+    const built = await buildCreditNoteDocumentHtml(supabase, creditNoteId, {
+      restrictBusinessId: business.id,
+    })
 
-    if (creditNoteError || !creditNote) {
+    if (!built.ok) {
+      return NextResponse.json({ error: built.error }, { status: built.status })
+    }
+
+    let pdfBuffer: Buffer
+    try {
+      pdfBuffer = await renderHtmlToPdfBuffer(built.html)
+    } catch (err: unknown) {
+      console.error("Credit note PDF (Chromium) failed:", err)
+      const message = err instanceof Error ? err.message : "PDF generation failed"
       return NextResponse.json(
-        { error: "Credit note not found" },
-        { status: 404 }
+        {
+          error: message,
+          hint:
+            process.env.VERCEL !== "1"
+              ? "Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium binary."
+              : undefined,
+        },
+        { status: 500 }
       )
     }
 
-    const { data: items, error: itemsError } = await supabase
-      .from("credit_note_items")
-      .select("*")
-      .eq("credit_note_id", creditNoteId)
-      .order("created_at", { ascending: true })
+    const { contentDisposition } = buildCreditNotePdfAttachmentDisposition(built.creditNumber)
 
-    if (itemsError) {
-      console.error("Error fetching credit note items:", itemsError)
-    }
-
-    // Get business info
-    let businessInfo = null
-    if (creditNote.business_id) {
-      const { data: business } = await supabase
-        .from("businesses")
-        .select("name, email, phone, address, tin, tax_id")
-        .eq("id", creditNote.business_id)
-        .single()
-      businessInfo = business
-    }
-
-    // Redirect to PDF preview endpoint that uses the shared document component
-    return NextResponse.redirect(
-      new URL(`/api/credit-notes/${creditNoteId}/pdf-preview`, request.url)
-    )
-  } catch (error: any) {
-    console.error("Error generating credit note PDF:", error)
+    return new NextResponse(new Uint8Array(pdfBuffer), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": contentDisposition,
+        "Cache-Control": "no-store",
+      },
+    })
+  } catch (error: unknown) {
+    console.error("Credit note export-pdf error:", error)
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: error instanceof Error ? error.message : "Failed to export PDF" },
       { status: 500 }
     )
   }
 }
-
-

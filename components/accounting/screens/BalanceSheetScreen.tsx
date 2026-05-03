@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
 import type { ScreenProps } from "./types"
+import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 
 type AccountingPeriod = {
   id: string
@@ -277,7 +278,7 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
 
   const hasData = !!(assetSection || liabilitySection || equitySection)
 
-  const handleExport = (format: "csv" | "pdf") => {
+  const handleExport = async (format: "csv" | "pdf") => {
     if (!businessId) {
       toast.showToast("Missing business context", "warning")
       return
@@ -300,7 +301,18 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
       else if (asOfDate) q.set("as_of_date", asOfDate)
     }
     const url = `/api/accounting/reports/balance-sheet/export/${format}?${q.toString()}`
-    window.open(url, "_blank")
+    const fallback = format === "pdf" ? "balance-sheet.pdf" : "balance-sheet.csv"
+    try {
+      await downloadFileFromApi(url, {
+        fallbackFilename: fallback,
+        ...(format === "pdf" ? { expectedMimePrefix: "application/pdf" as const } : {}),
+      })
+    } catch (err: unknown) {
+      toast.showToast(
+        err instanceof Error ? err.message : format === "pdf" ? "Could not download PDF" : "Could not download CSV",
+        "error"
+      )
+    }
   }
 
   const handlePrint = () => window.print()
