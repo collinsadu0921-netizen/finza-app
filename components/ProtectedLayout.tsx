@@ -8,6 +8,8 @@ import {
   useEffect,
   useRef,
   useState,
+  type MutableRefObject,
+  type ReactNode,
 } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useRouter, usePathname } from "next/navigation"
@@ -34,11 +36,37 @@ import { fetchAssistantBusinessSnapshot } from "@/components/ProtectedLayout-ass
 
 const ProtectedLayoutContext = createContext(false)
 
-export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+function clearWorkspaceAndAssistantState(params: {
+  setRestrictRetailCashierChrome: (v: boolean) => void
+  setWorkspaceBusiness: (v: WorkspaceBusiness) => void
+  setWorkspaceSessionUser: (v: WorkspaceSessionUser) => void
+  setAiBusinessId: (v: string | null) => void
+  setAiContext: (v: Record<string, unknown> | null) => void
+  setAssistantContextLoading: (v: boolean) => void
+  aiBusinessIdRef: MutableRefObject<string | null>
+  assistantContextCacheBusinessIdRef: MutableRefObject<string | null>
+  assistantCachedPayloadRef: MutableRefObject<Record<string, unknown> | null>
+  assistantContextLoadInflightRef: MutableRefObject<Promise<Record<string, unknown> | undefined> | null>
+}) {
+  params.setRestrictRetailCashierChrome(false)
+  params.setWorkspaceBusiness(null)
+  params.setWorkspaceSessionUser(null)
+  params.setAiBusinessId(null)
+  params.aiBusinessIdRef.current = null
+  params.setAiContext(null)
+  params.setAssistantContextLoading(false)
+  params.assistantContextCacheBusinessIdRef.current = null
+  params.assistantCachedPayloadRef.current = null
+  params.assistantContextLoadInflightRef.current = null
+}
+
+export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const isNestedProtectedLayout = useContext(ProtectedLayoutContext)
   const router = useRouter()
   const pathname = usePathname()
   const [loading, setLoading] = useState(isNestedProtectedLayout ? false : true)
+  /** True only while handling session error or denied access before navigation (never show protected shell). */
+  const [redirectBanner, setRedirectBanner] = useState(false)
   const [aiBusinessId, setAiBusinessId] = useState<string | null>(null)
   const [aiContext, setAiContext] = useState<Record<string, unknown> | null>(null)
   const [assistantContextLoading, setAssistantContextLoading] = useState(false)
@@ -103,19 +131,33 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       // CENTRALIZED ACCESS CONTROL: Single source of truth for all access decisions
       // This function evaluates ALL conditions (auth, role, workspace, route, store) in ONE place
       // Redirects happen HERE ONLY - no other guards should redirect
-      
+
+      setRedirectBanner(false)
+
       console.log("ProtectedLayout: Resolving access for", pathname)
-      
+
       // Get user ID from session
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-      
+
       if (stale()) return
-      
+
       if (sessionError) {
         console.error("ProtectedLayout: Session error:", sessionError)
         if (stale()) return
-        setLoading(false)
-        router.push("/login")
+        setRedirectBanner(true)
+        clearWorkspaceAndAssistantState({
+          setRestrictRetailCashierChrome,
+          setWorkspaceBusiness,
+          setWorkspaceSessionUser,
+          setAiBusinessId,
+          setAiContext,
+          setAssistantContextLoading,
+          aiBusinessIdRef,
+          assistantContextCacheBusinessIdRef,
+          assistantCachedPayloadRef,
+          assistantContextLoadInflightRef,
+        })
+        router.replace("/login")
         return
       }
       
@@ -143,9 +185,20 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         if (stale()) return
         const redirectTo = decision.redirectTo || "/login"
         console.log(`ProtectedLayout: Access denied (${decision.reason}), redirecting to ${redirectTo}`)
-        setRestrictRetailCashierChrome(false)
-        setLoading(false)
-        router.push(redirectTo)
+        setRedirectBanner(true)
+        clearWorkspaceAndAssistantState({
+          setRestrictRetailCashierChrome,
+          setWorkspaceBusiness,
+          setWorkspaceSessionUser,
+          setAiBusinessId,
+          setAiContext,
+          setAssistantContextLoading,
+          aiBusinessIdRef,
+          assistantContextCacheBusinessIdRef,
+          assistantCachedPayloadRef,
+          assistantContextLoadInflightRef,
+        })
+        router.replace(redirectTo)
         return
       }
 
@@ -187,6 +240,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       
       if (stale()) return
       console.log("ProtectedLayout: Access granted")
+      setRedirectBanner(false)
       setLoading(false)
     }
     
@@ -282,7 +336,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <p className="p-6">Loading...</p>
+        <p className="p-6">{redirectBanner ? "Redirecting…" : "Loading..."}</p>
       </div>
     )
   }

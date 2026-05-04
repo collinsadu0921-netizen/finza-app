@@ -9,7 +9,6 @@ import {
 } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import { FinzaLogo } from "@/components/FinzaLogo"
-import { FinzaDemoVideoEmbed } from "@/components/marketing/FinzaDemoVideoEmbed"
 import { buildOAuthRedirectToWithMarketingContext, signInWithGoogle } from "@/lib/auth/startGoogleAuth"
 
 /**
@@ -170,7 +169,7 @@ function SignupPageInner() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 px-4 py-8">
-      <div className="mx-auto w-full max-w-6xl">
+      <div className="mx-auto w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="mb-6 flex justify-center">
             <FinzaLogo height={72} />
@@ -207,29 +206,7 @@ function SignupPageInner() {
           )}
         </div>
 
-        <div className="grid items-start gap-10 lg:grid-cols-2">
-          <div className="order-1 lg:order-2">
-            <div className="lg:sticky lg:top-8">
-              <h2 className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500 lg:text-left">
-                How Finza works
-              </h2>
-              <FinzaDemoVideoEmbed title="How Finza works — see the product before you sign up" />
-              <p className="mt-3 text-center text-xs text-gray-500 lg:text-left">
-                Short walkthrough of Finza. You can also{" "}
-                <button
-                  type="button"
-                  onClick={() => router.push("/demo")}
-                  className="font-semibold text-blue-600 hover:text-blue-700 focus:outline-none focus:underline"
-                >
-                  open the full demo page
-                </button>
-                .
-              </p>
-            </div>
-          </div>
-
-          <div className="order-2 lg:order-1">
-            <div className="mx-auto w-full max-w-md rounded-2xl border border-gray-100 bg-white p-10 shadow-xl lg:mx-0 lg:max-w-none">
+        <div className="rounded-2xl border border-gray-100 bg-white p-10 shadow-xl">
               {error && (
                 <div className="bg-red-50 border-l-4 border-red-400 text-red-700 px-4 py-3 rounded-r mb-6 animate-in fade-in slide-in-from-top-2 duration-300">
                   <div className="flex items-center">
@@ -376,8 +353,6 @@ function SignupPageInner() {
                   </button>
                 </p>
               </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

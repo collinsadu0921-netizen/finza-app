@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 
@@ -13,6 +14,15 @@ const MAX_INVOICES_TO_CHECK = 10
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("businessId") ?? ""
 
@@ -23,11 +33,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const supabase = await createSupabaseServerClient()
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, businessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
     const { data: invoices } = await supabase
       .from("invoices")
       .select("id")
-      .eq("business_id", businessId)
+      .eq("business_id", scope.businessId)
       .neq("status", "draft")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -38,7 +52,7 @@ export async function GET(request: NextRequest) {
       const engine = createReconciliationEngine(supabase)
       for (const inv of invoices) {
         const result = await engine.reconcileInvoice(
-          { businessId, invoiceId: inv.id },
+          { businessId: scope.businessId, invoiceId: inv.id },
           ReconciliationContext.DISPLAY
         )
         if (result.status === ReconciliationStatus.WARN || result.status === ReconciliationStatus.FAIL) {

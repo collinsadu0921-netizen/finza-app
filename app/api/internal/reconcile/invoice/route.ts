@@ -6,11 +6,21 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
 import { ReconciliationContext } from "@/lib/accounting/reconciliation/types"
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("businessId") ?? ""
     const invoiceId = searchParams.get("invoiceId") ?? ""
@@ -24,6 +34,23 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const scope = await resolveBusinessScopeForUser(supabase, user.id, businessId)
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    const { data: invoiceRow, error: invoiceLookupError } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("id", invoiceId)
+      .eq("business_id", scope.businessId)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (invoiceLookupError || !invoiceRow) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 })
+    }
+
     const context =
       contextParam === "VALIDATE"
         ? ReconciliationContext.VALIDATE
@@ -31,10 +58,9 @@ export async function GET(request: NextRequest) {
           ? ReconciliationContext.PERIOD_CLOSE
           : ReconciliationContext.DISPLAY
 
-    const supabase = await createSupabaseServerClient()
     const engine = createReconciliationEngine(supabase)
     const result = await engine.reconcileInvoice(
-      { businessId, invoiceId, periodId },
+      { businessId: scope.businessId, invoiceId, periodId },
       context
     )
 
