@@ -11,7 +11,10 @@ export type RetailSaleReceiptPayloadResult =
   | { ok: false; status: number; error: string }
 
 type Options = {
-  /** When set, sale must belong to this store (retail POS cashier binding). */
+  /**
+   * When set, completed `sales` rows must have this `store_id` (retail POS cashier binding).
+   * `parked_sales` has no `store_id` column (see migration 017); store cannot be enforced for parked receipts.
+   */
   expectedStoreId?: string | null
 }
 
@@ -59,12 +62,10 @@ export async function getRetailSaleReceiptPayloadForBusiness(
     .from("parked_sales")
     .select("*")
     .eq("id", saleId)
+    .eq("business_id", businessId)
     .maybeSingle()
 
   if (parkedSale) {
-    if (parkedSale.business_id !== businessId) {
-      return { ok: false, status: 404, error: "Sale not found" }
-    }
     const body = {
       sale: {
         id: parkedSale.id,
@@ -83,6 +84,8 @@ export async function getRetailSaleReceiptPayloadForBusiness(
     } as RetailReceiptApiBody
     return { ok: true, body, default_currency, receipt_settings }
   }
+
+  const expectedStoreId = options?.expectedStoreId
 
   const { data: saleData, error: saleError } = await supabase
     .from("sales")
@@ -108,19 +111,17 @@ export async function getRetailSaleReceiptPayloadForBusiness(
       `
     )
     .eq("id", saleId)
+    .eq("business_id", businessId)
     .single()
 
   if (saleError || !saleData) {
     return { ok: false, status: 404, error: "Sale not found" }
   }
 
-  if (saleData.business_id !== businessId) {
-    return { ok: false, status: 404, error: "Sale not found" }
-  }
-
-  const expectedStoreId = options?.expectedStoreId
-  if (expectedStoreId && saleData.store_id && saleData.store_id !== expectedStoreId) {
-    return { ok: false, status: 403, error: "Sale not found" }
+  if (expectedStoreId) {
+    if (!saleData.store_id || saleData.store_id !== expectedStoreId) {
+      return { ok: false, status: 403, error: "Sale not found" }
+    }
   }
 
   const { data: voidedOverride } = await supabase
@@ -134,8 +135,9 @@ export async function getRetailSaleReceiptPayloadForBusiness(
 
   const { data: itemsData, error: itemsError } = await supabase
     .from("sale_items")
-    .select("*")
+    .select("*, sales!inner(business_id)")
     .eq("sale_id", saleId)
+    .eq("sales.business_id", businessId)
     .order("created_at", { ascending: true })
 
   if (itemsError) {
@@ -269,14 +271,14 @@ export async function getRetailSaleReceiptPayloadForBusiness(
     }
   })
 
-    const body = {
-      sale,
-      sale_items,
-      business: businessPayload,
-      store: storePayload,
-      customer: customerPayload,
-      is_parked: false,
-    } as RetailReceiptApiBody
+  const body = {
+    sale,
+    sale_items,
+    business: businessPayload,
+    store: storePayload,
+    customer: customerPayload,
+    is_parked: false,
+  } as RetailReceiptApiBody
 
-    return { ok: true, body, default_currency, receipt_settings }
+  return { ok: true, body, default_currency, receipt_settings }
 }

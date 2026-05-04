@@ -183,6 +183,12 @@ export async function resolveAccess(
         reason: "PIN session: retail route outside cashier POS shell",
       })
     }
+    // PIN entry must be reachable without a cashier session; `isPosSurfacePath` includes `/retail/pos/pin`,
+    // so denying here caused `router.replace(same URL)` + infinite reload in ProtectedLayout.
+    const pinEntry = normalizePathnameForAccess(pathname)
+    if (pinEntry === "/retail/pos/pin" || pinEntry === "/pos/pin") {
+      return debugDecision({ allowed: true, reason: "Retail POS PIN entry (no Supabase session yet)" })
+    }
     if (isPosSurfacePath(pathname)) {
       return debugDecision({
         allowed: false,

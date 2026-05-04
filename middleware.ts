@@ -21,7 +21,56 @@ import { createServerClient } from "@supabase/ssr"
  * Belt-and-suspenders cross-domain guard:
  *   Any request carrying x-workspace:accounting is blocked from reaching
  *   /service/* or /retail/* routes.
+ *
+ * Service workspace (pages only):
+ *   For `/service` and `/service/*` page routes (not `/api/service`), require a
+ *   Supabase session. Unauthenticated users are redirected to /login?next=...
+ *   Session only — membership, industry, and subscription remain in ProtectedLayout / APIs.
+ *
+ * Retail workspace (pages only):
+ *   For `/retail` and `/retail/*` except `/retail/pos`, `/retail/pos/*`, and all
+ *   `/retail/sales` paths (conservative PIN/sales exclusion), require a Supabase session.
+ *   PIN/cashier state is client-only — middleware cannot validate it; exclusions must match.
+ *   Session only — industry, role, store, cashier, and POS rules remain in ProtectedLayout.
  */
+
+function isRetailPagePath(pathname: string): boolean {
+  return pathname === "/retail" || pathname.startsWith("/retail/")
+}
+
+/** POS shell + PIN entry + legacy sales flows: no Supabase session at middleware (client resolves). */
+function isRetailMiddlewareSessionExcluded(pathname: string): boolean {
+  if (pathname === "/retail/pos" || pathname.startsWith("/retail/pos/")) return true
+  if (pathname === "/retail/sales" || pathname.startsWith("/retail/sales/")) return true
+  return false
+}
+
+function retailPageRequiresSupabaseSession(pathname: string): boolean {
+  return isRetailPagePath(pathname) && !isRetailMiddlewareSessionExcluded(pathname)
+}
+
+function isServicePagePath(pathname: string): boolean {
+  return pathname === "/service" || pathname.startsWith("/service/")
+}
+
+function createSupabaseForMiddleware(response: NextResponse, request: NextRequest) {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+}
 
 function isAccountingPath(pathname: string): boolean {
   return pathname.startsWith("/accounting") || pathname.startsWith("/api/accounting")
@@ -53,23 +102,7 @@ export async function middleware(request: NextRequest) {
 
     // Authenticate via session cookie. createServerClient here handles token
     // refresh and writes updated cookies back through the setAll callback.
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll()
-          },
-          setAll(cookiesToSet) {
-            // Forward refreshed cookies to the browser via the response.
-            cookiesToSet.forEach(({ name, value, options }) =>
-              response.cookies.set(name, value, options)
-            )
-          },
-        },
-      }
-    )
+    const supabase = createSupabaseForMiddleware(response, request)
 
     const {
       data: { user },
@@ -107,6 +140,40 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/unauthorized", request.url))
   }
 
+  // ── Retail workspace page session (not /api/retail; POS + /retail/sales excluded) ─
+  if (retailPageRequiresSupabaseSession(pathname)) {
+    const response = NextResponse.next()
+    const supabase = createSupabaseForMiddleware(response, request)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      const loginUrl = new URL("/login", request.url)
+      loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`)
+      return NextResponse.redirect(loginUrl)
+    }
+
+    return response
+  }
+
+  // ── Service workspace page session (not /api/service) ─────────────────────
+  if (isServicePagePath(pathname)) {
+    const response = NextResponse.next()
+    const supabase = createSupabaseForMiddleware(response, request)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      const loginUrl = new URL("/login", request.url)
+      loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`)
+      return NextResponse.redirect(loginUrl)
+    }
+
+    return response
+  }
+
   return NextResponse.next()
 }
 
@@ -114,7 +181,9 @@ export const config = {
   matcher: [
     "/accounting/:path*",
     "/api/accounting/:path*",
+    "/service",
     "/service/:path*",
+    "/retail",
     "/retail/:path*",
     "/api/service/:path*",
     "/api/retail/:path*",

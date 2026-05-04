@@ -101,6 +101,53 @@ describe("accessControl", () => {
     })
   })
 
+  /**
+   * Regression: `isPosSurfacePath("/retail/pos/pin")` is true, so treating all POS surfaces as
+   * "redirect to /retail/pos/pin" denied the PIN page itself and caused ProtectedLayout to
+   * `router.replace` the same URL in a loop.
+   */
+  describe("resolveAccess – logged-out POS PIN entry regression", () => {
+    beforeEach(() => {
+      mockIsCashierAuthenticated.mockReturnValue(false)
+    })
+
+    it("allows PIN entry at /retail/pos/pin without Supabase user or cashier session", async () => {
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/pos/pin")
+      expect(res.allowed).toBe(true)
+      expect(res.redirectTo).toBeUndefined()
+    })
+
+    it("redirects unauthenticated /retail/pos (no cashier) to /retail/pos/pin", async () => {
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/pos")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos/pin")
+    })
+
+    it("allows /retail/pos when cashier session is active without Supabase user", async () => {
+      mockIsCashierAuthenticated.mockReturnValue(true)
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/pos")
+      expect(res.allowed).toBe(true)
+      expect(res.redirectTo).toBeUndefined()
+    })
+
+    it("sends unauthenticated /retail/dashboard to /login", async () => {
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/retail/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/login")
+    })
+
+    it("allows legacy /pos/pin without Supabase user or cashier session", async () => {
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, null, "/pos/pin")
+      expect(res.allowed).toBe(true)
+      expect(res.redirectTo).toBeUndefined()
+    })
+  })
+
   describe("resolveAccess – Service workspace blocked from accounting", () => {
     it("denies service user on all /accounting/* (use /service/* instead)", async () => {
       const supabase = createMockSupabase({ firmUsersData: [] })
