@@ -7,7 +7,9 @@ import {
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
-import { PUBLIC_BUSINESS_SELECT, PUBLIC_ESTIMATE_COLUMNS, PUBLIC_ESTIMATE_ITEM_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
+import { PUBLIC_BUSINESS_SELECT, PUBLIC_ESTIMATE_ITEM_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
+import { fetchPublicEstimateRowByToken } from "@/lib/publicDocuments/fetchPublicEstimateRowByToken"
+import { logPublicQuoteEstimateFetch } from "@/lib/publicDocuments/publicQuoteRouteDiagnostics"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -34,19 +36,28 @@ export async function GET(
     }
 
     const supabase = serviceClient()
-    const { data: estimate, error } = (await supabase
-      .from("estimates")
-      .select(PUBLIC_ESTIMATE_COLUMNS)
-      .eq("public_token", token)
-      .is("deleted_at", null)
-      .maybeSingle()) as {
-      data: Record<string, unknown> | null
-      error: { message?: string } | null
-    }
+    const { data: estimate, error, columnVariant } = await fetchPublicEstimateRowByToken(supabase, token)
 
-    if (error || !estimate) {
+    if (error) {
+      logPublicQuoteEstimateFetch({
+        token,
+        outcome: "supabase_error",
+        error: error as { message?: string; code?: string; details?: string; hint?: string },
+      })
       return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
+    if (!estimate) {
+      logPublicQuoteEstimateFetch({ token, outcome: "no_row" })
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
+    }
+
+    const tokenLength = token.length
+    const tokenPrefix =
+      tokenLength === 0 ? "" : `${token.slice(0, Math.min(6, tokenLength))}${tokenLength > 6 ? "…" : ""}`
+    console.info(
+      "[public-quote] pdf estimate row loaded",
+      JSON.stringify({ tokenLength, tokenPrefix, columnVariant })
+    )
 
     const est = estimate as Record<string, unknown> & {
       id: string

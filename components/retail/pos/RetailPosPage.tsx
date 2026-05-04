@@ -12,7 +12,7 @@ import { getUserStore, getStoreFilter, getStores } from "@/lib/stores"
 import { getActiveStoreId, getActiveStoreName, setActiveStoreId } from "@/lib/storeSession"
 import { getUserRole } from "@/lib/userRoles"
 import { getEffectiveStoreIdClient } from "@/lib/storeContext"
-import { getCashierSession, clearCashierSession } from "@/lib/cashierSession"
+import { getCashierSession, clearCashierSession, getCashierPosToken } from "@/lib/cashierSession"
 import { getAllOpenRegisterSessions, type OpenRegisterSession } from "@/lib/registerStatus"
 import {
   getTerminalRegisterId,
@@ -44,6 +44,8 @@ import {
   saveRetailPosOfflineCatalog,
   loadRetailPosOfflineCatalog,
 } from "@/lib/retail/offline/retailPosOfflineCatalog"
+import { cashierPosBusinessBootstrap } from "@/lib/retail/cashierPosBusinessBootstrap"
+import type { RetailPosBootstrapPayload } from "@/lib/retail/posBootstrapTypes"
 import type {
   RetailPosOfflineCatalogPayloadV1,
   RetailPosOfflineVariantRow,
@@ -210,6 +212,8 @@ export default function RetailPosPage() {
   const [offlineVariants, setOfflineVariants] = useState<RetailPosOfflineVariantRow[]>([])
   const [lastOfflineCatalogSyncAt, setLastOfflineCatalogSyncAt] = useState<string | null>(null)
   const [catalogSnapshotSyncing, setCatalogSnapshotSyncing] = useState(false)
+  /** PIN-only catalog came from GET /api/retail/pos/bootstrap — skip periodic register polls that use anon Supabase. */
+  const pinOnlyTokenBootstrapRef = useRef(false)
   /** After online sale success: summary for modal (cart cleared; stay on POS) */
   const [saleSuccess, setSaleSuccess] = useState<{
     saleId: string
@@ -666,6 +670,7 @@ export default function RetailPosPage() {
   const loadData = async () => {
     try {
       setLoading(true)
+      pinOnlyTokenBootstrapRef.current = false
 
       /** Phase 1: PIN cashier + prior catalog sync — hydrate without Supabase when offline. */
       if (!isOnline()) {
@@ -726,21 +731,148 @@ export default function RetailPosPage() {
       // If cashier session exists, use it
       if (cashierSession) {
         setParkSaleClientAvailable(!!user)
-        // Verify business exists
+        const posToken = user ? null : getCashierPosToken()
+
+        if (!user && posToken) {
+          setRegisterStatusLoading(true)
+          try {
+            const res = await fetch("/api/retail/pos/bootstrap", {
+              headers: { Authorization: `Bearer ${posToken}` },
+              cache: "no-store",
+            })
+            if (!res.ok) {
+              pinOnlyTokenBootstrapRef.current = false
+              if (res.status === 401) {
+                router.push(retailPaths.posPin)
+              } else {
+                const errBody = (await res.json().catch(() => ({}))) as { error?: string }
+                setError(
+                  typeof errBody.error === "string" ? errBody.error : "Could not load POS data"
+                )
+              }
+              setRegisterStatusLoading(false)
+              setLoading(false)
+              return
+            }
+
+            const payload = (await res.json()) as RetailPosBootstrapPayload
+
+            const prods = payload.products.map((raw) => {
+              const copy = { ...(raw as Record<string, unknown>) }
+              delete copy.business_id
+              return copy as Product
+            })
+
+            setBusinessId(payload.business.id)
+            setBusinessCountry(payload.business.address_country)
+            setCurrencyCode(payload.business.default_currency)
+            setRetailVatInclusive(true)
+            setActiveStoreId(payload.store.id, payload.store.name)
+            setCurrentStoreId(payload.store.id)
+            setCurrentStoreName(payload.store.name)
+            setHasValidStore(true)
+            setUserRole("cashier")
+            setProducts(prods)
+            setCategories(payload.categories as Category[])
+            setVariantStockById(payload.variant_stock_by_id)
+            setOfflineVariants(
+              payload.variants.map((v) => ({
+                ...v,
+                variant_name: v.variant_name ?? "",
+              })) as RetailPosOfflineVariantRow[]
+            )
+
+            const qkpl = (payload.quick_key_products || []).map((raw) => {
+              const copy = { ...(raw as Record<string, unknown>) }
+              delete copy.business_id
+              delete copy.display_name_override
+              return copy as Product
+            })
+            if (qkpl.length > 0) setQuickKeys(qkpl)
+            else setQuickKeys(prods.slice(0, 6))
+
+            setTerminalRegisterOptions(
+              (payload.registers || []).map((r) => ({ id: r.id, name: r.name }))
+            )
+            const boundId = getTerminalRegisterId(payload.business.id, payload.store.id)
+            setTerminalBoundRegisterId(boundId)
+            const regMeta = payload.registers.find((r) => r.id === boundId)
+            setTerminalBoundRegisterName(regMeta?.name ?? null)
+
+            let nextSess: OpenRegisterSession | null = null
+            if (boundId) {
+              const row = payload.open_cashier_sessions.find((s) => s.register_id === boundId)
+              if (row) {
+                nextSess = {
+                  id: row.id,
+                  register_id: row.register_id,
+                  user_id: row.user_id,
+                  store_id: row.store_id,
+                  started_at: row.started_at,
+                  opening_float: row.opening_float,
+                  registers: row.registers ?? null,
+                  stores: row.stores ?? null,
+                }
+              }
+            }
+            setRegisterSession(nextSess)
+            setRegisterStatusLoading(false)
+
+            const catalogStoreId = payload.store.id
+            if (isOnline() && catalogStoreId) {
+              setCatalogSnapshotSyncing(true)
+              try {
+                const dexiePayload: RetailPosOfflineCatalogPayloadV1 = {
+                  schemaVersion: 1,
+                  businessId: payload.business.id,
+                  storeId: catalogStoreId,
+                  storeLabel: payload.store.name,
+                  lastSyncedAt: new Date().toISOString(),
+                  products: prods as unknown[],
+                  categories: payload.categories as unknown[],
+                  variantStockById: payload.variant_stock_by_id,
+                  variants: payload.variants.map((v) => ({
+                    ...v,
+                    variant_name: v.variant_name ?? "",
+                  })) as RetailPosOfflineVariantRow[],
+                  quickKeys: (qkpl.length > 0 ? qkpl : prods.slice(0, 6)) as unknown[],
+                  currencyCode: payload.business.default_currency,
+                  businessCountry: payload.business.address_country,
+                  retailVatInclusive: true,
+                }
+                await saveRetailPosOfflineCatalog(dexiePayload)
+                setLastOfflineCatalogSyncAt(dexiePayload.lastSyncedAt)
+              } catch (e) {
+                console.warn("[Retail POS offline] catalog persist failed:", e)
+              } finally {
+                setCatalogSnapshotSyncing(false)
+              }
+            }
+
+            pinOnlyTokenBootstrapRef.current = true
+            setLoading(false)
+            return
+          } catch (e: unknown) {
+            pinOnlyTokenBootstrapRef.current = false
+            console.error("PIN-only bootstrap failed:", e)
+            setError(e instanceof Error ? e.message : "Could not load POS data")
+            setRegisterStatusLoading(false)
+            setLoading(false)
+            return
+          }
+        }
+
+        pinOnlyTokenBootstrapRef.current = false
         const { data: business } = await supabase
           .from("businesses")
           .select("id, industry, address_country, default_currency")
           .eq("id", cashierSession.businessId)
           .maybeSingle()
 
-        if (!business) {
-          router.push(retailPaths.posPin)
-          return
-        }
-
-        setBusinessId(business.id)
-        setBusinessCountry(business.address_country || null)
-        setCurrencyCode(business.default_currency || null)
+        const boot = cashierPosBusinessBootstrap(cashierSession, business)
+        setBusinessId(boot.businessId)
+        setBusinessCountry(boot.address_country)
+        setCurrencyCode(boot.default_currency)
         
         // Set store context from cashier session
         const { data: storeData } = await supabase
@@ -764,10 +896,10 @@ export default function RetailPosPage() {
 
         // Check register status for cashier
         setUserRole("cashier")
-        await checkRegisterStatus(business.id, cashierSession.storeId, cashierSession.cashierId)
+        await checkRegisterStatus(boot.businessId, cashierSession.storeId, cashierSession.cashierId)
 
         // Load products for cashier's store
-        await loadProductsForStore(business.id, cashierSession.storeId)
+        await loadProductsForStore(boot.businessId, cashierSession.storeId)
         setLoading(false)
         return
       }
@@ -1061,6 +1193,7 @@ export default function RetailPosPage() {
     if (!businessId || !currentStoreId || !userRole) return
 
     const interval = setInterval(async () => {
+      if (pinOnlyTokenBootstrapRef.current) return
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         await checkRegisterStatus(businessId, currentStoreId, user.id, { silent: true })
@@ -3883,34 +4016,44 @@ export default function RetailPosPage() {
         return
       }
 
-      // Verify the selected session is still open
-      const { data: sessionVerify, error: sessionError } = await supabase
-        .from("cashier_sessions")
-        .select("id, register_id, status")
-        .eq("id", registerSession.id)
-        .eq("status", "open")
-        .maybeSingle()
+      const {
+        data: { user: supabaseUserAtCheckout },
+      } = await supabase.auth.getUser()
+      const cashierPosTokenAtCheckout = getCashierPosToken()
+      const pinOnlyTokenCheckout =
+        Boolean(cashierPosTokenAtCheckout) && !supabaseUserAtCheckout && Boolean(cashierSession)
 
-      if (sessionError && sessionError.code !== "PGRST116") {
-        console.error("Session error:", sessionError)
-        setError(`Failed to verify register session: ${sessionError.message}`)
-        setProcessingPayment(false)
-        return
-      }
+      // PIN + bearer token: browser Supabase is anon — RLS blocks cashier_sessions reads.
+      // Server still validates session on create; trust bootstrap-selected session here.
+      if (!pinOnlyTokenCheckout) {
+        const { data: sessionVerify, error: sessionError } = await supabase
+          .from("cashier_sessions")
+          .select("id, register_id, status")
+          .eq("id", registerSession.id)
+          .eq("status", "open")
+          .maybeSingle()
 
-      if (!sessionVerify) {
-        setError("This till’s session was closed. A manager must open the register again for this terminal.")
-        setProcessingPayment(false)
-        if (businessId && currentStoreId && userId) {
-          await checkRegisterStatus(businessId, currentStoreId, userId, { silent: true })
+        if (sessionError && sessionError.code !== "PGRST116") {
+          console.error("Session error:", sessionError)
+          setError(`Failed to verify register session: ${sessionError.message}`)
+          setProcessingPayment(false)
+          return
         }
-        return
+
+        if (!sessionVerify) {
+          setError("This till’s session was closed. A manager must open the register again for this terminal.")
+          setProcessingPayment(false)
+          if (businessId && currentStoreId && userId) {
+            await checkRegisterStatus(businessId, currentStoreId, userId, { silent: true })
+          }
+          return
+        }
       }
 
-      // Use the verified session
+      // Use the verified (or token-bootstrap) session
       const session = {
         id: registerSession.id,
-        register_id: registerSession.register_id
+        register_id: registerSession.register_id,
       }
       
       const sessionStoreId = getActiveStoreId()
@@ -4185,9 +4328,18 @@ export default function RetailPosPage() {
           }
       }
 
-      const response = await fetch("/api/sales/create", {
+      const saleCreateUrl =
+        pinOnlyTokenCheckout ? "/api/retail/pos/sales" : "/api/sales/create"
+      const saleCreateHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (pinOnlyTokenCheckout && cashierPosTokenAtCheckout) {
+        saleCreateHeaders.Authorization = `Bearer ${cashierPosTokenAtCheckout}`
+      }
+
+      const response = await fetch(saleCreateUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: saleCreateHeaders,
         body: JSON.stringify(salePayload),
       })
 

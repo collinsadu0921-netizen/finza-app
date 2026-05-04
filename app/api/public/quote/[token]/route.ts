@@ -4,7 +4,9 @@ import {
   loadInvoiceSettingsForDocument,
   mergeQuotePdfTerms,
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
-import { PUBLIC_BUSINESS_SELECT, PUBLIC_ESTIMATE_COLUMNS } from "@/lib/publicDocuments/publicDocumentSelects"
+import { PUBLIC_BUSINESS_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
+import { fetchPublicEstimateRowByToken } from "@/lib/publicDocuments/fetchPublicEstimateRowByToken"
+import { logPublicQuoteEstimateFetch } from "@/lib/publicDocuments/publicQuoteRouteDiagnostics"
 
 export const dynamic = "force-dynamic"
 
@@ -64,32 +66,37 @@ export async function GET(
   try {
     const { token: rawToken } = await params
     const token = decodeURIComponent(rawToken).trim()
+
+    const tokenLength = token.length
+    const tokenPrefix =
+      tokenLength === 0 ? "" : `${token.slice(0, Math.min(6, tokenLength))}${tokenLength > 6 ? "…" : ""}`
+    console.info("[public-quote] route reached", JSON.stringify({ tokenLength, tokenPrefix }))
+
     if (!token) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 
     const supabase = serviceClient()
 
-    // Avoid PostgREST embed `customers (...)` — relationship hints often break across
-    // schema versions and surface as PGRST errors that we were treating as 404.
-    const { data: row, error } = (await supabase
-      .from("estimates")
-      .select(PUBLIC_ESTIMATE_COLUMNS)
-      .eq("public_token", token)
-      .is("deleted_at", null)
-      .maybeSingle()) as {
-      data: Record<string, unknown> | null
-      error: { message?: string } | null
-    }
+    const { data: row, error, columnVariant } = await fetchPublicEstimateRowByToken(supabase, token)
 
     if (error) {
-      const pe = error as { message?: string; code?: string; details?: string }
-      console.error("public/quote GET estimates error:", pe.message, pe.code, pe.details)
+      logPublicQuoteEstimateFetch({
+        token,
+        outcome: "supabase_error",
+        error: error as { message?: string; code?: string; details?: string; hint?: string },
+      })
       return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
     if (!row) {
+      logPublicQuoteEstimateFetch({ token, outcome: "no_row" })
       return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
+
+    console.info(
+      "[public-quote] estimate row loaded",
+      JSON.stringify({ tokenLength, tokenPrefix, columnVariant })
+    )
 
     const customerId = row.customer_id as string | null | undefined
     let customers: {

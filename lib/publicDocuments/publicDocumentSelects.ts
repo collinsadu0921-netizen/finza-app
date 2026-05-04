@@ -99,47 +99,17 @@ export const PUBLIC_CREDIT_NOTE_ITEM_SELECT =
   "id, description, qty, unit_price, discount_amount, line_subtotal"
 
 /**
- * Public quote (estimate) row — fields used by public JSON normalizer + quote/proforma PDF HTML builders.
- * Includes legacy + canonical tax column names (`nhil` vs `nhil_amount`, etc.) across migration generations.
+ * Public quote estimate columns: two mutually exclusive PostgREST shapes exist in the wild
+ * (pre/post `034_service_invoice_system_complete.sql` renames). Use `fetchPublicEstimateRowByToken`
+ * in public quote routes — it tries modern then legacy selects.
  */
-export const PUBLIC_ESTIMATE_COLUMNS = [
-  "id",
-  "business_id",
-  "customer_id",
-  "estimate_number",
-  "issue_date",
-  "validity_date",
-  "notes",
-  "subtotal",
-  "subtotal_before_tax",
-  "nhil",
-  "getfund",
-  "covid",
-  "vat",
-  "nhil_amount",
-  "getfund_amount",
-  "covid_amount",
-  "vat_amount",
-  "total_tax_amount",
-  "tax",
-  "total",
-  "total_amount",
-  "status",
-  "tax_lines",
-  "currency_code",
-  "currency_symbol",
-  "public_token",
-  "client_name_signed",
-  "client_id_type",
-  "client_id_number",
-  "client_signature",
-  "signed_at",
-  "rejected_reason",
-  "rejected_at",
-  "fx_rate",
-  "home_currency_code",
-  "home_currency_total",
-].join(", ")
+export {
+  PUBLIC_ESTIMATE_COLUMNS_MODERN,
+  PUBLIC_ESTIMATE_COLUMNS_LEGACY,
+  fetchPublicEstimateRowByToken,
+  /** @deprecated Use `fetchPublicEstimateRowByToken` — single list is not portable across DBs. */
+  PUBLIC_ESTIMATE_COLUMNS_MODERN as PUBLIC_ESTIMATE_COLUMNS,
+} from "./fetchPublicEstimateRowByToken"
 
 /** Quote line items — supports legacy `quantity`/`price`/`total` and newer `qty`/`unit_price`/`line_total`. */
 export const PUBLIC_ESTIMATE_ITEM_SELECT =
