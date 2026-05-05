@@ -28,6 +28,11 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
     const search = searchParams.get("search")
+    const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1)
+    const limitRaw = Number.parseInt(searchParams.get("limit") || "25", 10) || 25
+    const limit = Math.min(100, Math.max(1, limitRaw))
+    const from = (page - 1) * limit
+    const to = from + limit - 1
 
     let query = supabase
       .from("invoices")
@@ -50,7 +55,8 @@ export async function GET(request: NextRequest) {
           name,
           email
         )
-      `
+      `,
+        { count: "exact" }
       )
       .eq("business_id", business.id)
       .is("deleted_at", null)
@@ -112,7 +118,12 @@ export async function GET(request: NextRequest) {
       query = query.or(searchConditions.join(","))
     }
 
-    let { data: invoices, error } = await query
+    // For non-overdue statuses, paginate in SQL.
+    if (status !== "overdue") {
+      query = query.range(from, to)
+    }
+
+    let { data: invoices, error, count } = await query
 
     if (error) {
       console.error("Error fetching invoices:", error)
@@ -192,7 +203,31 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return NextResponse.json({ invoices: invoices || [] })
+    const rows = invoices || []
+    if (status === "overdue") {
+      const totalCount = rows.length
+      const paged = rows.slice(from, to + 1)
+      return NextResponse.json({
+        invoices: paged,
+        pagination: {
+          page,
+          pageSize: limit,
+          totalCount,
+          totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+        },
+      })
+    }
+
+    const totalCount = count ?? 0
+    return NextResponse.json({
+      invoices: rows,
+      pagination: {
+        page,
+        pageSize: limit,
+        totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+    })
   } catch (error: any) {
     console.error("Error in invoice list:", error)
     return NextResponse.json(

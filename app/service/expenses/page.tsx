@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
@@ -30,6 +30,8 @@ type Expense = {
 
 export default function ExpensesPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const PAGE_SIZE = 25
   const toast = useToast()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<any[]>([])
@@ -40,6 +42,11 @@ export default function ExpensesPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearching, setIsSearching] = useState(false)
   const [business, setBusiness] = useState<{ currency_code?: string } | null>(null)
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => { loadData() }, [])
@@ -48,13 +55,14 @@ export default function ExpensesPage() {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
     if (searchInput.trim()) setIsSearching(true)
     searchDebounceRef.current = setTimeout(() => {
+      setPage(1)
       setSearchQuery(searchInput)
       setIsSearching(false)
     }, 300)
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current) }
   }, [searchInput])
 
-  useEffect(() => { loadExpenses() }, [filters, searchQuery])
+  useEffect(() => { loadExpenses() }, [filters, searchQuery, page])
 
   const loadData = async () => {
     try {
@@ -89,18 +97,15 @@ export default function ExpensesPage() {
       if (filters.category_id) query += `category_id=${filters.category_id}&`
       if (filters.start_date) query += `start_date=${filters.start_date}&`
       if (filters.end_date) query += `end_date=${filters.end_date}&`
+      if (searchQuery.trim()) query += `search=${encodeURIComponent(searchQuery.trim())}&`
+      query += `page=${page}&limit=${PAGE_SIZE}&`
 
       const response = await fetch(query)
       if (!response.ok) throw new Error("Failed to load expenses")
 
-      const { expenses: expensesData } = await response.json()
-      let filteredExpenses = expensesData || []
-      if (searchQuery.trim()) {
-        filteredExpenses = filteredExpenses.filter((exp: Expense) =>
-          exp.supplier.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      }
-      setExpenses(filteredExpenses)
+      const payload = await response.json()
+      setExpenses(payload.expenses || [])
+      setPagination(payload.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
       setLoading(false)
     } catch (err: any) {
       setError(err.message || "Failed to load expenses")
@@ -110,6 +115,13 @@ export default function ExpensesPage() {
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.total || 0), 0)
   const totalTaxes = expenses.reduce((sum, exp) => sum + Number(exp.nhil || 0) + Number(exp.getfund || 0) + Number(exp.covid || 0) + Number(exp.vat || 0), 0)
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`/service/expenses?${params.toString()}`)
+  }, [page, router, searchParams])
 
   // This-month total
   const now = new Date()
@@ -177,7 +189,7 @@ export default function ExpensesPage() {
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
+          <div data-tour="service-expenses-overview">
             <h1 className="text-2xl font-bold text-slate-900">Expenses</h1>
             <p className="text-sm text-slate-500 mt-0.5">Track and manage your business expenses</p>
           </div>
@@ -214,6 +226,7 @@ export default function ExpensesPage() {
               </>
             )}
             <button
+              data-tour="service-expenses-new"
               onClick={() => router.push("/service/expenses/create")}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
             >
@@ -266,7 +279,7 @@ export default function ExpensesPage() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3" data-tour="service-expenses-filters">
           <div className="relative flex-1 min-w-[200px]">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               {isSearching ? (
@@ -290,7 +303,10 @@ export default function ExpensesPage() {
           </div>
           <MenuSelect
             value={filters.category_id}
-            onValueChange={(v) => setFilters({ ...filters, category_id: v })}
+            onValueChange={(v) => {
+              setPage(1)
+              setFilters({ ...filters, category_id: v })
+            }}
             wrapperClassName="w-auto shrink-0 min-w-[11rem]"
             options={[
               { value: "", label: "All Categories" },
@@ -300,18 +316,24 @@ export default function ExpensesPage() {
           <input
             type="date"
             value={filters.start_date}
-            onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
+            onChange={(e) => {
+              setPage(1)
+              setFilters({ ...filters, start_date: e.target.value })
+            }}
             className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
           />
           <input
             type="date"
             value={filters.end_date}
-            onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
+            onChange={(e) => {
+              setPage(1)
+              setFilters({ ...filters, end_date: e.target.value })
+            }}
             className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-slate-300 text-slate-700"
           />
           {filtersActive && (
             <button
-              onClick={() => { setFilters({ category_id: "", start_date: "", end_date: "" }); setSearchInput(""); setSearchQuery("") }}
+              onClick={() => { setPage(1); setFilters({ category_id: "", start_date: "", end_date: "" }); setSearchInput(""); setSearchQuery("") }}
               className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
             >
               Clear
@@ -321,7 +343,7 @@ export default function ExpensesPage() {
 
         {/* Table / Empty State */}
         {expenses.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center" data-tour="service-expenses-list">
             <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-4">
               <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -343,7 +365,7 @@ export default function ExpensesPage() {
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-tour="service-expenses-list">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -401,6 +423,29 @@ export default function ExpensesPage() {
                 </tbody>
               </table>
             </div>
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-slate-600 tabular-nums">
+                  Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

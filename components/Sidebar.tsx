@@ -435,7 +435,7 @@ export default function Sidebar() {
           ],
         },
         {
-          title: "Catalog",
+          title: "Services & Materials",
           items: [
             { label: "Services", route: "/service/services", minTier: "starter" },
             { label: "Materials", route: "/service/materials", minTier: "professional" },
@@ -853,6 +853,7 @@ export default function Sidebar() {
                   const defaultExpanded =
                     section.title === "Operations" ||
                     section.title === "Billing" ||
+                    section.title === "Services & Materials" ||
                     section.title === "OPERATIONS" ||
                     section.title === "BILLING" ||
                     section.title === "RETAIL OPERATIONS"

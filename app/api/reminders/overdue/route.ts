@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabaseClient"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -211,6 +212,7 @@ ${businessName}`
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -231,6 +233,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
+      )
+    }
+
+    // Ensure reminder can only be recorded for invoices in the current business.
+    const { data: invoice, error: invoiceError } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("id", invoice_id)
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (invoiceError) {
+      return NextResponse.json(
+        { error: invoiceError.message },
+        { status: 500 }
+      )
+    }
+
+    if (!invoice) {
+      return NextResponse.json(
+        { error: "Invoice not found or access denied" },
+        { status: 403 }
       )
     }
 

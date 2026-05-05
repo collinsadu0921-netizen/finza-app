@@ -81,7 +81,7 @@ export default function ServiceSettingsHubPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-3xl px-4 py-10">
-        <div className="mb-8">
+        <div className="mb-8" data-tour="service-settings-overview">
           <h1 className="text-xl font-bold text-slate-900">Settings</h1>
           <p className="mt-1 text-sm text-slate-500">
             Everything for your workspace in one place. Open a section below.
@@ -93,6 +93,13 @@ export default function ServiceSettingsHubPage() {
             <section
               key={group.title}
               className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              data-tour={
+                group.title === "Workspace"
+                  ? "service-settings-profile-card"
+                  : group.title === "Invoices & payments"
+                    ? "service-settings-payment-card"
+                    : "service-settings-documents-card"
+              }
             >
               <h2 className="text-sm font-semibold text-slate-900">{group.title}</h2>
               <p className="mt-0.5 text-xs text-slate-500">{group.description}</p>
@@ -118,6 +125,13 @@ export default function ServiceSettingsHubPage() {
                               ? "text-slate-900"
                               : "text-slate-700",
                           ].join(" ")}
+                          data-tour={
+                            link.path === "/service/settings/communication/whatsapp"
+                              ? "service-settings-templates-card"
+                              : link.path === "/service/settings/team"
+                                ? "service-settings-users-card"
+                                : undefined
+                          }
                         >
                           {link.path === "/service/settings/inbound-email" ? (
                             <span>

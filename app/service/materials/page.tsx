@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
@@ -20,32 +20,71 @@ type MaterialRow = {
   last_movement_reference_id: string | null
 }
 
+type MaterialsSummary = {
+  totalItems: number
+  activeItems: number
+  lowStockItems: number
+  totalValue: number
+}
+
 export default function ServiceMaterialsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { format } = useBusinessCurrency()
+  const PAGE_SIZE = 25
   const [rows, setRows] = useState<MaterialRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [search, setSearch] = useState("")
-  const [searchQuery, setSearchQuery] = useState("")
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all")
-  const [filterStock, setFilterStock] = useState<"all" | "low" | "ok">("all")
+  const [search, setSearch] = useState(searchParams.get("search") || "")
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "")
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">(
+    (searchParams.get("status") as "all" | "active" | "inactive") || "all"
+  )
+  const [filterStock, setFilterStock] = useState<"all" | "low" | "ok">(
+    (searchParams.get("stock") as "all" | "low" | "ok") || "all"
+  )
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: PAGE_SIZE,
+    totalCount: 0,
+    totalPages: 0,
+  })
+  const [summary, setSummary] = useState<MaterialsSummary>({
+    totalItems: 0,
+    activeItems: 0,
+    lowStockItems: 0,
+    totalValue: 0,
+  })
   const searchDebounce = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     load()
-  }, [])
+  }, [searchQuery, filterStatus, filterStock, page])
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
-    searchDebounce.current = setTimeout(() => setSearchQuery(search), 280)
+    searchDebounce.current = setTimeout(() => {
+      setPage(1)
+      setSearchQuery(search.trim())
+    }, 280)
     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current) }
   }, [search])
 
   const load = async () => {
     try {
+      setLoading(true)
       setError("")
-      const res = await fetch("/api/service/materials/workspace")
+      const params = new URLSearchParams()
+      if (searchQuery) params.set("search", searchQuery)
+      if (filterStatus !== "all") params.set("status", filterStatus)
+      if (filterStock !== "all") params.set("stock", filterStock)
+      params.set("page", String(page))
+      params.set("limit", String(PAGE_SIZE))
+      const res = await fetch(`/api/service/materials/workspace?${params.toString()}`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setError(typeof data?.error === "string" ? data.error : "Failed to load materials")
@@ -53,6 +92,15 @@ export default function ServiceMaterialsPage() {
         return
       }
       setRows((data.rows ?? []) as MaterialRow[])
+      setPagination(data.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
+      setSummary(
+        data.summary || {
+          totalItems: 0,
+          activeItems: 0,
+          lowStockItems: 0,
+          totalValue: 0,
+        }
+      )
       setLoading(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load")
@@ -60,47 +108,22 @@ export default function ServiceMaterialsPage() {
     }
   }
 
-  // Derived stats
-  const totalItems = rows.length
-  const activeItems = rows.filter((r) => r.is_active).length
-  const lowStockItems = rows.filter(
-    (r) => r.is_active && Number(r.reorder_level) > 0 && Number(r.quantity_on_hand) <= Number(r.reorder_level)
-  ).length
-  const totalValue = rows.reduce(
-    (sum, r) => sum + Number(r.quantity_on_hand) * Number(r.average_cost),
-    0
-  )
-
-  // Client-side filtering
-  const visible = rows.filter((r) => {
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      if (
-        !r.name.toLowerCase().includes(q) &&
-        !(r.sku ?? "").toLowerCase().includes(q)
-      )
-        return false
-    }
-    if (filterStatus === "active" && !r.is_active) return false
-    if (filterStatus === "inactive" && r.is_active) return false
-    if (filterStock === "low") {
-      const isLow =
-        r.is_active &&
-        Number(r.reorder_level) > 0 &&
-        Number(r.quantity_on_hand) <= Number(r.reorder_level)
-      if (!isLow) return false
-    }
-    if (filterStock === "ok") {
-      const isLow =
-        r.is_active &&
-        Number(r.reorder_level) > 0 &&
-        Number(r.quantity_on_hand) <= Number(r.reorder_level)
-      if (isLow) return false
-    }
-    return true
-  })
+  const visible = rows
 
   const filtersActive = !!(search || filterStatus !== "all" || filterStock !== "all")
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (searchQuery) params.set("search", searchQuery)
+    else params.delete("search")
+    if (filterStatus !== "all") params.set("status", filterStatus)
+    else params.delete("status")
+    if (filterStock !== "all") params.set("stock", filterStock)
+    else params.delete("stock")
+    if (page > 1) params.set("page", String(page))
+    else params.delete("page")
+    router.replace(`/service/materials?${params.toString()}`)
+  }, [searchQuery, filterStatus, filterStock, page, router, searchParams])
 
   if (loading) {
     return (
@@ -147,7 +170,7 @@ export default function ServiceMaterialsPage() {
               </svg>
             }
             iconWrapperClassName="bg-blue-100"
-            value={totalItems}
+            value={summary.totalItems}
             label="Total"
           />
           <KpiStatCard
@@ -157,23 +180,27 @@ export default function ServiceMaterialsPage() {
               </svg>
             }
             iconWrapperClassName="bg-emerald-100"
-            value={activeItems}
+            value={summary.activeItems}
             label="Active"
           />
           <KpiStatCard
             icon={
-              <svg className={`w-5 h-5 ${lowStockItems > 0 ? "text-amber-600" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className={`w-5 h-5 ${summary.lowStockItems > 0 ? "text-amber-600" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             }
-            iconWrapperClassName={lowStockItems > 0 ? "bg-amber-100" : "bg-slate-100"}
-            value={lowStockItems}
+            iconWrapperClassName={summary.lowStockItems > 0 ? "bg-amber-100" : "bg-slate-100"}
+            value={summary.lowStockItems}
             label="Low Stock"
-            valueClassName={lowStockItems > 0 ? "text-amber-600" : undefined}
+            valueClassName={summary.lowStockItems > 0 ? "text-amber-600" : undefined}
             className={
-              lowStockItems > 0 ? "border-amber-300 hover:bg-amber-50" : undefined
+              summary.lowStockItems > 0 ? "border-amber-300 hover:bg-amber-50" : undefined
             }
-            onClick={() => lowStockItems > 0 && setFilterStock(filterStock === "low" ? "all" : "low")}
+            onClick={() => {
+              if (!summary.lowStockItems) return
+              setPage(1)
+              setFilterStock(filterStock === "low" ? "all" : "low")
+            }}
           />
           <KpiStatCard
             icon={
@@ -182,7 +209,7 @@ export default function ServiceMaterialsPage() {
               </svg>
             }
             iconWrapperClassName="bg-slate-100"
-            value={format(totalValue)}
+            value={format(summary.totalValue)}
             label="Total Value"
             valueVariant="currency"
           />
@@ -206,7 +233,10 @@ export default function ServiceMaterialsPage() {
           </div>
           <MenuSelect
             value={filterStatus}
-            onValueChange={(v) => setFilterStatus(v as "all" | "active" | "inactive")}
+            onValueChange={(v) => {
+              setPage(1)
+              setFilterStatus(v as "all" | "active" | "inactive")
+            }}
             wrapperClassName="w-auto shrink-0 min-w-[9rem]"
             options={[
               { value: "all", label: "All Status" },
@@ -216,7 +246,10 @@ export default function ServiceMaterialsPage() {
           />
           <MenuSelect
             value={filterStock}
-            onValueChange={(v) => setFilterStock(v as "all" | "low" | "ok")}
+            onValueChange={(v) => {
+              setPage(1)
+              setFilterStock(v as "all" | "low" | "ok")
+            }}
             wrapperClassName="w-auto shrink-0 min-w-[9rem]"
             options={[
               { value: "all", label: "All Stock" },
@@ -226,7 +259,7 @@ export default function ServiceMaterialsPage() {
           />
           {filtersActive && (
             <button
-              onClick={() => { setSearch(""); setSearchQuery(""); setFilterStatus("all"); setFilterStock("all") }}
+              onClick={() => { setPage(1); setSearch(""); setSearchQuery(""); setFilterStatus("all"); setFilterStock("all") }}
               className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
             >
               Clear
@@ -375,6 +408,29 @@ export default function ServiceMaterialsPage() {
                 </tbody>
               </table>
             </div>
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-slate-600 tabular-nums">
+                  Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
 

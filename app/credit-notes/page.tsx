@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -48,12 +48,19 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function CreditNotesPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const pathname = usePathname()
   const [loading, setLoading] = useState(true)
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([])
   const [error, setError] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
+  const PAGE_SIZE = 25
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
   const isServiceRoute = pathname?.startsWith("/service/")
   const createPath = isServiceRoute ? "/service/credit-notes/create" : "/credit-notes/create"
   const viewPath = (creditNoteId: string) =>
@@ -61,7 +68,7 @@ export default function CreditNotesPage() {
 
   useEffect(() => {
     loadCreditNotes()
-  }, [statusFilter])
+  }, [statusFilter, search, page])
 
   const loadCreditNotes = async () => {
     try {
@@ -75,12 +82,17 @@ export default function CreditNotesPage() {
       const params = new URLSearchParams()
       params.append("business_id", business.id)
       if (statusFilter !== "all") params.append("status", statusFilter)
+      if (search.trim()) params.append("search", search.trim())
+      params.append("page", String(page))
+      params.append("limit", String(PAGE_SIZE))
 
       const response = await fetch(`/api/credit-notes/list?${params.toString()}`)
       if (!response.ok) throw new Error("Failed to load credit notes")
 
-      const { creditNotes: data } = await response.json()
+      const payload = await response.json()
+      const data = payload.creditNotes || []
       setCreditNotes(data || [])
+      setPagination(payload.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
       setLoading(false)
     } catch (err: any) {
       setError(err.message || "Failed to load credit notes")
@@ -94,15 +106,14 @@ export default function CreditNotesPage() {
   const pending = creditNotes.filter((cn) => cn.status === "issued").length
   const totalValue = creditNotes.reduce((sum, cn) => sum + Number(cn.total || 0), 0)
 
-  // Client-side search
-  const visible = search.trim()
-    ? creditNotes.filter(
-        (cn) =>
-          cn.credit_number.toLowerCase().includes(search.toLowerCase()) ||
-          (cn.invoices?.customers?.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
-          (cn.invoices?.invoice_number ?? "").toLowerCase().includes(search.toLowerCase())
-      )
-    : creditNotes
+  const visible = creditNotes
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`${pathname || "/credit-notes"}?${params.toString()}`)
+  }, [page, pathname, router, searchParams])
 
   if (loading) {
     return (
@@ -121,11 +132,12 @@ export default function CreditNotesPage() {
 
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
+            <div data-tour="service-credit-notes-overview">
               <h1 className="text-2xl font-bold text-slate-900">Credit Notes</h1>
               <p className="text-sm text-slate-500 mt-0.5">Manage invoice adjustments and refunds</p>
             </div>
             <button
+              data-tour="service-credit-notes-new"
               onClick={() => router.push(createPath)}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
             >
@@ -173,14 +185,20 @@ export default function CreditNotesPage() {
               <input
                 type="text"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
                 placeholder="Search credit notes or customers…"
                 className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
               />
             </div>
             <NativeSelect
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value)
+                setPage(1)
+              }}
               size="sm"
               wrapperClassName="w-auto shrink-0"
             >
@@ -192,7 +210,7 @@ export default function CreditNotesPage() {
             </NativeSelect>
             {(search || statusFilter !== "all") && (
               <button
-                onClick={() => { setSearch(""); setStatusFilter("all") }}
+                onClick={() => { setSearch(""); setStatusFilter("all"); setPage(1) }}
                 className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
               >
                 Clear
@@ -202,7 +220,7 @@ export default function CreditNotesPage() {
 
           {/* Table / Empty State */}
           {visible.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center" data-tour="service-credit-notes-list">
               <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-4">
                 <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -226,7 +244,7 @@ export default function CreditNotesPage() {
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-tour="service-credit-notes-list">
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
@@ -277,6 +295,29 @@ export default function CreditNotesPage() {
                   </tbody>
                 </table>
               </div>
+              {pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
+                  <button
+                    type="button"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-slate-600 tabular-nums">
+                    Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+                  </span>
+                  <button
+                    type="button"
+                    disabled={page >= pagination.totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

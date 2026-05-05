@@ -13,16 +13,74 @@ export function shouldApplyServiceMarketingMetadataFromUrl(
   return true
 }
 
-/** Minimal row from `businesses` for post-auth redirect decisions. */
-export type AuthCallbackOwnedBusiness = {
+/** Minimal business row for post-auth redirect decisions. */
+export type AuthCallbackAccessibleBusiness = {
   id: string
   industry: string | null
+}
+
+type AuthCallbackMembershipBusiness = AuthCallbackAccessibleBusiness & {
+  archived_at?: string | null
+}
+
+/** Minimal row from `business_users` with joined `businesses`. */
+export type AuthCallbackMembershipRow = {
+  business_id: string | null
+  businesses: AuthCallbackMembershipBusiness | AuthCallbackMembershipBusiness[] | null
+}
+
+/** High guardrail limit for callback membership lookups. */
+export const AUTH_CALLBACK_MEMBERSHIP_QUERY_LIMIT = 1000
+
+/**
+ * Membership query failures can undercount accessible workspaces.
+ * Use workspace selection as the safe fallback to prevent silent bypass.
+ */
+export function resolveMembershipQueryFailureRedirect(
+  _ownedBusinessCount: number
+): "/select-workspace" {
+  return "/select-workspace"
+}
+
+/** True when callback membership query may be truncated. */
+export function isMembershipResultPotentiallyTruncated(
+  rowCount: number,
+  limit: number = AUTH_CALLBACK_MEMBERSHIP_QUERY_LIMIT
+): boolean {
+  return rowCount >= limit
+}
+
+/**
+ * Combines owned and membership businesses, deduplicated by id.
+ * Membership rows ignore archived businesses to match `getAllUserBusinesses`.
+ */
+export function mergeAccessibleBusinesses(
+  ownedBusinesses: AuthCallbackAccessibleBusiness[],
+  membershipRows: AuthCallbackMembershipRow[]
+): AuthCallbackAccessibleBusiness[] {
+  const merged: AuthCallbackAccessibleBusiness[] = []
+  const seen = new Set<string>()
+
+  for (const b of ownedBusinesses) {
+    if (!b?.id || seen.has(b.id)) continue
+    seen.add(b.id)
+    merged.push({ id: b.id, industry: b.industry ?? null })
+  }
+
+  for (const row of membershipRows) {
+    const business = Array.isArray(row.businesses) ? row.businesses[0] : row.businesses
+    if (!business?.id || business.archived_at != null || seen.has(business.id)) continue
+    seen.add(business.id)
+    merged.push({ id: business.id, industry: business.industry ?? null })
+  }
+
+  return merged
 }
 
 /**
  * True when the callback URL carries a Finza **Service** marketing context
  * (`workspace=service` plus plan and/or trial). Used to prefer `/service/dashboard`
- * when the user owns multiple businesses.
+ * when the user has only one accessible business.
  */
 export function urlIndicatesServiceMarketingContext(
   workspaceParam: string,
@@ -34,16 +92,15 @@ export function urlIndicatesServiceMarketingContext(
 }
 
 /**
- * Deterministic redirect for users who **already own** at least one business.
+ * Deterministic redirect for users who already have at least one accessible business.
  * Never returns `/business-setup`.
  *
  * - Single business: by `industry` (retail → retail dashboard, service → service dashboard).
- * - Multiple: if URL indicates Service marketing and a service business exists → service dashboard;
- *   otherwise `/` so `app/page.tsx` can apply `getSelectedBusinessId` / multi-workspace rules.
+ * - Multiple: always `/select-workspace` to avoid callback-level workspace bypass.
  */
 export function resolveBusinessDashboardRedirect(
-  businesses: AuthCallbackOwnedBusiness[],
-  urlPrefersService: boolean
+  businesses: AuthCallbackAccessibleBusiness[],
+  _urlPrefersService: boolean
 ): string {
   if (businesses.length === 0) {
     throw new Error("resolveBusinessDashboardRedirect: expected at least one business")
@@ -56,10 +113,5 @@ export function resolveBusinessDashboardRedirect(
     return "/"
   }
 
-  if (urlPrefersService) {
-    const hasService = businesses.some((b) => (b.industry || "").toLowerCase() === "service")
-    if (hasService) return "/service/dashboard"
-  }
-
-  return "/"
+  return "/select-workspace"
 }

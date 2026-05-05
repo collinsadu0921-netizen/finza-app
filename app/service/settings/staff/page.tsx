@@ -523,6 +523,11 @@ export default function ServiceStaffSettingsPage() {
 
   // Service / professional industry: payroll staff (tab mode — not retail POS staff)
   if (isPayrollStaffIndustry(businessIndustry)) {
+    const activeStaff = staff.filter((member) => member.status === "active").length
+    const inactiveStaff = staff.filter((member) => member.status === "inactive").length
+    const terminatedStaff = staff.filter((member) => member.status === "terminated").length
+    const monthlyPayroll = staff.reduce((sum, member) => sum + (Number(member.basic_salary) || 0), 0)
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -542,7 +547,7 @@ export default function ServiceStaffSettingsPage() {
                   Staff Management
                 </h1>
                 <p className="text-gray-600 dark:text-gray-400 text-lg">
-                  Manage your employees for payroll processing
+                  Team roster and payroll-ready staff details
                 </p>
               </div>
               <button
@@ -554,6 +559,32 @@ export default function ServiceStaffSettingsPage() {
                 </svg>
                 Add Staff
               </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Total Staff</p>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">{staff.length}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Active</p>
+              <p className="text-2xl font-semibold text-green-600 dark:text-green-400 mt-1">{activeStaff}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {inactiveStaff} inactive, {terminatedStaff} terminated
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Monthly Payroll Base</p>
+              <p className="text-2xl font-semibold text-gray-900 dark:text-white mt-1">{formatSalary(monthlyPayroll)}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Employment Mix</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+                Full-time {staff.filter((member) => member.employment_type === "full_time").length} · Part-time{" "}
+                {staff.filter((member) => member.employment_type === "part_time").length} · Casual{" "}
+                {staff.filter((member) => member.employment_type === "casual").length}
+              </p>
             </div>
           </div>
 
@@ -571,31 +602,47 @@ export default function ServiceStaffSettingsPage() {
 
           {/* Staff List */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Current Staff</h2>
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Team Members</h2>
+              <span className="text-sm text-gray-500 dark:text-gray-400">{staff.length} records</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 dark:bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Position</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Contact</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Salary</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {staff.length === 0 ? (
+            {staff.length === 0 ? (
+              <div className="px-6 py-14 text-center">
+                <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-blue-600 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">No staff members yet</h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Add your first team member to prepare payroll and workforce records.
+                </p>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="mt-5 inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Staff
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto hidden md:block">
+                <table className="w-full">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <td colSpan={7} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
-                        No staff members yet. Click "Add Staff" to get started.
-                      </td>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Position</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Contact</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Salary</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Actions</th>
                     </tr>
-                  ) : (
-                    staff.map((member) => (
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {staff.map((member) => (
                       <tr key={member.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-white">{member.name}</div>
@@ -650,11 +697,72 @@ export default function ServiceStaffSettingsPage() {
                           )}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {staff.length > 0 && (
+              <div className="grid grid-cols-1 gap-4 p-4 md:hidden">
+                {staff.map((member) => (
+                  <div
+                    key={member.id}
+                    className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-gray-900 dark:text-white">{member.name}</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{member.position || "No position set"}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(member.status)}`}>
+                          {member.status}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-gray-500 dark:text-gray-400">Salary</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{formatSalary(member.basic_salary)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 dark:text-gray-400">Employment</p>
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getEmploymentTypeBadgeColor(member.employment_type)}`}>
+                          {member.employment_type.replace("_", " ")}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-sm text-gray-700 dark:text-gray-300">
+                      <p>{member.phone || "No phone"}</p>
+                      {member.email && <p className="text-gray-500 dark:text-gray-400">{member.email}</p>}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700 text-sm">
+                      <button
+                        onClick={() => router.push(`/service/payroll/staff/${member.id}`)}
+                        className="text-blue-600 dark:text-blue-400 font-medium"
+                      >
+                        View
+                      </button>
+                      <button
+                        onClick={() => router.push(`/service/payroll/staff/${member.id}/edit`)}
+                        className="text-green-600 dark:text-green-400 font-medium"
+                      >
+                        Edit
+                      </button>
+                      {member.status !== "terminated" && (
+                        <button
+                          onClick={() => handleDeleteStaff(member.id, member.name)}
+                          className="text-red-600 dark:text-red-400 font-medium"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Add Staff Modal */}

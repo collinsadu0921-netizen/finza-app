@@ -5,6 +5,8 @@ import {
   PUBLIC_CREDIT_NOTE_ITEM_SELECT,
 } from "@/lib/publicDocuments/publicDocumentSelects"
 
+const PUBLIC_CREDIT_NOTE_STATUSES = new Set(["issued", "applied"])
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -36,6 +38,13 @@ export async function GET(
       .single()
 
     if (creditNoteError || !creditNote) {
+      return NextResponse.json({ error: "Document not found" }, { status: 404 })
+    }
+
+    const status = String((creditNote as { status?: string | null }).status || "")
+      .trim()
+      .toLowerCase()
+    if (!PUBLIC_CREDIT_NOTE_STATUSES.has(status)) {
       return NextResponse.json({ error: "Document not found" }, { status: 404 })
     }
 

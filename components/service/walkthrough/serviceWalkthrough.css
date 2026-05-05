@@ -1,0 +1,8 @@
+/**
+ * Applied when Service walkthrough host loads.
+ * Keeps `[data-tour]` targets clear of sticky headers / top chrome when scrolling into view.
+ */
+[data-tour] {
+  scroll-margin-top: 120px;
+  scroll-margin-bottom: 24px;
+}

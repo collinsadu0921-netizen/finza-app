@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import type { ProposalListRow } from "@/lib/proposals/proposalListApi"
@@ -14,12 +14,17 @@ import {
 
 export default function ServiceProposalsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const PAGE_SIZE = 25
   const [rows, setRows] = useState<ProposalListRow[]>([])
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [page, setPage] = useState(1)
-  const [pagination, setPagination] = useState({ page: 1, pageSize: 50, totalCount: 0, totalPages: 0 })
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -44,7 +49,7 @@ export default function ServiceProposalsPage() {
         const qs = new URLSearchParams()
         qs.set("business_id", business.id)
         qs.set("page", String(page))
-        qs.set("limit", "50")
+        qs.set("limit", String(PAGE_SIZE))
         const res = await fetch(`/api/proposals/list?${qs.toString()}`, { credentials: "same-origin" })
         const payload = await res.json().catch(() => ({}))
         if (!res.ok) {
@@ -54,7 +59,7 @@ export default function ServiceProposalsPage() {
         }
         if (cancelled) return
         setRows(payload.proposals || [])
-        setPagination(payload.pagination || { page: 1, pageSize: 50, totalCount: 0, totalPages: 0 })
+        setPagination(payload.pagination || { page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load")
       } finally {
@@ -64,7 +69,14 @@ export default function ServiceProposalsPage() {
     return () => {
       cancelled = true
     }
-  }, [page])
+  }, [page, PAGE_SIZE])
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`/service/proposals?${params.toString()}`)
+  }, [page, router, searchParams])
 
   async function deleteProposal(id: string, title: string) {
     if (!businessId) {
@@ -111,12 +123,13 @@ export default function ServiceProposalsPage() {
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div>
+          <div data-tour="service-proposals-overview">
             <h1 className="text-2xl font-bold text-slate-900">Proposals</h1>
             <p className="mt-0.5 text-sm text-slate-500">Structured proposals with a secure client link</p>
           </div>
           <button
             type="button"
+            data-tour="service-proposals-new"
             onClick={() => router.push("/service/proposals/new")}
             className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
           >
@@ -126,7 +139,7 @@ export default function ServiceProposalsPage() {
 
         {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div> : null}
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" data-tour="service-proposals-list">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
               <tr>

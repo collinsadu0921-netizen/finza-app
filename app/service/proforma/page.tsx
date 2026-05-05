@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
@@ -52,16 +52,23 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function ProformaListPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const PAGE_SIZE = 25
   const { format } = useBusinessCurrency()
   const [proformas, setProformas] = useState<ProformaInvoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [search, setSearch] = useState("")
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
 
   useEffect(() => {
     loadProformas()
-  }, [statusFilter])
+  }, [statusFilter, search, page])
 
   const loadProformas = async () => {
     try {
@@ -70,6 +77,9 @@ export default function ProformaListPage() {
 
       const url = new URL("/api/proforma/list", window.location.origin)
       if (statusFilter !== "all") url.searchParams.set("status", statusFilter)
+      if (search.trim()) url.searchParams.set("search", search.trim())
+      url.searchParams.set("page", String(page))
+      url.searchParams.set("limit", String(PAGE_SIZE))
 
       const response = await fetch(url.toString())
       if (!response.ok) {
@@ -79,6 +89,7 @@ export default function ProformaListPage() {
 
       const data = await response.json()
       setProformas(data.proformas || [])
+      setPagination(data.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
       setLoading(false)
     } catch (err: any) {
       setError(err.message || "Failed to load proforma invoices")
@@ -96,14 +107,14 @@ export default function ProformaListPage() {
   const open = proformas.filter((p) => p.status === "sent").length
   const converted = proformas.filter((p) => p.status === "converted").length
 
-  // Client-side search
-  const visible = search.trim()
-    ? proformas.filter(
-        (p) =>
-          (p.proforma_number ?? "").toLowerCase().includes(search.toLowerCase()) ||
-          (p.customers?.name ?? "").toLowerCase().includes(search.toLowerCase())
-      )
-    : proformas
+  const visible = proformas
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`/service/proforma?${params.toString()}`)
+  }, [page, router, searchParams])
 
   if (loading) {
     return (
@@ -122,11 +133,12 @@ export default function ProformaListPage() {
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
+          <div data-tour="service-proformas-overview">
             <h1 className="text-2xl font-bold text-slate-900">Proforma Invoices</h1>
             <p className="text-sm text-slate-500 mt-0.5">Manage your proforma invoices</p>
           </div>
           <button
+            data-tour="service-proformas-new"
             onClick={() => router.push("/service/proforma/create")}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
           >
@@ -174,14 +186,20 @@ export default function ProformaListPage() {
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value)
+                setPage(1)
+              }}
               placeholder="Search proformas or customers…"
               className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
             />
           </div>
           <MenuSelect
             value={statusFilter}
-            onValueChange={setStatusFilter}
+            onValueChange={(value) => {
+              setStatusFilter(value)
+              setPage(1)
+            }}
             wrapperClassName="w-auto shrink-0 min-w-[10.5rem]"
             options={[
               { value: "all", label: "All Status" },
@@ -194,7 +212,7 @@ export default function ProformaListPage() {
           />
           {(search || statusFilter !== "all") && (
             <button
-              onClick={() => { setSearch(""); setStatusFilter("all") }}
+              onClick={() => { setSearch(""); setStatusFilter("all"); setPage(1) }}
               className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
             >
               Clear
@@ -204,7 +222,7 @@ export default function ProformaListPage() {
 
         {/* Table / Empty State */}
         {visible.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center" data-tour="service-proformas-list">
             <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-4">
               <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -226,7 +244,7 @@ export default function ProformaListPage() {
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-tour="service-proformas-list">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -275,6 +293,29 @@ export default function ProformaListPage() {
                 </tbody>
               </table>
             </div>
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-slate-600 tabular-nums">
+                  Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

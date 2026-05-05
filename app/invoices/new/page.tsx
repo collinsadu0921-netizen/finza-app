@@ -764,7 +764,7 @@ export default function NewInvoicePage() {
             {/* 2. Customer & Dates Section */}
             <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
               {/* Customer Selection */}
-              <div className="space-y-4">
+              <div className="space-y-4" data-tour="service-invoice-customer">
                 <div className="flex justify-between items-end">
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Bill To</label>
                   <button
@@ -927,7 +927,7 @@ export default function NewInvoicePage() {
             )}
 
             {/* 3. High Density Line Items Table */}
-            <div className="border-t border-slate-200 dark:border-slate-700">
+            <div className="border-t border-slate-200 dark:border-slate-700" data-tour="service-invoice-lines">
               <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 sm:px-6">
                 <button
                   type="button"
@@ -997,7 +997,7 @@ export default function NewInvoicePage() {
                 />
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-3" data-tour="service-invoice-tax">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1081,7 +1081,10 @@ export default function NewInvoicePage() {
                 </div>
 
                 {/* WHT Receivable — customer withholds tax */}
-                <div className={`mt-4 rounded-lg border p-4 ${applyWHTReceivable ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                <div
+                  className={`mt-4 rounded-lg border p-4 ${applyWHTReceivable ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}
+                  data-tour="service-invoice-payment"
+                >
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-sm font-semibold text-slate-800">Customer will deduct WHT</span>
@@ -1129,7 +1132,7 @@ export default function NewInvoicePage() {
           </div>
 
           {/* 5. Sticky Action Footer */}
-          <div className="mt-8 flex items-center justify-end gap-3 sticky bottom-4 z-10">
+          <div className="mt-8 flex items-center justify-end gap-3 sticky bottom-4 z-10" data-tour="service-invoice-save">
             <button
               onClick={() => router.back()}
               className="px-4 py-2 bg-white border border-slate-300 rounded shadow-sm text-slate-700 text-sm font-medium hover:bg-slate-50"

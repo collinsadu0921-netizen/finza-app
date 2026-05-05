@@ -112,7 +112,15 @@ export default function PublicProposalPage() {
         </header>
 
         {model && !error ? (
-          <div className="mx-auto mt-4 flex max-w-4xl justify-end print:hidden">
+          <div className="mx-auto mt-4 flex max-w-4xl justify-end gap-2 print:hidden">
+            <a
+              href={`/api/proposals/public/${encodeURIComponent(token)}/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+            >
+              Download PDF
+            </a>
             <button
               type="button"
               onClick={() => window.print()}

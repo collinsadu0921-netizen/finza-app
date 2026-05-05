@@ -11,6 +11,33 @@ import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { dispatchBusinessBrandingUpdated } from "@/lib/business/businessBrandingEvents"
 import { tryBusinessAssetsLogoStoragePath } from "@/lib/business/businessLogoStorage"
 
+function trimStr(v: unknown): string {
+  if (v === undefined || v === null) return ""
+  return String(v).trim()
+}
+
+function formStateFromProfileBusiness(b: Record<string, unknown>) {
+  return {
+    legal_name: trimStr(b.legal_name),
+    trading_name: trimStr(b.trading_name),
+    address_street: trimStr(b.address_street),
+    address_city: trimStr(b.address_city),
+    address_region: trimStr(b.address_region),
+    address_country: trimStr(b.address_country),
+    phone: trimStr(b.phone),
+    whatsapp_phone: trimStr(b.whatsapp_phone),
+    email: trimStr(b.email),
+    website: trimStr(b.website),
+    tin: trimStr(b.tin),
+    logo_url: trimStr(b.logo_url),
+    default_currency: trimStr(b.default_currency),
+    start_date: b.start_date ? new Date(String(b.start_date)).toISOString().split("T")[0] : "",
+    cit_rate_code: (b.cit_rate_code as string) || "standard_25",
+    vat_scheme: (b.vat_scheme as string) || "standard",
+    business_type: (b.business_type as string) || "limited_company",
+  }
+}
+
 export default function ServiceBusinessProfilePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -22,6 +49,9 @@ export default function ServiceBusinessProfilePage() {
   const [success, setSuccess] = useState("")
   const [businessId, setBusinessId] = useState("")
   const [businessIndustry, setBusinessIndustry] = useState("")
+  const [recordedBusinessName, setRecordedBusinessName] = useState("")
+  const [onboardingStep, setOnboardingStep] = useState<string | null>(null)
+  const [authUserEmail, setAuthUserEmail] = useState("")
 
   const returnPath = searchParams?.get("return") || null
 
@@ -69,6 +99,8 @@ export default function ServiceBusinessProfilePage() {
         return
       }
 
+      setAuthUserEmail(trimStr(user.email))
+
       const business = await getCurrentBusiness(supabase, user.id)
       if (!business) {
         setError("Business not found")
@@ -85,25 +117,12 @@ export default function ServiceBusinessProfilePage() {
 
       const { business: businessData } = await response.json()
 
-      setFormData({
-        legal_name: businessData.legal_name || "",
-        trading_name: businessData.trading_name || "",
-        address_street: businessData.address_street || "",
-        address_city: businessData.address_city || "",
-        address_region: businessData.address_region || "",
-        address_country: businessData.address_country || "",
-        phone: businessData.phone || "",
-        whatsapp_phone: businessData.whatsapp_phone || "",
-        email: businessData.email || "",
-        website: businessData.website || "",
-        tin: businessData.tin || "",
-        logo_url: businessData.logo_url || "",
-        default_currency: businessData.default_currency || "",
-        start_date: businessData.start_date ? new Date(businessData.start_date).toISOString().split("T")[0] : "",
-        cit_rate_code: businessData.cit_rate_code || "standard_25",
-        vat_scheme: businessData.vat_scheme || "standard",
-        business_type: businessData.business_type || "limited_company",
-      })
+      setRecordedBusinessName(trimStr(businessData.name))
+      setOnboardingStep(
+        typeof businessData.onboarding_step === "string" ? businessData.onboarding_step : null
+      )
+
+      setFormData(formStateFromProfileBusiness(businessData as Record<string, unknown>))
 
       setLogoPreview(businessData.logo_url?.trim() ? businessData.logo_url : null)
       setSelectedLogoFileName(null)
@@ -163,7 +182,14 @@ export default function ServiceBusinessProfilePage() {
       }
 
       URL.revokeObjectURL(previewUrl)
-      setFormData((prev) => ({ ...prev, logo_url: publicUrl }))
+      if (typeof profileJson.business === "object" && profileJson.business) {
+        const row = profileJson.business as Record<string, unknown>
+        setFormData((prev) => ({ ...prev, ...formStateFromProfileBusiness(row) }))
+        if (typeof row.onboarding_step === "string") setOnboardingStep(row.onboarding_step)
+        if (row.name != null) setRecordedBusinessName(trimStr(row.name))
+      } else {
+        setFormData((prev) => ({ ...prev, logo_url: publicUrl }))
+      }
       setLogoPreview(publicUrl)
       setSelectedLogoFileName(null)
       if (logoFileInputRef.current) logoFileInputRef.current.value = ""
@@ -214,6 +240,13 @@ export default function ServiceBusinessProfilePage() {
         throw new Error((profileJson as { error?: string }).error || "Failed to remove logo")
       }
 
+      if (typeof (profileJson as { business?: unknown }).business === "object" && (profileJson as { business: Record<string, unknown> }).business) {
+        const row = (profileJson as { business: Record<string, unknown> }).business
+        setFormData((prev) => ({ ...prev, ...formStateFromProfileBusiness(row) }))
+        if (typeof row.onboarding_step === "string") setOnboardingStep(row.onboarding_step)
+        if (row.name != null) setRecordedBusinessName(trimStr(row.name))
+      }
+
       const storagePath = tryBusinessAssetsLogoStoragePath(prevPublicUrl, businessId)
       if (storagePath) {
         const { error: rmErr } = await supabase.storage.from("business-assets").remove([storagePath])
@@ -246,13 +279,53 @@ export default function ServiceBusinessProfilePage() {
     setError("")
     setSuccess("")
 
-    if (!formData.address_country) {
+    const tCountry = trimStr(formData.address_country)
+    const tCurrency = trimStr(formData.default_currency)
+
+    if (!tCountry) {
       setError("Country is required.")
       return
     }
-    if (!formData.default_currency) {
+    if (!tCurrency) {
       setError("Default currency is required.")
       return
+    }
+
+    const tLegal = trimStr(formData.legal_name)
+    const tTrading = trimStr(formData.trading_name)
+    const tPhone = trimStr(formData.phone)
+    const tEmail = trimStr(formData.email)
+
+    if (onboardingStep === "business_profile") {
+      const effectiveIdentity = tLegal || tTrading || trimStr(recordedBusinessName)
+      const effectiveContact = tPhone || tEmail || trimStr(authUserEmail)
+      if (!effectiveIdentity) {
+        setError(
+          "Business name, legal name, or trading name is required. Complete business setup or enter at least one of these names."
+        )
+        return
+      }
+      if (!effectiveContact) {
+        setError("Please provide at least one contact method: phone or email.")
+        return
+      }
+    }
+
+    const payload = {
+      ...formData,
+      address_country: tCountry,
+      default_currency: tCurrency,
+      legal_name: tLegal,
+      trading_name: tTrading,
+      phone: tPhone,
+      whatsapp_phone: trimStr(formData.whatsapp_phone),
+      email: tEmail,
+      website: trimStr(formData.website),
+      tin: trimStr(formData.tin),
+      address_street: trimStr(formData.address_street),
+      address_city: trimStr(formData.address_city),
+      address_region: trimStr(formData.address_region),
+      business_id: businessId,
     }
 
     try {
@@ -260,7 +333,7 @@ export default function ServiceBusinessProfilePage() {
       const response = await fetch("/api/business/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, business_id: businessId }),
+        body: JSON.stringify(payload),
       })
       const json = await response.json()
 
@@ -269,6 +342,19 @@ export default function ServiceBusinessProfilePage() {
         setError(message)
         toast.showToast(message, "error")
         return
+      }
+
+      if (json.business && typeof json.business === "object") {
+        const row = json.business as Record<string, unknown>
+        setFormData((prev) => ({ ...prev, ...formStateFromProfileBusiness(row) }))
+        setLogoPreview(trimStr(row.logo_url) ? String(row.logo_url) : null)
+        setRecordedBusinessName(trimStr(row.name))
+        if (typeof row.onboarding_step === "string") {
+          setOnboardingStep(row.onboarding_step)
+        } else {
+          setOnboardingStep(null)
+        }
+        setBusinessIndustry(trimStr(row.industry) || businessIndustry)
       }
 
       toast.showToast("Business profile updated", "success")
@@ -305,7 +391,7 @@ export default function ServiceBusinessProfilePage() {
       {success && <div className="bg-green-50 dark:bg-green-900/20 border-l-4 border-green-400 text-green-700 dark:text-green-400 px-4 py-3 rounded">{success}</div>}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6" data-tour="service-profile-logo">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Business Logo</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             PNG, JPG, or WebP, up to 2 MB. Shown in the sidebar and on documents that use your business branding.
@@ -313,7 +399,7 @@ export default function ServiceBusinessProfilePage() {
           <div className="mb-4 inline-flex max-w-full rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-600">
             <BusinessLogoDisplay
               logoUrl={logoPreview}
-              businessName={formData.trading_name || formData.legal_name}
+              businessName={formData.trading_name || formData.legal_name || recordedBusinessName}
               variant="document"
               size="xl"
               rounded="lg"
@@ -359,7 +445,7 @@ export default function ServiceBusinessProfilePage() {
         </div>
 
         {/* Business Identity */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4" data-tour="service-profile-identity">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Business Identity</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input value={formData.legal_name} onChange={(e) => handleChange("legal_name", e.target.value)} placeholder="Legal name" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
@@ -411,7 +497,7 @@ export default function ServiceBusinessProfilePage() {
         </div>
 
         {/* Contact */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4" data-tour="service-profile-contact">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Contact</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input value={formData.phone} onChange={(e) => handleChange("phone", e.target.value)} placeholder="Phone" className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 dark:bg-gray-700 dark:text-white" />
@@ -491,7 +577,7 @@ export default function ServiceBusinessProfilePage() {
           </div>
         )}
 
-        <div className="flex gap-3">
+        <div className="flex gap-3" data-tour="service-profile-save">
           <button type="button" onClick={() => router.back()} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 dark:bg-gray-700">
             Cancel
           </button>

@@ -1,9 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
+import { useRouter, useSearchParams } from "next/navigation"
 import LoadingScreen from "@/components/ui/LoadingScreen"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 
@@ -17,39 +15,45 @@ type ServiceCatalogRow = {
 
 export default function ServiceServicesPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { format } = useBusinessCurrency()
+  const PAGE_SIZE = 25
   const [rows, setRows] = useState<ServiceCatalogRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: PAGE_SIZE,
+    totalCount: 0,
+    totalPages: 0,
+  })
 
   useEffect(() => {
     load()
-  }, [])
+  }, [page])
 
   const load = async () => {
     try {
+      setLoading(true)
       setError("")
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      const params = new URLSearchParams()
+      params.set("page", String(page))
+      params.set("limit", String(PAGE_SIZE))
+      const res = await fetch(`/api/service/services/workspace?${params.toString()}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data?.error === "string" ? data.error : "Failed to load services")
         setLoading(false)
         return
       }
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setLoading(false)
-        return
-      }
-      const { data, error: qErr } = await supabase
-        .from("service_catalog")
-        .select("id, name, default_price, tax_code, is_active")
-        .eq("business_id", business.id)
-        .order("name", { ascending: true })
-      if (qErr) {
-        setError(qErr.message || "Failed to load services")
-        setLoading(false)
-        return
-      }
-      setRows((data ?? []) as ServiceCatalogRow[])
+      setRows((data.rows ?? []) as ServiceCatalogRow[])
+      setPagination(
+        data.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 }
+      )
       setLoading(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load")
@@ -57,14 +61,28 @@ export default function ServiceServicesPage() {
     }
   }
 
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`/service/services?${params.toString()}`)
+  }, [page, router, searchParams])
+
   if (loading) return <LoadingScreen />
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Services</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Services</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {pagination.totalCount} service{pagination.totalCount !== 1 ? "s" : ""}
+            </p>
+          </div>
           <button
+            type="button"
+            data-tour="service-services-add"
             onClick={() => router.push("/service/services/new")}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium"
           >
@@ -76,7 +94,10 @@ export default function ServiceServicesPage() {
             {error}
           </div>
         )}
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+        <div
+          className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden"
+          data-tour="service-services-list"
+        >
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 dark:bg-gray-700">
@@ -116,6 +137,29 @@ export default function ServiceServicesPage() {
               </tbody>
             </table>
           </div>
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-700/20">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-xs text-gray-600 dark:text-gray-300">
+                Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+              </span>
+              <button
+                type="button"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

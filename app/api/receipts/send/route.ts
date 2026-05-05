@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabaseClient"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { generateEmailReceipt, generateSMSReceipt, type ReceiptData } from "@/lib/receipts/template"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
 import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTags"
@@ -7,6 +7,7 @@ import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()

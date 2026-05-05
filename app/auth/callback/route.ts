@@ -7,6 +7,10 @@ import {
 } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import {
+  AUTH_CALLBACK_MEMBERSHIP_QUERY_LIMIT,
+  isMembershipResultPotentiallyTruncated,
+  mergeAccessibleBusinesses,
+  resolveMembershipQueryFailureRedirect,
   resolveBusinessDashboardRedirect,
   shouldApplyServiceMarketingMetadataFromUrl,
   urlIndicatesServiceMarketingContext,
@@ -171,14 +175,61 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: true })
     .limit(50)
 
+  const { data: membershipRows, error: membershipErr } = await supabase
+    .from("business_users")
+    .select("business_id, businesses(id, industry, archived_at)")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true })
+    .limit(AUTH_CALLBACK_MEMBERSHIP_QUERY_LIMIT)
+
   const origin = requestUrl.origin
   let redirectUrl: URL
 
-  if (ownedErr) {
-    console.error("[auth/callback] businesses query:", ownedErr.message)
+  if (ownedErr || membershipErr) {
+    if (ownedErr) {
+      console.error("[auth/callback] businesses query:", ownedErr.message)
+    }
+    if (membershipErr) {
+      console.error("[auth/callback] business_users query:", membershipErr.message)
+      const ownedCount = Array.isArray(ownedRows) ? ownedRows.length : 0
+      const safeRedirect = resolveMembershipQueryFailureRedirect(ownedCount)
+      redirectUrl = new URL(safeRedirect, origin)
+      const res = NextResponse.redirect(redirectUrl)
+      pendingCookies.forEach(({ name, value, options }) => {
+        if (options && typeof options === "object") {
+          res.cookies.set(name, value, options as Parameters<typeof res.cookies.set>[2])
+        } else {
+          res.cookies.set(name, value)
+        }
+      })
+      return res
+    }
     redirectUrl = new URL("/", origin)
   } else {
-    const businesses = Array.isArray(ownedRows) ? ownedRows : []
+    if (
+      isMembershipResultPotentiallyTruncated(
+        Array.isArray(membershipRows) ? membershipRows.length : 0
+      )
+    ) {
+      console.warn(
+        "[auth/callback] membership rows reached limit; routing to /select-workspace to avoid undercount"
+      )
+      redirectUrl = new URL("/select-workspace", origin)
+      const res = NextResponse.redirect(redirectUrl)
+      pendingCookies.forEach(({ name, value, options }) => {
+        if (options && typeof options === "object") {
+          res.cookies.set(name, value, options as Parameters<typeof res.cookies.set>[2])
+        } else {
+          res.cookies.set(name, value)
+        }
+      })
+      return res
+    }
+
+    const businesses = mergeAccessibleBusinesses(
+      Array.isArray(ownedRows) ? ownedRows : [],
+      Array.isArray(membershipRows) ? membershipRows : []
+    )
 
     if (businesses.length > 0) {
       redirectUrl = new URL(resolveBusinessDashboardRedirect(businesses, urlPrefersService), origin)

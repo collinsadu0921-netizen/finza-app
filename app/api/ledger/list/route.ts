@@ -66,8 +66,8 @@ export async function GET(request: NextRequest) {
     const accountCode = searchParams.get("account_code")
     const referenceType = searchParams.get("reference_type")
     const referenceId = searchParams.get("reference_id")
-    const page = parseInt(searchParams.get("page") || "1")
-    const pageSize = parseInt(searchParams.get("page_size") || "50")
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1)
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("page_size") || "25", 10) || 25))
 
     let query = supabase
       .from("journal_entries")
@@ -110,6 +110,38 @@ export async function GET(request: NextRequest) {
       query = query.eq("reference_id", referenceId)
     }
 
+    if (accountId || accountCode) {
+      let idQuery = supabase
+        .from("journal_entries")
+        .select("id, journal_entry_lines!inner(account_id, accounts!inner(code))")
+        .eq("business_id", businessId)
+
+      if (startDate) idQuery = idQuery.gte("date", startDate)
+      if (endDate) idQuery = idQuery.lte("date", endDate)
+      if (referenceType) idQuery = idQuery.eq("reference_type", referenceType)
+      if (referenceId) idQuery = idQuery.eq("reference_id", referenceId)
+      if (accountId) idQuery = idQuery.eq("journal_entry_lines.account_id", accountId)
+      if (accountCode) idQuery = idQuery.ilike("journal_entry_lines.accounts.code", `%${accountCode}%`)
+
+      const { data: matchingEntries, error: idError } = await idQuery
+      if (idError) {
+        console.error("Error resolving ledger account filters:", { businessId, idError })
+        return NextResponse.json(
+          { error: idError.message, step: "ledger_account_filter_query", business_id: businessId },
+          { status: 500 }
+        )
+      }
+
+      const matchingIds = [...new Set((matchingEntries || []).map((entry: any) => entry.id).filter(Boolean))]
+      if (matchingIds.length === 0) {
+        return NextResponse.json({
+          entries: [],
+          pagination: { page, pageSize, total: 0, totalPages: 0 },
+        })
+      }
+      query = query.in("id", matchingIds)
+    }
+
     // Apply pagination
     const from = (page - 1) * pageSize
     const to = from + pageSize - 1
@@ -130,25 +162,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Filter by account if specified
-    let filteredEntries = entries || []
-    if (accountId) {
-      filteredEntries = filteredEntries.filter((entry: any) =>
-        entry.journal_entry_lines.some((line: any) => line.account_id === accountId)
-      )
-    }
-
-    // Filter by account code if specified
-    if (accountCode) {
-      filteredEntries = filteredEntries.filter((entry: any) =>
-        entry.journal_entry_lines.some((line: any) => 
-          line.accounts && line.accounts.code.toLowerCase().includes(accountCode.toLowerCase())
-        )
-      )
-    }
-
     return NextResponse.json({ 
-      entries: filteredEntries,
+      entries: entries || [],
       pagination: {
         page,
         pageSize,

@@ -132,13 +132,17 @@ export async function GET(request: NextRequest) {
     const business = { id: scope.businessId }
     const search = searchParams.get("search") || ""
     const status = searchParams.get("status") // Don't default - only filter if explicitly requested
-    const limit = parseInt(searchParams.get("limit") || "50")
-    const offset = parseInt(searchParams.get("offset") || "0")
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1)
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "25", 10) || 25))
+    const offset =
+      parseInt(searchParams.get("offset") || "", 10) >= 0
+        ? parseInt(searchParams.get("offset") || "0", 10)
+        : (page - 1) * limit
 
     // Build query - select all fields (status may not exist if migration hasn't run)
     let query = supabase
       .from("customers")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("business_id", business.id)
       .order("name", { ascending: true })
 
@@ -159,7 +163,7 @@ export async function GET(request: NextRequest) {
     // Apply pagination
     query = query.range(offset, offset + limit - 1)
 
-    const { data: customers, error: customersError } = await query
+    const { data: customers, error: customersError, count } = await query
 
     if (customersError) {
       console.error("Error fetching customers:", customersError)
@@ -169,7 +173,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ customers: customers || [] })
+    const totalCount = count ?? 0
+    return NextResponse.json({
+      customers: customers || [],
+      pagination: {
+        page,
+        pageSize: limit,
+        totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+    })
   } catch (error: any) {
     console.error("Error in GET /api/customers:", error)
     return NextResponse.json(

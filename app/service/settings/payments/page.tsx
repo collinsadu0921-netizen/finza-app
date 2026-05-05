@@ -336,7 +336,7 @@ export default function ServicePaymentSettingsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
+        <div className="mb-8" data-tour="service-payment-settings-overview">
           <button
             onClick={() => router.back()}
             className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-4 flex items-center gap-2 transition-colors"
@@ -382,7 +382,10 @@ export default function ServicePaymentSettingsPage() {
           className="space-y-6"
         >
           {/* MTN MoMo Section */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700"
+            data-tour="service-payment-settings-momo"
+          >
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">MTN MoMo API Credentials</h2>
             {momoSecretPresent && (
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -442,7 +445,10 @@ export default function ServicePaymentSettingsPage() {
           </div>
 
           {/* Manual wallet — shown on customer invoice when set as default */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700"
+            data-tour="service-payment-settings-bank"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
               <h2 className="text-xl font-bold text-gray-900 dark:text-white">Manual wallet (MoMo / transfer)</h2>
               {manualProviderId && (
@@ -591,6 +597,7 @@ export default function ServicePaymentSettingsPage() {
               type="submit"
               disabled={saving}
               className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-indigo-700 font-medium shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+              data-tour="service-payment-settings-save"
             >
               {saving ? "Saving…" : "Save Settings"}
             </button>

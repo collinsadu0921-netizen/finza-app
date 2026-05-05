@@ -6,6 +6,12 @@ import { canEditBusinessWideSensitiveSettings } from "@/lib/retail/retailSensiti
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 
+/** Trim; empty / whitespace-only becomes "". */
+function normStr(v: unknown): string {
+  if (v === undefined || v === null) return ""
+  return String(v).trim()
+}
+
 async function getBusinessForProfile(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   userId: string,
@@ -48,21 +54,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
+    const authEmail = normStr(user?.email)
+    const rowEmail = normStr(business.email)
+    const displayEmail = rowEmail || authEmail || null
+
+    const rowTrading = normStr(business.trading_name)
+    const rowName = normStr(business.name)
+    const displayTrading = rowTrading || (rowName ? rowName : null)
+
     // Return all business profile fields
-    return NextResponse.json({ 
+    return NextResponse.json({
       business: {
         id: business.id,
         name: business.name,
         industry: business.industry,
         legal_name: business.legal_name || null,
-        trading_name: business.trading_name || null,
+        trading_name: displayTrading,
         address_street: business.address_street || null,
         address_city: business.address_city || null,
         address_region: business.address_region || null,
         address_country: business.address_country || null,
         phone: business.phone || null,
         whatsapp_phone: business.whatsapp_phone || null,
-        email: business.email || null,
+        email: displayEmail,
         website: business.website || null,
         tin: business.tin || null,
         logo_url: business.logo_url || null,
@@ -72,7 +86,8 @@ export async function GET(request: NextRequest) {
         vat_scheme: (business as any).vat_scheme || "standard",
         business_type: (business as any).business_type || "limited_company",
         created_at: business.created_at || null,
-      }
+        onboarding_step: (business as { onboarding_step?: string }).onboarding_step ?? null,
+      },
     })
   } catch (error: any) {
     console.error("Error fetching business profile:", error)
@@ -132,25 +147,33 @@ export async function PUT(request: NextRequest) {
       business_type,
     } = body
 
-    // Validate required fields
-    if (address_country !== undefined && !address_country) {
+    const authEmail = normStr(user.email)
+
+    // Validate required fields (trimmed)
+    if (address_country !== undefined && !normStr(address_country)) {
       return NextResponse.json(
         { error: "Country is required. Please select your business country." },
         { status: 400 }
       )
     }
 
-    if (default_currency !== undefined && !default_currency) {
+    if (default_currency !== undefined && !normStr(default_currency)) {
       return NextResponse.json(
         { error: "Default currency is required. Please select your business currency." },
         { status: 400 }
       )
     }
 
+    const trimmedCountry =
+      address_country !== undefined ? normStr(address_country) : undefined
+    const trimmedCurrency =
+      default_currency !== undefined ? normStr(default_currency) : undefined
+
     // Base currency immutability: cannot change after accounting activity has begun
     if (
       default_currency !== undefined &&
-      default_currency !== (business.default_currency || null)
+      trimmedCurrency !== undefined &&
+      trimmedCurrency !== (business.default_currency || null)
     ) {
       const businessId = business.id
 
@@ -181,21 +204,20 @@ export async function PUT(request: NextRequest) {
     }
 
     // Validate country-currency match if both are being updated
-    if (address_country !== undefined && default_currency !== undefined) {
-      const countryCode = normalizeCountry(address_country)
+    if (trimmedCountry !== undefined && trimmedCurrency !== undefined) {
+      const countryCode = normalizeCountry(trimmedCountry)
       try {
-        assertCountryCurrency(countryCode, default_currency)
+        assertCountryCurrency(countryCode, trimmedCurrency)
       } catch (error: any) {
         return NextResponse.json(
           { error: error.message || "Currency does not match country." },
           { status: 400 }
         )
       }
-    } else if (address_country !== undefined) {
-      // Country is being updated, validate against existing currency
+    } else if (trimmedCountry !== undefined) {
       const existingCurrency = business.default_currency
       if (existingCurrency) {
-        const countryCode = normalizeCountry(address_country)
+        const countryCode = normalizeCountry(trimmedCountry)
         try {
           assertCountryCurrency(countryCode, existingCurrency)
         } catch (error: any) {
@@ -205,13 +227,12 @@ export async function PUT(request: NextRequest) {
           )
         }
       }
-    } else if (default_currency !== undefined) {
-      // Currency is being updated, validate against existing country
+    } else if (trimmedCurrency !== undefined) {
       const existingCountry = business.address_country
       if (existingCountry) {
         const countryCode = normalizeCountry(existingCountry)
         try {
-          assertCountryCurrency(countryCode, default_currency)
+          assertCountryCurrency(countryCode, trimmedCurrency)
         } catch (error: any) {
           return NextResponse.json(
             { error: error.message || "Currency does not match existing country." },
@@ -221,69 +242,118 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     }
 
-    if (legal_name !== undefined) updateData.legal_name = legal_name
-    if (trading_name !== undefined) updateData.trading_name = trading_name
-    if (address_street !== undefined) updateData.address_street = address_street
-    if (address_city !== undefined) updateData.address_city = address_city
-    if (address_region !== undefined) updateData.address_region = address_region
-    if (address_country !== undefined) updateData.address_country = address_country
-    if (phone !== undefined) updateData.phone = phone
-    if (whatsapp_phone !== undefined) updateData.whatsapp_phone = whatsapp_phone
-    if (email !== undefined) updateData.email = email
-    if (website !== undefined) updateData.website = website
-    if (tin !== undefined) updateData.tin = tin
+    if (legal_name !== undefined) {
+      const v = normStr(legal_name)
+      updateData.legal_name = v || null
+    }
+    if (trading_name !== undefined) {
+      const t = normStr(trading_name)
+      const nameFallback = normStr(business.name)
+      updateData.trading_name = t || (nameFallback || null)
+    }
+    if (address_street !== undefined) {
+      const v = normStr(address_street)
+      updateData.address_street = v || null
+    }
+    if (address_city !== undefined) {
+      const v = normStr(address_city)
+      updateData.address_city = v || null
+    }
+    if (address_region !== undefined) {
+      const v = normStr(address_region)
+      updateData.address_region = v || null
+    }
+    if (address_country !== undefined) {
+      updateData.address_country = trimmedCountry || null
+    }
+    if (phone !== undefined) {
+      const v = normStr(phone)
+      updateData.phone = v || null
+    }
+    if (whatsapp_phone !== undefined) {
+      const v = normStr(whatsapp_phone)
+      updateData.whatsapp_phone = v || null
+    }
+    if (email !== undefined) {
+      const fromBody = normStr(email)
+      updateData.email = fromBody || authEmail || normStr(business.email) || null
+    }
+    if (website !== undefined) {
+      const v = normStr(website)
+      updateData.website = v || null
+    }
+    if (tin !== undefined) {
+      const v = normStr(tin)
+      updateData.tin = v || null
+    }
     if (logo_url !== undefined) {
       updateData.logo_url =
         logo_url === null || (typeof logo_url === "string" && logo_url.trim() === "") ? null : logo_url
     }
-    if (default_currency !== undefined) updateData.default_currency = default_currency
-    if (start_date !== undefined) updateData.start_date = start_date || null
+    if (default_currency !== undefined) {
+      updateData.default_currency = trimmedCurrency || null
+    }
+    if (start_date !== undefined) {
+      updateData.start_date = normStr(start_date) || null
+    }
     if (cit_rate_code !== undefined) updateData.cit_rate_code = cit_rate_code
     if (vat_scheme !== undefined) updateData.vat_scheme = vat_scheme
     if (business_type !== undefined) updateData.business_type = business_type
 
-    // ONBOARDING FIX: Advance onboarding_step when profile is saved during onboarding
-    // This ensures onboarding always progresses after successful actions
+    // Onboarding: validate effective identity + contact (trimmed; business.name + auth email count)
     if (business.onboarding_step === "business_profile") {
-      // VALIDATION: business.name must exist before onboarding can advance
-      const hasBusinessName = business.name && business.name.trim() !== ""
-      
-      // VALIDATION: Required fields for onboarding progression
-      const hasProfileData = (legal_name || trading_name) && (phone || email)
-      
-      // If in onboarding, enforce required fields - block save if missing
-      if (!hasBusinessName) {
+      const finalLegal =
+        legal_name !== undefined ? normStr(legal_name) : normStr(business.legal_name as string)
+      const finalTrading =
+        trading_name !== undefined
+          ? normStr(trading_name) || normStr(business.name as string)
+          : normStr(business.trading_name as string) || normStr(business.name as string)
+      const finalName = normStr(business.name as string)
+      const effectiveBusinessIdentity = finalLegal || finalTrading || finalName
+
+      const finalPhone =
+        phone !== undefined ? normStr(phone) : normStr(business.phone as string)
+      const finalEmail =
+        email !== undefined
+          ? normStr(email) || authEmail
+          : normStr(business.email as string) || authEmail
+      const effectiveContact = finalPhone || finalEmail
+
+      if (!effectiveBusinessIdentity) {
         return NextResponse.json(
-          { error: "Business name is required. Please complete your business setup first." },
+          {
+            error:
+              "Business name, legal name, or trading name is required. Complete business setup or enter at least one of these names.",
+          },
           { status: 400 }
         )
       }
-      
-      if (!hasProfileData) {
+
+      if (!effectiveContact) {
         return NextResponse.json(
-          { error: "Phone or email is required to continue onboarding. Please provide at least one contact method." },
+          {
+            error: "Please provide at least one contact method: phone or email.",
+          },
           { status: 400 }
         )
       }
-      
-      // All validations passed - advance to next step based on industry
+
       if (business.industry === "retail") {
         updateData.onboarding_step = "create_store"
       } else if (business.industry === "logistics") {
         updateData.onboarding_step = "add_rider"
       } else {
-        // service or other: new flow goes to industry_confirmation next
         updateData.onboarding_step = "industry_confirmation"
       }
     }
 
     let { data, error } = await supabase
       .from("businesses")
-      .update(updateData)
+      .update(updateData as any)
       .eq("id", business.id)
       .select("*")
       .maybeSingle()
@@ -299,7 +369,7 @@ export async function PUT(request: NextRequest) {
       const { business_type: _omit, ...updateWithoutType } = updateData
       const second = await supabase
         .from("businesses")
-        .update(updateWithoutType)
+        .update(updateWithoutType as any)
         .eq("id", business.id)
         .select("*")
         .maybeSingle()
@@ -333,4 +403,3 @@ export async function PUT(request: NextRequest) {
     )
   }
 }
-

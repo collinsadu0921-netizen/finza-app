@@ -211,7 +211,7 @@ export default function ServiceInboundEmailSettingsPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-      <div>
+      <div data-tour="service-inbound-email-overview">
         <p className="text-xs text-slate-500 mb-1">
           <Link href={buildServiceRoute("/service/settings", bid ?? undefined)} className="hover:underline">
             ← Settings
@@ -246,7 +246,10 @@ export default function ServiceInboundEmailSettingsPage() {
       )}
 
       {!loading && domainConfigured && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <div
+          className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4"
+          data-tour="service-inbound-email-settings"
+        >
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -273,6 +276,7 @@ export default function ServiceInboundEmailSettingsPage() {
                     onClick={() => void copyAddress()}
                     disabled={route.is_active === false}
                     className="text-sm font-medium rounded-lg border border-slate-200 px-3 py-1.5 text-slate-800 hover:bg-slate-50 disabled:opacity-40"
+                    data-tour="service-inbound-email-copy"
                   >
                     {copyLabel}
                   </button>
@@ -290,7 +294,7 @@ export default function ServiceInboundEmailSettingsPage() {
           )}
 
           {canManage && (
-            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4" data-tour="service-inbound-email-actions">
               {!route && (
                 <button
                   type="button"

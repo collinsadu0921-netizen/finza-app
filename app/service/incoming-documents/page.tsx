@@ -335,7 +335,7 @@ export default function IncomingDocumentsListPage() {
   return (
     <main className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div data-tour="service-incoming-documents-overview">
           <h1 className="text-lg font-semibold text-slate-900">Incoming documents</h1>
           <p className="mt-0.5 max-w-xl text-xs text-slate-500">
             Operational inbox for uploads and email — triage, review, then link to expenses or bills.{" "}
@@ -353,6 +353,7 @@ export default function IncomingDocumentsListPage() {
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
             href={buildServiceRoute("/service/settings/inbound-email", effectiveBusinessId ?? undefined)}
+            data-tour="service-incoming-documents-upload"
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 hover:bg-slate-50"
           >
             Inbound email
@@ -582,7 +583,7 @@ export default function IncomingDocumentsListPage() {
       )}
 
       {!loading && rows.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm" data-tour="service-incoming-documents-list">
           <div className="divide-y divide-slate-100">
             {rows.map((r) => {
               const bid = effectiveBusinessId ?? ""

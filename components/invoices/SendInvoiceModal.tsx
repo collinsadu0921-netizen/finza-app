@@ -97,7 +97,7 @@ export default function SendInvoiceModal({
       const phone = customer?.whatsapp_phone || customer?.phone
 
       if (!phone) {
-        setError("Customer phone number is not available. Please add a phone number to the customer profile.")
+        setError("Customer phone number is missing.")
         setLoading(false)
         closePrep()
         return
@@ -170,7 +170,7 @@ export default function SendInvoiceModal({
   /** @param skipOnSuccess - when sending Email+WhatsApp, defer onSuccess until WhatsApp step finishes */
   const handleSendEmail = async (skipOnSuccess = false) => {
     if (!email) {
-      setError("Please enter an email address")
+      setError("Customer email is missing.")
       return
     }
 
@@ -326,7 +326,7 @@ export default function SendInvoiceModal({
           const customer = invoice.customers
           const phone = customer?.whatsapp_phone || customer?.phone
           if (!phone) {
-            setError("Customer phone number is not available. Please add a phone number to the customer profile.")
+            setError("Customer phone number is missing.")
             return
           }
           const waCheck = normalizePhoneForWaMe(phone)
@@ -340,14 +340,14 @@ export default function SendInvoiceModal({
         }
         case "email":
           if (!email) {
-            setError("Please enter an email address")
+            setError("Customer email is missing.")
             return
           }
           await handleSendEmail()
           break
         case "both":
           if (!email) {
-            setError("Please enter an email address for email sending")
+            setError("Customer email is missing.")
             return
           }
           {
@@ -365,7 +365,7 @@ export default function SendInvoiceModal({
           const customer = invoice.customers
           const phone = customer?.whatsapp_phone || customer?.phone
           if (!phone) {
-            setError("Customer phone number is not available. Please add a phone number to the customer profile.")
+            setError("Customer phone number is missing.")
             return
           }
           const waCheck = normalizePhoneForWaMe(phone)

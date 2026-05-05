@@ -20,6 +20,7 @@ function devInvoiceTiming(label: string, startedAt: number) {
 }
 
 type CustomerOption = { id: string; name: string }
+type InvoiceListPagination = { page: number; pageSize: number; totalCount: number; totalPages: number }
 
 type Invoice = {
   id: string
@@ -172,6 +173,17 @@ function InvoicesPageContent() {
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const PAGE_SIZE = 25
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState<InvoiceListPagination>({
+    page: 1,
+    pageSize: PAGE_SIZE,
+    totalCount: 0,
+    totalPages: 0,
+  })
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const isInitialLoadRef = useRef(true)
   const businessIdRef = useRef("")
@@ -203,31 +215,39 @@ function InvoicesPageContent() {
       if (startDate) params.append("start_date", startDate)
       if (endDate) params.append("end_date", endDate)
       if (searchQuery) params.append("search", searchQuery)
+      params.append("page", String(page))
+      params.append("limit", String(PAGE_SIZE))
       return params
     },
-    [statusFilter, customerFilter, startDate, endDate, searchQuery]
+    [statusFilter, customerFilter, startDate, endDate, searchQuery, page]
   )
 
   const fetchInvoiceList = useCallback(
-    async (bid: string): Promise<Invoice[]> => {
+    async (bid: string): Promise<{ invoices: Invoice[]; pagination: InvoiceListPagination }> => {
       const params = buildInvoiceListParams(bid)
       const t0 = performance.now()
       const res = await fetch(`/api/invoices/list?${params.toString()}`)
       devInvoiceTiming("invoices API load", t0)
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
-      const { invoices: data } = await res.json()
-      return data || []
+      const payload = await res.json()
+      return {
+        invoices: (payload.invoices || []) as Invoice[],
+        pagination:
+          payload.pagination ||
+          ({ page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 } as InvoiceListPagination),
+      }
     },
-    [buildInvoiceListParams]
+    [buildInvoiceListParams, page]
   )
 
   const reloadInvoicesOnly = useCallback(async () => {
     const bid = businessIdRef.current
     if (!bid) return
     try {
-      const data = await fetchInvoiceList(bid)
+      const { invoices: data, pagination: pg } = await fetchInvoiceList(bid)
       setInvoices(data)
-      setTotalInvoices(data.length)
+      setPagination(pg)
+      setTotalInvoices(pg.totalCount || data.length)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load invoices")
     }
@@ -268,15 +288,21 @@ function InvoicesPageContent() {
           const res = await fetch(`/api/invoices/list?${params.toString()}`)
           devInvoiceTiming("invoices API load", t0)
           if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
-          const { invoices: data } = await res.json()
-          return (data || []) as Invoice[]
+          const payload = await res.json()
+          return {
+            invoices: (payload.invoices || []) as Invoice[],
+            pagination:
+              payload.pagination ||
+              ({ page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 } as InvoiceListPagination),
+          }
         })()
 
         const [custRows, invData] = await Promise.all([customersPromise, invoicesPromise])
         if (cancelled) return
         setCustomers(custRows)
-        setInvoices(invData)
-        setTotalInvoices(invData.length)
+        setInvoices(invData.invoices)
+        setPagination(invData.pagination)
+        setTotalInvoices(invData.pagination.totalCount || invData.invoices.length)
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load invoices")
       } finally {
@@ -315,9 +341,10 @@ function InvoicesPageContent() {
           setCustomers(data || [])
         }
         try {
-          const data = await fetchInvoiceList(bid)
+          const { invoices: data, pagination: pg } = await fetchInvoiceList(bid)
           setInvoices(data)
-          setTotalInvoices(data.length)
+          setPagination(pg)
+          setTotalInvoices(pg.totalCount || data.length)
         } catch (err: unknown) {
           setError(err instanceof Error ? err.message : "Failed to load invoices")
         }
@@ -331,6 +358,7 @@ function InvoicesPageContent() {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
     if (searchInput.trim()) setIsSearching(true)
     searchDebounceRef.current = setTimeout(() => {
+      setPage(1)
       setSearchQuery(searchInput)
       setIsSearching(false)
     }, 300)
@@ -346,7 +374,14 @@ function InvoicesPageContent() {
       return
     }
     void reloadInvoicesOnly()
-  }, [businessId, statusFilter, customerFilter, startDate, endDate, searchQuery, reloadInvoicesOnly])
+  }, [businessId, statusFilter, customerFilter, startDate, endDate, searchQuery, page, reloadInvoicesOnly])
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`/service/invoices?${params.toString()}`)
+  }, [page, router, searchParams])
 
   const fetchPaymentTotals = async (ids: string[]) => {
     if (!ids.length) return { payments: {} as Record<string, number>, creditNotes: {} as Record<string, number> }
@@ -504,7 +539,7 @@ function InvoicesPageContent() {
     toast.showToast("Exported to Excel", "success")
   }
 
-  const clearFilters = () => { setStatusFilter("all"); setCustomerFilter("all"); setStartDate(""); setEndDate(""); setSearchInput(""); setSearchQuery("") }
+  const clearFilters = () => { setPage(1); setStatusFilter("all"); setCustomerFilter("all"); setStartDate(""); setEndDate(""); setSearchInput(""); setSearchQuery("") }
   const hasFilters = statusFilter !== "all" || customerFilter !== "all" || startDate || endDate || searchInput
 
   if (loading) {
@@ -538,6 +573,8 @@ function InvoicesPageContent() {
               </>
             )}
             <button
+              type="button"
+              data-tour="service-invoices-new"
               onClick={() => router.push("/invoices/create")}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
             >
@@ -587,7 +624,7 @@ function InvoicesPageContent() {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4" data-tour="service-invoices-filters">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {/* Search */}
             <div className="sm:col-span-2 lg:col-span-1 relative">
@@ -605,7 +642,10 @@ function InvoicesPageContent() {
             {/* Status */}
             <MenuSelect
               value={statusFilter}
-              onValueChange={setStatusFilter}
+              onValueChange={(v) => {
+                setPage(1)
+                setStatusFilter(v)
+              }}
               options={[
                 { value: "all", label: "All Status" },
                 { value: "draft", label: "Draft" },
@@ -620,7 +660,10 @@ function InvoicesPageContent() {
             {/* Customer */}
             <MenuSelect
               value={customerFilter}
-              onValueChange={setCustomerFilter}
+              onValueChange={(v) => {
+                setPage(1)
+                setCustomerFilter(v)
+              }}
               options={[
                 { value: "all", label: "All Customers" },
                 ...customers.map((c) => ({ value: c.id, label: c.name })),
@@ -628,10 +671,10 @@ function InvoicesPageContent() {
             />
 
             {/* Start date */}
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+            <input type="date" value={startDate} onChange={e => { setPage(1); setStartDate(e.target.value) }} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
 
             {/* End date */}
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+            <input type="date" value={endDate} onChange={e => { setPage(1); setEndDate(e.target.value) }} className="px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
           </div>
           {hasFilters && (
             <div className="mt-3 pt-3 border-t border-slate-100">
@@ -645,7 +688,7 @@ function InvoicesPageContent() {
 
         {/* Table */}
         {invoices.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-16 text-center">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-16 text-center" data-tour="service-invoices-table">
             <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             </div>
@@ -654,14 +697,19 @@ function InvoicesPageContent() {
               {hasFilters ? "Try adjusting your filters" : "Create your first invoice to get started"}
             </p>
             {!hasFilters && (
-              <button onClick={() => router.push("/invoices/create")} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors">
+              <button
+                type="button"
+                data-tour="service-invoices-new"
+                onClick={() => router.push("/invoices/create")}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+              >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
                 Create Invoice
               </button>
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-tour="service-invoices-table">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -747,6 +795,29 @@ function InvoicesPageContent() {
                 </tbody>
               </table>
             </div>
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-slate-600 tabular-nums">
+                  Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

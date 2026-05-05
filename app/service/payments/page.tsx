@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate } from "@/lib/exportUtils"
@@ -34,6 +34,8 @@ type DateRange = "this_month" | "last_month" | "custom"
 
 export default function ServicePaymentsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const PAGE_SIZE = 25
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -42,6 +44,11 @@ export default function ServicePaymentsPage() {
   const [dateRange, setDateRange] = useState<DateRange>("this_month")
   const [customStartDate, setCustomStartDate] = useState("")
   const [customEndDate, setCustomEndDate] = useState("")
+  const [page, setPage] = useState(() => {
+    const p = Number.parseInt(searchParams.get("page") || "1", 10)
+    return Number.isFinite(p) && p > 0 ? p : 1
+  })
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
 
   useEffect(() => {
     loadBusiness()
@@ -51,7 +58,7 @@ export default function ServicePaymentsPage() {
     if (businessId) {
       loadPayments()
     }
-  }, [businessId, dateRange, customStartDate, customEndDate])
+  }, [businessId, dateRange, customStartDate, customEndDate, page])
 
   const loadBusiness = async () => {
     try {
@@ -122,6 +129,8 @@ export default function ServicePaymentsPage() {
       params.append("business_id", businessId)
       if (startDate) params.append("start_date", startDate)
       if (endDate) params.append("end_date", endDate)
+      params.append("page", String(page))
+      params.append("limit", String(PAGE_SIZE))
 
       const response = await fetch(`/api/payments/list?${params.toString()}`)
 
@@ -132,6 +141,7 @@ export default function ServicePaymentsPage() {
 
       const data = await response.json()
       setPayments(data.payments || [])
+      setPagination(data.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
     } catch (err: any) {
       console.error("Error loading payments:", err)
       setError(err.message || "Failed to load payments")
@@ -238,6 +248,13 @@ export default function ServicePaymentsPage() {
   const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
   const paymentCount = payments.length
 
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (page <= 1) params.delete("page")
+    else params.set("page", String(page))
+    router.replace(`/service/payments?${params.toString()}`)
+  }, [page, router, searchParams])
+
   if (loading && !businessId) {
     return (
       <div className="p-8 flex items-center justify-center min-h-[50vh]">
@@ -254,7 +271,7 @@ export default function ServicePaymentsPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Page Header */}
         <div className="mb-8 flex items-center justify-between">
-          <div>
+          <div data-tour="service-payments-overview">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">Payments</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">View all cash collected payments</p>
           </div>
@@ -289,7 +306,7 @@ export default function ServicePaymentsPage() {
         </div>
 
         {/* Summary Bar */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-6 mb-8 flex flex-col md:flex-row gap-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-6 mb-8 flex flex-col md:flex-row gap-8" data-tour="service-payments-filters">
           <div className="flex-1">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Collected</p>
             <div className="text-3xl font-bold text-slate-900 dark:text-white">
@@ -306,7 +323,10 @@ export default function ServicePaymentsPage() {
           <div className="flex-1 md:flex-none flex flex-col justify-end gap-2">
             <MenuSelect
               value={dateRange}
-              onValueChange={(v) => setDateRange(v as DateRange)}
+              onValueChange={(v) => {
+                setDateRange(v as DateRange)
+                setPage(1)
+              }}
               wrapperClassName="w-full md:w-48 md:max-w-[12rem]"
               options={[
                 { value: "this_month", label: "This Month" },
@@ -320,13 +340,19 @@ export default function ServicePaymentsPage() {
                 <input
                   type="date"
                   value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  onChange={(e) => {
+                    setCustomStartDate(e.target.value)
+                    setPage(1)
+                  }}
                   className="w-full text-xs border-slate-200 rounded px-2 py-1"
                 />
                 <input
                   type="date"
                   value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  onChange={(e) => {
+                    setCustomEndDate(e.target.value)
+                    setPage(1)
+                  }}
                   className="w-full text-xs border-slate-200 rounded px-2 py-1"
                 />
               </div>
@@ -342,14 +368,14 @@ export default function ServicePaymentsPage() {
         )}
 
         {/* Payments Table */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden" data-tour="service-payments-list">
           {loading ? (
             <div className="p-12 text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900 mx-auto mb-4"></div>
               <p className="text-slate-500 dark:text-slate-400">Updating list...</p>
             </div>
           ) : payments.length === 0 ? (
-            <div className="p-16 text-center">
+            <div className="p-16 text-center" data-tour="service-payments-record">
               <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               </div>
@@ -424,6 +450,29 @@ export default function ServicePaymentsPage() {
             </div>
           )}
         </div>
+        {pagination.totalPages > 1 && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <span className="text-xs text-slate-500">
+              Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
+            </span>
+            <button
+              type="button"
+              disabled={page >= pagination.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

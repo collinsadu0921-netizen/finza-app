@@ -115,7 +115,12 @@ function getDashboardRoutes(businessId: string) {
 }
 
 const QUICK_ACTIONS = [
-  { label: "Create Invoice", href: "/service/invoices/new", icon: "invoice" as const },
+  {
+    label: "Create Invoice",
+    href: "/service/invoices/new",
+    icon: "invoice" as const,
+    dataTour: "service-dashboard-create-invoice",
+  },
   { label: "Recurring invoices", href: "/service/recurring", icon: "recurring" as const },
   { label: "Record Expense", href: "/service/expenses/create", icon: "expense" as const },
   { label: "Add Customer", href: "/service/customers/new", icon: "customer" as const },
@@ -495,7 +500,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const routes = getDashboardRoutes(business.id)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-tour="service-dashboard-overview">
       {workspaceTopBar}
 
       {metricsError && !loadingMetrics && (
@@ -527,7 +532,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       ) : metrics ? (
         <>
           {/* Primary KPI grid */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" data-tour="service-dashboard-kpis">
             <MetricCard
               title="Revenue"
               value={metrics.revenue ?? 0}

@@ -908,7 +908,7 @@ function SubscriptionPageInner() {
       <div className="mx-auto max-w-5xl px-4 py-10">
 
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-8" data-tour="service-subscription-overview">
           <Link
             href={buildServiceRoute(
               "/service/settings/business-profile",
@@ -929,7 +929,10 @@ function SubscriptionPageInner() {
         </div>
 
         {/* Current plan + subscription status banner */}
-        <div className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div
+          className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          data-tour="service-subscription-current-plan"
+        >
           {loading ? (
             <div className="space-y-2">
               <div className="h-4 w-24 animate-pulse rounded bg-slate-100" />
@@ -1159,7 +1162,7 @@ function SubscriptionPageInner() {
         </div>
 
         {/* Billing cycle toggle */}
-        <div className="mb-6 flex justify-center">
+        <div className="mb-6 flex justify-center" data-tour="service-subscription-billing-cycle">
           <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
             {BILLING_CYCLES.map((c) => {
               const savings = billingCycleSavings(c, "starter") // same % across tiers
@@ -1199,7 +1202,7 @@ function SubscriptionPageInner() {
         </p>
 
         {/* Plan comparison cards */}
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3" data-tour="service-subscription-plans">
           {TIER_ORDER.map((t) => {
             const isCurrent   = t === effectiveTier
             // Show payment actions when: trial (any state), period expired (grace), or locked

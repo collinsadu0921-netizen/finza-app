@@ -6,6 +6,8 @@ export type QuickAction = {
   label: string
   href: string
   icon?: "invoice" | "expense" | "customer" | "reports" | "recurring"
+  /** Optional `data-tour` for Service walkthrough spotlight */
+  dataTour?: string
 }
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -58,6 +60,7 @@ export default function QuickActionsBar({ actions, businessId }: QuickActionsBar
           <Link
             key={action.label}
             href={finalHref}
+            data-tour={action.dataTour}
             className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
             {action.icon && ICONS[action.icon]}

@@ -28,6 +28,11 @@ export default function ServiceCustomer360Page() {
   const [tags, setTags] = useState<string[]>([])
   const [newTag, setNewTag] = useState("")
 
+  const normalizedNewTag = newTag.trim()
+  const canAddTag =
+    normalizedNewTag.length > 0 &&
+    !tags.some((tag) => tag.toLowerCase() === normalizedNewTag.toLowerCase())
+
   useEffect(() => {
     loadCustomer360()
   }, [customerId])
@@ -79,8 +84,8 @@ export default function ServiceCustomer360Page() {
   }
 
   const handleAddTag = () => {
-    if (!newTag.trim() || tags.includes(newTag.trim())) return
-    const updatedTags = [...tags, newTag.trim()]
+    if (!canAddTag) return
+    const updatedTags = [...tags, normalizedNewTag]
     setTags(updatedTags)
     setNewTag("")
     handleSaveTags(updatedTags)
@@ -146,6 +151,11 @@ export default function ServiceCustomer360Page() {
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString("en-GH", { year: "numeric", month: "short", day: "numeric" })
 
+  const invoices = activities.filter((activity) => activity.type === "invoice").slice(0, 5)
+  const estimates = activities.filter((activity) => activity.type === "estimate").slice(0, 5)
+  const orders = activities.filter((activity) => activity.type === "order").slice(0, 5)
+  const payments = activities.filter((activity) => activity.type === "payment").slice(0, 5)
+
   if (loading) {
     return (
       
@@ -169,38 +179,172 @@ export default function ServiceCustomer360Page() {
   return (
     
       <div className="p-6 max-w-7xl mx-auto">
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="mb-6 space-y-4">
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 md:p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-sm font-medium text-blue-600 dark:text-blue-400">Customer 360</p>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{customer?.name}</h1>
+                <p className="text-gray-600 dark:text-gray-400 mt-2">
+                  Unified profile, activity, notes, and collections overview.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                    {summary?.invoiceCount ?? 0} invoices
+                  </span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                    {summary?.paymentCount ?? 0} payments
+                  </span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+                    {tags.length} tags
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => router.push(`/service/customers/${customerId}`)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
+                  Edit Profile
+                </button>
+                <button onClick={() => router.push(`/service/customers/${customerId}/statement`)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  View Statement
+                </button>
+                <button onClick={() => router.push("/service/customers")} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
+                  Customers
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Total Invoiced</p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-white mt-1">
+                {formatMoney(summary?.totalInvoiced ?? 0, currencyCode)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Collected</p>
+              <p className="text-lg font-semibold text-green-600 dark:text-green-400 mt-1">
+                {formatMoney(summary?.totalPaid ?? 0, currencyCode)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Outstanding</p>
+              <p className="text-lg font-semibold text-orange-600 dark:text-orange-400 mt-1">
+                {formatMoney(summary?.totalOutstanding ?? 0, currencyCode)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Overdue</p>
+              <p className="text-lg font-semibold text-red-600 dark:text-red-400 mt-1">
+                {formatMoney(summary?.overdueAmount ?? 0, currencyCode)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Credits</p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-white mt-1">
+                {formatMoney(summary?.totalCredits ?? 0, currencyCode)}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <h2 className="font-semibold text-gray-900 dark:text-white mb-3">Contact</h2>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Email</p>
+                  <p className="text-gray-900 dark:text-white">{customer?.email || "Not provided"}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Phone</p>
+                  <p className="text-gray-900 dark:text-white">{customer?.phone || "Not provided"}</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <h2 className="font-semibold text-gray-900 dark:text-white mb-3">Billing & Tax</h2>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Outstanding Balance</p>
+                  <p className="text-gray-900 dark:text-white font-medium">
+                    {formatMoney(summary?.totalOutstanding ?? 0, currencyCode)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500 dark:text-gray-400">Overdue Balance</p>
+                  <p className="text-gray-900 dark:text-white font-medium">
+                    {formatMoney(summary?.overdueAmount ?? 0, currencyCode)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <h2 className="font-semibold text-gray-900 dark:text-white mb-3">Quick Actions</h2>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <button onClick={() => router.push(`/service/customers/${customerId}`)} className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">
+                  Edit Profile
+                </button>
+                <button onClick={() => router.push(`/service/customers/${customerId}/statement`)} className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+                  Statement
+                </button>
+                <button onClick={() => router.push("/service/invoices/new")} className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">
+                  New Invoice
+                </button>
+                <button onClick={() => router.push("/service/estimates/new")} className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">
+                  New Quote
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-2">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Customer 360: {customer?.name}</h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">Complete view of customer relationship</p>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Recent Documents & Payments</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Latest items already available in customer activity.</p>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => router.push(`/service/customers/${customerId}/statement`)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                View Statement
-              </button>
-              <button onClick={() => router.push(`/service/customers/${customerId}`)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
-                Back to Profile
-              </button>
-            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            {[
+              { title: "Recent Invoices", items: invoices },
+              { title: "Recent Quotes", items: estimates },
+              { title: "Recent Proposals / Orders", items: orders },
+              { title: "Recent Payments", items: payments },
+            ].map((group) => (
+              <div key={group.title} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{group.title}</h3>
+                <div className="space-y-2">
+                  {group.items.length === 0 ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">No records yet.</p>
+                  ) : (
+                    group.items.map((item) => (
+                      <button
+                        key={`${item.type}-${item.id}`}
+                        onClick={() => router.push(getActivityLink(item))}
+                        className="w-full text-left rounded-lg border border-gray-200 dark:border-gray-700 p-2 hover:bg-gray-50 dark:hover:bg-gray-700/40"
+                      >
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(item.date)}</p>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          {item.number || item.type.replace("_", " ")}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">
+                          {formatMoney(item.amount, currencyCode)}
+                        </p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
         {error && <div className="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">{error}</div>}
 
-        {summary && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Total Invoiced</div><div className="font-bold text-xl">{formatMoney(summary.totalInvoiced, currencyCode)}</div></div>
-            <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Total Paid</div><div className="font-bold text-xl">{formatMoney(summary.totalPaid, currencyCode)}</div></div>
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Outstanding</div><div className="font-bold text-xl">{formatMoney(summary.totalOutstanding, currencyCode)}</div></div>
-            <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-4"><div className="font-semibold text-sm mb-1">Overdue</div><div className="font-bold text-xl">{formatMoney(summary.overdueAmount, currencyCode)}</div></div>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Customer Information</h2>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Profile Notes</h2>
               <div className="space-y-2">
                 <div><span className="text-sm text-gray-500 dark:text-gray-400">Email:</span><p className="text-gray-900 dark:text-white">{customer?.email || "N/A"}</p></div>
                 <div><span className="text-sm text-gray-500 dark:text-gray-400">Phone:</span><p className="text-gray-900 dark:text-white">{customer?.phone || "N/A"}</p></div>
@@ -223,9 +367,34 @@ export default function ServiceCustomer360Page() {
                 {tags.length === 0 && !editingTags && <p className="text-gray-500 dark:text-gray-400 text-sm">No tags</p>}
               </div>
               {editingTags && (
-                <div className="flex gap-2">
-                  <input type="text" value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyPress={(e) => e.key === "Enter" && handleAddTag()} placeholder="Add tag..." className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg" />
-                  <button onClick={handleAddTag} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Add</button>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2 items-start">
+                    <input
+                      type="text"
+                      value={newTag}
+                      onChange={(e) => setNewTag(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          handleAddTag()
+                        }
+                      }}
+                      placeholder="Add tag..."
+                      className="w-full min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                    />
+                    <button
+                      onClick={handleAddTag}
+                      disabled={!canAddTag}
+                      className="px-4 py-2 sm:min-w-[110px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Add Tag
+                    </button>
+                  </div>
+                  {normalizedNewTag.length > 0 && !canAddTag && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      This tag already exists.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

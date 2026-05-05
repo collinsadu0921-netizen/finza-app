@@ -17,6 +17,12 @@ export async function GET(request: NextRequest) {
     const categoryId = searchParams.get("category_id")
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
+    const search = (searchParams.get("search") || "").trim()
+    const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1)
+    const limitRaw = Number.parseInt(searchParams.get("limit") || "25", 10) || 25
+    const limit = Math.min(100, Math.max(1, limitRaw))
+    const from = (page - 1) * limit
+    const to = from + limit - 1
 
     const scope = await resolveBusinessScopeForUser(
       supabase,
@@ -40,7 +46,8 @@ export async function GET(request: NextRequest) {
           id,
           name
         )
-      `
+      `,
+        { count: "exact" }
       )
       .eq("business_id", businessId)
       .is("deleted_at", null)
@@ -58,7 +65,10 @@ export async function GET(request: NextRequest) {
       query = query.lte("date", endDate)
     }
 
-    const { data: expenses, error } = await query
+    if (search) {
+      query = query.ilike("supplier", `%${search}%`)
+    }
+    const { data: expenses, error, count } = await query.range(from, to)
 
     if (error) {
       console.error("Error fetching expenses:", error)
@@ -68,7 +78,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ expenses: expenses || [] })
+    const totalCount = count ?? 0
+    return NextResponse.json({
+      expenses: expenses || [],
+      pagination: {
+        page,
+        pageSize: limit,
+        totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+    })
   } catch (error: any) {
     console.error("Error in expense list:", error)
     return NextResponse.json(

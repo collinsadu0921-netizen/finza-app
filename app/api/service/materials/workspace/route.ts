@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
@@ -7,7 +7,7 @@ import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceSer
  * GET /api/service/materials/workspace
  * Inventory rows plus last movement metadata per material (materials list page).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
     const {
@@ -25,11 +25,61 @@ export async function GET() {
     const denied = await enforceServiceIndustryMinTier(supabase, user.id, business.id, "professional")
     if (denied) return denied
 
-    const { data: materials, error: matErr } = await supabase
+    const { searchParams } = new URL(request.url)
+    const search = (searchParams.get("search") || "").trim()
+    const status = (searchParams.get("status") || "all").trim()
+    const stock = (searchParams.get("stock") || "all").trim()
+    const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1)
+    const limitRaw = Number.parseInt(searchParams.get("limit") || "25", 10) || 25
+    const limit = Math.min(100, Math.max(1, limitRaw))
+    const from = (page - 1) * limit
+    const to = from + limit - 1
+
+    let materialQuery = supabase
       .from("service_material_inventory")
-      .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active")
+      .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active", {
+        count: "exact",
+      })
       .eq("business_id", business.id)
-      .order("name", { ascending: true })
+
+    if (search) {
+      materialQuery = materialQuery.or(`name.ilike.%${search}%,sku.ilike.%${search}%`)
+    }
+    if (status === "active") materialQuery = materialQuery.eq("is_active", true)
+    if (status === "inactive") materialQuery = materialQuery.eq("is_active", false)
+    let materials: Array<{
+      id: string
+      name: string
+      sku: string | null
+      unit: string
+      quantity_on_hand: number
+      average_cost: number
+      reorder_level: number
+      is_active: boolean
+    }> = []
+    let count = 0
+    let matErr: { message?: string } | null = null
+
+    if (stock === "all") {
+      const result = await materialQuery.order("name", { ascending: true }).range(from, to)
+      materials = (result.data ?? []) as typeof materials
+      count = result.count ?? 0
+      matErr = result.error
+    } else {
+      const prefiltered = await materialQuery
+        .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active")
+        .order("name", { ascending: true })
+      if (prefiltered.error) {
+        matErr = prefiltered.error
+      } else {
+        const scoped = ((prefiltered.data ?? []) as typeof materials).filter((r) => {
+          const isLow = r.is_active && Number(r.reorder_level) > 0 && Number(r.quantity_on_hand) <= Number(r.reorder_level)
+          return stock === "low" ? isLow : !isLow
+        })
+        count = scoped.length
+        materials = scoped.slice(from, to + 1)
+      }
+    }
 
     if (matErr) {
       return NextResponse.json({ error: matErr.message }, { status: 500 })
@@ -80,7 +130,50 @@ export async function GET() {
       }
     })
 
-    return NextResponse.json({ rows })
+    const [{ count: totalItems }, { count: activeItems }, { data: allForStock }, { data: allForValue }] = await Promise.all([
+      supabase
+        .from("service_material_inventory")
+        .select("id", { count: "exact", head: true })
+        .eq("business_id", business.id),
+      supabase
+        .from("service_material_inventory")
+        .select("id", { count: "exact", head: true })
+        .eq("business_id", business.id)
+        .eq("is_active", true),
+      supabase
+        .from("service_material_inventory")
+        .select("quantity_on_hand, reorder_level, is_active")
+        .eq("business_id", business.id),
+      supabase
+        .from("service_material_inventory")
+        .select("quantity_on_hand, average_cost")
+        .eq("business_id", business.id),
+    ])
+
+    const lowStockItems = (allForStock || []).filter(
+      (r) => r.is_active && Number(r.reorder_level) > 0 && Number(r.quantity_on_hand) <= Number(r.reorder_level)
+    ).length
+    const totalValue = (allForValue || []).reduce(
+      (sum, row) => sum + Number(row.quantity_on_hand || 0) * Number(row.average_cost || 0),
+      0
+    )
+
+    const totalCount = count ?? 0
+    return NextResponse.json({
+      rows,
+      pagination: {
+        page,
+        pageSize: limit,
+        totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+      summary: {
+        totalItems: totalItems ?? 0,
+        activeItems: activeItems ?? 0,
+        lowStockItems,
+        totalValue,
+      },
+    })
   } catch (err: unknown) {
     console.error("GET /api/service/materials/workspace:", err)
     return NextResponse.json(

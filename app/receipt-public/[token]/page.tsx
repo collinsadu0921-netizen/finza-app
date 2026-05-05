@@ -306,7 +306,7 @@ export default function PublicReceiptPage() {
               onClick={() => window.print()}
               className="text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded px-3 py-1.5 hover:bg-slate-50 shadow-sm"
             >
-              Print receipt
+              Print / Save as PDF
             </button>
           </div>
 

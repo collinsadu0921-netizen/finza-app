@@ -213,12 +213,12 @@ export default function ServiceCustomerProfilePage() {
   return (
     
       <div className="p-6 max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
           <div>
-            <h1 className="text-3xl font-bold mb-2">Customer Profile</h1>
-            <p className="text-gray-600">Customer ID: {customer.id.substring(0, 8)}</p>
+            <h1 className="text-3xl font-bold mb-1 text-gray-900 dark:text-white">Customer Profile</h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Customer ID: {customer.id.substring(0, 8)}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => router.push(`/service/customers/${customerId}/360`)}
               className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -240,11 +240,16 @@ export default function ServiceCustomerProfilePage() {
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-          <div className="flex justify-between items-start mb-4">
-            <h2 className="text-xl font-semibold">Customer Information</h2>
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Customer Information</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Keep contact, billing, and status details accurate for invoicing and collections.
+              </p>
+            </div>
             {!editing && (
-              <button onClick={() => setEditing(true)} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+              <button onClick={() => setEditing(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
                 Edit
               </button>
             )}
@@ -252,41 +257,88 @@ export default function ServiceCustomerProfilePage() {
 
           {editing ? (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full border p-2 rounded" />
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300 mb-3">Primary</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name *</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-2.5 rounded-lg text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone</label>
+                    <input
+                      type="text"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-2.5 rounded-lg text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">WhatsApp</label>
+                    <input
+                      type="text"
+                      value={editWhatsappPhone}
+                      onChange={(e) => setEditWhatsappPhone(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-2.5 rounded-lg text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-2.5 rounded-lg text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input type="text" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="Optional" className="w-full border p-2 rounded" />
+
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300 mb-3">Billing & Compliance</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Address</label>
+                    <textarea
+                      value={editAddress}
+                      onChange={(e) => setEditAddress(e.target.value)}
+                      placeholder="Optional"
+                      rows={3}
+                      className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-2.5 rounded-lg text-gray-900 dark:text-white"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used on statements and customer-facing documents when required.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TIN</label>
+                    <input
+                      type="text"
+                      value={editTin}
+                      onChange={(e) => setEditTin(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-2.5 rounded-lg text-gray-900 dark:text-white"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Tax identification number for compliance and invoicing.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+                    <NativeSelect value={editStatus} onChange={(e) => setEditStatus(e.target.value as "active" | "blocked")}>
+                      <option value="active">Active</option>
+                      <option value="blocked">Blocked</option>
+                    </NativeSelect>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Blocked customers remain in records but should not be billed.</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="Optional" className="w-full border p-2 rounded" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                <textarea value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="Optional" rows={3} className="w-full border p-2 rounded" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">TIN</label>
-                <input type="text" value={editTin} onChange={(e) => setEditTin(e.target.value)} placeholder="Optional" className="w-full border p-2 rounded" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp</label>
-                <input type="text" value={editWhatsappPhone} onChange={(e) => setEditWhatsappPhone(e.target.value)} placeholder="Optional" className="w-full border p-2 rounded" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <NativeSelect value={editStatus} onChange={(e) => setEditStatus(e.target.value as "active" | "blocked")}>
-                  <option value="active">Active</option>
-                  <option value="blocked">Blocked</option>
-                </NativeSelect>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={handleSave} disabled={saving || !editName.trim()} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-300">
-                  {saving ? "Saving..." : "Save"}
-                </button>
+
+              <div className="pt-2 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
                 <button
                   onClick={() => {
                     setEditing(false)
@@ -299,9 +351,16 @@ export default function ServiceCustomerProfilePage() {
                     setEditStatus(customer.status)
                     setError("")
                   }}
-                  className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300"
+                  className="w-full sm:w-auto bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
                 >
                   Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !editName.trim()}
+                  className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300"
+                >
+                  {saving ? "Saving..." : "Save"}
                 </button>
               </div>
               {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{error}</div>}

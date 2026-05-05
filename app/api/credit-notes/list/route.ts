@@ -30,6 +30,12 @@ export async function GET(request: NextRequest) {
 
     const invoiceId = searchParams.get("invoice_id")
     const status    = searchParams.get("status")
+    const search = (searchParams.get("search") || "").trim()
+    const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1)
+    const limitRaw = Number.parseInt(searchParams.get("limit") || "25", 10) || 25
+    const limit = Math.min(100, Math.max(1, limitRaw))
+    const from = (page - 1) * limit
+    const to = from + limit - 1
 
     let query = supabase
       .from("credit_notes")
@@ -43,22 +49,33 @@ export async function GET(request: NextRequest) {
           invoice_number,
           customers ( id, name )
         )
-      `)
+      `, { count: "exact" })
       .eq("business_id", business.id)
       .is("deleted_at", null)
       .order("date", { ascending: false })
 
     if (invoiceId) query = query.eq("invoice_id", invoiceId)
     if (status)    query = query.eq("status", status)
-
-    const { data: creditNotes, error } = await query
+    if (search) {
+      query = query.or(`credit_number.ilike.%${search}%,reason.ilike.%${search}%`)
+    }
+    const { data: creditNotes, error, count } = await query.range(from, to)
 
     if (error) {
       console.error("Error fetching credit notes:", error)
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ creditNotes: creditNotes || [] })
+    const totalCount = count ?? 0
+    return NextResponse.json({
+      creditNotes: creditNotes || [],
+      pagination: {
+        page,
+        pageSize: limit,
+        totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+    })
   } catch (error: any) {
     console.error("Error in credit notes list:", error)
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
