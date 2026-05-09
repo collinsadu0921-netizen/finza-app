@@ -416,6 +416,7 @@ export async function resolveAccess(
         "/accounting",
         "/accounting/ledger",
         "/accounting/trial-balance",
+        "/accounting/reports",
         "/accounting/periods",
         "/accounting/exceptions",
         "/accounting/adjustments",

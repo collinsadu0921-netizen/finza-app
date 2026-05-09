@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { Fragment, useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
@@ -13,10 +13,29 @@ type Advance = {
   monthly_repayment: number
   date_issued: string
   bank_account_id: string | null
+  bank_account_name?: string | null
+  bank_account_code?: string | null
   notes: string | null
   repaid: number
-  outstanding: number
+  repaid_amount: number
+  outstanding_amount: number
+  status: "outstanding" | "partially_repaid" | "cleared" | "cancelled"
+  cleared_at?: string | null
+  repayments?: Repayment[]
   created_at: string
+}
+
+type Repayment = {
+  id: string
+  salary_advance_id: string
+  payroll_run_id: string
+  payroll_entry_id: string | null
+  amount: number
+  status: "pending" | "posted" | "voided"
+  journal_entry_id: string | null
+  posted_at: string | null
+  created_at: string
+  payroll_run?: { id: string; payroll_month: string } | null
 }
 
 type StaffMember = {
@@ -42,6 +61,7 @@ export default function SalaryAdvancesPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const [advances, setAdvances] = useState<Advance[]>([])
+  const [expandedAdvanceId, setExpandedAdvanceId] = useState<string | null>(null)
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
 
@@ -129,6 +149,28 @@ export default function SalaryAdvancesPage() {
     new Date(d + "T00:00:00").toLocaleDateString("en-GH", { day: "numeric", month: "short", year: "numeric" })
 
   const fmt = (n: number) => n.toFixed(2)
+  const statusMeta = (status: Advance["status"]) => {
+    switch (status) {
+      case "cleared":
+        return { label: "Cleared", cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400" }
+      case "partially_repaid":
+        return { label: "Partially repaid", cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400" }
+      case "cancelled":
+        return { label: "Cancelled", cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400" }
+      default:
+        return { label: "Outstanding", cls: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400" }
+    }
+  }
+  const repaymentStatusMeta = (status: Repayment["status"]) => {
+    switch (status) {
+      case "posted":
+        return { label: "Posted", cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400" }
+      case "voided":
+        return { label: "Voided", cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400" }
+      default:
+        return { label: "Pending", cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400" }
+    }
+  }
 
   if (loading) {
     return (
@@ -189,35 +231,104 @@ export default function SalaryAdvancesPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                     {advances.map((adv) => {
-                      const cleared = adv.outstanding === 0
+                      const meta = statusMeta(adv.status)
+                      const repayments = adv.repayments ?? []
+                      const isExpanded = expandedAdvanceId === adv.id
                       return (
-                        <tr key={adv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                          <td className="px-5 py-3 font-medium text-gray-900 dark:text-white">
-                            {adv.staff_name ?? "—"}
-                            {cleared && (
-                              <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
-                                Cleared
+                        <Fragment key={adv.id}>
+                          <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                            <td className="px-5 py-3 font-medium text-gray-900 dark:text-white">
+                              <div className="flex items-center gap-2">
+                                <span>{adv.staff_name ?? "—"}</span>
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${meta.cls}`}>
+                                  {meta.label}
+                                </span>
+                              </div>
+                              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {adv.bank_account_name ? `${adv.bank_account_code ?? ""} ${adv.bank_account_name}`.trim() : "Payment account —"}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                              {fmt(adv.amount)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                              {fmt(adv.monthly_repayment)}/mo
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums text-blue-600 dark:text-blue-400">
+                              {fmt(adv.repaid_amount ?? adv.repaid ?? 0)}
+                            </td>
+                            <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                              <span className={adv.outstanding_amount === 0 ? "text-green-600 dark:text-green-400" : "text-orange-600 dark:text-orange-400"}>
+                                {fmt(adv.outstanding_amount)}
                               </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
-                            {fmt(adv.amount)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
-                            {fmt(adv.monthly_repayment)}/mo
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-blue-600 dark:text-blue-400">
-                            {fmt(adv.repaid)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums font-semibold">
-                            <span className={cleared ? "text-green-600 dark:text-green-400" : "text-orange-600 dark:text-orange-400"}>
-                              {fmt(adv.outstanding)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                            {fmtDate(adv.date_issued)}
-                          </td>
-                        </tr>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
+                              <div>{fmtDate(adv.date_issued)}</div>
+                              {adv.cleared_at && (
+                                <div className="text-green-600 dark:text-green-400">Cleared {fmtDate(adv.cleared_at.slice(0, 10))}</div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setExpandedAdvanceId((cur) => (cur === adv.id ? null : adv.id))}
+                                className="mt-1 text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                {isExpanded ? "Hide repayments" : `View repayments (${repayments.length})`}
+                              </button>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={6} className="px-5 py-3 bg-gray-50 dark:bg-gray-900/40">
+                                {repayments.length === 0 ? (
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">No repayments yet.</p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {repayments.map((repayment) => {
+                                      const repaymentMeta = repaymentStatusMeta(repayment.status)
+                                      const runMonth = repayment.payroll_run?.payroll_month
+                                      return (
+                                        <div
+                                          key={repayment.id}
+                                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border border-gray-200 dark:border-gray-700 rounded-md px-3 py-2 bg-white dark:bg-gray-800"
+                                        >
+                                          <div className="text-xs text-gray-600 dark:text-gray-300">
+                                            <div>
+                                              Payroll: {runMonth ? fmtDate(runMonth) : "—"}
+                                            </div>
+                                            <div>
+                                              Posted: {repayment.posted_at ? fmtDate(repayment.posted_at.slice(0, 10)) : "—"}
+                                            </div>
+                                            {repayment.journal_entry_id && (
+                                              <div className="text-gray-500 dark:text-gray-400">
+                                                Journal: {repayment.journal_entry_id.slice(0, 8)}...
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-3">
+                                            <span className="text-sm tabular-nums text-gray-900 dark:text-white">
+                                              {fmt(Number(repayment.amount || 0))}
+                                            </span>
+                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${repaymentMeta.cls}`}>
+                                              {repaymentMeta.label}
+                                            </span>
+                                            {repayment.payroll_run_id && (
+                                              <a
+                                                href={`${payrollBase}/${repayment.payroll_run_id}`}
+                                                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                              >
+                                                View run
+                                              </a>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>

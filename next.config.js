@@ -11,7 +11,15 @@ const nextConfig = {
     'canvas',
     'pdf-parse',
     'pdfjs-dist',
+    'pdfkit',
   ],
+  // Bundle PDFKit's built-in AFM font metric files (Helvetica.afm, etc.)
+  // into the Trial Balance PDF route's serverless tracing output.
+  outputFileTracingIncludes: {
+    '/api/accounting/reports/trial-balance/export/pdf': [
+      './node_modules/pdfkit/js/data/**/*',
+    ],
+  },
 }
 
 module.exports = nextConfig

@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
-import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
+import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
-import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { getTrialBalanceReport } from "@/lib/accounting/reports/getTrialBalanceReport"
 
 /**
  * GET /api/accounting/reports/trial-balance/export/pdf
  * Exports Trial Balance as PDF. Period resolved server-side via universal resolver.
  * Query: business_id (required), period_id | period_start | as_of_date | start_date/end_date (optional).
+ *
+ * Uses the same shared loader as the JSON endpoint, so period, accounts,
+ * totals, and balance status always match. Fails loudly (HTTP 500) when
+ * the trial balance is unbalanced — never silently exports a broken ledger.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -25,7 +29,6 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
     const periodId = searchParams.get("period_id")
     const periodStart = searchParams.get("period_start")
     const asOfDate = searchParams.get("as_of_date")
@@ -83,6 +86,13 @@ export async function GET(request: NextRequest) {
         )
       }
     } else {
+      const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, resolvedBusinessId)
+      if (bootstrapErr) {
+        return NextResponse.json(
+          { error: "ACCOUNTING_NOT_READY", business_id: resolvedBusinessId, authority_source: auth.authority_source },
+          { status: 500 }
+        )
+      }
       await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
     }
 
@@ -92,21 +102,42 @@ export async function GET(request: NextRequest) {
       .eq("id", resolvedBusinessId)
       .single()
 
-    const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
-      supabase,
-      { businessId: resolvedBusinessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
-    )
-    if (resolveError || !resolvedPeriod) {
+    const result = await getTrialBalanceReport(supabase, {
+      businessId: resolvedBusinessId,
+      period_id: periodId,
+      period_start: periodStart,
+      as_of_date: asOfDate,
+      start_date: startDate,
+      end_date: endDate,
+    })
+
+    if (result.error || !result.data) {
       return NextResponse.json(
-        { error: resolveError ?? "Accounting period could not be resolved" },
+        { error: result.error ?? "Failed to fetch trial balance" },
+        { status: result.status ?? 500 }
+      )
+    }
+
+    const { data } = result
+
+    // INVARIANT 3: Fail loudly if unbalanced - never hide ledger errors in exports.
+    if (!data.isBalanced) {
+      return NextResponse.json(
+        {
+          error: "Trial Balance is unbalanced",
+          imbalance: data.imbalance,
+          totalDebits: data.totals.totalDebits,
+          totalCredits: data.totals.totalCredits,
+          message:
+            "Ledger integrity error: Debits and credits do not match. PDF export blocked until the imbalance is resolved.",
+        },
         { status: 500 }
       )
     }
 
-    const effectiveStartDate = resolvedPeriod.period_start
-    const effectiveEndDate = resolvedPeriod.period_end
+    const effectiveStartDate = data.period.period_start
+    const effectiveEndDate = data.period.period_end
 
-    // Validate date range (reject absurd ranges > 10 years)
     const start = new Date(effectiveStartDate)
     const end = new Date(effectiveEndDate)
     const yearsDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)
@@ -117,138 +148,242 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Canonical TB source per Contract v2.0 — Snapshot Authority
-    const { data: trialBalance, error: rpcError } = await supabase.rpc("get_trial_balance_from_snapshot", {
-      p_period_id: resolvedPeriod.period_id,
-    })
-
-    if (rpcError) {
-      console.error("Error fetching trial balance:", rpcError)
-      return NextResponse.json(
-        { error: rpcError.message || "Failed to fetch trial balance" },
-        { status: 500 }
-      )
-    }
-
-    // Safety limit: PDF max 5,000 rows
-    const rowCount = trialBalance?.length || 0
+    const rowCount = data.accounts.length
     if (rowCount > 5000) {
       return NextResponse.json(
-        { error: `Trial balance has ${rowCount} rows, which exceeds the maximum PDF export limit of 5,000 rows. Please use CSV export instead or use a smaller date range.` },
+        {
+          error: `Trial balance has ${rowCount} rows, which exceeds the maximum PDF export limit of 5,000 rows. Please use CSV export instead or use a smaller date range.`,
+        },
         { status: 400 }
       )
     }
 
-    // Generate PDF
+    // Use the standard server PDFKit build. The standalone bundle is for
+    // browsers and overflows the call stack when run on the Node.js server.
+    // PDFKit's built-in AFM font metrics (e.g. Helvetica.afm) are bundled
+    // into the server runtime via outputFileTracingIncludes in next.config.js.
     const PDFDocument = (await import("pdfkit")).default
-    const doc = new PDFDocument({ margin: 50 })
+    // autoFirstPage:false so the pageAdded handler can paint chrome on EVERY
+    // page, including the very first one. Landscape A4 fits 7 columns cleanly.
+    const doc = new PDFDocument({ margin: 50, size: "A4", layout: "landscape", autoFirstPage: false })
 
-    // Collect PDF chunks - set up listener early
     const chunks: Buffer[] = []
     doc.on("data", (chunk: Buffer) => {
       chunks.push(chunk)
     })
 
-    // Title
-    doc.fontSize(18).font("Helvetica-Bold").text("Trial Balance Report", { align: "center" })
-    doc.moveDown(0.5)
+    // ---- Layout constants ----
+    const PAGE_LEFT = 50
+    const PAGE_TOP = 50
+    const FOOTER_HEIGHT = 30
+    const TITLE_BLOCK_HEIGHT = 60
+    const HEADER_ROW_HEIGHT = 22
+    const DATA_ROW_HEIGHT = 18
+    const TOTALS_ROW_HEIGHT = 22
 
-    // Subheader
+    // 7 columns matching CSV: Code, Name, Type, Opening, Debit, Credit, Closing.
+    const columns: Array<{ label: string; width: number; align: "left" | "right" }> = [
+      { label: "Account Code", width: 80, align: "left" },
+      { label: "Account Name", width: 200, align: "left" },
+      { label: "Type", width: 70, align: "left" },
+      { label: "Opening Balance", width: 95, align: "right" },
+      { label: "Debit Total", width: 95, align: "right" },
+      { label: "Credit Total", width: 95, align: "right" },
+      { label: "Closing Balance", width: 95, align: "right" },
+    ]
+    const totalTableWidth = columns.reduce((s, c) => s + c.width, 0)
+
     const businessName = business?.name || "Business"
-    const periodLabel = `Period: ${resolvedPeriod.period_start} to ${resolvedPeriod.period_end}`
-    doc.fontSize(12).font("Helvetica").text(`${businessName} — ${periodLabel}`, { align: "center" })
-    doc.moveDown(1)
+    const periodLabel = `Period: ${data.period.period_start} to ${data.period.period_end}`
+    const generatedAt = new Date().toISOString()
 
-    // Table headers
-    const columnWidths = [80, 180, 80, 100, 100, 100] // Account Code, Name, Type, Debit, Credit, Balance
-    const rowHeight = 25
-    let x = 50
-    let y = doc.y
+    let isFirstPage = true
 
-    doc.fontSize(10).font("Helvetica-Bold")
-    const headers = ["Account Code", "Account Name", "Type", "Debit Total", "Credit Total", "Ending Balance"]
-    headers.forEach((header: string, i: number) => {
-      doc.rect(x, y, columnWidths[i], rowHeight).stroke()
-      doc.text(header, x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 3 ? "right" : "left" })
-      x += columnWidths[i]
-    })
-    y += rowHeight
-
-    // Table rows
-    doc.fontSize(9).font("Helvetica")
-    if (trialBalance && trialBalance.length > 0) {
-      for (const account of trialBalance) {
-        x = 50
-        if (y + rowHeight > doc.page.height - 50) {
-          doc.addPage()
-          y = 50
-        }
-
-        const cells = [
-          account.account_code || "",
-          account.account_name || "",
-          account.account_type || "",
-          formatNumeric(account.debit_total || 0),
-          formatNumeric(account.credit_total || 0),
-          formatNumeric(account.closing_balance ?? 0),
-        ]
-
-        cells.forEach((cell: string | number, i: number) => {
-          doc.rect(x, y, columnWidths[i], rowHeight).stroke()
-          doc.text(String(cell), x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 3 ? "right" : "left" })
-          x += columnWidths[i]
+    const drawColumnHeader = (yTop: number) => {
+      doc.fontSize(10).font("Helvetica-Bold").fillColor("#000000")
+      let x = PAGE_LEFT
+      for (const col of columns) {
+        doc.rect(x, yTop, col.width, HEADER_ROW_HEIGHT).fillAndStroke("#F0F0F0", "#000000")
+        // lineBreak:false prevents PDFKit from auto-flowing text to a new page,
+        // which would otherwise re-fire pageAdded and recurse.
+        doc.fillColor("#000000").text(col.label, x + 5, yTop + 6, {
+          width: col.width - 10,
+          align: col.align,
+          lineBreak: false,
         })
-        y += rowHeight
+        x += col.width
       }
     }
 
-    // Totals row
-    const totalDebits = trialBalance?.reduce((sum: number, acc: any) => sum + Number(acc.debit_total || 0), 0) || 0
-    const totalCredits = trialBalance?.reduce((sum: number, acc: any) => sum + Number(acc.credit_total || 0), 0) || 0
-    const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01
+    const drawFooter = () => {
+      const pageHeight = doc.page.height
+      const pageWidth = doc.page.width
+      const footerY = pageHeight - FOOTER_HEIGHT
 
-    if (y + rowHeight > doc.page.height - 50) {
-      doc.addPage()
-      y = 50
+      // PDFKit's LineWrapper triggers an automatic addPage() whenever
+      // doc.y > page.maxY(). Footers live in the bottom margin band BY DESIGN
+      // (y > maxY), so any doc.text() call there would recurse into addPage.
+      // Zero the bottom margin around the footer draw so maxY === pageHeight,
+      // which keeps the wrapper from firing nextSection().
+      const savedBottomMargin = doc.page.margins.bottom
+      doc.page.margins.bottom = 0
+      try {
+        doc.fontSize(8).font("Helvetica").fillColor("#000000")
+        doc.text(`Generated on ${generatedAt}`, PAGE_LEFT, footerY, {
+          width: pageWidth - PAGE_LEFT * 2,
+          align: "left",
+          lineBreak: false,
+        })
+        doc.text(
+          `${businessName} — FINZA — Read-only report`,
+          PAGE_LEFT,
+          footerY,
+          {
+            width: pageWidth - PAGE_LEFT * 2,
+            align: "right",
+            lineBreak: false,
+          }
+        )
+      } finally {
+        doc.page.margins.bottom = savedBottomMargin
+      }
     }
 
-    doc.fontSize(10).font("Helvetica-Bold")
-    x = 50
-    doc.rect(x, y, columnWidths[0] + columnWidths[1] + columnWidths[2], rowHeight).fillAndStroke("#F0F0F0", "#000000")
-    doc.text("Totals", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] + columnWidths[2] - 10, align: "left" })
-    x += columnWidths[0] + columnWidths[1] + columnWidths[2]
-    doc.rect(x, y, columnWidths[3], rowHeight).fillAndStroke("#F0F0F0", "#000000")
-    doc.text(formatNumeric(totalDebits), x + 5, y + 7, { width: columnWidths[3] - 10, align: "right" })
-    x += columnWidths[3]
-    doc.rect(x, y, columnWidths[4], rowHeight).fillAndStroke("#F0F0F0", "#000000")
-    doc.text(formatNumeric(totalCredits), x + 5, y + 7, { width: columnWidths[4] - 10, align: "right" })
-    x += columnWidths[4]
-    doc.rect(x, y, columnWidths[5], rowHeight).fillAndStroke("#F0F0F0", "#000000")
-    doc.text(formatNumeric(totalDebits - totalCredits), x + 5, y + 7, { width: columnWidths[5] - 10, align: "right" })
-    y += rowHeight + 10
+    // Returns the y at which row content can begin on the new page.
+    const drawPageChrome = (firstPage: boolean): number => {
+      let y = PAGE_TOP
+      if (firstPage) {
+        const innerWidth = doc.page.width - PAGE_LEFT * 2
+        doc.fontSize(18).font("Helvetica-Bold").fillColor("#000000")
+        doc.text("Trial Balance Report", PAGE_LEFT, y, {
+          width: innerWidth,
+          align: "center",
+          lineBreak: false,
+        })
+        doc.fontSize(12).font("Helvetica").fillColor("#000000")
+        doc.text(`${businessName} — ${periodLabel}`, PAGE_LEFT, y + 26, {
+          width: innerWidth,
+          align: "center",
+          lineBreak: false,
+        })
+        y += TITLE_BLOCK_HEIGHT
+      }
+      drawColumnHeader(y)
+      drawFooter()
+      return y + HEADER_ROW_HEIGHT
+    }
 
-    // Balance check
-    doc.fontSize(9).font("Helvetica")
-    doc.text(`Balanced: ${isBalanced ? "Yes" : "No"}`, 50, y)
-
-    // Footer on each page
+    // pageAdded fires for every doc.addPage() — including the very first
+    // because autoFirstPage:false. Use the isFirstPage latch to render the
+    // title block once. The drawingChrome guard prevents PDFKit from
+    // recursively re-entering this listener if a chrome draw call ever
+    // triggered an auto-page-break (which would overflow the call stack).
+    let drawingChrome = false
+    let nextRowY = 0
     doc.on("pageAdded", () => {
-      const pageHeight = doc.page.height
-      doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-      doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
+      if (drawingChrome) return
+      drawingChrome = true
+      try {
+        const firstPage = isFirstPage
+        isFirstPage = false
+        nextRowY = drawPageChrome(firstPage)
+      } finally {
+        drawingChrome = false
+      }
     })
 
-    // Footer on first page
-    const pageHeight = doc.page.height
-    doc.fontSize(8).font("Helvetica")
-    doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-    doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
+    doc.addPage()
+    let y = nextRowY
 
-    // Finalize PDF
+    const pageBottomLimit = () => doc.page.height - PAGE_TOP - FOOTER_HEIGHT
+
+    const ensureSpace = (need: number) => {
+      if (y + need > pageBottomLimit()) {
+        doc.addPage()
+        y = nextRowY
+      }
+    }
+
+    const drawRow = (cells: string[], rowHeight: number, isHeaderLike: boolean, fillColor?: string) => {
+      doc.fontSize(isHeaderLike ? 10 : 9).font(isHeaderLike ? "Helvetica-Bold" : "Helvetica")
+      let x = PAGE_LEFT
+      for (let i = 0; i < columns.length; i++) {
+        const col = columns[i]
+        if (fillColor) {
+          doc.rect(x, y, col.width, rowHeight).fillAndStroke(fillColor, "#000000")
+          doc.fillColor("#000000")
+        } else {
+          doc.rect(x, y, col.width, rowHeight).stroke()
+        }
+        doc.text(cells[i] ?? "", x + 5, y + (rowHeight - 12) / 2, {
+          width: col.width - 10,
+          align: col.align,
+          ellipsis: true,
+          lineBreak: false,
+        })
+        x += col.width
+      }
+    }
+
+    // ---- Data rows ----
+    for (const account of data.accounts) {
+      ensureSpace(DATA_ROW_HEIGHT)
+      drawRow(
+        [
+          account.account_code,
+          account.account_name,
+          account.account_type,
+          formatNumeric(account.opening_balance),
+          formatNumeric(account.debit_total),
+          formatNumeric(account.credit_total),
+          formatNumeric(account.closing_balance),
+        ],
+        DATA_ROW_HEIGHT,
+        false
+      )
+      y += DATA_ROW_HEIGHT
+    }
+
+    // ---- Totals row ----
+    // Don't put (debit - credit) under "Closing Balance" — that label is misleading.
+    // Show TB column totals only where they're meaningful (Debit/Credit), and
+    // put the balance check on its own line just below.
+    const totalDebits = data.totals.totalDebits
+    const totalCredits = data.totals.totalCredits
+    const isBalanced = data.isBalanced
+    const difference = Math.round((totalDebits - totalCredits) * 100) / 100
+
+    ensureSpace(TOTALS_ROW_HEIGHT + 22)
+
+    drawRow(
+      [
+        "Totals",
+        "",
+        "",
+        "—",
+        formatNumeric(totalDebits),
+        formatNumeric(totalCredits),
+        "—",
+      ],
+      TOTALS_ROW_HEIGHT,
+      true,
+      "#F0F0F0"
+    )
+    y += TOTALS_ROW_HEIGHT
+
+    // ---- Balance check (separate from totals row) ----
+    doc.fontSize(10).font("Helvetica-Bold").fillColor(isBalanced ? "#0B7A3B" : "#B91C1C")
+    doc.text(
+      `Difference: ${formatNumeric(Math.abs(difference))}    Balanced: ${isBalanced ? "Yes" : "No"}`,
+      PAGE_LEFT,
+      y + 6,
+      { width: totalTableWidth, align: "right", lineBreak: false }
+    )
+    doc.fillColor("#000000")
+    y += 22
+
     doc.end()
 
-    // Wait for PDF to be fully generated
     await new Promise<void>((resolve) => {
       doc.on("end", () => {
         resolve()
@@ -257,18 +392,17 @@ export async function GET(request: NextRequest) {
 
     const pdfBuffer = Buffer.concat(chunks)
 
-    // Generate filename
-    const periodLabelForFile = periodStart 
-      ? `period-${periodStart}` 
+    const periodLabelForFile = periodStart
+      ? `period-${periodStart}`
       : `${effectiveStartDate}-to-${effectiveEndDate}`
     const filename = `trial-balance-${periodLabelForFile}.pdf`
 
-    // Return PDF file
     return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store",
       },
     })
   } catch (error: any) {
@@ -287,7 +421,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Format numeric value for PDF (no currency symbols, 2 decimal places)
+ * Format numeric value for PDF (no currency symbols, 2 decimal places).
  */
 function formatNumeric(value: number | null | undefined): string {
   if (value === null || value === undefined || isNaN(Number(value))) {

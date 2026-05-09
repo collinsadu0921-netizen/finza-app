@@ -505,7 +505,12 @@ export default function Sidebar() {
       const showAccountingSection = isAccountantFirmUser || accountingBusinessId != null
       if (showAccountingSection) {
         const useServiceRoutes = effectiveIndustry === "service" && !isAccountantFirmUser
-        const ledgerRoute = useServiceRoutes ? buildServiceRoute("/service/ledger", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/ledger", accountingBusinessId ?? undefined)
+        const generalLedgerReportRoute = useServiceRoutes
+          ? buildServiceRoute("/service/reports/general-ledger", accountingBusinessId ?? undefined)
+          : buildAccountingRoute("/accounting/reports/general-ledger", accountingBusinessId ?? undefined)
+        const journalEntriesRoute = useServiceRoutes
+          ? buildServiceRoute("/service/ledger", accountingBusinessId ?? undefined)
+          : buildAccountingRoute("/accounting/ledger", accountingBusinessId ?? undefined)
         const coaRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/chart-of-accounts", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/chart-of-accounts", accountingBusinessId ?? undefined)
         const trialBalanceRoute = useServiceRoutes ? buildServiceRoute("/service/reports/trial-balance", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reports/trial-balance", accountingBusinessId ?? undefined)
         const reconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reconciliation", accountingBusinessId ?? undefined)
@@ -513,7 +518,8 @@ export default function Sidebar() {
         const periodsRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/periods", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/periods", accountingBusinessId ?? undefined)
 
         const accountingItems: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }> = [
-          { label: "General Ledger", route: ledgerRoute, minTier: "business" },
+          { label: "General Ledger", route: generalLedgerReportRoute, minTier: "business" },
+          { label: "Journal Entries", route: journalEntriesRoute, minTier: "business" },
           { label: "Chart of Accounts", route: coaRoute, minTier: "business" },
           { label: "Trial Balance", route: trialBalanceRoute, minTier: "business" },
           { label: "Reconciliation", route: reconciliationRoute, minTier: "business" },

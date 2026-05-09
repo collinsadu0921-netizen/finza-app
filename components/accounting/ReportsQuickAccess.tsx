@@ -9,7 +9,7 @@ const REPORTS = [
   { label: "Balance Sheet",       path: "/accounting/reports/balance-sheet" },
   { label: "Cash Flow",           path: "/accounting/reports/cash-flow" },
   { label: "Changes in Equity",   path: "/accounting/reports/equity-changes" },
-  { label: "General Ledger",      path: "/accounting/ledger" },
+  { label: "General Ledger",      path: "/accounting/reports/general-ledger" },
   { label: "Reconciliation",      path: "/accounting/reconciliation" },
 ] as const
 

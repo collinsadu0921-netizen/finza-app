@@ -641,6 +641,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
               currentRevenue={metrics?.revenue ?? 0}
               currentExpenses={metrics?.expenses ?? 0}
               currentNetProfit={metrics?.netProfit ?? 0}
+              periodLabel={periodLabel}
+              selectedPeriodStart={selectedPeriodStart}
             />
           </div>
         )}

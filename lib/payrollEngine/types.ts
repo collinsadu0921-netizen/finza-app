@@ -74,9 +74,34 @@ export interface PayrollEngineConfig {
   /**
    * Optional: Whether employee is resident for tax purposes
    * Default: true
-   * Note: Currently does not affect PAYE rates (same rates apply per PwC guidance)
+   * Ghana: non-residents use flat 25% on regular employment income and 20% on bonus/overtime slices (Phase 1A).
    */
   isResident?: boolean
+
+  /**
+   * Optional: Ghana — include employee/employer pension (5.5% / 13%) on insurable basic.
+   * Default: true. Set false when staff are not pensionable (schema flag TODO).
+   */
+  isPensionable?: boolean
+
+  /**
+   * Optional: Ghana staff `employment_type` (e.g. full_time, part_time, casual).
+   * casual → 5% flat on taxable income after employee pension (Phase 1A).
+   */
+  employmentCategory?: string | null
+
+  /**
+   * Optional: Ghana — bonus already paid earlier in same calendar year (approved/locked runs), in GHS.
+   * Used for 15%-of-annual-basic concessional room. Default 0 when omitted from API.
+   */
+  priorBonusPaidInCalendarYear?: number
+
+  /**
+   * Optional: Ghana statutory junior overtime — qualifying annual employment income YTD (GHS).
+   * Overtime concession applies only when ≤ 18,000 and junior heuristic is true.
+   * TODO Phase 1B: compute from payroll history; when omitted, concession does not apply.
+   */
+  annualQualifyingEmploymentIncomeYtd?: number
 
   /**
    * Optional: NHIMA base selection (Zambia)
@@ -150,7 +175,8 @@ export interface StatutoryDeduction {
   amount: number
 
   /**
-   * Ledger account code for liability (e.g., "2210" for PAYE)
+   * Optional chart-of-accounts code hint for this deduction’s liability side.
+   * Actual posting is driven by jurisdiction-specific SQL/RPC (e.g. Finza Ghana PAYE → 2230 in post_payroll_to_ledger), not by this field.
    */
   ledgerAccountCode: string | null
 
@@ -190,12 +216,14 @@ export interface EmployerContribution {
   amount: number
 
   /**
-   * Ledger account code for expense (e.g., "6010" for Employer SSNIT)
+   * Optional expense account code hint (e.g. Ghana employer pension → 5610 in Finza’s post_payroll_to_ledger).
+   * Not authoritative: posting may use different codes or split lines in SQL.
    */
   ledgerExpenseAccountCode: string | null
 
   /**
-   * Ledger account code for liability (e.g., "2230" for SSNIT Employer Payable)
+   * Optional liability account code hint when a single counterparty line applies.
+   * May be null when liabilities are split in ledger posting (e.g. Ghana employer pension → 2231 + 2232 via payroll entry snapshots).
    */
   ledgerLiabilityAccountCode: string | null
 }
@@ -280,6 +308,22 @@ export interface PayrollCalculationResult {
     graduatedPayeBase: number
     graduatedPayeAmount: number
     totalIncomeTax: number
+    /** Ghana Phase 1A — bonus YTD used for concessional room */
+    priorBonusPaidInCalendarYear?: number
+    bonusConcessionalRoomBeforeRun?: number
+    /** Ghana — junior overtime concession applied (needs income YTD from API) */
+    juniorOvertimeConcessionApplies?: boolean
+    /** Ghana — statutory junior overtime income ceiling check input */
+    annualQualifyingEmploymentIncomeYtd?: number
+    casualWorkerFlatTaxApplied?: boolean
+    isResident?: boolean
+    pensionable?: boolean
+    ssnitBase?: number
+    employeePensionContribution?: number
+    employerPensionContribution?: number
+    totalMandatoryPension?: number
+    tier1SsnitRemittance?: number
+    tier2PensionRemittance?: number
   }
 }
 

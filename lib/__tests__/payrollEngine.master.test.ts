@@ -15,7 +15,7 @@
 
 import { calculatePayroll } from "../payrollEngine"
 import { MissingCountryError, UnsupportedCountryError } from "../payrollEngine/errors"
-import { ghanaPayrollEngine } from "../payrollEngine/jurisdictions/ghana"
+import { ghanaPayrollEngine, calculateGhanaResidentGraduatedPaye } from "../payrollEngine/jurisdictions/ghana"
 import { kenyaPayrollEngine } from "../payrollEngine/jurisdictions/kenya"
 import { tanzaniaPayrollEngine } from "../payrollEngine/jurisdictions/tanzania"
 import { rwandaPayrollEngine } from "../payrollEngine/jurisdictions/rwanda"
@@ -74,99 +74,42 @@ describe("A. Global Sanity Test (ALL COUNTRIES)", () => {
 
 describe("B. PAYE Boundary Tests (COUNTRY-SPECIFIC)", () => {
   describe("B1. Ghana (GH)", () => {
-    it("should calculate PAYE = 0 for 490 (first band edge)", () => {
-      // Adjust basic to get taxable income of 490 after SSNIT
-      // SSNIT = 5.5% of gross, so: taxable = gross - 0.055*gross = 0.945*gross
-      // For taxable = 490: gross = 490 / 0.945 ≈ 518.52
-      const gross = 490 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
+    // Use pre-2026 effectiveDate so insurable min/max (2026) does not distort low-end “target taxable” construction.
+    const ghPreInsurableClamp = "2025-12-01"
 
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      expect(paye?.amount).toBeCloseTo(0, 1) // Should be 0 or very close
+    it("PAYE on taxable income matches GRA graduated schedule (basic only, no allowance split)", () => {
+      const basics = [700, 3500, 12_000, 45_000, 120_000]
+      for (const basic of basics) {
+        const result = ghanaPayrollEngine.calculate({
+          jurisdiction: "GH",
+          effectiveDate: ghPreInsurableClamp,
+          basicSalary: basic,
+          allowances: 0,
+          otherDeductions: 0,
+        })
+        const taxable = result.totals.taxableIncome
+        const paye = result.statutoryDeductions.find((d) => d.code === "PAYE")?.amount ?? 0
+        expect(paye).toBeCloseTo(calculateGhanaResidentGraduatedPaye(taxable), 2)
+      }
     })
 
-    it("should calculate PAYE correctly for 650 (second band edge)", () => {
-      const gross = 650 / 0.945
+    it("should calculate PAYE ≈ 0 when taxable falls in first band", () => {
+      const basic = Math.round(490 / 0.945)
       const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
+        jurisdiction: "GH",
+        effectiveDate: ghPreInsurableClamp,
+        basicSalary: basic,
         allowances: 0,
-        otherDeductions: 0
+        otherDeductions: 0,
       })
-
-      const taxable = result.totals.taxableIncome
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // PAYE = (650 - 490) * 5% = 8
-      expect(paye?.amount).toBeCloseTo(8, 1)
+      const paye = result.statutoryDeductions.find((d) => d.code === "PAYE")
+      expect(paye?.amount).toBeCloseTo(0, 1)
     })
 
-    it("should calculate PAYE correctly for 3,850 (third band edge)", () => {
-      const gross = 3850 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: (650-490)*5% + (3850-650)*10% = 8 + 320 = 328
-      expect(paye?.amount).toBeCloseTo(328, 1)
-    })
-
-    it("should calculate PAYE correctly for 20,000 (fourth band edge)", () => {
-      const gross = 20000 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: 8 + 320 + (20000-3850)*17.5% = 8 + 320 + 2826.25 = 3154.25
-      expect(paye?.amount).toBeCloseTo(3154.25, 1)
-    })
-
-    it("should calculate PAYE correctly for 50,000 (fifth band edge)", () => {
-      const gross = 50000 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: 8 + 320 + 2826.25 + (50000-20000)*25% = 8 + 320 + 2826.25 + 7500 = 10654.25
-      expect(paye?.amount).toBeCloseTo(10654.25, 1)
-    })
-
-    it("should calculate PAYE correctly for 100,000 (sixth band)", () => {
-      const gross = 100000 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: 8 + 320 + 2826.25 + 7500 + (taxable-50000)*30%
-      // taxable ≈ 100000/0.945 ≈ 105820
-      // PAYE ≈ 10654.25 + (105820-50000)*30% ≈ 10654.25 + 16746 ≈ 27400
-      expect(paye?.amount).toBeGreaterThan(20000)
+    it("35% top marginal applies above final band threshold", () => {
+      const paye50416 = calculateGhanaResidentGraduatedPaye(50416.67)
+      const payeWithExtra = calculateGhanaResidentGraduatedPaye(50416.67 + 2000)
+      expect(payeWithExtra - paye50416).toBeCloseTo(2000 * 0.35, 2)
     })
 
     it("should verify SSNIT employee reduces taxable income", () => {

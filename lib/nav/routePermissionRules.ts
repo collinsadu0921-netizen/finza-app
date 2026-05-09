@@ -12,6 +12,7 @@ export const ROUTE_PERMISSION_RULES: Array<{ prefix: string; permission: Permiss
   { prefix: "/service/payroll", permission: "payroll.view" },
   { prefix: "/payroll", permission: "payroll.view" },
   { prefix: "/service/reports/trial-balance", permission: "accounting.view" },
+  { prefix: "/service/reports/general-ledger", permission: "accounting.view" },
   { prefix: "/service/reports", permission: "reports.view" },
   { prefix: "/service/ledger", permission: "accounting.view" },
   { prefix: "/service/accounting", permission: "accounting.view" },

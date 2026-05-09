@@ -1,270 +1,236 @@
 /**
- * Ghana Payroll Engine Implementation
- * Implements Ghana's payroll structure with PAYE tax bands and SSNIT contributions
+ * Ghana Payroll Engine — Phase 1A (calculation foundation)
  *
- * Version A (current):
- * - PAYE: Progressive tax bands (0-490: 0%, 491-650: 5%, 651-3850: 10%, 3851-20000: 17.5%, 20001-50000: 25%, 50000+: 30%)
- * - SSNIT base (Ghana default): BASIC SALARY ONLY. Employee 5.5% and Employer 13% are applied to basic_salary,
- *   not gross (basic+allowances). This matches statutory treatment where pensionable earnings = basic only.
- * - Taxable income = gross - employee SSNIT; PAYE on taxable; net = gross - employee SSNIT - PAYE - deductions.
- *
- * Future versions can be added by date:
- * - Version B (2026-01-01): Potential rate changes (placeholder for future)
+ * References (official):
+ * - GRA PAYE: https://gra.gov.gh/domestic-tax/tax-types/paye/
+ * - SSNIT employer obligations: https://www.ssnit.org.gh/become-an-employer/
+ * - SSNIT FAQs: https://www.ssnit.org.gh/faqs/
+ * - 2026 min/max insurable earnings (Finza applies from 2026-01-01):
+ *   https://www.ssnit.org.gh/wp-content/uploads/2026/01/Public-Notice-Min-Max-Insurable.pdf
  */
 
 import type { PayrollEngine, PayrollEngineConfig, PayrollCalculationResult, StatutoryDeduction, EmployerContribution } from '../types'
 import { roundPayroll, extractDatePart } from '../versioning'
 
-/**
- * Ghana PAYE tax rate version
- */
-interface GhanaPayeRates {
-  bands: Array<{
-    min: number
-    max: number | null // null = no upper limit
-    rate: number
-  }>
+/** First version key for GRA monthly resident bands (Phase 1A; replaces incorrect historic brackets). */
+export const GHANA_RESIDENT_PAYE_EFFECTIVE_FROM = '1970-01-01'
+
+const GHANA_INSURABLE_EARNINGS_2026_START = '2026-01-01'
+
+/** Progressive slices: first GHS 490 @ 0%, next 110 @ 5%, …, then 35% on excess. Source: GRA PAYE page. */
+const PAYE_BAND_WIDTHS: ReadonlyArray<{ width: number; rate: number }> = [
+  { width: 490, rate: 0 },
+  { width: 110, rate: 0.05 },
+  { width: 130, rate: 0.1 },
+  { width: 3166.67, rate: 0.175 },
+  { width: 16000, rate: 0.25 },
+  { width: 30520, rate: 0.3 },
+]
+const PAYE_TOP_MARGINAL_RATE = 0.35
+
+interface GhanaInsurableSchedule {
+  minInsurableEarning: number | null
+  maxInsurableEarning: number | null
 }
 
-/**
- * Ghana SSNIT contribution rates
- */
-interface GhanaSsnitRates {
-  employeeRate: number // 5.5%
-  employerRate: number // 13%
-}
-
-/**
- * Ghana payroll rate versions
- * Key: effective date (YYYY-MM-DD) - date when this version becomes active
- * Value: rates for that version
- */
-const GHANA_PAYE_VERSIONS: Record<string, GhanaPayeRates> = {
-  // Version A: Current GRA PAYE tax bands (effective from beginning)
-  // Bands match SQL function calculate_ghana_paye() exactly
-  // Band ranges are inclusive on both ends (e.g., 0-490 means 0 through 490 inclusive)
-  '1970-01-01': {
-    bands: [
-      { min: 0, max: 490, rate: 0.00 }, // 0% - 0 to 490 (inclusive)
-      { min: 491, max: 650, rate: 0.05 }, // 5% - 491 to 650 (inclusive)
-      { min: 651, max: 3850, rate: 0.10 }, // 10% - 651 to 3850 (inclusive)
-      { min: 3851, max: 20000, rate: 0.175 }, // 17.5% - 3851 to 20000 (inclusive)
-      { min: 20001, max: 50000, rate: 0.25 }, // 25% - 20001 to 50000 (inclusive)
-      { min: 50001, max: null, rate: 0.30 }, // 30% - 50001+ (no upper limit)
-    ],
-  },
-}
-
-const GHANA_SSNIT_VERSIONS: Record<string, GhanaSsnitRates> = {
-  // Version A: Current SSNIT rates (effective from beginning)
-  '1970-01-01': {
-    employeeRate: 0.055, // 5.5%
-    employerRate: 0.13, // 13%
-  },
-}
-
-/**
- * Get PAYE tax bands for a specific effective date
- * 
- * @param effectiveDate ISO date string (YYYY-MM-DD)
- * @returns PAYE tax bands for the effective date
- */
-function getPayeRatesForDate(effectiveDate: string): GhanaPayeRates {
+function getInsurableScheduleForDate(effectiveDate: string): GhanaInsurableSchedule {
   const date = extractDatePart(effectiveDate)
-  const versions = Object.keys(GHANA_PAYE_VERSIONS)
-    .filter(versionDate => versionDate <= date)
-    .sort()
-    .reverse() // Most recent first
-  
-  const latestVersion = versions[0] || '1970-01-01'
-  return GHANA_PAYE_VERSIONS[latestVersion]
+  if (date >= GHANA_INSURABLE_EARNINGS_2026_START) {
+    return {
+      minInsurableEarning: 587.8,
+      maxInsurableEarning: 69_000.0,
+    }
+  }
+  return { minInsurableEarning: null, maxInsurableEarning: null }
 }
 
 /**
- * Get SSNIT rates for a specific effective date
- * 
- * @param effectiveDate ISO date string (YYYY-MM-DD)
- * @returns SSNIT rates for the effective date
+ * Pensionable insurable earnings (basic-only, Phase 1A).
+ * No contribution when basic ≤ 0 or not pensionable.
+ * From 2026-01-01: clamp to SSNIT public notice min/max insurable earnings.
  */
-function getSsnitRatesForDate(effectiveDate: string): GhanaSsnitRates {
-  const date = extractDatePart(effectiveDate)
-  const versions = Object.keys(GHANA_SSNIT_VERSIONS)
-    .filter(versionDate => versionDate <= date)
-    .sort()
-    .reverse() // Most recent first
-  
-  const latestVersion = versions[0] || '1970-01-01'
-  return GHANA_SSNIT_VERSIONS[latestVersion]
+export function resolveGhanaInsurableBasicSalary(params: {
+  basicSalary: number
+  pensionable?: boolean | undefined
+  effectiveDate: string
+}): number {
+  const { basicSalary: rawBasic, pensionable = true, effectiveDate } = params
+  const basic = Number(rawBasic) || 0
+  if (!pensionable || basic <= 0) return 0
+
+  const sch = getInsurableScheduleForDate(effectiveDate)
+  let base = basic
+  if (sch.minInsurableEarning != null) base = Math.max(base, sch.minInsurableEarning)
+  if (sch.maxInsurableEarning != null) base = Math.min(base, sch.maxInsurableEarning)
+  return roundPayroll(base)
 }
 
-/**
- * Calculate PAYE tax using progressive tax bands
- * 
- * Progressive tax calculation:
- * - Each band applies only to income within that band range
- * - Tax is cumulative (band 1 + band 2 + ...)
- * 
- * Example for 3000 taxable income:
- * - Band 1 (0-490): 490 * 0.00 = 0
- * - Band 2 (491-650): (650-490) * 0.05 = 8
- * - Band 3 (651-3850): (3000-650) * 0.10 = 235
- * - Total: 0 + 8 + 235 = 243
- * 
- * @param taxableIncome Taxable income amount
- * @param effectiveDate Effective date for rate selection
- * @returns PAYE tax amount
- */
-function calculatePaye(taxableIncome: number, effectiveDate: string): number {
-  if (taxableIncome <= 0) {
-    return 0
+/** GRA progressive resident PAYE on monthly taxable employment income. */
+export function calculateGhanaResidentGraduatedPaye(monthlyTaxableIncome: number): number {
+  const income = Math.max(0, Number(monthlyTaxableIncome) || 0)
+  if (income <= 0) return 0
+
+  let remaining = income
+  let tax = 0
+
+  for (const { width, rate } of PAYE_BAND_WIDTHS) {
+    if (remaining <= 0) break
+    const slice = Math.min(remaining, width)
+    tax += slice * rate
+    remaining -= slice
   }
 
-  const payeRates = getPayeRatesForDate(effectiveDate)
-  
-  // Progressive tax calculation (matches SQL function calculate_ghana_paye exactly)
-  // SQL calculation uses the previous band's upper boundary as the base
-  // Band 1 (0-490): tax = 0
-  // Band 2 (491-650): tax = (income - 490) * 0.05
-  // Band 3 (651-3850): tax = (650-490)*0.05 + (income-650)*0.10
-  // etc.
-  
-  // Match SQL logic exactly using if-else chain
-  if (taxableIncome <= 490) {
-    return 0
-  } else if (taxableIncome <= 650) {
-    return roundPayroll((taxableIncome - 490) * 0.05)
-  } else if (taxableIncome <= 3850) {
-    return roundPayroll((650 - 490) * 0.05 + (taxableIncome - 650) * 0.10)
-  } else if (taxableIncome <= 20000) {
-    return roundPayroll((650 - 490) * 0.05 + (3850 - 650) * 0.10 + (taxableIncome - 3850) * 0.175)
-  } else if (taxableIncome <= 50000) {
-    return roundPayroll(
-      (650 - 490) * 0.05 +
-      (3850 - 650) * 0.10 +
-      (20000 - 3850) * 0.175 +
-      (taxableIncome - 20000) * 0.25
-    )
-  } else {
-    return roundPayroll(
-      (650 - 490) * 0.05 +
-      (3850 - 650) * 0.10 +
-      (20000 - 3850) * 0.175 +
-      (50000 - 20000) * 0.25 +
-      (taxableIncome - 50000) * 0.30
-    )
-  }
+  if (remaining > 0) tax += remaining * PAYE_TOP_MARGINAL_RATE
+
+  return roundPayroll(tax)
 }
 
-/**
- * Ghana Payroll Engine
- */
+function employmentTypeIndicatesCasual(employmentType: string | undefined | null): boolean {
+  const t = String(employmentType ?? '').trim().toLowerCase()
+  return t === 'casual' || (t.includes('casual') && !t.includes('non-casual'))
+}
+
 export const ghanaPayrollEngine: PayrollEngine = {
   calculate(config: PayrollEngineConfig): PayrollCalculationResult {
-    const {
-      basicSalary,
-      allowances,
-      otherDeductions,
-      effectiveDate,
-      bonusAmount = 0,
-      overtimeAmount = 0,
-      isQualifyingJuniorEmployee = false,
-    } = config
+    const safeBasicSalary = Number(config.basicSalary) || 0
+    const allowances = Number(config.allowances ?? 0) || 0
+    const otherDeductions = Math.max(0, Number(config.otherDeductions ?? 0) || 0)
+    const dateToUse = config.effectiveDate
+    const pensionable = config.isPensionable !== false
+    const isResident = config.isResident !== false
+    const safeBonusAmount = roundPayroll(Math.max(0, Number(config.bonusAmount ?? 0) || 0))
+    const safeOvertimeAmount = roundPayroll(Math.max(0, Number(config.overtimeAmount ?? 0) || 0))
+    const regularAllowances = roundPayroll(Math.max(0, allowances - safeBonusAmount - safeOvertimeAmount))
 
-    // Use effectiveDate from config (defaults to payroll_month)
-    const dateToUse = effectiveDate
+    const casual = employmentTypeIndicatesCasual(config.employmentCategory)
 
-    const safeBonusAmount = roundPayroll(Math.max(0, Number(bonusAmount) || 0))
-    const safeOvertimeAmount = roundPayroll(Math.max(0, Number(overtimeAmount) || 0))
-    const regularAllowances = roundPayroll(Math.max(0, Number(allowances || 0) - safeBonusAmount - safeOvertimeAmount))
-
-    // Ghana bonus concession: first 15% of annual basic taxed at flat 5%.
-    const bonusCapAmount = roundPayroll(Math.max(0, basicSalary * 12 * 0.15))
-    const bonusConcessionalAmount = Math.min(safeBonusAmount, bonusCapAmount)
+    const priorBonusYtd = Math.max(0, Number(config.priorBonusPaidInCalendarYear ?? 0) || 0)
+    const annualBasicForCap = roundPayroll(Math.max(0, safeBasicSalary * 12))
+    const bonusAnnualCap = roundPayroll(Math.max(0, annualBasicForCap * 0.15))
+    const bonusCapRemainingBeforeThisRun = roundPayroll(Math.max(0, bonusAnnualCap - priorBonusYtd))
+    const bonusConcessionalAmount = casual ? 0 : Math.min(safeBonusAmount, bonusCapRemainingBeforeThisRun)
     const bonusGraduatedAmount = roundPayroll(Math.max(0, safeBonusAmount - bonusConcessionalAmount))
-    const bonusTax5 = roundPayroll(bonusConcessionalAmount * 0.05)
 
-    // Ghana overtime concession (qualifying junior employees):
-    // first 50% of monthly basic taxed at 5%, excess taxed at 10%.
-    // Non-qualifying employees: overtime follows graduated PAYE.
-    const overtimeThresholdAmount = roundPayroll(Math.max(0, basicSalary * 0.5))
-    const overtimeTaxableAt5 = isQualifyingJuniorEmployee ? Math.min(safeOvertimeAmount, overtimeThresholdAmount) : 0
-    const overtimeTaxableAt10 = isQualifyingJuniorEmployee
+    const annualQualIncome = config.annualQualifyingEmploymentIncomeYtd
+    const juniorIncomeQualifies =
+      typeof annualQualIncome === 'number' && Number.isFinite(annualQualIncome) && annualQualIncome <= 18_000
+    const concessionApplies =
+      !casual &&
+      Boolean(config.isQualifyingJuniorEmployee) &&
+      juniorIncomeQualifies
+
+    const overtimeThresholdAmount = roundPayroll(Math.max(0, safeBasicSalary * 0.5))
+    const overtimeTaxableAt5 = concessionApplies ? Math.min(safeOvertimeAmount, overtimeThresholdAmount) : 0
+    const overtimeTaxableAt10 = concessionApplies
       ? roundPayroll(Math.max(0, safeOvertimeAmount - overtimeTaxableAt5))
       : 0
-    const overtimeGraduatedAmount = isQualifyingJuniorEmployee ? 0 : safeOvertimeAmount
-    const overtimeTax5 = roundPayroll(overtimeTaxableAt5 * 0.05)
-    const overtimeTax10 = roundPayroll(overtimeTaxableAt10 * 0.10)
+    const overtimeGraduatedAmount = concessionApplies ? 0 : safeOvertimeAmount
 
-    // Calculate earnings: gross = basic + regular allowances + bonus + overtime
-    const grossSalary = roundPayroll(basicSalary + regularAllowances + safeBonusAmount + safeOvertimeAmount)
+    const bonusTax5 =
+      casual || !isResident
+        ? 0
+        : roundPayroll(bonusConcessionalAmount * 0.05)
+    const overtimeTax5 =
+      casual || !isResident ? 0 : roundPayroll(overtimeTaxableAt5 * 0.05)
+    const overtimeTax10 =
+      casual || !isResident ? 0 : roundPayroll(overtimeTaxableAt10 * 0.1)
 
-    // Get SSNIT rates for effective date
-    const ssnitRates = getSsnitRatesForDate(dateToUse)
+    const grossSalary = roundPayroll(safeBasicSalary + regularAllowances + safeBonusAmount + safeOvertimeAmount)
 
-    // SSNIT base (Ghana default): BASIC SALARY ONLY. Employee 5.5% and employer 13% apply to basic_salary.
-    const ssnitBase = basicSalary
-    const ssnitEmployeeAmount = roundPayroll(ssnitBase * ssnitRates.employeeRate)
-    const ssnitEmployerAmount = roundPayroll(ssnitBase * ssnitRates.employerRate)
+    const ssnitBase = resolveGhanaInsurableBasicSalary({
+      basicSalary: safeBasicSalary,
+      pensionable,
+      effectiveDate: dateToUse,
+    })
 
-    // Taxable income = gross - employee SSNIT (SSNIT is tax-deductible).
-    const taxableIncome = roundPayroll(grossSalary - ssnitEmployeeAmount)
+    const employeeRate = 0.055
+    const employerRate = 0.13
+    const ssnitEmployeeAmount = pensionable ? roundPayroll(ssnitBase * employeeRate) : 0
+    const ssnitEmployerAmount = pensionable ? roundPayroll(ssnitBase * employerRate) : 0
 
-    // Graduated PAYE base excludes concessional bonus/overtime portions.
-    const graduatedPayeBase = roundPayroll(
-      taxableIncome - bonusConcessionalAmount - overtimeTaxableAt5 - overtimeTaxableAt10
-    )
-    const regularGraduatedBase = roundPayroll(
-      graduatedPayeBase - bonusGraduatedAmount - overtimeGraduatedAmount
-    )
-    const regularPayeAmount = calculatePaye(Math.max(0, regularGraduatedBase), dateToUse)
-    const regularPlusBonusPayeAmount = calculatePaye(
-      Math.max(0, regularGraduatedBase + bonusGraduatedAmount),
-      dateToUse
-    )
-    const graduatedPayeAmount = calculatePaye(Math.max(0, graduatedPayeBase), dateToUse)
-    const bonusTaxGraduated = roundPayroll(regularPlusBonusPayeAmount - regularPayeAmount)
-    const overtimeTaxGraduated = roundPayroll(graduatedPayeAmount - regularPlusBonusPayeAmount)
-    const payeAmount = roundPayroll(gradedTaxTotal(graduatedPayeAmount, bonusTax5, overtimeTax5, overtimeTax10))
+    const tier1SsnitRemittance = pensionable ? roundPayroll(ssnitBase * 0.135) : 0
+    const tier2PensionRemittance = pensionable ? roundPayroll(ssnitBase * 0.05) : 0
 
-    // Calculate net salary (taxable income - PAYE - other deductions)
+    const taxableIncome = roundPayroll(Math.max(0, grossSalary - ssnitEmployeeAmount))
+
+    let payeAmount: number
+    let bonusTaxGraduatedForBreakdown = 0
+    let overtimeTaxGraduatedForBreakdown = 0
+    let graduatedPayeAmount = 0
+
+    if (casual) {
+      payeAmount = roundPayroll(taxableIncome * 0.05)
+    } else if (!isResident) {
+      const remainder = Math.max(
+        0,
+        roundPayroll(taxableIncome - safeBonusAmount - safeOvertimeAmount)
+      )
+      payeAmount = roundPayroll(remainder * 0.25 + safeBonusAmount * 0.2 + safeOvertimeAmount * 0.2)
+    } else {
+      const graduatedPayeBase = roundPayroll(
+        taxableIncome - bonusConcessionalAmount - overtimeTaxableAt5 - overtimeTaxableAt10
+      )
+      const regularGraduatedBase = roundPayroll(
+        graduatedPayeBase - bonusGraduatedAmount - overtimeGraduatedAmount
+      )
+      const regularPayeAmount = calculateGhanaResidentGraduatedPaye(Math.max(0, regularGraduatedBase))
+      const regularPlusBonusPayeAmount = calculateGhanaResidentGraduatedPaye(
+        Math.max(0, regularGraduatedBase + bonusGraduatedAmount)
+      )
+      graduatedPayeAmount = calculateGhanaResidentGraduatedPaye(Math.max(0, graduatedPayeBase))
+      bonusTaxGraduatedForBreakdown = roundPayroll(
+        Math.max(0, regularPlusBonusPayeAmount - regularPayeAmount)
+      )
+      overtimeTaxGraduatedForBreakdown = roundPayroll(
+        Math.max(0, graduatedPayeAmount - regularPlusBonusPayeAmount)
+      )
+      payeAmount = roundPayroll(
+        graduatedPayeAmount + bonusTax5 + overtimeTax5 + overtimeTax10
+      )
+    }
+
     const netSalary = Math.max(0, roundPayroll(taxableIncome - payeAmount - otherDeductions))
 
-    // Build statutory deductions
+    const totalMandatoryPension = pensionable ? roundPayroll(ssnitBase * 0.185) : 0
+
     const statutoryDeductions: StatutoryDeduction[] = [
       {
         code: 'SSNIT_EMPLOYEE',
-        name: 'SSNIT Employee Contribution',
-        rate: ssnitRates.employeeRate,
-        base: roundPayroll(ssnitBase), // Ghana default: basic salary only
+        name: 'Employee pension contribution (5.5% of insurable basic)',
+        rate: employeeRate,
+        base: roundPayroll(ssnitBase),
         amount: ssnitEmployeeAmount,
-        ledgerAccountCode: '2220', // SSNIT Employee Contribution Payable
-        isTaxDeductible: true, // SSNIT is deductible from taxable income
+        // Employee pension withholding is not a single liability line in Finza posting: Tier 1 / Tier 2 remittance
+        // amounts live on payroll_entries and post_payroll_to_ledger credits 2231 + 2232 (see complianceBreakdown).
+        ledgerAccountCode: null,
+        isTaxDeductible: true,
       },
       {
         code: 'PAYE',
         name: 'PAYE',
-        rate: 0, // PAYE uses progressive bands, no single rate
+        rate: 0,
         base: roundPayroll(taxableIncome),
         amount: payeAmount,
-        ledgerAccountCode: '2210', // PAYE Liability
-        isTaxDeductible: false, // PAYE is calculated on taxable income (after SSNIT)
+        // Finza payroll journal: PAYE payable posts to 2230 (post_payroll_to_ledger); metadata hint only.
+        ledgerAccountCode: '2230',
+        isTaxDeductible: false,
       },
     ]
 
-    // Build employer contributions
     const employerContributions: EmployerContribution[] = [
       {
         code: 'SSNIT_EMPLOYER',
-        name: 'SSNIT Employer Contribution',
-        rate: ssnitRates.employerRate,
-        base: roundPayroll(ssnitBase), // Ghana default: basic salary only
+        name: 'Employer pension contribution (13% of insurable basic)',
+        rate: employerRate,
+        base: roundPayroll(ssnitBase),
         amount: ssnitEmployerAmount,
-        ledgerExpenseAccountCode: '6010', // Employer SSNIT Contribution (expense)
-        ledgerLiabilityAccountCode: '2230', // SSNIT Employer Contribution Payable
+        // Finza payroll journal: employer pension expense posts to 5610 (post_payroll_to_ledger). Metadata hint only.
+        ledgerExpenseAccountCode: '5610',
+        // Ghana employer pension liability is split between 2231 Tier 1 and 2232 Tier 2 by post_payroll_to_ledger using payroll entry snapshots.
+        ledgerLiabilityAccountCode: null,
       },
     ]
 
-    // Calculate totals
     const totalStatutoryDeductions = roundPayroll(
       statutoryDeductions.reduce((sum, d) => sum + d.amount, 0)
     )
@@ -274,7 +240,7 @@ export const ghanaPayrollEngine: PayrollEngine = {
 
     return {
       earnings: {
-        basicSalary: roundPayroll(basicSalary),
+        basicSalary: roundPayroll(safeBasicSalary),
         allowances: roundPayroll(allowances),
         grossSalary: roundPayroll(grossSalary),
       },
@@ -293,22 +259,39 @@ export const ghanaPayrollEngine: PayrollEngine = {
         bonusAmount: safeBonusAmount,
         overtimeAmount: safeOvertimeAmount,
         regularAllowancesAmount: regularAllowances,
-        isQualifyingJuniorEmployee,
-        bonusCapAmount,
+        isQualifyingJuniorEmployee: Boolean(config.isQualifyingJuniorEmployee),
+        bonusCapAmount: bonusAnnualCap,
         bonusTax5,
-        bonusTaxGraduated: roundPayroll(Math.max(0, bonusTaxGraduated)),
+        bonusTaxGraduated: bonusTaxGraduatedForBreakdown,
         overtimeThresholdAmount,
         overtimeTax5,
         overtimeTax10,
-        overtimeTaxGraduated: roundPayroll(Math.max(0, overtimeTaxGraduated)),
-        graduatedPayeBase: roundPayroll(Math.max(0, graduatedPayeBase)),
+        overtimeTaxGraduated: overtimeTaxGraduatedForBreakdown,
+        graduatedPayeBase: roundPayroll(
+          Math.max(
+            0,
+            taxableIncome -
+              bonusConcessionalAmount -
+              overtimeTaxableAt5 -
+              overtimeTaxableAt10
+          )
+        ),
         graduatedPayeAmount: roundPayroll(graduatedPayeAmount),
         totalIncomeTax: roundPayroll(payeAmount),
+        priorBonusPaidInCalendarYear: priorBonusYtd,
+        bonusConcessionalRoomBeforeRun: bonusCapRemainingBeforeThisRun,
+        juniorOvertimeConcessionApplies: concessionApplies,
+        annualQualifyingEmploymentIncomeYtd: annualQualIncome,
+        casualWorkerFlatTaxApplied: casual,
+        isResident,
+        pensionable,
+        ssnitBase: roundPayroll(ssnitBase),
+        employeePensionContribution: ssnitEmployeeAmount,
+        employerPensionContribution: ssnitEmployerAmount,
+        totalMandatoryPension,
+        tier1SsnitRemittance,
+        tier2PensionRemittance,
       },
     }
   },
-}
-
-function gradedTaxTotal(graduatedPaye: number, bonusTax5: number, overtimeTax5: number, overtimeTax10: number): number {
-  return roundPayroll(graduatedPaye + bonusTax5 + overtimeTax5 + overtimeTax10)
 }

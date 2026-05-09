@@ -70,7 +70,7 @@ export async function PUT(
     const body = await request.json()
     const { name, code, type, description } = body
 
-    // Verify account exists and is not system
+    // System chart rows (is_system = true), including payroll controls 2230–2241 / 5610, are not tenant-editable here.
     const { data: existing } = await supabase
       .from("accounts")
       .select("is_system")

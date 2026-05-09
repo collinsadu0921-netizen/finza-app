@@ -40,6 +40,19 @@ type PayslipData = {
     payroll_month: string
     status: string
   }
+  salary_advance_repayment_amount?: number
+  salary_advance_remaining_balance?: number
+  salary_advance_repayments?: Array<{
+    id: string
+    salary_advance_id: string
+    payroll_entry_id: string
+    payroll_run_id: string
+    amount: number
+    status: "pending" | "posted" | "voided"
+    posted_at: string | null
+    journal_entry_id: string | null
+    remaining_balance?: number
+  }>
 }
 
 type BusinessData = {
@@ -54,7 +67,11 @@ type BusinessData = {
 }
 
 function fmt(amount: number, sym: string) {
-  return `${sym}${Number(amount).toFixed(2)}`
+  const numeric = Number(amount || 0)
+  return `${sym}${numeric.toLocaleString("en-GH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function formatMonth(dateStr: string) {
@@ -131,6 +148,19 @@ export default function PublicPayslipPage() {
   const overtimeTax5 = Number(entry.overtime_tax_5 ?? 0)
   const overtimeTax10 = Number(entry.overtime_tax_10 ?? 0)
   const overtimeTaxGraduated = Number(entry.overtime_tax_graduated ?? 0)
+  const salaryAdvanceRepayments = payslip.salary_advance_repayments ?? []
+  const salaryAdvanceRepaymentAmount = Number(
+    payslip.salary_advance_repayment_amount ??
+      salaryAdvanceRepayments.reduce((sum, repayment) => sum + Number(repayment.amount || 0), 0)
+  )
+  const salaryAdvanceRemainingBalance = Number(
+    payslip.salary_advance_remaining_balance ??
+      salaryAdvanceRepayments.reduce((sum, repayment) => sum + Number(repayment.remaining_balance || 0), 0)
+  )
+  const otherDeductionsExcludingAdvance = Math.max(
+    0,
+    Number(entry.deductions_total ?? 0) - salaryAdvanceRepaymentAmount
+  )
 
   return (
     <div className="min-h-screen bg-slate-100 py-10 px-4 print:bg-white print:py-0">
@@ -246,20 +276,32 @@ export default function PublicPayslipPage() {
                 )}
                 {Number(entry.ssnit_employee) > 0 && (
                   <div className="flex justify-between items-center py-2 border-b border-slate-50">
-                    <span className="text-sm text-slate-600">SSNIT (Employee 5.5%)</span>
+                    <span className="text-sm text-slate-600">Employee pension contribution — 5.5% of basic salary</span>
                     <span className="text-sm font-medium text-red-600">−{fmt(entry.ssnit_employee, sym)}</span>
                   </div>
                 )}
-                {Number(entry.deductions_total) > 0 && (
+                {salaryAdvanceRepaymentAmount > 0 && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                    <span className="text-sm text-slate-600">Salary advance repayment</span>
+                    <span className="text-sm font-medium text-red-600">−{fmt(salaryAdvanceRepaymentAmount, sym)}</span>
+                  </div>
+                )}
+                {otherDeductionsExcludingAdvance > 0 && (
                   <div className="flex justify-between items-center py-2 border-b border-slate-50">
                     <span className="text-sm text-slate-600">Other Deductions</span>
-                    <span className="text-sm font-medium text-red-600">−{fmt(entry.deductions_total, sym)}</span>
+                    <span className="text-sm font-medium text-red-600">−{fmt(otherDeductionsExcludingAdvance, sym)}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center py-2 bg-red-50 rounded-lg px-3">
                   <span className="text-sm font-bold text-red-700">Total Deductions</span>
                   <span className="text-sm font-bold text-red-700">−{fmt(totalDeductions, sym)}</span>
                 </div>
+                {salaryAdvanceRepaymentAmount > 0 && (
+                  <div className="flex justify-between items-center py-2 bg-amber-50 rounded-lg px-3">
+                    <span className="text-sm font-semibold text-amber-700">Remaining salary advance balance</span>
+                    <span className="text-sm font-semibold text-amber-700">{fmt(salaryAdvanceRemainingBalance, sym)}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -267,7 +309,7 @@ export default function PublicPayslipPage() {
             {Number(entry.ssnit_employer) > 0 && (
               <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
                 <p className="text-xs text-blue-700">
-                  <strong>Employer SSNIT Contribution:</strong> {fmt(entry.ssnit_employer, sym)} (13% — paid by employer, not deducted from your salary)
+                  Employer pension contribution: <strong className="font-mono">{fmt(entry.ssnit_employer, sym)}</strong> (13% of basic salary — paid by employer, not deducted from your salary)
                 </p>
               </div>
             )}
@@ -277,7 +319,7 @@ export default function PublicPayslipPage() {
               <div className="flex justify-between items-center">
                 <div>
                   <p className="text-sm font-semibold text-green-700">Net Pay</p>
-                  <p className="text-xs text-green-600 mt-0.5">Amount to be paid to employee</p>
+                  <p className="text-xs text-green-600 mt-0.5">Final amount payable after all employee deductions</p>
                 </div>
                 <p className="text-3xl font-bold text-green-700">{fmt(entry.net_salary, sym)}</p>
               </div>

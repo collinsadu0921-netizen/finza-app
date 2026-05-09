@@ -4,6 +4,7 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { resolveGeneralLedgerAccount } from "@/lib/accounting/resolveGeneralLedgerAccount"
 
 /**
  * GET /api/accounting/reports/general-ledger/export/pdf
@@ -43,9 +44,24 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
     const accountId = searchParams.get("account_id")
+    const accountCodeParam = searchParams.get("account_code")
     const periodStart = searchParams.get("period_start")
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
+    const accountCodeFrom = searchParams.get("account_code_from")
+    const accountCodeTo = searchParams.get("account_code_to")
+    const accountCodes = searchParams.get("account_codes")
+    const preset = searchParams.get("preset")
+
+    if (preset || accountCodes || accountCodeFrom || accountCodeTo) {
+      return NextResponse.json(
+        {
+          error:
+            "PDF export supports a single account. Use CSV for multi-account or range exports.",
+        },
+        { status: 400 }
+      )
+    }
 
     try {
       assertAccountingAccess(accountingUserFromRequest(request))
@@ -62,9 +78,9 @@ export async function GET(request: NextRequest) {
       source: "api",
     })
 
-    if ("error" in resolved || !accountId) {
+    if ("error" in resolved || (!accountId && !accountCodeParam)) {
       return NextResponse.json(
-        { error: "Missing required parameters: business_id and account_id" },
+        { error: "Missing required parameters: business_id and account_id or account_code" },
         { status: 400 }
       )
     }
@@ -90,19 +106,16 @@ export async function GET(request: NextRequest) {
     )
     if (tierBlockGlPdf) return tierBlockGlPdf
 
-    // Verify account exists
-    const { data: account, error: accountError } = await supabase
-      .from("accounts")
-      .select("id, code, name, type")
-      .eq("id", accountId)
-      .eq("business_id", resolvedBusinessId)
-      .is("deleted_at", null)
-      .single()
-
-    if (accountError || !account) {
+    const { account, error: resolveAccountError } = await resolveGeneralLedgerAccount(
+      supabase,
+      resolvedBusinessId,
+      accountId,
+      accountCodeParam
+    )
+    if (resolveAccountError || !account) {
       return NextResponse.json(
-        { error: "Account not found or does not belong to business" },
-        { status: 404 }
+        { error: resolveAccountError || "Account not found or does not belong to business" },
+        { status: resolveAccountError?.includes("Missing") ? 400 : 404 }
       )
     }
 
@@ -166,7 +179,7 @@ export async function GET(request: NextRequest) {
     // Fetch data (non-paginated for export)
     const { data: ledgerLines, error: rpcError } = await supabase.rpc("get_general_ledger", {
       p_business_id: resolvedBusinessId,
-      p_account_id: accountId,
+      p_account_id: account.id,
       p_start_date: effectiveStartDate,
       p_end_date: effectiveEndDate,
     })

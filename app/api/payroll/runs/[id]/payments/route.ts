@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, resolveBusinessScopeForUser } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
+import { statusFromAmounts } from "@/lib/payroll/obligations"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 async function getRunPaymentData(
@@ -106,26 +107,52 @@ export async function GET(
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
+    const resolvedScope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
+    if (!resolvedScope.ok) {
+      return NextResponse.json({ error: resolvedScope.error }, { status: resolvedScope.status })
+    }
+    const businessId = resolvedScope.businessId
 
     const tierDeniedPayGet = await enforceServiceIndustryMinTier(
       supabase,
       user.id,
-      business.id,
+      businessId,
       "professional"
     )
     if (tierDeniedPayGet) return tierDeniedPayGet
 
-    const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW)
-    if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    const viewPermission = await requirePermission(supabase, user.id, businessId, PERMISSIONS.PAYROLL_VIEW)
+    const payPermission = await requirePermission(supabase, user.id, businessId, PERMISSIONS.PAYROLL_PAY)
+    if (!viewPermission.allowed && !payPermission.allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    }
 
-    const runData = await getRunPaymentData(supabase, business.id, runId)
+    const runData = await getRunPaymentData(supabase, businessId, runId)
     if ("error" in runData) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[payroll payments GET runData error]", {
+          runId,
+          currentBusinessId: businessId,
+          requestedBusinessId,
+          status: runData.status,
+          error: runData.error,
+        })
+      }
       return NextResponse.json({ error: runData.error }, { status: runData.status })
     }
 
-    const paymentAccounts = await getPaymentAccounts(supabase, business.id)
+    const paymentAccounts = await getPaymentAccounts(supabase, businessId)
+
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[payroll payments GET debug]", {
+        runId,
+        runBusinessId: runData.payrollRun.business_id,
+        currentBusinessId: businessId,
+        requestedBusinessId,
+        eligiblePaidFromAccounts: paymentAccounts.length,
+      })
+    }
 
     return NextResponse.json({
       payrollRun: runData.payrollRun,
@@ -180,6 +207,23 @@ export async function POST(
     const reference = body.reference ? String(body.reference).trim() : null
     const notes = body.notes ? String(body.notes).trim() : null
 
+    let batchId: string | null = null
+    if (body.batch_id != null && String(body.batch_id).trim()) {
+      batchId = String(body.batch_id).trim()
+      const { data: batchRow, error: batchErr } = await supabase
+        .from("payroll_payment_batches")
+        .select("id")
+        .eq("id", batchId)
+        .eq("business_id", business.id)
+        .eq("payroll_run_id", runId)
+        .is("deleted_at", null)
+        .maybeSingle()
+
+      if (batchErr || !batchRow) {
+        return NextResponse.json({ error: "Invalid batch_id for this payroll run." }, { status: 400 })
+      }
+    }
+
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
       return NextResponse.json({ error: "payment_date must be YYYY-MM-DD" }, { status: 400 })
     }
@@ -208,11 +252,13 @@ export async function POST(
       )
     }
 
+    if (runData.summary.outstanding_amount <= 0.01) {
+      return NextResponse.json({ error: "Net salaries are already fully paid." }, { status: 400 })
+    }
+
     if (amount - runData.summary.outstanding_amount > 0.01) {
       return NextResponse.json(
-        {
-          error: `Payment amount exceeds outstanding net salaries payable (outstanding: ${runData.summary.outstanding_amount.toFixed(2)})`,
-        },
+        { error: "Payment amount exceeds outstanding net salary." },
         { status: 400 }
       )
     }
@@ -250,6 +296,7 @@ export async function POST(
         reference: reference || null,
         notes: notes || null,
         created_by: user.id,
+        ...(batchId ? { batch_id: batchId } : {}),
       })
       .select("*")
       .single()
@@ -281,6 +328,36 @@ export async function POST(
         },
         { status: 201 }
       )
+    }
+
+    const { data: salaryNetObligation } = await supabase
+      .from("payroll_obligations")
+      .select("id, amount_due")
+      .eq("business_id", business.id)
+      .eq("payroll_run_id", runId)
+      .eq("obligation_type", "salary_net")
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (salaryNetObligation) {
+      const due = Number(salaryNetObligation.amount_due || 0)
+      const paidTotal = Number(refreshed.summary.paid_amount || 0)
+      const amountPaidForObligation = Math.min(due, paidTotal)
+      const obligationStatus = statusFromAmounts(due, amountPaidForObligation)
+      const latestPay = (refreshed.payments || [])[0] as
+        | { payment_date?: string; reference?: string | null; payment_account_id?: string }
+        | undefined
+
+      await supabase
+        .from("payroll_obligations")
+        .update({
+          amount_paid: amountPaidForObligation,
+          status: obligationStatus,
+          latest_payment_date: latestPay?.payment_date ?? null,
+          latest_payment_reference: latestPay?.reference ?? null,
+          payment_account_id: latestPay?.payment_account_id ?? null,
+        })
+        .eq("id", salaryNetObligation.id)
     }
 
     return NextResponse.json(

@@ -11,6 +11,7 @@ describe("routePermissionRules", () => {
 
   it("uses most specific prefix: trial balance is accounting not reports", () => {
     expect(getRequiredPermissionForPath("/service/reports/trial-balance")).toBe("accounting.view")
+    expect(getRequiredPermissionForPath("/service/reports/general-ledger")).toBe("accounting.view")
     expect(getRequiredPermissionForPath("/service/reports/profit-and-loss")).toBe("reports.view")
   })
 

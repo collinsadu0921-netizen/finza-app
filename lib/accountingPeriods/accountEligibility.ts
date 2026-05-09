@@ -42,7 +42,7 @@ const FORBIDDEN_SYSTEM_CODES = [
   "2200", // Other Tax Liabilities
   "2210", // PAYE Liability
   "2220", // SSNIT Employee Contribution Payable
-  "2230", // SSNIT Employer Contribution Payable
+  "2230", // PAYE Tax Payable (ledger code for payroll withholdings)
   "2240", // Net Salaries Payable
 ]
 

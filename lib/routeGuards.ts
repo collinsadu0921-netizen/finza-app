@@ -38,6 +38,7 @@ export function checkRouteAccess(
         "/accounting",
         "/accounting/ledger",
         "/accounting/trial-balance",
+        "/accounting/reports",
         "/accounting/periods",
         "/accounting/chart-of-accounts",
         "/accounting/opening-balances",

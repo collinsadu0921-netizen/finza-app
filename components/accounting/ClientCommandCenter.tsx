@@ -283,7 +283,7 @@ export default function ClientCommandCenter({ businessId }: Props) {
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
             <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Drill links</h3>
             <div className="flex flex-wrap gap-3">
-              <Link href={links.ledger} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Ledger</Link>
+              <Link href={links.ledger} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Journal entries</Link>
               <Link href={links.journals} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Journals</Link>
               <Link href={links.openingBalances} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Opening balances</Link>
               <Link href={links.reconciliation} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Reconciliation</Link>

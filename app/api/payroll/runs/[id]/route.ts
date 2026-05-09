@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { generateOrSyncPayrollObligationsForRun } from "@/lib/payroll/obligations"
 
 export async function GET(
   request: NextRequest,
@@ -81,6 +82,83 @@ export async function GET(
       console.error("Error fetching payroll entries:", entriesError)
     }
 
+    const entryIds = (entries || []).map((entry: any) => entry.id)
+    const { data: advanceRepayments, error: repaymentsError } = entryIds.length > 0
+      ? await supabase
+          .from("salary_advance_repayments")
+          .select(`
+            id,
+            salary_advance_id,
+            payroll_entry_id,
+            payroll_run_id,
+            amount,
+            status,
+            journal_entry_id,
+            posted_at,
+            created_at,
+            salary_advance:salary_advance_id (
+              id,
+              amount,
+              repaid_amount,
+              status
+            )
+          `)
+          .eq("business_id", business.id)
+          .eq("payroll_run_id", runId)
+          .in("status", ["pending", "posted"])
+      : { data: [], error: null }
+
+    if (repaymentsError) {
+      console.error("Error fetching salary advance repayments:", repaymentsError)
+    }
+
+    const repaymentsByEntryId = new Map<string, any[]>()
+    for (const repayment of advanceRepayments || []) {
+      const entryId = String((repayment as any).payroll_entry_id || "")
+      if (!entryId) continue
+      const existing = repaymentsByEntryId.get(entryId) || []
+      existing.push(repayment as any)
+      repaymentsByEntryId.set(entryId, existing)
+    }
+
+    const enrichedEntries = (entries || []).map((entry: any) => {
+      const entryRepayments = repaymentsByEntryId.get(String(entry.id)) || []
+      const salaryAdvanceRepaymentAmount = entryRepayments
+        .reduce((sum, repayment) => sum + Number(repayment.amount || 0), 0)
+
+      const salaryAdvanceRemainingBalance = entryRepayments.reduce((sum, repayment: any) => {
+        const advance = repayment.salary_advance as any
+        const amount = Number(advance?.amount || 0)
+        const repaidAmount = Number(advance?.repaid_amount || 0)
+        if (repayment.status === "posted") {
+          return sum + Math.max(0, amount - repaidAmount)
+        }
+        return sum + Math.max(0, amount - repaidAmount - Number(repayment.amount || 0))
+      }, 0)
+
+      return {
+        ...entry,
+        salary_advance_repayment_amount: salaryAdvanceRepaymentAmount,
+        salary_advance_remaining_balance: salaryAdvanceRemainingBalance,
+        salary_advance_repayments: entryRepayments.map((repayment: any) => ({
+          id: repayment.id,
+          salary_advance_id: repayment.salary_advance_id,
+          payroll_entry_id: repayment.payroll_entry_id,
+          payroll_run_id: repayment.payroll_run_id,
+          amount: Number(repayment.amount || 0),
+          status: repayment.status,
+          journal_entry_id: repayment.journal_entry_id,
+          posted_at: repayment.posted_at,
+          created_at: repayment.created_at,
+        })),
+      }
+    })
+
+    const totalSalaryAdvanceRepayments = enrichedEntries.reduce(
+      (sum: number, entry: any) => sum + Number(entry.salary_advance_repayment_amount || 0),
+      0
+    )
+
     const { data: payrollPayments, error: paymentsError } = await supabase
       .from("payroll_payments")
       .select(
@@ -123,7 +201,10 @@ export async function GET(
 
     return NextResponse.json({
       payrollRun,
-      entries: entries || [],
+      entries: enrichedEntries,
+      totals: {
+        total_salary_advance_repayments: totalSalaryAdvanceRepayments,
+      },
       payments: payrollPayments || [],
       paymentSummary,
     })
@@ -169,6 +250,8 @@ export async function PUT(
     const body = await request.json()
     const { status, notes } = body
     let journalEntryId: string | null = null
+    let obligationsWarning: string | null = null
+    let obligationsGenerationError: string | null = null
 
     // Get existing payroll run
     const { data: existingRun } = await supabase
@@ -218,14 +301,6 @@ export async function PUT(
 
     // If approving, post to ledger (must succeed or approval fails)
     if (status === "approved" && existingRun.status !== "approved") {
-      // Check if already posted
-      if (existingRun.journal_entry_id) {
-        return NextResponse.json(
-          { error: "Payroll run has already been posted to ledger" },
-          { status: 400 }
-        )
-      }
-
       const { data: entries, error: entriesError } = await supabase
         .from("payroll_entries")
         .select("gross_salary, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary")
@@ -281,24 +356,30 @@ export async function PUT(
         )
       }
 
-      // Post to ledger - if this fails, approval must fail
-      const { data: postedJournalId, error: ledgerError } = await supabase.rpc(
-        "post_payroll_to_ledger",
-        {
-          p_payroll_run_id: runId,
-        }
-      )
-      journalEntryId = postedJournalId ?? null
-
-      if (ledgerError || !journalEntryId) {
-        console.error("Error posting payroll to ledger:", ledgerError)
-        return NextResponse.json(
-          { error: ledgerError?.message || "Failed to post payroll to ledger. Approval cannot proceed." },
-          { status: 500 }
+      // Idempotent posting: RPC locks payroll_runs, returns linked journal, any existing
+      // active payroll journal, or inserts once (see migration 474).
+      if (existingRun.journal_entry_id) {
+        journalEntryId = String(existingRun.journal_entry_id)
+        console.log("Payroll journal already linked on run:", journalEntryId)
+      } else {
+        const { data: postedJournalId, error: ledgerError } = await supabase.rpc(
+          "post_payroll_to_ledger",
+          {
+            p_payroll_run_id: runId,
+          }
         )
-      }
+        journalEntryId = postedJournalId ?? null
 
-      console.log("Payroll posted to ledger:", journalEntryId)
+        if (ledgerError || !journalEntryId) {
+          console.error("Error posting payroll to ledger:", ledgerError)
+          return NextResponse.json(
+            { error: ledgerError?.message || "Failed to post payroll to ledger. Approval cannot proceed." },
+            { status: 500 }
+          )
+        }
+
+        console.log("Payroll posted to ledger:", journalEntryId)
+      }
     }
 
     const updateData: any = {}
@@ -327,6 +408,27 @@ export async function PUT(
       )
     }
 
+    // Obligations require persisted status approved|locked (see lib/payroll/obligations.ts).
+    if (
+      status === "approved" &&
+      existingRun.status !== "approved" &&
+      payrollRun?.status === "approved"
+    ) {
+      try {
+        const result = await generateOrSyncPayrollObligationsForRun(
+          supabase as any,
+          business.id,
+          runId,
+          { allowLegacyDerivation: true }
+        )
+        obligationsWarning = result.warning
+      } catch (oblErr: any) {
+        console.error("Payroll obligations generation failed after approval:", oblErr)
+        obligationsGenerationError =
+          oblErr?.message || "Failed to generate payroll obligations after approval."
+      }
+    }
+
     // Audit the status change
     if (status && status !== existingRun.status) {
       const actionType =
@@ -347,7 +449,11 @@ export async function PUT(
       })
     }
 
-    return NextResponse.json({ payrollRun })
+    return NextResponse.json({
+      payrollRun,
+      ...(obligationsWarning ? { obligationsWarning } : {}),
+      ...(obligationsGenerationError ? { obligationsGenerationError } : {}),
+    })
   } catch (error: any) {
     console.error("Error updating payroll run:", error)
     return NextResponse.json(

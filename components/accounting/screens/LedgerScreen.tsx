@@ -405,7 +405,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       const response = await fetch(`/api/ledger/list?${params.toString()}`)
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
-        const msg    = (body.error as string) || "Unable to load ledger. Please try again."
+        const msg    = (body.error as string) || "Unable to load journal entries. Please try again."
         const detail = body.supabase_error?.message
         throw new Error(detail ? `${msg} (${detail})` : msg)
       }
@@ -432,7 +432,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       }
       setLoading(false)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load ledger")
+      setError(err instanceof Error ? err.message : "Failed to load journal entries")
       setLoading(false)
     }
   }
@@ -536,7 +536,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement("a")
       a.href     = url
-      a.download = `general-ledger-${from || "all"}-to-${to || "time"}.csv`
+      a.download = `journal-entries-${from || "all"}-to-${to || "time"}.csv`
       a.click()
       URL.revokeObjectURL(url)
       setExportModalOpen(false)
@@ -574,7 +574,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <EmptyState
           title="Client not selected"
-          description="Select a client from the Accounting workspace or open a business in the Service workspace to view the ledger."
+          description="Select a client from the Accounting workspace or open a business in the Service workspace to view journal entries."
         />
       </div>
     )
@@ -615,7 +615,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
             </button>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                General Ledger
+                Journal Entries
               </h1>
               {authoritySource === "accountant" && engagementAccessLevel && (
                 <span
@@ -631,7 +631,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
               )}
             </div>
             <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-              Append-only · every entry is permanent and traceable
+              View posted accounting journal entries. Append-only — every entry is permanent and traceable.
             </p>
           </div>
           <div className="flex items-center gap-3 mt-1 shrink-0">
@@ -841,7 +841,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm border border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Export General Ledger</h2>
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Export journal entries</h2>
                 <button
                   onClick={() => setExportModalOpen(false)}
                   className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"

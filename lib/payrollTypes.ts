@@ -2,6 +2,7 @@
  * Allowance and deduction type values allowed by DB constraints.
  * Source of truth: supabase/migrations/047_payroll_system.sql
  * - allowances: type IN ('transport', 'housing', 'utility', 'medical', 'bonus', 'overtime', 'other')
+ *   Custom labels map through payroll_allowance_types (allowance_type_id) while legacy `type` stays CHECK-safe.
  * - deductions: type IN ('loan', 'advance', 'penalty', 'other')
  */
 

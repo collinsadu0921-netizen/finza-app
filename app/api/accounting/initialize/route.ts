@@ -86,7 +86,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
+    const { error: seedError } = await supabase.rpc("create_system_accounts", {
+      p_business_id: resolvedBusinessId,
+    })
+    if (seedError) {
+      console.error("Failed to create system accounts during accounting initialize:", seedError)
+      return NextResponse.json(
+        { error: "Failed to initialize chart of accounts." },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json({ success: true, business_id: resolvedBusinessId })
   } catch (error: any) {

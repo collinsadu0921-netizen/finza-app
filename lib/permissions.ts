@@ -52,7 +52,7 @@ export const PERMISSION_GROUPS = [
     group: "Accounting & Reports",
     permissions: [
       { key: "reports.view",            label: "View financial reports (P&L, Balance Sheet, Cash Flow)" },
-      { key: "accounting.view",         label: "View ledger, chart of accounts, trial balance" },
+      { key: "accounting.view",         label: "View journal entries, general ledger reports, chart of accounts, and trial balance" },
       { key: "accounting.reconcile",    label: "Perform bank reconciliation" },
       { key: "accounting.close_period", label: "Close accounting periods" },
     ],

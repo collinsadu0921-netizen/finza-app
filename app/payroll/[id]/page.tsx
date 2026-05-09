@@ -1,9 +1,12 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
+import Link from "next/link"
 import { useToast } from "@/components/ui/ToastProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
+import { buildServiceRoute } from "@/lib/service/routes"
+import { buildAccountingRoute } from "@/lib/accounting/routes"
 
 type PayrollEntry = {
   id: string
@@ -19,6 +22,18 @@ type PayrollEntry = {
   taxable_income: number
   paye: number
   net_salary: number
+  salary_advance_repayment_amount?: number
+  salary_advance_remaining_balance?: number
+  salary_advance_repayments?: Array<{
+    id: string
+    salary_advance_id: string
+    payroll_entry_id: string
+    payroll_run_id: string
+    amount: number
+    status: "pending" | "posted" | "voided"
+    posted_at: string | null
+    journal_entry_id: string | null
+  }>
   staff: {
     id: string
     name: string
@@ -31,6 +46,7 @@ type PayrollEntry = {
 
 type PayrollRun = {
   id: string
+  business_id?: string
   payroll_month: string
   status: string
   total_gross_salary: number
@@ -41,6 +57,10 @@ type PayrollRun = {
   total_paye: number
   total_net_salary: number
   notes: string | null
+}
+
+type PayrollTotals = {
+  total_salary_advance_repayments?: number
 }
 
 type Payslip = {
@@ -54,6 +74,37 @@ type Payslip = {
   email_sent_at: string | null
 }
 
+type PayrollPaymentBatch = {
+  id: string
+  payroll_run_id: string
+  status: string
+  currency: string
+  total_amount_snapshot: number
+  item_count: number
+  created_at: string
+  status_counts?: Record<string, number>
+}
+
+type PayrollPaymentBatchItem = {
+  id: string
+  batch_id: string
+  payroll_entry_id: string
+  staff_id: string
+  employee_name: string | null
+  amount: number
+  currency: string
+  status: string
+  destination_method_type: string | null
+  destination_bank_name: string | null
+  destination_account_number: string | null
+  destination_momo_provider: string | null
+  destination_momo_number: string | null
+  legacy_destination_source: string | null
+  payment_reference: string | null
+  failure_reason: string | null
+  paid_at: string | null
+}
+
 type PayrollPayment = {
   id: string
   payroll_run_id: string
@@ -64,6 +115,7 @@ type PayrollPayment = {
   notes: string | null
   journal_entry_id: string | null
   created_at: string
+  batch_id?: string | null
   payment_account?: {
     id: string
     name: string
@@ -89,12 +141,74 @@ type PaymentAccount = {
   type: string
 }
 
+type PayrollObligation = {
+  id: string
+  obligation_type: "salary_net" | "paye_gra" | "ssnit_tier1" | "tier2_pension" | "other_employee_deductions"
+  label: string
+  amount_due: number
+  amount_paid: number
+  outstanding_amount: number
+  status: "unpaid" | "partially_paid" | "paid"
+  status_display?: string
+  due_date: string | null
+  is_payable?: boolean
+  internal_note?: string | null
+}
+
+type ObligationsResponse = {
+  obligations: PayrollObligation[]
+  canGenerateObligations: boolean
+  totals: {
+    total_due: number
+    total_paid: number
+    total_outstanding: number
+    salary_outstanding: number
+    statutory_outstanding: number
+  }
+}
+
 type SendModalState = {
   payslipId: string
   staffName: string
   staffEmail: string | null
   staffPhone: string | null
 } | null
+
+type PaymentBatchSummary = {
+  batchId: string
+  total: number
+  paidTotal: number
+  pendingTotal: number
+  failedOrSkippedCount: number
+  paidCount: number
+}
+
+/** Compare calendar dates as YYYY-MM-DD strings only (no Date/timezone math). */
+function isPaymentDateBeforePayrollPeriod(
+  paymentDate: string,
+  payrollMonth: string | null | undefined
+): boolean {
+  if (!paymentDate?.trim() || payrollMonth == null || payrollMonth === "") return false
+  const periodDay = String(payrollMonth).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDay)) return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) return false
+  return paymentDate < periodDay
+}
+
+/** Action column label when a payable obligation is fully settled (outstanding ≤ 0.01). */
+function obligationSettledActionLabel(
+  obligationType: PayrollObligation["obligation_type"]
+): string {
+  switch (obligationType) {
+    case "paye_gra":
+      return "Paid"
+    case "ssnit_tier1":
+    case "tier2_pension":
+      return "Remitted"
+    default:
+      return "Paid"
+  }
+}
 
 export default function PayrollRunViewPage() {
   const router = useRouter()
@@ -106,15 +220,21 @@ export default function PayrollRunViewPage() {
   const [loading, setLoading] = useState(true)
   const [payrollRun, setPayrollRun] = useState<PayrollRun | null>(null)
   const [entries, setEntries] = useState<PayrollEntry[]>([])
+  const [runTotals, setRunTotals] = useState<PayrollTotals | null>(null)
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [updating, setUpdating] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [sendingAll, setSendingAll] = useState(false)
   const [recordingPayment, setRecordingPayment] = useState(false)
+  const salaryPaymentSubmittingRef = useRef(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [salaryPayments, setSalaryPayments] = useState<PayrollPayment[]>([])
   const [paymentSummary, setPaymentSummary] = useState<PayrollPaymentSummary | null>(null)
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
+  const [paymentsBusinessId, setPaymentsBusinessId] = useState<string | null>(null)
+  const [runBusinessId, setRunBusinessId] = useState<string | null>(null)
+  const [paymentAccountsLoading, setPaymentAccountsLoading] = useState(false)
+  const [paymentAccountsError, setPaymentAccountsError] = useState("")
   const [paymentError, setPaymentError] = useState("")
   const [paymentForm, setPaymentForm] = useState({
     payment_date: new Date().toISOString().split("T")[0],
@@ -122,13 +242,40 @@ export default function PayrollRunViewPage() {
     payment_account_id: "",
     reference: "",
     notes: "",
+    batch_id: "",
   })
+
+  const [paymentBatches, setPaymentBatches] = useState<PayrollPaymentBatch[]>([])
+  const [loadingPaymentBatches, setLoadingPaymentBatches] = useState(false)
+  const [creatingPaymentBatch, setCreatingPaymentBatch] = useState(false)
+  const [expandedPaymentBatchId, setExpandedPaymentBatchId] = useState<string | null>(null)
+  const [expandedBatchDetail, setExpandedBatchDetail] = useState<{
+    batch: PayrollPaymentBatch
+    items: PayrollPaymentBatchItem[]
+  } | null>(null)
+  const [loadingBatchDetail, setLoadingBatchDetail] = useState(false)
+  const [batchActionLoading, setBatchActionLoading] = useState<string | null>(null)
+  const [selectedBatchSummary, setSelectedBatchSummary] = useState<PaymentBatchSummary | null>(null)
+  const [loadingSelectedBatchSummary, setLoadingSelectedBatchSummary] = useState(false)
 
   // Send modal state
   const [sendModal, setSendModal] = useState<SendModalState>(null)
   const [sendEmail, setSendEmailInput] = useState("")
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState("")
+  const [obligationsData, setObligationsData] = useState<ObligationsResponse | null>(null)
+  const [loadingObligations, setLoadingObligations] = useState(false)
+  const [showObligationPaymentModal, setShowObligationPaymentModal] = useState(false)
+  const [selectedObligation, setSelectedObligation] = useState<PayrollObligation | null>(null)
+  const [recordingObligationPayment, setRecordingObligationPayment] = useState(false)
+  const [obligationPaymentError, setObligationPaymentError] = useState("")
+  const [obligationPaymentForm, setObligationPaymentForm] = useState({
+    payment_date: new Date().toISOString().split("T")[0],
+    amount: "",
+    payment_account_id: "",
+    reference: "",
+    notes: "",
+  })
 
   const loadPayrollRun = useCallback(async () => {
     try {
@@ -136,7 +283,9 @@ export default function PayrollRunViewPage() {
       const data = await response.json()
       if (response.ok) {
         setPayrollRun(data.payrollRun)
+        setRunBusinessId(typeof data?.payrollRun?.business_id === "string" ? data.payrollRun.business_id : null)
         setEntries(data.entries || [])
+        setRunTotals(data.totals || null)
         if (data.paymentSummary) setPaymentSummary(data.paymentSummary)
         if (Array.isArray(data.payments)) setSalaryPayments(data.payments)
       }
@@ -158,16 +307,67 @@ export default function PayrollRunViewPage() {
   }, [runId])
 
   const loadPayrollPayments = useCallback(async () => {
+    setPaymentAccountsLoading(true)
+    setPaymentAccountsError("")
     try {
-      const response = await fetch(`/api/payroll/runs/${runId}/payments`)
-      const data = await response.json()
+      const route = runBusinessId
+        ? `/api/payroll/runs/${runId}/payments?business_id=${encodeURIComponent(runBusinessId)}`
+        : `/api/payroll/runs/${runId}/payments`
+      const response = await fetch(route)
+      const raw = await response.text()
+      let data: any = null
+      try {
+        data = raw ? JSON.parse(raw) : null
+      } catch {
+        data = null
+      }
       if (response.ok) {
-        setSalaryPayments(data.payments || [])
-        setPaymentSummary(data.summary || null)
-        setPaymentAccounts(data.paymentAccounts || [])
+        setSalaryPayments(data?.payments || [])
+        setPaymentSummary(data?.summary || null)
+        setPaymentAccounts(data?.paymentAccounts || [])
+        setPaymentsBusinessId(typeof data?.payrollRun?.business_id === "string" ? data.payrollRun.business_id : null)
+      } else {
+        console.error("[payroll payments fetch failed]", {
+          route,
+          runId,
+          runBusinessId,
+          status: response.status,
+          body: data ?? raw,
+        })
+        setPaymentAccounts([])
+        setPaymentsBusinessId(null)
+        if (response.status === 403) {
+          setPaymentAccountsError(
+            "You do not have permission to load paid-from accounts. Ask an admin to grant payroll payment or accounting access."
+          )
+        } else {
+          setPaymentAccountsError(
+            "Could not load paid-from accounts. Please refresh or check your payroll/accounting permissions."
+          )
+        }
       }
     } catch (err) {
       console.error("Error loading payroll payments:", err)
+      setPaymentAccounts([])
+      setPaymentsBusinessId(null)
+      setPaymentAccountsError(
+        "Could not load paid-from accounts. Please refresh or check your payroll/accounting permissions."
+      )
+    } finally {
+      setPaymentAccountsLoading(false)
+    }
+  }, [runId, runBusinessId])
+
+  const loadPaymentBatches = useCallback(async () => {
+    setLoadingPaymentBatches(true)
+    try {
+      const response = await fetch(`/api/payroll/runs/${runId}/payment-batches`)
+      const data = await response.json()
+      if (response.ok) setPaymentBatches(data.batches || [])
+    } catch (err) {
+      console.error("Error loading payment batches:", err)
+    } finally {
+      setLoadingPaymentBatches(false)
     }
   }, [runId])
 
@@ -175,9 +375,28 @@ export default function PayrollRunViewPage() {
     loadPayrollRun()
     loadPayslips()
     loadPayrollPayments()
-  }, [loadPayrollRun, loadPayslips, loadPayrollPayments])
+    loadPaymentBatches()
+  }, [loadPayrollRun, loadPayslips, loadPayrollPayments, loadPaymentBatches])
+
+  const loadObligations = useCallback(async () => {
+    setLoadingObligations(true)
+    try {
+      const response = await fetch(`/api/payroll/runs/${runId}/obligations`)
+      const data = await response.json()
+      if (response.ok) setObligationsData(data)
+    } catch (err) {
+      console.error("Error loading obligations:", err)
+    } finally {
+      setLoadingObligations(false)
+    }
+  }, [runId])
+
+  useEffect(() => {
+    loadObligations()
+  }, [loadObligations])
 
   const handleApprove = async () => {
+    if (updating) return
     setUpdating(true)
     try {
       const response = await fetch(`/api/payroll/runs/${runId}`, {
@@ -188,6 +407,7 @@ export default function PayrollRunViewPage() {
       const data = await response.json()
       if (response.ok) {
         loadPayrollRun()
+        loadObligations()
         toast.showToast("Payroll approved", "success")
       } else {
         toast.showToast(data.error || "Error approving payroll run", "error")
@@ -196,6 +416,109 @@ export default function PayrollRunViewPage() {
       toast.showToast("Error approving payroll run", "error")
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const handleGenerateObligations = async () => {
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/obligations/generate`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Failed to generate obligations", "error")
+        return
+      }
+      await loadObligations()
+      toast.showToast(data.warning || "Payroll obligations generated", "success")
+    } catch {
+      toast.showToast("Failed to generate obligations", "error")
+    }
+  }
+
+  const openObligationPaymentModal = (obligation: PayrollObligation) => {
+    const defaultAccountId = paymentAccounts[0]?.id || ""
+    setSelectedObligation(obligation)
+    setObligationPaymentError("")
+    setObligationPaymentForm({
+      payment_date: new Date().toISOString().split("T")[0],
+      amount: Number(obligation.outstanding_amount || 0).toFixed(2),
+      payment_account_id: defaultAccountId,
+      reference: "",
+      notes: "",
+    })
+    setShowObligationPaymentModal(true)
+  }
+
+  const handleRecordObligationPayment = async () => {
+    if (!selectedObligation) return
+    if (!obligationPaymentForm.payment_date) {
+      setObligationPaymentError("Payment date is required.")
+      return
+    }
+    if (!obligationPaymentForm.payment_account_id) {
+      setObligationPaymentError("Select a paid-from account.")
+      return
+    }
+    const amount = Number(obligationPaymentForm.amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setObligationPaymentError("Amount must be a positive number.")
+      return
+    }
+    setRecordingObligationPayment(true)
+    setObligationPaymentError("")
+    try {
+      const res = await fetch(
+        `/api/payroll/runs/${runId}/obligations/${selectedObligation.id}/payments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payment_date: obligationPaymentForm.payment_date,
+            amount,
+            payment_account_id: obligationPaymentForm.payment_account_id,
+            reference: obligationPaymentForm.reference || null,
+            notes: obligationPaymentForm.notes || null,
+          }),
+        }
+      )
+      const data = await res.json()
+      if (!res.ok) {
+        setObligationPaymentError(data.error || "Failed to record obligation payment.")
+        return
+      }
+      setShowObligationPaymentModal(false)
+      setSelectedObligation(null)
+      await loadObligations()
+      toast.showToast("Obligation payment/remittance recorded", "success")
+    } catch {
+      setObligationPaymentError("Failed to record obligation payment.")
+    } finally {
+      setRecordingObligationPayment(false)
+    }
+  }
+
+  const downloadRunExport = async (path: string, successMessage: string) => {
+    try {
+      const response = await fetch(path)
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        toast.showToast(data?.error || "Failed to download export", "error")
+        return
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get("Content-Disposition") || ""
+      const match = disposition.match(/filename="([^"]+)"/i)
+      const filename = match?.[1] || "payroll-export.csv"
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.showToast(successMessage, "success")
+    } catch {
+      toast.showToast("Failed to download export", "error")
     }
   }
 
@@ -286,7 +609,8 @@ export default function PayrollRunViewPage() {
 
   const openPaymentModal = () => {
     const outstanding = Number(paymentSummary?.outstanding_amount || 0)
-    const defaultAccountId = paymentAccounts[0]?.id || ""
+    if (outstanding <= 0.01) return
+    const defaultAccountId = paymentAccounts.length === 1 ? paymentAccounts[0]?.id || "" : ""
     setPaymentError("")
     setPaymentForm({
       payment_date: new Date().toISOString().split("T")[0],
@@ -294,51 +618,244 @@ export default function PayrollRunViewPage() {
       payment_account_id: defaultAccountId,
       reference: "",
       notes: "",
+      batch_id: "",
     })
     setShowPaymentModal(true)
   }
 
+  useEffect(() => {
+    if (!showPaymentModal) return
+    if (paymentAccounts.length !== 1) return
+    setPaymentForm((f) => (f.payment_account_id ? f : { ...f, payment_account_id: paymentAccounts[0].id }))
+  }, [showPaymentModal, paymentAccounts])
+
+  const loadSelectedBatchSummary = useCallback(
+    async (batchId: string): Promise<PaymentBatchSummary | null> => {
+      if (!batchId) return null
+      setLoadingSelectedBatchSummary(true)
+      try {
+        const res = await fetch(`/api/payroll/runs/${runId}/payment-batches/${batchId}`)
+        const data = await res.json()
+        if (!res.ok) {
+          toast.showToast(data.error || "Failed to load selected batch summary", "error")
+          return null
+        }
+        const items = (data.items || []) as PayrollPaymentBatchItem[]
+        const total = items.reduce((sum, i) => sum + Number(i.amount || 0), 0)
+        const paidItems = items.filter((i) => i.status === "paid")
+        const paidTotal = paidItems.reduce((sum, i) => sum + Number(i.amount || 0), 0)
+        const pendingTotal = items
+          .filter((i) => i.status === "pending")
+          .reduce((sum, i) => sum + Number(i.amount || 0), 0)
+        const failedOrSkippedCount = items.filter((i) => i.status === "failed" || i.status === "skipped").length
+
+        return {
+          batchId,
+          total,
+          paidTotal,
+          pendingTotal,
+          failedOrSkippedCount,
+          paidCount: paidItems.length,
+        }
+      } catch {
+        toast.showToast("Failed to load selected batch summary", "error")
+        return null
+      } finally {
+        setLoadingSelectedBatchSummary(false)
+      }
+    },
+    [runId, toast]
+  )
+
   const handleRecordSalaryPayment = async () => {
-    if (!paymentForm.payment_date) {
-      setPaymentError("Payment date is required.")
-      return
+    if (salaryPaymentSubmittingRef.current || recordingPayment) return
+    salaryPaymentSubmittingRef.current = true
+
+    try {
+      if (!paymentForm.payment_date) {
+        setPaymentError("Payment date is required.")
+        return
+      }
+      if (!paymentForm.payment_account_id) {
+        setPaymentError("Select a paid-from account.")
+        return
+      }
+      const amount = Number(paymentForm.amount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setPaymentError("Amount must be a positive number.")
+        return
+      }
+
+      const outstanding = Number(paymentSummary?.outstanding_amount || 0)
+      if (amount - outstanding > 0.01) {
+        setPaymentError("Payment amount exceeds remaining outstanding net salary.")
+        return
+      }
+
+      if (
+        paymentForm.batch_id.trim() &&
+        (loadingSelectedBatchSummary ||
+          (selectedBatchSummary !== null && selectedBatchSummary.paidCount === 0))
+      ) {
+        setPaymentError(
+          "This batch has no lines marked paid yet. Mark batch lines paid first, or clear the batch link to record a manual aggregate salary payment."
+        )
+        return
+      }
+
+      setRecordingPayment(true)
+      setPaymentError("")
+      try {
+        const res = await fetch(`/api/payroll/runs/${runId}/payments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payment_date: paymentForm.payment_date,
+            amount,
+            payment_account_id: paymentForm.payment_account_id,
+            reference: paymentForm.reference || null,
+            notes: paymentForm.notes || null,
+            ...(paymentForm.batch_id.trim() ? { batch_id: paymentForm.batch_id.trim() } : {}),
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setPaymentError(data.error || "Failed to record salary payment.")
+          return
+        }
+        setShowPaymentModal(false)
+        toast.showToast("Salary payment recorded and posted to ledger", "success")
+        await loadPayrollPayments()
+      } catch {
+        setPaymentError("Failed to record salary payment. Please try again.")
+      } finally {
+        setRecordingPayment(false)
+      }
+    } finally {
+      salaryPaymentSubmittingRef.current = false
     }
-    if (!paymentForm.payment_account_id) {
-      setPaymentError("Select a payment account.")
-      return
-    }
-    const amount = Number(paymentForm.amount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentError("Amount must be a positive number.")
+  }
+
+  const handleSelectBatchForPayment = async (nextBatchId: string) => {
+    setPaymentForm((f) => ({ ...f, batch_id: nextBatchId }))
+    if (!nextBatchId) {
+      setSelectedBatchSummary(null)
       return
     }
 
-    setRecordingPayment(true)
-    setPaymentError("")
+    const summary = await loadSelectedBatchSummary(nextBatchId)
+    setSelectedBatchSummary(summary)
+    if (!summary) return
+
+    const outstanding = Number(paymentSummary?.outstanding_amount || 0)
+    if (summary.paidTotal > 0) {
+      const suggested = Math.min(summary.paidTotal, outstanding)
+      setPaymentForm((f) => ({ ...f, amount: suggested.toFixed(2) }))
+      return
+    }
+
+    setPaymentForm((f) => ({ ...f, amount: "" }))
+  }
+
+  const expandPaymentBatch = async (batchId: string) => {
+    setExpandedPaymentBatchId(batchId)
+    setLoadingBatchDetail(true)
+    setExpandedBatchDetail(null)
     try {
-      const res = await fetch(`/api/payroll/runs/${runId}/payments`, {
+      const res = await fetch(`/api/payroll/runs/${runId}/payment-batches/${batchId}`)
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Failed to load batch", "error")
+        setExpandedPaymentBatchId(null)
+        return
+      }
+      setExpandedBatchDetail({
+        batch: data.batch as PayrollPaymentBatch,
+        items: (data.items || []) as PayrollPaymentBatchItem[],
+      })
+    } finally {
+      setLoadingBatchDetail(false)
+    }
+  }
+
+  const togglePaymentBatchDetails = async (batchId: string) => {
+    if (expandedPaymentBatchId === batchId) {
+      setExpandedPaymentBatchId(null)
+      setExpandedBatchDetail(null)
+      return
+    }
+    await expandPaymentBatch(batchId)
+  }
+
+  const handleCreatePaymentBatch = async () => {
+    setCreatingPaymentBatch(true)
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/payment-batches`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          payment_date: paymentForm.payment_date,
-          amount,
-          payment_account_id: paymentForm.payment_account_id,
-          reference: paymentForm.reference || null,
-          notes: paymentForm.notes || null,
-        }),
+        body: JSON.stringify({}),
       })
       const data = await res.json()
       if (!res.ok) {
-        setPaymentError(data.error || "Failed to record salary payment.")
+        toast.showToast(data.error || "Could not create batch", "error")
         return
       }
-      setShowPaymentModal(false)
-      toast.showToast("Salary payment recorded and posted to ledger", "success")
-      await loadPayrollPayments()
-    } catch {
-      setPaymentError("Failed to record salary payment. Please try again.")
+      toast.showToast("Salary disbursement batch created", "success")
+      await loadPaymentBatches()
+      const newId = data.batch?.id as string | undefined
+      if (newId) await expandPaymentBatch(newId)
     } finally {
-      setRecordingPayment(false)
+      setCreatingPaymentBatch(false)
+    }
+  }
+
+  const patchPaymentBatchStatus = async (batchId: string, status: string) => {
+    setBatchActionLoading(`batch:${batchId}`)
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/payment-batches/${batchId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Could not update batch", "error")
+        return
+      }
+      toast.showToast("Batch updated", "success")
+      await loadPaymentBatches()
+      if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
+    } finally {
+      setBatchActionLoading(null)
+    }
+  }
+
+  const patchPaymentBatchItem = async (
+    batchId: string,
+    itemId: string,
+    body: Record<string, unknown>
+  ) => {
+    const key = `${batchId}:${itemId}`
+    setBatchActionLoading(key)
+    try {
+      const res = await fetch(
+        `/api/payroll/runs/${runId}/payment-batches/${batchId}/items/${itemId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      )
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Could not update item", "error")
+        return
+      }
+      toast.showToast("Line updated", "success")
+      await loadPaymentBatches()
+      if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
+    } finally {
+      setBatchActionLoading(null)
     }
   }
 
@@ -363,7 +880,13 @@ export default function PayrollRunViewPage() {
   const isRunPayable = payrollRun?.status === "approved" || payrollRun?.status === "locked"
   const outstandingAmount = Number(paymentSummary?.outstanding_amount || 0)
   const canRecordPayment = isRunPayable && outstandingAmount > 0.01
-  const totals = entries.reduce(
+  const hasActivePaymentBatch = paymentBatches.some((b) => b.status !== "cancelled")
+  const canCreatePaymentBatch = isRunPayable && !hasActivePaymentBatch
+  const expandedBatchAllPaid =
+    expandedBatchDetail &&
+    expandedBatchDetail.items.length > 0 &&
+    expandedBatchDetail.items.every((i) => i.status === "paid")
+  const earningsTotals = entries.reduce(
     (acc, entry) => {
       acc.bonus += Number(entry.bonus_amount ?? 0)
       acc.overtime += Number(entry.overtime_amount ?? 0)
@@ -374,6 +897,26 @@ export default function PayrollRunViewPage() {
 
   const formatMonth = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
+  const chartOfAccountsRoute = payrollBase.startsWith("/service")
+    ? buildServiceRoute("/service/accounting/chart-of-accounts", paymentsBusinessId)
+    : paymentsBusinessId
+      ? `/accounting/chart-of-accounts?business_id=${encodeURIComponent(paymentsBusinessId)}`
+      : "/accounting/chart-of-accounts"
+  const selectedBatchOverpaidWarning =
+    selectedBatchSummary &&
+    Number(paymentForm.amount || 0) > 0 &&
+    Number(paymentForm.amount || 0) - Number(selectedBatchSummary.paidTotal || 0) > 0.01
+
+  const salaryPaymentEnteredAmount = Number(paymentForm.amount)
+  const salaryPaymentAmountExceedsOutstanding =
+    paymentForm.amount.trim() !== "" &&
+    Number.isFinite(salaryPaymentEnteredAmount) &&
+    salaryPaymentEnteredAmount - outstandingAmount > 0.01
+
+  const salaryPaymentBatchSubmitBlocked =
+    Boolean(paymentForm.batch_id.trim()) &&
+    (loadingSelectedBatchSummary ||
+      (selectedBatchSummary !== null && selectedBatchSummary.paidCount === 0))
 
   if (loading) {
     return (
@@ -436,7 +979,7 @@ export default function PayrollRunViewPage() {
                     }`}
                   >
                     {paymentStatus === "paid"
-                      ? "Payroll Paid"
+                      ? "Fully settled"
                       : paymentStatus === "partially_paid"
                       ? "Partially Paid"
                       : "Unpaid"}
@@ -450,6 +993,47 @@ export default function PayrollRunViewPage() {
                 <p className="text-sm text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 max-w-xl text-left">
                   Approving payroll posts salary expense and payroll liabilities to accounting. It does not mark salaries as paid.
                 </p>
+              )}
+              {(payrollRun.status === "approved" || payrollRun.status === "locked") && (
+                <p className="text-sm text-sky-900 dark:text-sky-100/90 bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-lg px-3 py-2 max-w-xl text-left">
+                  Approval records payroll liabilities. Record salary and statutory payments after you have paid them
+                  outside Finza so the books are cleared.
+                </p>
+              )}
+              {runBusinessId && payrollRun && (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 px-3 py-2 text-left max-w-xl">
+                  <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Accounting — liability ledgers</p>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        ["2230", "PAYE"],
+                        ["2231", "SSNIT / Tier 1"],
+                        ["2232", "Tier 2"],
+                        ["2240", "Net salaries payable"],
+                      ] as const
+                    ).map(([code, label]) => {
+                      const glPath = payrollBase.startsWith("/service")
+                        ? "/service/reports/general-ledger"
+                        : "/accounting/reports/general-ledger"
+                      const qs = new URLSearchParams()
+                      qs.set("account_code", code)
+                      const month = String(payrollRun.payroll_month).slice(0, 10)
+                      if (month) qs.set("period_start", month.length === 7 ? `${month}-01` : month)
+                      const href = payrollBase.startsWith("/service")
+                        ? buildServiceRoute(`${glPath}?${qs.toString()}`, runBusinessId)
+                        : buildAccountingRoute(`${glPath}?${qs.toString()}`, runBusinessId)
+                      return (
+                        <Link
+                          key={code}
+                          href={href}
+                          className="text-xs font-medium px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-blue-700 dark:text-blue-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
+                          {label} ({code})
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
               )}
               <div className="flex flex-wrap gap-2">
               {payrollRun.status === "draft" && (
@@ -492,7 +1076,13 @@ export default function PayrollRunViewPage() {
                 <button
                   onClick={openPaymentModal}
                   disabled={!canRecordPayment}
-                  title={!canRecordPayment ? "Payroll net salary is fully paid." : undefined}
+                  title={
+                    !canRecordPayment
+                      ? isRunPayable
+                        ? "Net salaries are fully settled in your books."
+                        : "Approve payroll before recording salary payments."
+                      : undefined
+                  }
                   className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -505,20 +1095,20 @@ export default function PayrollRunViewPage() {
             </div>
           </div>
 
-          {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
+          {/* Summary Cards — employee pension reduces net pay; employer pension is a company cost */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">
             {[
               { label: "Gross Salary", value: payrollRun.total_gross_salary, color: "text-gray-900 dark:text-white" },
-              { label: "Bonus", value: totals.bonus, color: "text-violet-600 dark:text-violet-400" },
-              { label: "Overtime", value: totals.overtime, color: "text-indigo-600 dark:text-indigo-400" },
+              { label: "Bonus", value: earningsTotals.bonus, color: "text-violet-600 dark:text-violet-400" },
+              { label: "Overtime", value: earningsTotals.overtime, color: "text-indigo-600 dark:text-indigo-400" },
               { label: "PAYE", value: payrollRun.total_paye, color: "text-red-600 dark:text-red-400" },
               {
-                label: "SSNIT (employee)",
+                label: "Employee pension",
                 value: payrollRun.total_ssnit_employee || 0,
                 color: "text-orange-600 dark:text-orange-400",
               },
               {
-                label: "SSNIT (employer)",
+                label: "Employer pension",
                 value: payrollRun.total_ssnit_employer || 0,
                 color: "text-amber-700 dark:text-amber-500",
               },
@@ -540,8 +1130,13 @@ export default function PayrollRunViewPage() {
             ))}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-2">
-            Net salary is gross minus PAYE, employee SSNIT, and other employee deductions — not employer SSNIT.
+            Net salary is gross minus PAYE, employee pension, and other employee deductions — not employer pension.
           </p>
+          {Number(runTotals?.total_salary_advance_repayments || 0) > 0 && (
+            <p className="text-xs text-blue-600 dark:text-blue-400 -mt-1 mb-2">
+              Salary advance repayments in this run: ₵{Number(runTotals?.total_salary_advance_repayments || 0).toFixed(2)}
+            </p>
+          )}
 
           {paymentSummary && (
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-4">
@@ -559,7 +1154,7 @@ export default function PayrollRunViewPage() {
                   <p className="text-xs text-gray-500 dark:text-gray-400">Payment Status</p>
                   <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-white sm:text-base">
                     {paymentStatus === "paid"
-                      ? "Paid"
+                      ? "Fully settled"
                       : paymentStatus === "partially_paid"
                       ? "Partially Paid"
                       : "Unpaid"}
@@ -618,6 +1213,423 @@ export default function PayrollRunViewPage() {
             </div>
           )}
 
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+                Salary disbursement batches
+              </h2>
+              {canCreatePaymentBatch && (
+                <button
+                  type="button"
+                  onClick={handleCreatePaymentBatch}
+                  disabled={creatingPaymentBatch}
+                  className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {creatingPaymentBatch ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Creating…
+                    </>
+                  ) : (
+                    <>Create batch from this run</>
+                  )}
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Batches help you prepare and track salary payments. They do not send money or post ledger entries.
+            </p>
+            {expandedBatchAllPaid && canRecordPayment && (
+              <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                All lines in the open batch are marked paid externally. When funds have left your bank account, record
+                the salary payment to post Dr 2240 / Cr bank.
+              </p>
+            )}
+            {loadingPaymentBatches ? (
+              <p className="text-sm text-gray-500">Loading batches…</p>
+            ) : paymentBatches.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {canCreatePaymentBatch
+                  ? "No batch yet. Create one to snapshot net pay and payout destinations for export."
+                  : "No batches for this run."}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {paymentBatches.map((b) => {
+                  const isOpen = expandedPaymentBatchId === b.id
+                  const batchBusy = batchActionLoading === `batch:${b.id}`
+                  return (
+                    <div
+                      key={b.id}
+                      className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 overflow-hidden"
+                    >
+                      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">
+                              Batch · {new Date(b.created_at).toLocaleString("en-GH")}
+                            </span>
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                b.status === "paid"
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                                  : b.status === "cancelled"
+                                  ? "bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-200"
+                                  : "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+                              }`}
+                            >
+                              {b.status.replace(/_/g, " ")}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400">
+                            {b.item_count} employees · ₵{Number(b.total_amount_snapshot || 0).toFixed(2)} ·{" "}
+                            {b.currency || "GHS"}
+                          </p>
+                          {b.status_counts && Object.keys(b.status_counts).length > 0 && (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-500">
+                              Items:{" "}
+                              {Object.entries(b.status_counts)
+                                .map(([k, v]) => `${k}: ${v}`)
+                                .join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              downloadRunExport(
+                                `/api/payroll/runs/${runId}/payment-batches/${b.id}/export`,
+                                "Batch export downloaded"
+                              )
+                            }
+                            className="px-2.5 py-1.5 text-xs rounded-md bg-slate-700 text-white hover:bg-slate-800"
+                          >
+                            Export CSV
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => togglePaymentBatchDetails(b.id)}
+                            className="px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          >
+                            {isOpen ? "Hide details" : "View details"}
+                          </button>
+                          {b.status === "draft" && (
+                            <button
+                              type="button"
+                              disabled={batchBusy}
+                              onClick={() => patchPaymentBatchStatus(b.id, "ready")}
+                              className="px-2.5 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              Mark ready
+                            </button>
+                          )}
+                          {b.status === "ready" && (
+                            <button
+                              type="button"
+                              disabled={batchBusy}
+                              onClick={() => patchPaymentBatchStatus(b.id, "processing")}
+                              className="px-2.5 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                              Start processing
+                            </button>
+                          )}
+                          {b.status !== "cancelled" && b.status !== "paid" && (
+                            <button
+                              type="button"
+                              disabled={batchBusy}
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    "Cancel this batch? You can create a new batch after cancellation."
+                                  )
+                                )
+                                  return
+                                patchPaymentBatchStatus(b.id, "cancelled")
+                              }}
+                              className="px-2.5 py-1.5 text-xs rounded-md text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                            >
+                              Cancel batch
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {isOpen && (
+                        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+                          {loadingBatchDetail ? (
+                            <p className="text-sm text-gray-500">Loading lines…</p>
+                          ) : expandedBatchDetail && expandedPaymentBatchId === b.id ? (
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[980px] text-sm">
+                                <thead>
+                                  <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                    <th className="sticky left-0 z-20 bg-white dark:bg-gray-800 py-2 pr-2 min-w-[220px]">
+                                      Employee
+                                    </th>
+                                    <th className="py-2 pr-2 text-right min-w-[110px]">Amount</th>
+                                    <th className="py-2 pr-2">Method</th>
+                                    <th className="py-2 pr-2">Destination</th>
+                                    <th className="py-2 pr-2 min-w-[110px]">Status</th>
+                                    <th className="sticky right-0 z-20 bg-white dark:bg-gray-800 py-2 text-right min-w-[180px]">
+                                      Actions
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                  {expandedBatchDetail.items.map((item) => {
+                                    const dest =
+                                      String(item.destination_method_type || "").toLowerCase() === "momo"
+                                        ? `${item.destination_momo_provider || "—"} · ${item.destination_momo_number || "—"}`
+                                        : `${item.destination_bank_name || "—"} · ${item.destination_account_number || "—"}`
+                                    const busy = batchActionLoading === `${b.id}:${item.id}`
+                                    return (
+                                      <tr key={item.id}>
+                                        <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 py-2 pr-2 text-gray-900 dark:text-white">
+                                          {item.employee_name || "—"}
+                                        </td>
+                                        <td className="py-2 pr-2 text-right tabular-nums">
+                                          ₵{Number(item.amount || 0).toFixed(2)}
+                                        </td>
+                                        <td className="py-2 pr-2 text-gray-700 dark:text-gray-300">
+                                          {item.destination_method_type || "—"}
+                                        </td>
+                                        <td className="py-2 pr-2 text-gray-600 dark:text-gray-400 text-xs max-w-[220px]">
+                                          {dest}
+                                          {item.legacy_destination_source ? (
+                                            <span className="block text-[10px] text-gray-400 mt-0.5">
+                                              Source: {item.legacy_destination_source}
+                                            </span>
+                                          ) : null}
+                                        </td>
+                                        <td className="py-2 pr-2">
+                                          <span className="text-xs font-medium capitalize">{item.status}</span>
+                                        </td>
+                                        <td className="sticky right-0 z-10 bg-white dark:bg-gray-800 py-2 text-right whitespace-nowrap">
+                                          <div className="flex flex-wrap justify-end gap-1">
+                                            {item.status === "pending" || item.status === "failed" ? (
+                                              <button
+                                                type="button"
+                                                disabled={busy || b.status === "cancelled"}
+                                                onClick={() => {
+                                                  if (
+                                                    !window.confirm(
+                                                      "Confirm this employee was paid outside Finza? This does not post to the ledger."
+                                                    )
+                                                  )
+                                                    return
+                                                  patchPaymentBatchItem(b.id, item.id, {
+                                                    status: "paid",
+                                                    manual_confirm: true,
+                                                  })
+                                                }}
+                                                className="px-2 py-0.5 text-[11px] rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                              >
+                                                Mark paid
+                                              </button>
+                                            ) : null}
+                                            {item.status === "pending" ? (
+                                              <button
+                                                type="button"
+                                                disabled={busy || b.status === "cancelled"}
+                                                onClick={() => {
+                                                  const reason = window.prompt("Failure reason (optional)") || ""
+                                                  patchPaymentBatchItem(b.id, item.id, {
+                                                    status: "failed",
+                                                    failure_reason: reason.trim() || null,
+                                                  })
+                                                }}
+                                                className="px-2 py-0.5 text-[11px] rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                                              >
+                                                Mark failed
+                                              </button>
+                                            ) : null}
+                                            {item.status === "pending" ? (
+                                              <button
+                                                type="button"
+                                                disabled={busy || b.status === "cancelled"}
+                                                onClick={() =>
+                                                  patchPaymentBatchItem(b.id, item.id, { status: "skipped" })
+                                                }
+                                                className="px-2 py-0.5 text-[11px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                                              >
+                                                Skip
+                                              </button>
+                                            ) : null}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Payroll obligations</h2>
+              {obligationsData?.canGenerateObligations && (
+                <button
+                  onClick={handleGenerateObligations}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Generate Obligations
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Payroll approval records the liabilities. These cards help you track actual payments and remittances.
+            </p>
+            {loadingObligations ? (
+              <p className="text-sm text-gray-500">Loading obligations…</p>
+            ) : (obligationsData?.obligations?.length || 0) === 0 ? (
+              <p className="text-sm text-gray-500">No obligations available for this run yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      <th className="py-2">Obligation</th>
+                      <th className="py-2 text-right">Due</th>
+                      <th className="py-2 text-right">Paid</th>
+                      <th className="py-2 text-right">Outstanding</th>
+                      <th className="py-2">Status</th>
+                      <th className="py-2">Due date</th>
+                      <th className="py-2 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                    {(obligationsData?.obligations || []).map((o) => (
+                      <tr key={o.id}>
+                        <td className="py-2 text-gray-800 dark:text-gray-200">{o.label}</td>
+                        <td className="py-2 text-right tabular-nums">₵{Number(o.amount_due).toFixed(2)}</td>
+                        <td className="py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">₵{Number(o.amount_paid).toFixed(2)}</td>
+                        <td className="py-2 text-right tabular-nums text-amber-600 dark:text-amber-400">₵{Number(o.outstanding_amount).toFixed(2)}</td>
+                        <td className="py-2">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${
+                            o.status === "paid"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-400"
+                              : o.status === "partially_paid"
+                              ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400"
+                              : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                          }`}>
+                            {String(o.status_display || o.status).replace("_", " ")}
+                          </span>
+                          {o.internal_note ? (
+                            <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                              {o.internal_note}
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="py-2 text-gray-500 dark:text-gray-400">{o.due_date ? new Date(o.due_date).toLocaleDateString("en-GH") : "—"}</td>
+                        <td className="py-2 text-right">
+                          {o.obligation_type === "salary_net" ? (
+                            Number(o.outstanding_amount) <= 0.01 ? (
+                              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                Fully settled
+                              </span>
+                            ) : (
+                              <button
+                                onClick={openPaymentModal}
+                                disabled={Number(o.outstanding_amount) <= 0.01 || !isRunPayable}
+                                className="px-2.5 py-1 text-xs rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
+                              >
+                                Record salary payment
+                              </button>
+                            )
+                          ) : o.is_payable === false ? (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              Cleared on approval
+                            </span>
+                          ) : Number(o.outstanding_amount) <= 0.01 ? (
+                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                              {obligationSettledActionLabel(o.obligation_type)}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => openObligationPaymentModal(o)}
+                              disabled={!isRunPayable}
+                              className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {o.obligation_type === "paye_gra"
+                                ? "Pay GRA PAYE"
+                                : o.obligation_type === "ssnit_tier1"
+                                  ? "Pay SSNIT / Tier 1"
+                                  : o.obligation_type === "tier2_pension"
+                                    ? "Pay Tier 2 trustee"
+                                    : "Record payment"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-3">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">Reports & exports</h2>
+            <details className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/30 px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-gray-800 dark:text-gray-200 select-none">
+                Download CSV files
+              </summary>
+              <div className="mt-2 flex flex-col gap-2 pb-1 sm:grid sm:grid-cols-2 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadRunExport(`/api/payroll/runs/${runId}/exports/summary`, "Payroll summary CSV downloaded")}
+                  className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                >
+                  Payroll Summary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadRunExport(`/api/payroll/runs/${runId}/exports/paye-schedule`, "PAYE schedule CSV downloaded")}
+                  className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                >
+                  PAYE Schedule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadRunExport(`/api/payroll/runs/${runId}/exports/pension-tier1`, "Tier 1 CSV downloaded")}
+                  className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                >
+                  SSNIT / Tier 1 Schedule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadRunExport(`/api/payroll/runs/${runId}/exports/pension-tier2`, "Tier 2 CSV downloaded")}
+                  className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                >
+                  Tier 2 Schedule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadRunExport(`/api/payroll/runs/${runId}/exports/obligations`, "Obligations CSV downloaded")}
+                  className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                >
+                  Obligations Summary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadRunExport(`/api/payroll/runs/${runId}/exports/net-salary`, "Net salary schedule CSV downloaded")}
+                  className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                >
+                  Salary Payment List
+                </button>
+              </div>
+            </details>
+          </div>
+
           {/* Payslips hint when not generated */}
           {!hasPayslips && (
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 flex items-start gap-3">
@@ -645,8 +1657,11 @@ export default function PayrollRunViewPage() {
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Bonus</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Overtime</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Gross</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">SSNIT (emp.)</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee pension</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">PAYE</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Deductions</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Advance repaid</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Advance balance</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Net</th>
                     <th className="px-5 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Payslip</th>
                   </tr>
@@ -671,6 +1686,9 @@ export default function PayrollRunViewPage() {
                         <td className="px-4 py-4 text-right font-medium text-gray-900 dark:text-white tabular-nums">₵{Number(entry.gross_salary).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-orange-600 dark:text-orange-400 tabular-nums">₵{Number(entry.ssnit_employee).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-red-600 dark:text-red-400 tabular-nums">₵{Number(entry.paye).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-red-600 dark:text-red-400 tabular-nums">₵{Number(entry.deductions_total || 0).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-blue-600 dark:text-blue-400 tabular-nums">₵{Number(entry.salary_advance_repayment_amount || 0).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-amber-600 dark:text-amber-400 tabular-nums">₵{Number(entry.salary_advance_remaining_balance || 0).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right font-bold text-green-600 dark:text-green-400 tabular-nums">₵{Number(entry.net_salary).toFixed(2)}</td>
                         <td className="px-5 py-4 text-center">
                           {payslip ? (
@@ -729,15 +1747,17 @@ export default function PayrollRunViewPage() {
 
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="text-base font-bold text-gray-900 dark:text-white">Record Salary Payment</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  This records salary disbursement and posts Dr Net Salaries Payable, Cr selected payment account. It does not change payroll calculations or statutory liabilities.
+                  Use this after salaries have been paid outside Finza. Finza records the payment in your books (does not
+                  send money).
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => {
                   if (!recordingPayment) {
                     setShowPaymentModal(false)
@@ -752,15 +1772,38 @@ export default function PayrollRunViewPage() {
               </button>
             </div>
 
-            <div className="px-6 py-5 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto">
               {paymentError && (
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   {paymentError}
                 </div>
               )}
 
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-900/50 px-3 py-2 space-y-1">
+                <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">
+                  Remaining net salary to record: ₵{Number(paymentSummary?.outstanding_amount || 0).toFixed(2)}
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  This is the aggregate amount still to clear against net salaries payable in your ledger.
+                </p>
+              </div>
+
+              {salaryPaymentAmountExceedsOutstanding && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 dark:bg-red-950/30 dark:border-red-900 dark:text-red-300">
+                  Amount exceeds remaining outstanding (₵{outstandingAmount.toFixed(2)}). Adjust the amount or refresh the
+                  page if you already recorded a payment.
+                </div>
+              )}
+
+              {salaryPaymentBatchSubmitBlocked && (
+                <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-200">
+                  No batch lines are marked paid. Either mark lines paid first, or remove the batch link and record a
+                  manual aggregate salary payment.
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label className="space-y-1">
+                <label className="space-y-1 block">
                   <span className="text-sm text-gray-700 dark:text-gray-300">Payment Date</span>
                   <input
                     type="date"
@@ -768,6 +1811,11 @@ export default function PayrollRunViewPage() {
                     onChange={(e) => setPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
                     className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
                   />
+                  {isPaymentDateBeforePayrollPeriod(paymentForm.payment_date, payrollRun?.payroll_month) ? (
+                    <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
+                      This payment date is before the payroll period date. Check that this is intentional.
+                    </p>
+                  ) : null}
                 </label>
                 <label className="space-y-1">
                   <span className="text-sm text-gray-700 dark:text-gray-300">Amount</span>
@@ -783,19 +1831,54 @@ export default function PayrollRunViewPage() {
               </div>
 
               <label className="space-y-1 block">
-                <span className="text-sm text-gray-700 dark:text-gray-300">Payment Account</span>
-                <select
-                  value={paymentForm.payment_account_id}
-                  onChange={(e) => setPaymentForm((f) => ({ ...f, payment_account_id: e.target.value }))}
-                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="">Select account</option>
-                  {paymentAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.code} - {account.name}
-                    </option>
-                  ))}
-                </select>
+                <span className="text-sm text-gray-700 dark:text-gray-300">Paid from account</span>
+                {paymentAccountsLoading ? (
+                  <div className="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2">
+                    Loading paid-from accounts...
+                  </div>
+                ) : paymentAccountsError ? (
+                  <div className="space-y-2">
+                    <div className="text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
+                      {paymentAccountsError}
+                    </div>
+                  </div>
+                ) : paymentAccounts.length === 0 ? (
+                  <div className="space-y-2">
+                    <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                      No eligible cash, bank, or Mobile Money ledger account is available.
+                    </div>
+                    <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                      Add or activate an internal asset account in Chart of Accounts before recording salary payment.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        router.push(chartOfAccountsRoute)
+                      }}
+                      className="px-3 py-1.5 text-xs rounded-md bg-slate-700 text-white hover:bg-slate-800"
+                    >
+                      Open Chart of Accounts
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={paymentForm.payment_account_id}
+                    onChange={(e) => setPaymentForm((f) => ({ ...f, payment_account_id: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">Select account</option>
+                    {paymentAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.code} - {account.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Select the Finza cash, bank, or Mobile Money account the salary was paid from. This records the
+                  accounting entry only; it does not connect to your bank or send money.
+                </span>
               </label>
 
               <label className="space-y-1 block">
@@ -819,13 +1902,71 @@ export default function PayrollRunViewPage() {
                 />
               </label>
 
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                Outstanding net salary payable: ₵{Number(paymentSummary?.outstanding_amount || 0).toFixed(2)}
-              </div>
+              {paymentBatches.some((x) => x.status !== "cancelled") && (
+                <label className="space-y-1 block">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                    Link to salary batch (optional)
+                  </span>
+                  <select
+                    value={paymentForm.batch_id}
+                    onChange={(e) => handleSelectBatchForPayment(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">None</option>
+                    {paymentBatches
+                      .filter((x) => x.status !== "cancelled")
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.status.replace(/_/g, " ")} · {x.item_count} lines ·{" "}
+                          {new Date(x.created_at).toLocaleDateString("en-GH")}
+                        </option>
+                      ))}
+                  </select>
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    For traceability only; does not change how the payment posts.
+                  </span>
+                </label>
+              )}
+
+              {paymentForm.batch_id && (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Selected batch summary</p>
+                  {loadingSelectedBatchSummary ? (
+                    <p className="text-xs text-gray-500">Loading batch summary…</p>
+                  ) : selectedBatchSummary ? (
+                    <>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        Batch total: ₵{selectedBatchSummary.total.toFixed(2)} · Confirmed paid lines:{" "}
+                        ₵{selectedBatchSummary.paidTotal.toFixed(2)} · Pending total: ₵
+                        {selectedBatchSummary.pendingTotal.toFixed(2)}
+                      </p>
+                      {selectedBatchSummary.failedOrSkippedCount > 0 && (
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          Failed/skipped lines: {selectedBatchSummary.failedOrSkippedCount}
+                        </p>
+                      )}
+                      {selectedBatchSummary.paidCount === 0 ? (
+                        <p className="text-xs text-amber-800 dark:text-amber-200">
+                          No batch lines are marked paid. Either mark lines paid first, or clear the batch link above to
+                          record a manual aggregate salary payment (batch link is for traceability only).
+                        </p>
+                      ) : null}
+                      {selectedBatchOverpaidWarning ? (
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          This amount is higher than the confirmed paid lines in the selected batch.
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-500">Batch summary unavailable.</p>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+            <div className="sticky bottom-0 z-10 bg-white dark:bg-gray-800 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setShowPaymentModal(false)}
                 disabled={recordingPayment}
                 className="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
@@ -833,11 +1974,142 @@ export default function PayrollRunViewPage() {
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleRecordSalaryPayment}
-                disabled={recordingPayment}
+                disabled={
+                  recordingPayment ||
+                  paymentAccountsLoading ||
+                  !!paymentAccountsError ||
+                  paymentAccounts.length === 0 ||
+                  salaryPaymentAmountExceedsOutstanding ||
+                  salaryPaymentBatchSubmitBlocked
+                }
                 className="px-4 py-2 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
               >
                 {recordingPayment ? "Posting..." : "Record Payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showObligationPaymentModal && selectedObligation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white">
+                  Record {selectedObligation.label}
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Use this after you have paid this amount outside Finza. Finza will record the payment in your books.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (!recordingObligationPayment) {
+                    setShowObligationPaymentModal(false)
+                    setSelectedObligation(null)
+                    setObligationPaymentError("")
+                  }
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4 overflow-y-auto">
+              {obligationPaymentError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {obligationPaymentError}
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1 block">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Payment Date</span>
+                  <input
+                    type="date"
+                    value={obligationPaymentForm.payment_date}
+                    onChange={(e) => setObligationPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  />
+                  {isPaymentDateBeforePayrollPeriod(
+                    obligationPaymentForm.payment_date,
+                    payrollRun?.payroll_month
+                  ) ? (
+                    <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
+                      This payment date is before the payroll period date. Check that this is intentional.
+                    </p>
+                  ) : null}
+                </label>
+                <label className="space-y-1">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Amount</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={obligationPaymentForm.amount}
+                    onChange={(e) => setObligationPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  />
+                </label>
+              </div>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Paid from account</span>
+                <select
+                  value={obligationPaymentForm.payment_account_id}
+                  onChange={(e) => setObligationPaymentForm((f) => ({ ...f, payment_account_id: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Select account</option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.code} - {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Reference (optional)</span>
+                <input
+                  type="text"
+                  value={obligationPaymentForm.reference}
+                  onChange={(e) => setObligationPaymentForm((f) => ({ ...f, reference: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Notes (optional)</span>
+                <textarea
+                  value={obligationPaymentForm.notes}
+                  onChange={(e) => setObligationPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  rows={3}
+                />
+              </label>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Outstanding: ₵{Number(selectedObligation.outstanding_amount || 0).toFixed(2)}
+              </div>
+            </div>
+            <div className="sticky bottom-0 z-10 bg-white dark:bg-gray-800 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowObligationPaymentModal(false)
+                  setSelectedObligation(null)
+                }}
+                disabled={recordingObligationPayment}
+                className="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRecordObligationPayment}
+                disabled={recordingObligationPayment}
+                className="px-4 py-2 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {recordingObligationPayment ? "Posting..." : "Record Payment"}
               </button>
             </div>
           </div>

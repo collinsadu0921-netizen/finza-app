@@ -11,6 +11,8 @@ import {
 import ReadinessBanner from "@/components/accounting/ReadinessBanner"
 import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { buildAccountingRoute } from "@/lib/accounting/routes"
+import Link from "next/link"
 import EmptyState from "@/components/ui/EmptyState"
 import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
@@ -53,6 +55,8 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
   const [error, setError] = useState("")
   const [readiness, setReadiness] = useState<{ ready: boolean; authority_source: string | null } | null>(null)
   const [readinessLoading, setReadinessLoading] = useState(true)
+  const [exportingCsv, setExportingCsv] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   useEffect(() => {
     if (!businessId) setLoading(false)
@@ -111,21 +115,31 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
     }
   }
 
+  const buildTrialBalanceQuery = (): URLSearchParams | null => {
+    if (!businessId) return null
+    const params = new URLSearchParams()
+    params.set("business_id", businessId)
+    if (selectedPeriodStart && !useDateRange) {
+      params.set("period_start", selectedPeriodStart)
+    } else if (useDateRange && startDate && endDate) {
+      params.set("start_date", startDate)
+      params.set("end_date", endDate)
+    } else {
+      return null
+    }
+    return params
+  }
+
   const loadTrialBalance = async () => {
     if (!businessId) return
-    if (!selectedPeriodStart && !(useDateRange && startDate && endDate)) return
+    const params = buildTrialBalanceQuery()
+    if (!params) return
 
     try {
       setLoading(true)
       setError("")
 
-      let url = `/api/accounting/reports/trial-balance?business_id=${businessId}`
-      if (selectedPeriodStart && !useDateRange) {
-        url += `&period_start=${selectedPeriodStart}`
-      } else if (useDateRange && startDate && endDate) {
-        url += `&start_date=${startDate}&end_date=${endDate}`
-      }
-
+      const url = `/api/accounting/reports/trial-balance?${params.toString()}`
       const response = await fetch(url)
 
       if (!response.ok) {
@@ -164,48 +178,64 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
     return labels[type] || type
   }
 
+  const buildViewLedgerHref = (accountId: string) => {
+    const base = mode === "service" ? "/service/reports/general-ledger" : "/accounting/reports/general-ledger"
+    const q = new URLSearchParams()
+    q.set("account_id", accountId)
+    if (useDateRange && startDate && endDate) {
+      q.set("start_date", startDate)
+      q.set("end_date", endDate)
+    } else if (selectedPeriodStart) {
+      q.set("period_start", selectedPeriodStart)
+    }
+    const path = `${base}?${q.toString()}`
+    return mode === "service"
+      ? buildServiceRoute(path, businessId ?? undefined)
+      : buildAccountingRoute(path, businessId ?? undefined)
+  }
+
   const handleExportCSV = async () => {
     if (!businessId) return
-    if (!selectedPeriodStart && !(useDateRange && startDate && endDate)) {
+    if (exportingCsv) return
+    const params = buildTrialBalanceQuery()
+    if (!params) {
       toast.showToast("Please select a period or date range first", "warning")
       return
     }
 
-    let url = `/api/accounting/reports/trial-balance/export/csv?business_id=${businessId}`
-    if (selectedPeriodStart && !useDateRange) {
-      url += `&period_start=${selectedPeriodStart}`
-    } else if (useDateRange && startDate && endDate) {
-      url += `&start_date=${startDate}&end_date=${endDate}`
-    }
+    const url = `/api/accounting/reports/trial-balance/export/csv?${params.toString()}`
 
     try {
+      setExportingCsv(true)
       await downloadFileFromApi(url, { fallbackFilename: "trial-balance.csv" })
     } catch (err: unknown) {
       toast.showToast(err instanceof Error ? err.message : "Could not download CSV", "error")
+    } finally {
+      setExportingCsv(false)
     }
   }
 
   const handleExportPDF = async () => {
     if (!businessId) return
-    if (!selectedPeriodStart && !(useDateRange && startDate && endDate)) {
+    if (exportingPdf) return
+    const params = buildTrialBalanceQuery()
+    if (!params) {
       toast.showToast("Please select a period or date range first", "warning")
       return
     }
 
-    let url = `/api/accounting/reports/trial-balance/export/pdf?business_id=${businessId}`
-    if (selectedPeriodStart && !useDateRange) {
-      url += `&period_start=${selectedPeriodStart}`
-    } else if (useDateRange && startDate && endDate) {
-      url += `&start_date=${startDate}&end_date=${endDate}`
-    }
+    const url = `/api/accounting/reports/trial-balance/export/pdf?${params.toString()}`
 
     try {
+      setExportingPdf(true)
       await downloadFileFromApi(url, {
         fallbackFilename: "trial-balance.pdf",
         expectedMimePrefix: "application/pdf",
       })
     } catch (err: unknown) {
       toast.showToast(err instanceof Error ? err.message : "Could not download PDF", "error")
+    } finally {
+      setExportingPdf(false)
     }
   }
 
@@ -274,28 +304,43 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
                 Trial Balance
               </h1>
               <p className="text-gray-600 dark:text-gray-400 text-lg">
-                View account balances and verify ledger is balanced. Ledger-only report.
+                One accounting period at a time. Debits must equal credits. Ledger-only report. For activity across
+                months, use{" "}
+                {mode === "service" ? (
+                  <Link href={buildServiceRoute("/service/reports/general-ledger", businessId ?? undefined)} className="text-blue-600 dark:text-blue-400 underline">
+                    General Ledger
+                  </Link>
+                ) : (
+                  <Link href={buildAccountingRoute("/accounting/reports/general-ledger", businessId ?? undefined)} className="text-blue-600 dark:text-blue-400 underline">
+                    General Ledger
+                  </Link>
+                )}{" "}
+                with a custom date range.
               </p>
             </div>
             {accounts.length > 0 && (
               <div className="flex gap-3">
                 <button
                   onClick={handleExportCSV}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
+                  disabled={exportingCsv || exportingPdf}
+                  aria-busy={exportingCsv}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Export CSV
+                  {exportingCsv ? "Exporting..." : "Export CSV"}
                 </button>
                 <button
                   onClick={handleExportPDF}
-                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 font-medium flex items-center gap-2"
+                  disabled={exportingPdf || exportingCsv}
+                  aria-busy={exportingPdf}
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 font-medium flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                   </svg>
-                  Export PDF
+                  {exportingPdf ? "Exporting..." : "Export PDF"}
                 </button>
               </div>
             )}
@@ -355,9 +400,13 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
                     className="mr-2"
                   />
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Custom Date Range
+                    Custom dates (still one accounting period)
                   </span>
                 </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  Trial balance is always one calendar accounting period. Dates below only determine which period
+                  contains the start date; they do not sum multiple months.
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="date"
@@ -430,6 +479,9 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
                       <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Debit</th>
                       <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Credit</th>
                       <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Balance</th>
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase print-hide export-hide">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -453,6 +505,14 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
                         <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-white">
                           {formatCurrencySafe(account.ending_balance ?? account.closing_balance)}
                         </td>
+                        <td className="px-4 py-3 text-sm print-hide export-hide">
+                          <Link
+                            href={buildViewLedgerHref(account.account_id)}
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                          >
+                            View general ledger
+                          </Link>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -473,6 +533,7 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
                             <span className="text-red-600 dark:text-red-400">Imbalance: {formatCurrencySafe(imbalance)}</span>
                           )}
                         </td>
+                        <td className="print-hide export-hide" />
                       </tr>
                     </tfoot>
                   )}
