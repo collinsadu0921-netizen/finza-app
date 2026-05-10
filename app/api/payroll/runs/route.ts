@@ -8,6 +8,13 @@ import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { effectiveAllowanceBucket } from "@/lib/payroll/allowanceBuckets"
+import {
+  buildPayrollTaxProfileSnapshotForEntry,
+  normalizeGraPositionCode,
+  parseStaffIsPensionable,
+  parseStaffIsTaxResident,
+  parseStaffSecondaryEmployment,
+} from "@/lib/payroll/staffTaxProfile"
 
 /**
  * Heuristic only — statutory junior staff for overtime concession requires income tests (engine uses annualQualifyingEmploymentIncomeYtd).
@@ -231,6 +238,13 @@ export async function POST(request: NextRequest) {
     let totalNet = 0
 
     for (const staff of staffList) {
+      const staffIsTaxResident = parseStaffIsTaxResident((staff as { is_tax_resident?: boolean }).is_tax_resident)
+      const staffIsPensionable = parseStaffIsPensionable((staff as { is_pensionable?: boolean }).is_pensionable)
+      const graPositionCode = normalizeGraPositionCode((staff as { gra_position_code?: string | null }).gra_position_code)
+      const secondaryEmployment = parseStaffSecondaryEmployment(
+        (staff as { secondary_employment?: boolean }).secondary_employment
+      )
+
       // Allowances: recurring each month; non-recurring scoped by applies_to_month when set (migration 464).
       // Bucket split: use payroll_allowance_types.maps_to_bucket when allowance_type_id links a row;
       // otherwise fall back to legacy allowances.type ('bonus' | 'overtime' vs regular).
@@ -308,7 +322,7 @@ export async function POST(request: NextRequest) {
 
       const { data: provisionalResult, error: provisionalCalcError } = await Promise.resolve().then(() => {
         try {
-          return {
+            return {
             data: calculatePayroll(
               {
                 jurisdiction: businessCountry,
@@ -321,6 +335,8 @@ export async function POST(request: NextRequest) {
                 isQualifyingJuniorEmployee: juniorStaffHeuristicFromProfile(staff),
                 priorBonusPaidInCalendarYear: bonusYtdByStaffId.get(String(staff.id)) ?? 0,
                 employmentCategory: staff.employment_type ?? null,
+                isResident: staffIsTaxResident,
+                isPensionable: staffIsPensionable,
               },
               businessCountry
             ),
@@ -372,6 +388,8 @@ export async function POST(request: NextRequest) {
             isQualifyingJuniorEmployee: juniorStaffHeuristicFromProfile(staff),
             priorBonusPaidInCalendarYear: bonusYtdByStaffId.get(String(staff.id)) ?? 0,
             employmentCategory: staff.employment_type ?? null,
+            isResident: staffIsTaxResident,
+            isPensionable: staffIsPensionable,
           },
           businessCountry
         )
@@ -422,6 +440,15 @@ export async function POST(request: NextRequest) {
         const overtimeAmountSnapshot = Number(breakdown?.overtimeAmount ?? 0)
         const regularAllowancesSnapshot = Number(breakdown?.regularAllowancesAmount ?? allowancesTotal)
 
+        const bonusConcessionalSnapshot =
+          breakdown && typeof breakdown.bonusConcessionalAmount === "number" && Number.isFinite(breakdown.bonusConcessionalAmount)
+            ? Number(breakdown.bonusConcessionalAmount)
+            : null
+        const bonusGraduatedSnapshot =
+          breakdown && typeof breakdown.bonusGraduatedAmount === "number" && Number.isFinite(breakdown.bonusGraduatedAmount)
+            ? Number(breakdown.bonusGraduatedAmount)
+            : null
+
         payrollEntries.push({
           staff_id: staff.id,
           basic_salary: payrollResult.earnings.basicSalary,
@@ -449,15 +476,21 @@ export async function POST(request: NextRequest) {
           total_mandatory_pension: Number(breakdown?.totalMandatoryPension ?? (ssnitEmployee + ssnitEmployer)),
           tier1_ssnit_remittance: Number(breakdown?.tier1SsnitRemittance ?? 0),
           tier2_pension_remittance: Number(breakdown?.tier2PensionRemittance ?? 0),
-          payroll_tax_profile: breakdown ? {
-            is_resident: Boolean(breakdown.isResident ?? true),
-            is_pensionable: Boolean(breakdown.pensionable ?? true),
-            casual_worker_flat_tax_applied: Boolean(breakdown.casualWorkerFlatTaxApplied ?? false),
-            prior_bonus_paid_in_calendar_year: Number(breakdown.priorBonusPaidInCalendarYear ?? 0),
-            bonus_concessional_room_before_run: Number(breakdown.bonusConcessionalRoomBeforeRun ?? 0),
-            junior_overtime_concession_applies: Boolean(breakdown.juniorOvertimeConcessionApplies ?? false),
-            annual_qualifying_employment_income_ytd: Number(breakdown.annualQualifyingEmploymentIncomeYtd ?? 0),
-          } : null,
+          /** Frozen at run creation for GRA DT 107A (Phase 2A); does not affect PAYE. */
+          filing_tin: staff.tin_number != null ? String(staff.tin_number).trim() : null,
+          filing_employee_name: staff.name != null ? String(staff.name).trim() : null,
+          /** Ghana engine `complianceBreakdown` only; null for non-GH or missing breakdown. */
+          bonus_concessional_amount: bonusConcessionalSnapshot,
+          bonus_graduated_amount: bonusGraduatedSnapshot,
+          payroll_tax_profile: breakdown
+            ? buildPayrollTaxProfileSnapshotForEntry({
+                breakdown,
+                staffIsTaxResident,
+                staffIsPensionable,
+                graPositionCode,
+                secondaryEmployment,
+              })
+            : null,
           net_salary: payrollResult.totals.netSalary,
         })
 

@@ -12,3 +12,4 @@ coverage/
 
 # Playwright — saved Supabase session (never commit)
 e2e/.auth/
+.local/

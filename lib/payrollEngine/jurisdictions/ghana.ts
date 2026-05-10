@@ -261,6 +261,8 @@ export const ghanaPayrollEngine: PayrollEngine = {
         regularAllowancesAmount: regularAllowances,
         isQualifyingJuniorEmployee: Boolean(config.isQualifyingJuniorEmployee),
         bonusCapAmount: bonusAnnualCap,
+        bonusConcessionalAmount: roundPayroll(bonusConcessionalAmount),
+        bonusGraduatedAmount,
         bonusTax5,
         bonusTaxGraduated: bonusTaxGraduatedForBreakdown,
         overtimeThresholdAmount,

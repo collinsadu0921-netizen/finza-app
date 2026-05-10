@@ -299,6 +299,10 @@ export interface PayrollCalculationResult {
     regularAllowancesAmount: number
     isQualifyingJuniorEmployee: boolean
     bonusCapAmount: number
+    /** Ghana — bonus taxed at 5% within concessional room (same value used internally; exposed for payroll_entries snapshot). */
+    bonusConcessionalAmount?: number
+    /** Ghana — bonus above concessional room (graduated slice); same as internal split, not a formula change. */
+    bonusGraduatedAmount?: number
     bonusTax5: number
     bonusTaxGraduated: number
     overtimeThresholdAmount: number

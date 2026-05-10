@@ -280,6 +280,8 @@ describe("Payroll Engine - Ghana Calculations", () => {
         otherDeductions: 0,
       })
       expect(r.complianceBreakdown?.bonusTax5).toBeCloseTo(50, 2)
+      expect(r.complianceBreakdown?.bonusConcessionalAmount).toBeCloseTo(1000, 2)
+      expect(r.complianceBreakdown?.bonusGraduatedAmount).toBeCloseTo(0, 2)
     })
 
     it("splits bonus between 5% concession and graduated PAYE above cap", () => {
@@ -293,6 +295,8 @@ describe("Payroll Engine - Ghana Calculations", () => {
         otherDeductions: 0,
       })
       expect(r.complianceBreakdown?.bonusCapAmount).toBeCloseTo(1800, 2)
+      expect(r.complianceBreakdown?.bonusConcessionalAmount).toBeCloseTo(1800, 2)
+      expect(r.complianceBreakdown?.bonusGraduatedAmount).toBeCloseTo(1200, 2)
       expect(r.complianceBreakdown?.bonusTax5).toBeCloseTo(90, 2)
       expect((r.complianceBreakdown?.bonusTaxGraduated ?? 0) + (r.complianceBreakdown?.bonusTax5 ?? 0)).toBeGreaterThan(
         0
