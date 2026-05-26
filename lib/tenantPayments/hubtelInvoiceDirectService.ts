@@ -14,7 +14,7 @@ import "server-only"
 import { createHash } from "crypto"
 import type { PostgrestError } from "@supabase/supabase-js"
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
+import { ensureAccountingInitializedForServerJob } from "@/lib/accountingBootstrap"
 import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
 import { normalizeCountry, assertProviderAllowed } from "@/lib/payments/eligibility"
 import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
@@ -34,7 +34,13 @@ const PROVIDER_TYPE = "hubtel" as const
 const ENV = "live" as const
 const WORKSPACE = "service" as const
 
-const OPEN_TXN_STATUSES = ["initiated", "pending", "requires_action", "pending_verification"] as const
+const OPEN_TXN_STATUSES = [
+  "initiated",
+  "pending",
+  "requires_action",
+  "pending_verification",
+  "pending_accounting_setup",
+] as const
 const HUBTEL_CALLBACK_EVENT = "hubtel_callback" as const
 
 function isUniqueViolation(err: PostgrestError | null): boolean {
@@ -261,15 +267,6 @@ export async function initiateTenantHubtelInvoicePayment(
     return { ok: false, error: msg, statusCode: 400 }
   }
 
-  const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, invoice.business_id)
-  if (bootstrapErr) {
-    return {
-      ok: false,
-      error: "Accounting setup required before payment can be recorded.",
-      statusCode: 500,
-    }
-  }
-
   const clientReference = generateHubtelClientReference()
   const amountMinor = Math.round(balanceDue * 100)
 
@@ -398,6 +395,17 @@ async function ensureHubtelInvoicePaymentRow(
     throw new Error("Invalid Hubtel payment amount")
   }
 
+  const { error: bootstrapErr } = await ensureAccountingInitializedForServerJob(
+    supabase,
+    txn.business_id
+  )
+  if (bootstrapErr) {
+    const err = new Error("Accounting bootstrap failed before payment insert")
+    ;(err as Error & { bootstrapError?: string; code?: string }).bootstrapError = bootstrapErr
+    ;(err as Error & { code?: string }).code = "ACCOUNTING_BOOTSTRAP_FAILED"
+    throw err
+  }
+
   const { data: tokenData } = await supabase.rpc("generate_public_token")
   const publicToken =
     (typeof tokenData === "string" && tokenData) ||
@@ -518,8 +526,32 @@ export async function reconcileVerifiedHubtelInvoicePayment(
 
   let paymentId = txn.payment_id
   if (!paymentId) {
-    const ensured = await ensureHubtelInvoicePaymentRow(supabase, txn, statusData)
-    paymentId = ensured.paymentId
+    try {
+      const ensured = await ensureHubtelInvoicePaymentRow(supabase, txn, statusData)
+      paymentId = ensured.paymentId
+    } catch (e: unknown) {
+      const bootstrapFailed =
+        e instanceof Error &&
+        ((e as Error & { code?: string }).code === "ACCOUNTING_BOOTSTRAP_FAILED" ||
+          (e.message && e.message.includes("Accounting bootstrap failed")))
+      if (bootstrapFailed) {
+        await supabase
+          .from("payment_provider_transactions")
+          .update({
+            status: "pending_accounting_setup",
+            last_event_payload: {
+              hubtelStatus: statusData.raw,
+              accountingBootstrapError:
+                (e as Error & { bootstrapError?: string }).bootstrapError ?? e.message,
+            } as unknown as Record<string, unknown>,
+            last_event_at: new Date().toISOString(),
+          })
+          .eq("id", txn.id)
+          .in("status", [...OPEN_TXN_STATUSES])
+        return { applied: false, paymentId: null }
+      }
+      throw e
+    }
   }
 
   const { data: promoted, error: promoteErr } = await supabase

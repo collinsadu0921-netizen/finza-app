@@ -10,13 +10,13 @@ describe("resolvePublicInvoicePaymentFlowDecision", () => {
     expected: PublicInvoicePaymentFlow
   }> = [
     {
-      name: "manual_wallet default when enabled",
+      name: "hubtel when configured even if manual_wallet is default",
       input: {
         defaultProviderType: "manual_wallet",
         defaultProviderEnabled: true,
         hubtelConfigured: true,
       },
-      expected: "manual_wallet",
+      expected: "hubtel_checkout",
     },
     {
       name: "hubtel when configured and manual not default",

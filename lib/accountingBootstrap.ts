@@ -13,7 +13,7 @@ export function canUserInitializeAccounting(authoritySource?: string): boolean {
 export type AccountingBootstrapError = {
   error_code: string
   message: string
-  step: "ensure_accounting_initialized"
+  step: "ensure_accounting_initialized" | "ensure_accounting_initialized_system"
   business_id: string
   supabase_error?: { message?: string; code?: string; details?: string }
 }
@@ -57,6 +57,46 @@ export async function ensureAccountingInitialized(
       step,
       business_id: businessId,
       error_code: structured.error_code,
+      supabase_error: structured.supabase_error,
+    })
+    return {
+      initialized: false,
+      error: structured.message,
+      structuredError: structured,
+    }
+  }
+
+  return { initialized: true }
+}
+
+/**
+ * Bootstrap for trusted server jobs (Hubtel/MoMo verify) using service_role.
+ * `ensure_accounting_initialized` requires auth.uid(); service clients have none.
+ */
+export async function ensureAccountingInitializedForServerJob(
+  supabase: SupabaseClient,
+  businessId: string
+): Promise<{ initialized: boolean; error?: string; structuredError?: AccountingBootstrapError }> {
+  const step = "ensure_accounting_initialized_system"
+  const { error } = await supabase.rpc("ensure_accounting_initialized_system", {
+    p_business_id: businessId,
+  })
+
+  if (error) {
+    const structured: AccountingBootstrapError = {
+      error_code: "ACCOUNTING_BOOTSTRAP_FAILED",
+      message: "Unable to start accounting. Please try again.",
+      step,
+      business_id: businessId,
+      supabase_error: {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+      },
+    }
+    console.error("accountingBootstrap: ensure_accounting_initialized_system failed", {
+      step,
+      business_id: businessId,
       supabase_error: structured.supabase_error,
     })
     return {

@@ -18,9 +18,6 @@ export function resolvePublicInvoicePaymentFlowDecision(input: {
   defaultProviderEnabled: boolean
   hubtelConfigured: boolean
 }): PublicInvoicePaymentFlow {
-  if (input.defaultProviderEnabled && input.defaultProviderType === "manual_wallet") {
-    return "manual_wallet"
-  }
   if (input.hubtelConfigured) {
     return "hubtel_checkout"
   }

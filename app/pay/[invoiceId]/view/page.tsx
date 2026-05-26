@@ -533,13 +533,13 @@ export default function InvoiceViewPage() {
 
         </div>
 
-        {!isPaid && remaining > 0 && tenantOnlinePay && (
+        {!isPaid && remaining > 0 && tenantOnlinePay && invoicePaymentFlow === "hubtel_checkout" && (
           <div className="mt-5 print:hidden">
             <a
               href={`/pay/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`}
-              className="flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+              className="flex w-full items-center justify-center rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-900 shadow-sm hover:bg-indigo-100"
             >
-              {invoicePaymentFlow === "hubtel_checkout" ? "Pay with Hubtel" : "Open payment page"}
+              Pay with Hubtel
             </a>
           </div>
         )}

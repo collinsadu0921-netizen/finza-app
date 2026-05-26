@@ -148,6 +148,11 @@ export default function PayInvoicePage() {
         return
       }
 
+      if (data.invoice_payment_flow !== "hubtel_checkout") {
+        router.replace(`/invoice-public/${encodeURIComponent(publicToken)}`)
+        return
+      }
+
       setInvoice(data.invoice)
       setPayments((data.payments || []) as InvoicePaymentRow[])
       setManualWalletPayment(data.manual_wallet_payment ?? null)

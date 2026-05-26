@@ -202,7 +202,7 @@ export default function PublicInvoicePage() {
         }
       ` }} />
 
-      <div className="min-h-screen bg-slate-50 py-5 px-4 print:bg-white print:py-0">
+      <div className="min-h-screen bg-slate-50 py-5 px-4 pb-24 md:pb-5 print:bg-white print:py-0 print:pb-0">
         <div className="max-w-3xl mx-auto space-y-3">
 
           {/* Client toolbar — minimal */}
@@ -270,7 +270,7 @@ export default function PublicInvoicePage() {
               {!isPaid && effectiveBalanceDue > 0 && tenantOnlinePay && hubtelCheckoutAvailable && invoice?.id && (
                 <a
                   href={`/pay/${encodeURIComponent(invoice.id)}?token=${encodeURIComponent(token)}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 transition-colors"
+                  className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 transition-colors"
                 >
                   Pay with Hubtel
                 </a>
@@ -339,6 +339,17 @@ export default function PublicInvoicePage() {
           <p className="no-print text-center text-[11px] text-slate-300 pb-3">Powered by Finza</p>
         </div>
       </div>
+
+      {!isPaid && effectiveBalanceDue > 0 && tenantOnlinePay && hubtelCheckoutAvailable && invoice?.id && (
+        <div className="no-print fixed inset-x-0 bottom-0 z-50 border-t border-indigo-200 bg-white/95 px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur sm:hidden">
+          <a
+            href={`/pay/${encodeURIComponent(invoice.id)}?token=${encodeURIComponent(token)}`}
+            className="flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-3.5 text-sm font-bold text-white shadow-md hover:bg-indigo-700 active:bg-indigo-800"
+          >
+            Pay {formatMoney(effectiveBalanceDue, invoice.currency_code)} with Hubtel
+          </a>
+        </div>
+      )}
     </>
   )
 }

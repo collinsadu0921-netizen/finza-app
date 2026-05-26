@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       .eq("business_id", scope.businessId)
       .eq("provider_type", "hubtel")
       .eq("workspace", "service")
-      .in("status", ["pending_verification", "pending", "initiated"])
+      .in("status", ["pending_verification", "pending_accounting_setup", "pending", "initiated"])
       .order("created_at", { ascending: false })
       .limit(50)
 
@@ -75,7 +75,11 @@ export async function GET(request: NextRequest) {
         invoiceNumber: inv?.invoice_number ?? null,
         customerName: inv?.customers?.name ?? null,
         lastVerificationError:
-          typeof last.verificationError === "string" ? last.verificationError : null,
+          typeof last.verificationError === "string"
+            ? last.verificationError
+            : typeof last.accountingBootstrapError === "string"
+              ? last.accountingBootstrapError
+              : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         lastEventAt: row.last_event_at,
