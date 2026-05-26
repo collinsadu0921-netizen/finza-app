@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,16 +48,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Canonical tax guard: when apply_taxes is true, template must include tax metadata (same as invoices)
+    // Tax guard: when apply_taxes is true, template must include tax_lines in a supported JSONB shape
     const applyTaxes = invoice_template_data?.apply_taxes === true
     if (applyTaxes) {
-      const hasTaxLines =
-        invoice_template_data.tax_lines &&
-        Array.isArray(invoice_template_data.tax_lines?.lines) &&
-        invoice_template_data.tax_lines.lines.length >= 0
-      if (!hasTaxLines) {
+      const tl = invoice_template_data.tax_lines
+      if (tl === undefined || tl === null) {
         return NextResponse.json(
-          { error: "When apply_taxes is true, invoice_template_data must include tax_lines with lines array" },
+          { error: "When apply_taxes is true, invoice_template_data must include tax_lines" },
+          { status: 400 }
+        )
+      }
+      if (extractTaxLineRows(tl) === null) {
+        return NextResponse.json(
+          {
+            error:
+              "When apply_taxes is true, tax_lines must be an array of line objects, or an object with a lines or tax_lines array",
+          },
           { status: 400 }
         )
       }

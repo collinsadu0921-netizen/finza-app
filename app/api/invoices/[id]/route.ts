@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { calculateTaxes, getLegacyTaxAmounts } from "@/lib/taxEngine"
-import { deriveLegacyGhanaTaxAmounts, getTaxEngineCode, taxResultToJSONB } from "@/lib/taxEngine/helpers"
+import { legacyToCanonicalResult } from "@/lib/taxEngine/adapters"
+import { deriveLegacyGhanaTaxAmounts, getTaxEngineCode } from "@/lib/taxEngine/helpers"
+import { getGhanaEngineVersion } from "@/lib/taxEngine/jurisdictions/ghana-shared"
+import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
+import {
+  enrichGhanaTaxResultWithScheduleMetadata,
+  fetchGhanaEvatLevyScheduleMetadataMap,
+} from "@/lib/tax/ghanaTaxScheduleMetadata"
 import { createAuditLog } from "@/lib/auditLog"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
@@ -324,9 +331,10 @@ export async function PUT(
 
       // Determine effective date: use sent_at if invoice has been sent, otherwise use issue_date
       // When updating a draft that becomes sent, we'll use the new sent_at timestamp
-      const effectiveDate = existingInvoice.sent_at 
-        ? existingInvoice.sent_at 
-        : (issue_date || (existingInvoice as any).issue_date || new Date().toISOString().split('T')[0])
+      const effectiveDate = existingInvoice.sent_at
+        ? existingInvoice.sent_at
+        : (issue_date || (existingInvoice as any).issue_date || new Date().toISOString().split("T")[0])
+      const effectiveDateStr = String(effectiveDate).split("T")[0]
 
       // Get business country for tax calculation
       const { data: business } = await supabase
@@ -335,8 +343,8 @@ export async function PUT(
         .eq("id", businessId)
         .single()
 
-      const jurisdiction = business?.address_country || 'GH'
-      const taxEngineCode = getTaxEngineCode(jurisdiction)
+      const countryCode = normalizeCountry(business?.address_country ?? "GH") ?? "GH"
+      const taxEngineCode = getTaxEngineCode(countryCode)
       let baseSubtotal: number
       let invoiceTotal: number
       let legacyTaxAmounts: ReturnType<typeof getLegacyTaxAmounts>
@@ -347,27 +355,41 @@ export async function PUT(
         taxCalculationResult = calculateTaxes(
           lineItems,
           business?.address_country,
-          effectiveDate,
+          effectiveDateStr,
           true // tax-inclusive pricing
         )
 
         baseSubtotal = taxCalculationResult.subtotal_excl_tax
         invoiceTotal = taxCalculationResult.total_incl_tax
         legacyTaxAmounts = getLegacyTaxAmounts(taxCalculationResult)
-        
+
         // Derive legacy Ghana tax columns from tax_lines
         // CRITICAL: Only derive Ghana taxes if country is GH
-        const countryCode = normalizeCountry(business?.address_country ?? "GH")
         const isGhana = countryCode === "GH"
         const legacyGhanaTaxes = isGhana
           ? deriveLegacyGhanaTaxAmounts(taxCalculationResult.taxLines)
           : { nhil: 0, getfund: 0, covid: 0, vat: 0 }
-        
-        // Store generic tax columns (source of truth)
-        updateData.tax_lines = taxResultToJSONB(taxCalculationResult)
+
+        // Canonical tax_lines shape (same as invoice create): lines + meta + pricing_mode
+        let canonicalForPersist = legacyToCanonicalResult(
+          taxCalculationResult,
+          {
+            jurisdiction: countryCode,
+            effectiveDate: effectiveDateStr,
+            taxInclusive: true,
+          },
+          getGhanaEngineVersion
+        )
+        if (isGhana) {
+          const scheduleMap = await fetchGhanaEvatLevyScheduleMetadataMap(supabase, {
+            effectiveDate: effectiveDateStr,
+          })
+          canonicalForPersist = enrichGhanaTaxResultWithScheduleMetadata(canonicalForPersist, scheduleMap)
+        }
+        updateData.tax_lines = toTaxLinesJsonb(canonicalForPersist)
         updateData.tax_engine_code = taxEngineCode
-        updateData.tax_engine_effective_from = effectiveDate
-        updateData.tax_jurisdiction = jurisdiction
+        updateData.tax_engine_effective_from = effectiveDateStr
+        updateData.tax_jurisdiction = countryCode
         
         // Store legacy columns (derived from tax_lines for backward compatibility)
         // CRITICAL: Only populate nhil/getfund/covid for GH businesses

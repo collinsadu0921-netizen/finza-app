@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
 
 type RecurringInvoice = {
   id: string
@@ -191,6 +192,7 @@ function RecurringInvoiceViewContent() {
 
   const templateData = recurringInvoice.invoice_template_data || {}
   const lineItems = templateData.line_items || []
+  const templateTaxRows = extractTaxLineRows(templateData.tax_lines) ?? []
   const totalDiscount = Array.isArray(lineItems)
     ? lineItems.reduce((sum: number, item: any) => sum + Number(item?.discount_amount || 0), 0)
     : 0
@@ -318,10 +320,11 @@ function RecurringInvoiceViewContent() {
                     <span className="font-medium text-rose-600 tabular-nums">−GH₵{Number(totalDiscount).toFixed(2)}</span>
                   </div>
                 )}
-                {templateData.apply_taxes && Array.isArray(templateData.tax_lines?.lines) && templateData.tax_lines.lines.length > 0 && (
+                {templateData.apply_taxes && templateTaxRows.length > 0 && (
                   <>
-                    {templateData.tax_lines.lines.map(
-                      (line: { code?: string; name?: string; amount?: number }, i: number) => (
+                    {templateTaxRows.map((lineRaw, i: number) => {
+                      const line = lineRaw as { code?: string; name?: string; amount?: number }
+                      return (
                         <div key={i} className="flex justify-between text-slate-600">
                           <span>{line.name || line.code || "Tax"}</span>
                           <span className="font-medium text-slate-900 tabular-nums">
@@ -329,7 +332,7 @@ function RecurringInvoiceViewContent() {
                           </span>
                         </div>
                       )
-                    )}
+                    })}
                   </>
                 )}
                 {templateData.apply_taxes && templateData.total_tax != null && (

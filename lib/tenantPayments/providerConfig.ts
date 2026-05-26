@@ -160,16 +160,29 @@ export function normalizeBusinessPaymentProviderRow(
 
     case "hubtel": {
       const sec = decryptSecretsRow(row)
-      const secrets: HubtelSecretConfig = {
-        pos_key: requireStr(sec, "hubtel", "pos_key", "posKey"),
-        api_secret: requireStr(sec, "hubtel", "api_secret", "secret"),
+      const apiId = pickStr(sec, "api_id", "apiId", "pos_key", "posKey")
+      const apiKey = pickStr(sec, "api_key", "apiKey", "api_secret", "secret")
+      if (!apiId || !apiKey) {
+        throw new TenantPaymentInvalidConfigError(
+          "hubtel requires api_id and api_key in encrypted secrets (or legacy pos_key/secret)"
+        )
       }
+      const secrets: HubtelSecretConfig = {
+        api_id: apiId,
+        api_key: apiKey,
+        pos_key: pickStr(sec, "pos_key", "posKey"),
+        api_secret: pickStr(sec, "api_secret", "secret"),
+      }
+      const merchant = pickStr(
+        publicRaw,
+        "merchant_account_number",
+        "merchantAccountNumber",
+        "collection_account_number",
+        "collectionAccountNumber"
+      )
       const pub: HubtelPublicConfig = {
-        merchant_account_number: pickStr(
-          publicRaw,
-          "merchant_account_number",
-          "merchantAccountNumber"
-        ),
+        merchant_account_number: merchant,
+        collection_account_number: merchant,
       }
       return { kind: "hubtel", row, environment, public: pub, secrets }
     }

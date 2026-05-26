@@ -100,6 +100,30 @@ describe("maskProviderConfigForUi", () => {
     expect(m.public_config.wallet_number).not.toContain("0244999888")
   })
 
+  it("hubtel UI mask does not expose api_id or api_key", () => {
+    const prevKey = process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY
+    process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY = VALID_TEST_KEY_HEX
+    const row: BusinessPaymentProviderRow = {
+      ...baseRow(),
+      provider_type: "hubtel",
+      public_config: {
+        merchant_account_number: "123456",
+        collection_account_number: "123456",
+      },
+      secret_config_encrypted: encryptProviderSecretConfig({
+        api_id: "hub-id-secret",
+        api_key: "hub-key-secret",
+      }),
+    }
+    const m = maskProviderConfigForUi(row)
+    expect(m.secret_present).toBe(true)
+    const json = JSON.stringify(m)
+    expect(json).not.toContain("hub-id-secret")
+    expect(json).not.toContain("hub-key-secret")
+    if (prevKey === undefined) delete process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY
+    else process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY = prevKey
+  })
+
   it("maskResolvedTenantProviderForUi matches row mask", () => {
     const prevKey = process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY
     process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY = VALID_TEST_KEY_HEX

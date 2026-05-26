@@ -34,12 +34,6 @@ type EncodedPayloadV1 = {
   data: string
 }
 
-/**
- * Parse TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY into a 32-byte AES key.
- * Accepted formats (trimmed):
- * - 64 hexadecimal characters
- * - Standard Base64 or Base64url encoding of exactly 32 raw bytes (decoded length 32)
- */
 export function parseTenantPaymentEncryptionKeyFromEnv(): Buffer {
   const raw = process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY?.trim()
   if (!raw) {
@@ -74,6 +68,16 @@ export function parseTenantPaymentEncryptionKeyFromEnv(): Buffer {
   }
 
   throw new TenantPaymentEncryptionKeyInvalidError()
+}
+
+/** True when TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY is set and parseable (does not throw). */
+export function isTenantPaymentEncryptionKeyConfigured(): boolean {
+  try {
+    parseTenantPaymentEncryptionKeyFromEnv()
+    return true
+  } catch {
+    return false
+  }
 }
 
 function getEncryptionKey(): Buffer {

@@ -23,6 +23,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
+import { PrepareEvatDraftCard } from "@/components/invoices/PrepareEvatDraftCard"
 
 type Invoice = {
   id: string
@@ -809,6 +810,12 @@ Thank you.`
                   )}
                 </dl>
               </div>
+
+              <PrepareEvatDraftCard
+                invoiceId={invoiceId}
+                businessId={resolvedBusinessId ?? invoice.business_id}
+                currencyCode={invoice.currency_code}
+              />
 
               {/* Actions Panel (Secondary) */}
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
 
 export async function GET(
   request: NextRequest,
@@ -136,12 +137,19 @@ export async function PUT(
     if (invoice_template_data) {
       const applyTaxes = invoice_template_data?.apply_taxes === true
       if (applyTaxes) {
-        const hasTaxLines =
-          invoice_template_data.tax_lines &&
-          Array.isArray(invoice_template_data.tax_lines?.lines)
-        if (!hasTaxLines) {
+        const tl = invoice_template_data.tax_lines
+        if (tl === undefined || tl === null) {
           return NextResponse.json(
-            { error: "When apply_taxes is true, invoice_template_data must include tax_lines with lines array" },
+            { error: "When apply_taxes is true, invoice_template_data must include tax_lines" },
+            { status: 400 }
+          )
+        }
+        if (extractTaxLineRows(tl) === null) {
+          return NextResponse.json(
+            {
+              error:
+                "When apply_taxes is true, tax_lines must be an array of line objects, or an object with a lines or tax_lines array",
+            },
             { status: 400 }
           )
         }

@@ -94,35 +94,39 @@ export function mergeMtnPublicFields(input: {
 }
 
 export function mergeHubtelSecrets(input: {
+  bodyApiId?: string | undefined
+  bodyApiKey?: string | undefined
+  /** @deprecated legacy field names */
   bodyPosKey?: string | undefined
+  /** @deprecated legacy field names */
   bodyApiSecret?: string | undefined
   existingCiphertext: string | null | undefined
   legacy: LegacyHubtelSettings | null
-}): { pos_key: string; api_secret: string } | null {
-  let pos_key = (input.bodyPosKey ?? "").trim()
-  let api_secret = (input.bodyApiSecret ?? "").trim()
+}): { api_id: string; api_key: string } | null {
+  let api_id = (input.bodyApiId ?? input.bodyPosKey ?? "").trim()
+  let api_key = (input.bodyApiKey ?? input.bodyApiSecret ?? "").trim()
 
   if (
-    (!pos_key || !api_secret) &&
+    (!api_id || !api_key) &&
     input.existingCiphertext &&
     isEncryptedProviderSecretConfig(input.existingCiphertext)
   ) {
     try {
       const dec = decryptProviderSecretConfig(input.existingCiphertext)
-      if (!pos_key) pos_key = pickStr(dec, "pos_key", "posKey")
-      if (!api_secret) api_secret = pickStr(dec, "api_secret", "secret")
+      if (!api_id) api_id = pickStr(dec, "api_id", "apiId", "pos_key", "posKey")
+      if (!api_key) api_key = pickStr(dec, "api_key", "apiKey", "api_secret", "secret")
     } catch {
       /* missing */
     }
   }
 
-  if ((!pos_key || !api_secret) && input.legacy) {
-    if (!pos_key) pos_key = input.legacy.pos_key
-    if (!api_secret) api_secret = input.legacy.secret
+  if ((!api_id || !api_key) && input.legacy) {
+    if (!api_id) api_id = input.legacy.pos_key
+    if (!api_key) api_key = input.legacy.secret
   }
 
-  if (!pos_key || !api_secret) return null
-  return { pos_key, api_secret }
+  if (!api_id || !api_key) return null
+  return { api_id, api_key }
 }
 
 export function mergeHubtelMerchant(input: {

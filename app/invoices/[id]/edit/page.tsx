@@ -663,6 +663,19 @@ export default function InvoiceEditPage() {
     }
   }
 
+  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode ?? undefined })
+
+  const productMenuOptions = useMemo((): MenuSelectOption[] => {
+    const list = Array.isArray(products) ? products : []
+    return [
+      { value: "", label: "Select product/service" },
+      ...list.map((product) => ({
+        value: product.id,
+        label: `${product.name} - ${currency}${Number(product.price).toFixed(2)}`,
+      })),
+    ]
+  }, [products, currency])
+
   if (loading) {
     return (
       <Wrapper>
@@ -695,18 +708,6 @@ export default function InvoiceEditPage() {
       </Wrapper>
     )
   }
-
-  const currency = resolveCurrencyDisplay({ currency_symbol: currencySymbol, currency_code: currencyCode ?? undefined })
-
-  const productMenuOptions = useMemo((): MenuSelectOption[] => {
-    return [
-      { value: "", label: "Select product/service" },
-      ...products.map((product) => ({
-        value: product.id,
-        label: `${product.name} - ${currency}${Number(product.price).toFixed(2)}`,
-      })),
-    ]
-  }, [products, currency])
 
   return (
     <Wrapper>

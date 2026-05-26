@@ -159,7 +159,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0)
     const remaining = Number(invoice.total) - totalPaid
 
-    let invoice_payment_flow: "manual_wallet" | "mtn_momo_direct" | "paystack_momo" | null = null
+    let invoice_payment_flow: "manual_wallet" | "hubtel_checkout" | null = null
     let manual_wallet_payment: Awaited<ReturnType<typeof getManualWalletInstructionsForInvoice>> = null
 
     if (invoice.status !== "paid" && remaining > 0 && invoice.business_id) {

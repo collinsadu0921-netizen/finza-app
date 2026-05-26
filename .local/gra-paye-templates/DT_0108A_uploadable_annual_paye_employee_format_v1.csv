@@ -1,0 +1,10 @@
+ENUM VALUES
+(4) Position,,
+EXPT,Expatriate,
+JUNR,Junior,
+MNGT,Management,
+OTHR,Other,
+SENR,Senior,
+,
+TABLE DATA
+(3) TIN,(2) Employee Name,(1) Serial Number,(4) Position,(5) Non-Resident,(6) Basic Salary,(7) Secondary Employment,(8) Social Security Fund,(9) Third Tier Pension,(10) Cash Allowances,(11) Bonus Income,(12) Final Tax on Bonus,(13) Excess Bonus,(14) Total Cash Emolument,(15) Accommodation Element,(16) Vehicle Element,(17) Non Cash Benefit,(18) Total Assessable Income,(19) Deductible Reliefs,(20) Total Reliefs,(21) Chargeable Income,(22) Tax Deductible,(23) Overtime Income,(24) Overtime Tax,(25) Total Tax Payable to GRA,(26) Severance Pay Paid,(27) Remarks 

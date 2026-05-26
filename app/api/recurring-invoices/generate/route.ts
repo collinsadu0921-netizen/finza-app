@@ -5,6 +5,7 @@ import { deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
+import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
 
 export async function POST(request: NextRequest) {
   try {
@@ -118,10 +119,15 @@ export async function POST(request: NextRequest) {
     let taxJurisdiction: string | null = null
     let legacyGhanaTaxes = { nhil: 0, getfund: 0, covid: 0, vat: 0 }
 
-    if (applyTaxes && templateData.tax_lines?.lines != null) {
+    const templateLineRowsRaw = extractTaxLineRows(templateData.tax_lines)
+    const templateLineRows =
+      templateLineRowsRaw === null
+        ? null
+        : (templateLineRowsRaw as Array<{ code: string; amount: number }>)
+
+    if (applyTaxes && templateData.tax_lines != null && templateLineRows != null) {
       storedTaxLines = templateData.tax_lines as Record<string, unknown>
-      const lines = (templateData.tax_lines as { lines?: Array<{ code: string; amount: number }> }).lines ?? []
-      legacyGhanaTaxes = deriveLegacyTaxColumnsFromTaxLines(lines)
+      legacyGhanaTaxes = deriveLegacyTaxColumnsFromTaxLines(templateLineRows)
       baseSubtotal = Number(templateData.subtotal) || 0
       totalTax = Number(templateData.total_tax) || 0
       invoiceTotal = Number(templateData.total) || baseSubtotal + totalTax

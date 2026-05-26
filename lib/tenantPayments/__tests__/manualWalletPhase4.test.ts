@@ -74,8 +74,18 @@ describe("manualWalletInstructionsFromDefaultRow", () => {
 })
 
 describe("normalizeManualWalletPublicConfig", () => {
-  it("requires wallet_number or display_label", () => {
+  it("requires wallet_number or display_label when enabled", () => {
     expect(() => normalizeManualWalletPublicConfig({ network: "x" })).toThrow(/wallet_number or display_label/)
+  })
+
+  it("allows empty identity when requireWalletOrLabel is false", () => {
+    expect(normalizeManualWalletPublicConfig({ network: "x" }, { requireWalletOrLabel: false })).toEqual({
+      network: "x",
+      account_name: "",
+      wallet_number: "",
+      instructions: "",
+      display_label: "",
+    })
   })
 
   it("accepts display_label only", () => {

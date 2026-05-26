@@ -9,6 +9,7 @@ import {
   type InvoiceManualPaymentDetailsProps,
 } from "@/components/invoices/ManualInvoicePaymentDetails"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { getTaxLinesForDisplay } from "@/lib/taxes/readTaxLines"
 
 type Business = {
   id: string
@@ -102,6 +103,15 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
 }
 
+/** Labels aligned with legacy column fallback (COVID omitted via getTaxLinesForDisplay). */
+function taxLineDisplayName(code: string): string {
+  const c = code.toUpperCase()
+  if (c === "NHIL") return "NHIL (2.5%)"
+  if (c === "GETFUND") return "GETFund (2.5%)"
+  if (c === "VAT") return "VAT (15%)"
+  return code
+}
+
 export default function InvoiceViewPage() {
   const params    = useParams()
   const router    = useRouter()
@@ -117,6 +127,9 @@ export default function InvoiceViewPage() {
   const [linkUnavailable, setLinkUnavailable] = useState(false)
   const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
   const [tenantOnlinePay, setTenantOnlinePay] = useState(false)
+  const [invoicePaymentFlow, setInvoicePaymentFlow] = useState<
+    "manual_wallet" | "hubtel_checkout" | null
+  >(null)
   const [invoiceSettingsPublic, setInvoiceSettingsPublic] = useState<InvoiceManualPaymentDetailsProps | null>(null)
 
   useEffect(() => {
@@ -160,6 +173,7 @@ export default function InvoiceViewPage() {
         setRemaining(data.remaining ?? Number(data.invoice?.total ?? 0))
         setManualWalletPayment(data.manual_wallet_payment ?? null)
         setTenantOnlinePay(data.tenant_invoice_online_payments_enabled === true)
+        setInvoicePaymentFlow(data.invoice_payment_flow ?? null)
         setInvoiceSettingsPublic(data.invoice_settings_public ?? null)
       } catch {
         if (!cancelled) {
@@ -224,12 +238,12 @@ export default function InvoiceViewPage() {
       ? `Less WHT (${(whtRate * 100).toFixed(0)}% withheld by customer)`
       : "Less WHT (withheld by customer)"
 
-  // Tax breakdown lines (new tax engine)
+  // Tax breakdown: canonical + legacy JSONB via getTaxLinesForDisplay (same policy as invoice detail UI)
   const taxLines: { name: string; amount: number }[] = []
-  if (invoice.apply_taxes && invoice.tax_lines?.lines) {
-    invoice.tax_lines.lines.forEach((l: any) => {
-      if (l.amount > 0) taxLines.push({ name: l.name || l.code, amount: l.amount })
-    })
+  if (invoice.apply_taxes && invoice.tax_lines) {
+    for (const row of getTaxLinesForDisplay(invoice.tax_lines)) {
+      taxLines.push({ name: taxLineDisplayName(row.code), amount: row.amount })
+    }
   } else if (invoice.apply_taxes) {
     // Legacy Ghana tax columns
     if (Number(invoice.nhil)    > 0) taxLines.push({ name: "NHIL (2.5%)",      amount: invoice.nhil })
@@ -525,7 +539,7 @@ export default function InvoiceViewPage() {
               href={`/pay/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`}
               className="flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
             >
-              Open payment page
+              {invoicePaymentFlow === "hubtel_checkout" ? "Pay with Hubtel" : "Open payment page"}
             </a>
           </div>
         )}

@@ -3,7 +3,7 @@
  * Utilities for storing and deriving tax data
  */
 
-import type { TaxCalculationResult, TaxLine, TaxResult, TaxEngineConfig, LineItem } from './types'
+import type { LegacyTaxLine, TaxCalculationResult, TaxLine, TaxResult, TaxEngineConfig, LineItem } from './types'
 import { ghanaTaxEngineCanonical } from './jurisdictions/ghana'
 import { legacyToCanonicalResult } from './adapters'
 import { getGhanaEngineVersion } from './jurisdictions/ghana-shared'
@@ -178,25 +178,143 @@ export function taxResultToJSONB(result: TaxCalculationResult): any {
   }
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function parseJsonbRoot(jsonb: any): any {
+  if (jsonb == null) return null
+  if (typeof jsonb === "string") {
+    try {
+      return JSON.parse(jsonb)
+    } catch {
+      return null
+    }
+  }
+  return jsonb
+}
+
+function mapJsonLineToLegacyTaxLine(line: any): LegacyTaxLine {
+  const code = line?.code != null ? String(line.code) : ""
+  const name = line?.name != null ? String(line.name) : code
+  const rate = Number(line?.rate)
+  const base = Number(line?.base)
+  const amount = Number(line?.amount)
+  const ledgerFromLine = line?.ledger_account_code ?? line?.meta?.ledger_account_code
+  const sideFromLine = line?.ledger_side ?? line?.meta?.ledger_side
+  return {
+    code,
+    name,
+    rate: Number.isFinite(rate) ? rate : 0,
+    base: Number.isFinite(base) ? base : 0,
+    amount: Number.isFinite(amount) ? amount : 0,
+    ledger_account_code: ledgerFromLine ?? null,
+    ledger_side: sideFromLine === "debit" || sideFromLine === "credit" ? sideFromLine : null,
+    ...(typeof line?.is_creditable_input === "boolean" ? { is_creditable_input: line.is_creditable_input } : {}),
+    ...(typeof line?.absorbed_to_cost === "boolean" ? { absorbed_to_cost: line.absorbed_to_cost } : {}),
+  }
+}
+
 /**
- * Parse tax_lines JSONB back to TaxCalculationResult
+ * Parse tax_lines JSONB back to TaxCalculationResult.
+ *
+ * Supports:
+ * - **Canonical** (Phase 2A): `{ lines: [...], meta?: {...}, pricing_mode?: string }`
+ * - **Legacy** (taxResultToJSONB): `{ tax_lines: [...], subtotal_excl_tax, tax_total, total_incl_tax }`
+ * - **Root array**: `[{ code, amount, ... }, ...]` (same line shape as legacy array)
+ *
+ * Returns null when the payload cannot be normalized to at least one tax line (canonical empty
+ * `lines: []` with no legacy `tax_lines` fallback). Legacy `{ tax_lines: [] }` still returns an
+ * empty `taxLines` array with totals from numeric fields (backward compatible).
  */
 export function jsonbToTaxResult(jsonb: any): TaxCalculationResult | null {
-  if (!jsonb || !jsonb.tax_lines || !Array.isArray(jsonb.tax_lines)) {
+  const root = parseJsonbRoot(jsonb)
+  if (root == null) {
     return null
   }
 
+  // Root JSON array of line objects
+  if (Array.isArray(root)) {
+    if (root.length === 0) {
+      return null
+    }
+    const taxLines = root.map(mapJsonLineToLegacyTaxLine).filter((l) => l.code.length > 0)
+    if (taxLines.length === 0) {
+      return null
+    }
+    const tax_total = round2(taxLines.reduce((s, l) => s + l.amount, 0))
+    return {
+      taxLines,
+      subtotal_excl_tax: 0,
+      tax_total,
+      total_incl_tax: tax_total,
+    }
+  }
+
+  if (typeof root !== "object") {
+    return null
+  }
+
+  const hasLinesKey = "lines" in root && Array.isArray((root as any).lines)
+  const hasTaxLinesKey = "tax_lines" in root && Array.isArray((root as any).tax_lines)
+  const linesArr = hasLinesKey ? ((root as any).lines as any[]) : null
+  const taxLinesArr = hasTaxLinesKey ? ((root as any).tax_lines as any[]) : null
+
+  let rawLines: any[] | null = null
+  if (linesArr && linesArr.length > 0) {
+    rawLines = linesArr
+  } else if (taxLinesArr && taxLinesArr.length > 0) {
+    rawLines = taxLinesArr
+  } else if (taxLinesArr && taxLinesArr.length === 0) {
+    rawLines = taxLinesArr
+  } else if (linesArr && linesArr.length === 0) {
+    // Canonical wrapper with no lines and no legacy array to fall back to
+    return null
+  } else {
+    return null
+  }
+
+  const taxLines = rawLines.map(mapJsonLineToLegacyTaxLine).filter((l) => l.code.length > 0)
+  if (taxLines.length === 0 && rawLines.length > 0) {
+    return null
+  }
+
+  const sumAmount = round2(taxLines.reduce((s, l) => s + l.amount, 0))
+
+  const r = root as Record<string, unknown>
+  const hasExplicitLegacyTotals =
+    ("subtotal_excl_tax" in r && r.subtotal_excl_tax != null && Number.isFinite(Number(r.subtotal_excl_tax))) ||
+    ("tax_total" in r && r.tax_total != null && Number.isFinite(Number(r.tax_total))) ||
+    ("total_incl_tax" in r && r.total_incl_tax != null && Number.isFinite(Number(r.total_incl_tax)))
+
+  // Default: legacy taxResultToJSONB semantics (|| 0 for each total field)
+  let subtotal_excl_tax = round2(Number(r.subtotal_excl_tax) || 0)
+  let tax_total = round2(Number(r.tax_total) || 0)
+  let total_incl_tax = round2(Number(r.total_incl_tax) || 0)
+
+  const usedCanonicalLines = Boolean(linesArr && linesArr.length > 0 && rawLines === linesArr)
+
+  if (usedCanonicalLines && !hasExplicitLegacyTotals) {
+    tax_total = sumAmount
+    const baseAmountOpt = Number(r.base_amount)
+    if ("base_amount" in r && r.base_amount != null && Number.isFinite(baseAmountOpt)) {
+      subtotal_excl_tax = round2(baseAmountOpt)
+    } else {
+      subtotal_excl_tax = 0
+    }
+    const totalAmountOpt = Number(r.total_amount)
+    if ("total_amount" in r && r.total_amount != null && Number.isFinite(totalAmountOpt)) {
+      total_incl_tax = round2(totalAmountOpt)
+    } else {
+      total_incl_tax = round2(subtotal_excl_tax + tax_total)
+    }
+  }
+
   return {
-    taxLines: jsonb.tax_lines.map((line: any) => ({
-      code: line.code,
-      name: line.name,
-      rate: line.rate,
-      base: line.base,
-      amount: line.amount,
-    })),
-    subtotal_excl_tax: jsonb.subtotal_excl_tax || 0,
-    tax_total: jsonb.tax_total || 0,
-    total_incl_tax: jsonb.total_incl_tax || 0,
+    taxLines,
+    subtotal_excl_tax,
+    tax_total,
+    total_incl_tax,
   }
 }
 

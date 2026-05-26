@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { assertBusinessPaymentWriteAccess } from "@/lib/settings/assertBusinessPaymentWriteAccess"
 import {
-  getTenantHubtelConnections,
-  upsertTenantHubtelConnection,
-} from "@/lib/payments/hubtel/tenantConnectionService"
+  getHubtelIntegrationSettings,
+  hubtelIntegrationErrorMessage,
+  saveHubtelIntegrationSettings,
+} from "@/lib/payments/hubtel/hubtelIntegrationService"
+import {
+  TenantPaymentEncryptionKeyInvalidError,
+  TenantPaymentEncryptionKeyMissingError,
+} from "@/lib/tenantPayments/errors"
 
 export const dynamic = "force-dynamic"
 
 function parseEnvironment(raw: unknown): "test" | "live" {
-  return raw === "live" ? "live" : "test"
+  return raw === "test" ? "test" : "live"
 }
 
 export async function GET(request: NextRequest) {
@@ -28,10 +34,11 @@ export async function GET(request: NextRequest) {
     )
     if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: scope.status })
 
-    const rows = await getTenantHubtelConnections(supabase, scope.businessId)
+    const environment = parseEnvironment(searchParams.get("environment"))
+    const settings = await getHubtelIntegrationSettings(supabase, scope.businessId, environment)
+
     return NextResponse.json({
-      business_id: scope.businessId,
-      connections: rows,
+      ...settings,
       statuses: ["not_connected", "pending_verification", "connected", "failed", "disconnected"],
     })
   } catch (e: unknown) {
@@ -58,29 +65,61 @@ export async function POST(request: NextRequest) {
     )
     if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: scope.status })
 
-    const merchantNumber = typeof body.merchant_number === "string" ? body.merchant_number.trim() : ""
-    if (!merchantNumber) {
-      return NextResponse.json({ error: "merchant_number is required" }, { status: 400 })
+    const writeGate = await assertBusinessPaymentWriteAccess(supabase, user.id, scope.businessId)
+    if (!writeGate.ok) {
+      return NextResponse.json({ error: writeGate.error }, { status: writeGate.status })
     }
 
-    const connection = await upsertTenantHubtelConnection(supabase, {
-      businessId: scope.businessId,
-      merchantNumber,
-      environment: parseEnvironment(body.environment),
+    const collectionAccountNumber =
+      typeof body.collection_account_number === "string"
+        ? body.collection_account_number
+        : typeof body.merchant_number === "string"
+          ? body.merchant_number
+          : typeof body.merchantAccountNumber === "string"
+            ? body.merchantAccountNumber
+            : ""
+
+    const settings = await saveHubtelIntegrationSettings(supabase, scope.businessId, {
+      apiId:
+        typeof body.api_id === "string"
+          ? body.api_id
+          : typeof body.apiId === "string"
+            ? body.apiId
+            : undefined,
+      apiKey:
+        typeof body.api_key === "string"
+          ? body.api_key
+          : typeof body.apiKey === "string"
+            ? body.apiKey
+            : undefined,
+      collectionAccountNumber,
       businessDisplayName:
-        typeof body.business_display_name === "string" ? body.business_display_name.trim() : null,
+        typeof body.business_display_name === "string"
+          ? body.business_display_name
+          : typeof body.display_name === "string"
+            ? body.display_name
+            : null,
+      environment: parseEnvironment(body.environment),
+      invoiceCheckoutEnabled:
+        body.invoice_checkout_enabled === true ||
+        body.invoiceCheckoutEnabled === true ||
+        body.is_enabled === true,
     })
 
     return NextResponse.json({
       business_id: scope.businessId,
-      connection,
-      message: "Hubtel connection saved as pending verification.",
+      settings,
+      message: "Hubtel integration saved.",
     })
   } catch (e: unknown) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Failed to save Hubtel integration" },
-      { status: 500 }
-    )
+    const message = hubtelIntegrationErrorMessage(e)
+    const status =
+      e instanceof TenantPaymentEncryptionKeyMissingError ||
+      e instanceof TenantPaymentEncryptionKeyInvalidError
+        ? 503
+        : message.includes("required")
+          ? 400
+          : 500
+    return NextResponse.json({ error: message }, { status })
   }
 }
-

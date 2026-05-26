@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { normalizeCountry } from "@/lib/payments/eligibility"
 import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
 import {
@@ -45,24 +44,11 @@ type ManualWalletPayment = {
 type PaymentStatus =
   | "idle"
   | "initiating"
-  | "pending"      // waiting for phone approval
+  | "pending"      // waiting for phone approval / Hubtel return
   | "otp"          // Vodafone OTP step
   | "success"
   | "failed"
-
-const PROVIDERS = [
-  { id: "mtn",        label: "MTN MoMo",      color: "yellow",  icon: "📱" },
-  { id: "vodafone",   label: "Vodafone Cash",  color: "red",     icon: "📱" },
-  { id: "airteltigo", label: "AirtelTigo",     color: "blue",    icon: "📱" },
-] as const
-
-type ProviderId = typeof PROVIDERS[number]["id"]
-
-const PROVIDER_COLORS: Record<string, string> = {
-  yellow: "border-yellow-500 bg-yellow-50",
-  red:    "border-red-500 bg-red-50",
-  blue:   "border-blue-500 bg-blue-50",
-}
+  | "pending_verification"
 
 const PAY_LINK_UNAVAILABLE =
   "This payment link is no longer available. Please use the invoice link sent by the business."
@@ -80,18 +66,15 @@ export default function PayInvoicePage() {
   const [loading,          setLoading]           = useState(false)
   const [linkUnavailable, setLinkUnavailable]   = useState(false)
   const [error,            setError]             = useState("")
-  const [selectedProvider, setSelectedProvider]  = useState<ProviderId | null>(null)
-  const [phone,            setPhone]             = useState("")
-  const [otp,              setOtp]               = useState("")
   const [paymentRef,       setPaymentRef]        = useState("")
   const [paymentStatus,    setPaymentStatus]     = useState<PaymentStatus>("idle")
   const [displayText,      setDisplayText]       = useState("")
   const [qrCodeUrl,        setQrCodeUrl]         = useState("")
-  const [businessCountry,  setBusinessCountry]   = useState<string | null>(null)
   const [manualWalletPayment, setManualWalletPayment] = useState<ManualWalletPayment | null>(null)
-  const [paymentFlow, setPaymentFlow] = useState<"manual_wallet" | "mtn_momo_direct" | "paystack_momo">("paystack_momo")
+  const [paymentFlow, setPaymentFlow] = useState<"manual_wallet" | "hubtel_checkout">("manual_wallet")
   const [tenantOnlinePay, setTenantOnlinePay] = useState(false)
   const [invoiceSettingsPublic, setInvoiceSettingsPublic] = useState<InvoiceManualPaymentDetailsProps | null>(null)
+  const [hubtelClientReference, setHubtelClientReference] = useState("")
   /** Paystack MoMo: token returned from /charge (same row as poll/verify). MTN: filled from refreshed `payments` after success. */
   const [chargePublicToken, setChargePublicToken] = useState<string | null>(null)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
@@ -118,6 +101,24 @@ export default function PayInvoicePage() {
       return () => { if (pollRef.current) clearInterval(pollRef.current) }
     }
   }, [paymentStatus, paymentRef])
+
+  // ── Hubtel return from checkout ───────────────────────────────────────────
+  useEffect(() => {
+    if (!invoiceId || !publicToken) return
+    const hubtelReturn = searchParams.get("hubtel_return") === "1"
+    const hubtelCancelled = searchParams.get("hubtel_cancelled") === "1"
+    const refFromQuery = (searchParams.get("clientReference") ?? "").trim()
+    if (hubtelCancelled) {
+      setError("Payment was cancelled on Hubtel.")
+      return
+    }
+    if (hubtelReturn && refFromQuery) {
+      setHubtelClientReference(refFromQuery)
+      setPaymentRef(refFromQuery)
+      setPaymentStatus("pending")
+      setDisplayText("Payment returned. Checking status…")
+    }
+  }, [invoiceId, publicToken, searchParams])
 
   const loadInvoice = async () => {
     if (!invoiceId || !publicToken) return
@@ -150,11 +151,11 @@ export default function PayInvoicePage() {
       setInvoice(data.invoice)
       setPayments((data.payments || []) as InvoicePaymentRow[])
       setManualWalletPayment(data.manual_wallet_payment ?? null)
-      setPaymentFlow(data.invoice_payment_flow ?? "paystack_momo")
+      setPaymentFlow(
+        data.invoice_payment_flow === "hubtel_checkout" ? "hubtel_checkout" : "manual_wallet"
+      )
       setTenantOnlinePay(data.tenant_invoice_online_payments_enabled === true)
       setInvoiceSettingsPublic(data.invoice_settings_public ?? null)
-      const country = data.invoice.businesses?.address_country || null
-      setBusinessCountry(country)
       const origin = window.location.origin
       const payUrl = `${origin}/pay/${encodeURIComponent(invoiceId)}?token=${encodeURIComponent(publicToken)}`
       setQrCodeUrl(
@@ -172,6 +173,30 @@ export default function PayInvoicePage() {
   const pollStatus = async () => {
     if (!paymentRef) return
     try {
+      if (paymentFlow === "hubtel_checkout" || paymentRef.startsWith("FZHB")) {
+        const res = await fetch(
+          `/api/payments/hubtel/tenant/invoice/status?clientReference=${encodeURIComponent(paymentRef)}&invoice_id=${encodeURIComponent(invoiceId)}&token=${encodeURIComponent(publicToken)}`
+        )
+        const data = await res.json()
+        if (data.success && data.status === "paid") {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setPaymentStatus("success")
+          setTimeout(loadInvoice, 1000)
+        } else if (data.success && data.status === "verification_unavailable") {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setPaymentStatus("pending_verification")
+          setDisplayText(
+            data.message ||
+              "Your payment is being verified. We will update this invoice once confirmed."
+          )
+        } else if (data.success && (data.status === "failed" || data.status === "refunded")) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          setPaymentStatus("failed")
+          setError(data.message || "Payment was not completed")
+        }
+        return
+      }
+
       if (paymentRef.startsWith("finza-mtn-")) {
         const res = await fetch(
           `/api/payments/momo/tenant/invoice/status?reference=${encodeURIComponent(paymentRef)}&invoice_id=${encodeURIComponent(invoiceId)}`
@@ -212,92 +237,32 @@ export default function PayInvoicePage() {
     } catch {}
   }
 
-  const handlePayMtnDirect = async () => {
-    if (phone.replace(/\D/g, "").length < 10) return
+  const handlePayHubtel = async () => {
+    if (!invoiceId || !publicToken) return
     setError("")
     setChargePublicToken(null)
     setPaymentStatus("initiating")
     try {
-      const res = await fetch("/api/payments/momo/tenant/invoice/initiate", {
+      const res = await fetch("/api/payments/hubtel/tenant/invoice/initiate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoice_id: invoiceId, phone: phone.replace(/\s+/g, "") }),
-      })
-      const data = await res.json()
-      if (!data.success) throw new Error(data.error || "Failed to initiate MTN payment")
-      setPaymentRef(data.reference)
-      setDisplayText(data.display_text || "")
-      setPaymentStatus("pending")
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Payment initiation failed")
-      setChargePublicToken(null)
-      setPaymentStatus("idle")
-    }
-  }
-
-  // ── Initiate charge ───────────────────────────────────────────────────────
-  const handlePay = async () => {
-    if (!selectedProvider || phone.replace(/\D/g, "").length < 10) return
-    setError("")
-    setChargePublicToken(null)
-    setPaymentStatus("initiating")
-    try {
-      const res  = await fetch("/api/payments/paystack/charge", {
-        method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           invoice_id: invoiceId,
-          provider: selectedProvider,
-          phone: phone.replace(/\s+/g, ""),
+          public_token: publicToken,
+          payee_name: invoice?.customers?.name ?? undefined,
         }),
       })
       const data = await res.json()
-      if (!data.success) throw new Error(data.error || "Failed to initiate payment")
-
-      setPaymentRef(data.reference)
-      setDisplayText(data.display_text || "")
-      if (typeof data.public_token === "string" && data.public_token) {
-        setChargePublicToken(data.public_token)
+      if (!data.success || !data.checkoutUrl) {
+        throw new Error(data.error || "Failed to open Hubtel checkout")
       }
-
-      if (data.otp_required) {
-        setPaymentStatus("otp")  // Vodafone — OTP step
-      } else {
-        setPaymentStatus("pending")  // MTN / AirtelTigo — phone push
-      }
-    } catch (err: any) {
-      setError(err.message || "Payment initiation failed")
-      setChargePublicToken(null)
+      setHubtelClientReference(data.clientReference ?? "")
+      setPaymentRef(data.clientReference ?? "")
+      window.location.href = data.checkoutUrl
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Hubtel checkout failed")
       setPaymentStatus("idle")
     }
-  }
-
-  // ── Submit Vodafone OTP ───────────────────────────────────────────────────
-  const handleSubmitOtp = async () => {
-    if (!otp.trim()) return
-    setError(""); setPaymentStatus("initiating")
-    try {
-      const res  = await fetch("/api/payments/paystack/submit-otp", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ otp: otp.trim(), reference: paymentRef }),
-      })
-      const data = await res.json()
-      if (!data.success) throw new Error(data.error || "Invalid OTP")
-      setPaymentStatus(data.status === "success" ? "success" : "pending")
-      if (data.status === "success") setTimeout(loadInvoice, 1000)
-    } catch (err: any) {
-      setError(err.message)
-      setPaymentStatus("otp")
-    }
-  }
-
-  const formatPhone = (v: string) => {
-    const d = v.replace(/\D/g, "")
-    if (d.length <= 3)  return d
-    if (d.length <= 6)  return `${d.slice(0,3)} ${d.slice(3)}`
-    if (d.length <= 10) return `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6)}`
-    return `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6,10)}`
   }
 
   // ── Loading / error screens ───────────────────────────────────────────────
@@ -333,9 +298,6 @@ export default function PayInvoicePage() {
 
   const totalPaid      = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
   const remaining      = Number(invoice.total) - totalPaid
-  const countryCode    = normalizeCountry(businessCountry)
-  const isGhana        = countryCode === "GH"
-
   const receiptPublicToken =
     chargePublicToken ||
     (paymentRef
@@ -452,6 +414,21 @@ export default function PayInvoicePage() {
           </div>
         )}
 
+        {paymentStatus === "pending_verification" && (
+          <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-900 p-4 rounded-lg mb-5 flex items-start gap-3">
+            <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <p className="font-semibold">Payment pending verification</p>
+              <p className="text-sm mt-0.5">
+                {displayText ||
+                  "Your payment is being verified. We will update this invoice once confirmed."}
+              </p>
+            </div>
+          </div>
+        )}
+
         {paymentStatus === "pending" && (
           <div className="bg-blue-50 border-l-4 border-blue-400 text-blue-800 p-4 rounded-lg mb-5 flex items-start gap-3">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mt-0.5 flex-shrink-0" />
@@ -513,185 +490,52 @@ export default function PayInvoicePage() {
                   </>
                 )}
               </div>
-            ) : manualWalletPayment ? (
+            ) : paymentFlow === "hubtel_checkout" ? (
+              <>
+                <h2 className="text-lg font-bold text-gray-900 mb-1">Pay with Hubtel</h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  You will be redirected to Hubtel&apos;s secure checkout to pay this invoice. We confirm payment
+                  only after Hubtel verifies the transaction.
+                </p>
+                <ManualInvoicePaymentDetails
+                  details={invoiceSettingsPublic}
+                  manualWallet={null}
+                  className="mb-4"
+                />
+                <button
+                  type="button"
+                  onClick={handlePayHubtel}
+                  disabled={paymentStatus === "initiating"}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white py-4 rounded-xl font-bold text-lg shadow-md hover:from-indigo-700 hover:to-violet-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                >
+                  {paymentStatus === "initiating" ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                      Opening Hubtel checkout…
+                    </>
+                  ) : (
+                    <>Pay {formatMoney(remaining, invoice.currency_code)} with Hubtel</>
+                  )}
+                </button>
+                {hubtelClientReference && paymentStatus === "pending" && (
+                  <p className="text-xs text-gray-500 mt-3 text-center">Reference: {hubtelClientReference}</p>
+                )}
+              </>
+            ) : (
               <div className="space-y-4">
                 <h2 className="text-lg font-bold text-gray-900 mb-1">Manual payment</h2>
                 <p className="text-sm text-gray-600">
-                  Use the instructions below to pay. This invoice updates when the business records your payment — there is
-                  no automatic confirmation for manual transfers.
+                  Use the bank or MoMo details below. This invoice updates when the business records your payment — there is
+                  no automatic online confirmation for manual transfers.
                 </p>
-                {manualWalletPayment.display_label && (
-                  <p className="text-sm font-semibold text-gray-800">{manualWalletPayment.display_label}</p>
-                )}
-                <dl className="space-y-2 text-sm">
-                  {manualWalletPayment.network && (
-                    <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
-                      <dt className="text-gray-500">Network</dt>
-                      <dd className="font-medium text-gray-900 text-right">{manualWalletPayment.network}</dd>
-                    </div>
-                  )}
-                  {manualWalletPayment.account_name && (
-                    <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
-                      <dt className="text-gray-500">Account name</dt>
-                      <dd className="font-medium text-gray-900 text-right">{manualWalletPayment.account_name}</dd>
-                    </div>
-                  )}
-                  {manualWalletPayment.wallet_number && (
-                    <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
-                      <dt className="text-gray-500">Wallet number</dt>
-                      <dd className="font-mono font-semibold text-gray-900 text-right">{manualWalletPayment.wallet_number}</dd>
-                    </div>
-                  )}
-                </dl>
-                {manualWalletPayment.instructions && (
-                  <div className="rounded-lg bg-gray-50 border border-gray-100 p-3 text-sm text-gray-700 whitespace-pre-line">
-                    {manualWalletPayment.instructions}
-                  </div>
-                )}
+                <ManualInvoicePaymentDetails
+                  details={invoiceSettingsPublic}
+                  manualWallet={manualWalletPayment}
+                />
                 <p className="text-xs text-gray-500">
                   Amount due: <strong>{formatMoney(remaining, invoice.currency_code)}</strong>
                 </p>
               </div>
-            ) : paymentFlow === "mtn_momo_direct" ? (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 mb-1">Pay with MTN MoMo (direct)</h2>
-                <p className="text-sm text-gray-600 mb-4">
-                  Payment is processed through this business&apos;s MTN MoMo collection account. Approve the prompt on your
-                  phone; we confirm when MTN reports success.
-                </p>
-                <div className="mb-5">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Mobile money number</label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(formatPhone(e.target.value))}
-                    placeholder="0XX XXX XXXX"
-                    maxLength={14}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500"
-                  />
-                </div>
-                {phone.replace(/\D/g, "").length >= 10 && (
-                  <button
-                    type="button"
-                    onClick={handlePayMtnDirect}
-                    disabled={paymentStatus === "initiating"}
-                    className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 text-white py-4 rounded-xl font-bold text-lg shadow-md hover:from-yellow-600 hover:to-amber-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
-                  >
-                    {paymentStatus === "initiating" ? (
-                      <>
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-                        Processing…
-                      </>
-                    ) : (
-                      <>Pay {formatMoney(remaining, invoice.currency_code)}</>
-                    )}
-                  </button>
-                )}
-              </>
-            ) : !isGhana ? (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-                Online payment is currently available for Ghana only. Please contact the business for alternative payment options.
-              </div>
-            ) : (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 mb-4">Pay with Mobile Money</h2>
-
-                {/* OTP step (Vodafone) */}
-                {paymentStatus === "otp" ? (
-                  <div className="space-y-4">
-                    <p className="text-sm text-gray-600">
-                      A confirmation code has been sent to your Vodafone number. Enter it below.
-                    </p>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={otp}
-                      onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
-                      placeholder="Enter OTP"
-                      className="w-full border border-gray-300 rounded-lg px-4 py-3 text-center text-2xl tracking-widest focus:ring-2 focus:ring-red-400 focus:border-red-400"
-                    />
-                    <button
-                      onClick={handleSubmitOtp}
-                      disabled={otp.length < 4}
-                      className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-40"
-                    >
-                      Confirm OTP
-                    </button>
-                    <button onClick={() => { setPaymentStatus("idle"); setOtp("") }} className="w-full text-sm text-gray-500 hover:underline">
-                      Back
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {/* Provider selector */}
-                    <div className="mb-5">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Select Provider</label>
-                      <div className="grid grid-cols-3 gap-3">
-                        {PROVIDERS.map(p => (
-                          <button
-                            key={p.id}
-                            onClick={() => setSelectedProvider(p.id)}
-                            className={`p-3 rounded-xl border-2 transition-all text-center ${
-                              selectedProvider === p.id
-                                ? PROVIDER_COLORS[p.color]
-                                : "border-gray-200 hover:border-gray-300 bg-white"
-                            }`}
-                          >
-                            <div className="text-xl mb-1">{p.icon}</div>
-                            <div className="text-xs font-semibold text-gray-700 leading-tight">{p.label}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Phone input */}
-                    {selectedProvider && (
-                      <div className="mb-5">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          {PROVIDERS.find(p => p.id === selectedProvider)?.label} Number
-                        </label>
-                        <input
-                          type="tel"
-                          value={phone}
-                          onChange={e => setPhone(formatPhone(e.target.value))}
-                          placeholder="0XX XXX XXXX"
-                          maxLength={14}
-                          className="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">
-                          {selectedProvider === "vodafone"
-                            ? "You will receive an OTP to approve this payment."
-                            : "A payment prompt will be sent to your phone."}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Pay button */}
-                    {selectedProvider && phone.replace(/\D/g, "").length >= 10 && (
-                      <button
-                        onClick={handlePay}
-                        disabled={paymentStatus === "initiating"}
-                        className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-md hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
-                      >
-                        {paymentStatus === "initiating" ? (
-                          <>
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-                            Processing…
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                            Pay {formatMoney(remaining, invoice.currency_code)}
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </>
-                )}
-              </>
             )}
           </div>
         )}

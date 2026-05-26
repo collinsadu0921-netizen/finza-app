@@ -62,8 +62,9 @@ export type MtnMomoDirectPublicConfig = {
 }
 
 export type HubtelPublicConfig = {
-  /** Shown on receipts; not the API secret */
+  /** Collection / merchant account number for Hubtel Online Checkout */
   merchant_account_number?: string
+  collection_account_number?: string
 }
 
 export type PaystackTenantPublicConfig = {
@@ -87,8 +88,14 @@ export type MtnMomoDirectSecretConfig = {
 }
 
 export type HubtelSecretConfig = {
-  pos_key: string
-  api_secret: string
+  /** Hubtel Online Checkout API ID (Basic auth username) */
+  api_id?: string
+  /** Hubtel Online Checkout API Key (Basic auth password) */
+  api_key?: string
+  /** Legacy retail POS key — fallback only */
+  pos_key?: string
+  /** Legacy secret — fallback only */
+  api_secret?: string
 }
 
 export type PaystackTenantSecretConfig = {

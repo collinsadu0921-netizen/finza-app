@@ -88,14 +88,35 @@ describe("mergeHubtelSecrets", () => {
     else process.env.TENANT_PAYMENT_CONFIG_ENCRYPTION_KEY = prev
   })
 
-  it("reads legacy secret field name", () => {
+  it("reads legacy secret field name as api_id/api_key", () => {
     const r = mergeHubtelSecrets({
-      bodyPosKey: "",
-      bodyApiSecret: "",
+      bodyApiId: "",
+      bodyApiKey: "",
       existingCiphertext: null,
       legacy: { pos_key: "p", secret: "s", merchant_account_number: "" },
     })
-    expect(r).toEqual({ pos_key: "p", api_secret: "s" })
+    expect(r).toEqual({ api_id: "p", api_key: "s" })
+  })
+
+  it("prefers api_id and api_key from body", () => {
+    const r = mergeHubtelSecrets({
+      bodyApiId: "id1",
+      bodyApiKey: "key1",
+      existingCiphertext: null,
+      legacy: null,
+    })
+    expect(r).toEqual({ api_id: "id1", api_key: "key1" })
+  })
+
+  it("returns null when API ID and API Key are missing (no MTN fallback)", () => {
+    expect(
+      mergeHubtelSecrets({
+        bodyApiId: "",
+        bodyApiKey: "",
+        existingCiphertext: null,
+        legacy: null,
+      })
+    ).toBeNull()
   })
 })
 

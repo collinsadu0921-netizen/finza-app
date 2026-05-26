@@ -83,6 +83,8 @@ export default function PublicInvoicePage() {
   const [settings, setSettings] = useState<InvoiceSettings | null>(null)
   const [items, setItems] = useState<any[]>([])
   const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null)
+  const [tenantOnlinePay, setTenantOnlinePay] = useState(false)
+  const [hubtelCheckoutAvailable, setHubtelCheckoutAvailable] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
   const [error, setError] = useState("")
 
@@ -105,6 +107,10 @@ export default function PublicInvoicePage() {
                 statusLabel: String(d.paymentSummary.statusLabel),
               }
             : null
+        )
+        setTenantOnlinePay(d.tenant_invoice_online_payments_enabled === true)
+        setHubtelCheckoutAvailable(
+          d.tenant_invoice_online_payments_enabled === true && d.invoice_payment_flow === "hubtel_checkout"
         )
       })
       .catch(e => setError(e.message))
@@ -261,6 +267,14 @@ export default function PublicInvoicePage() {
               >
                 View invoice
               </a>
+              {!isPaid && effectiveBalanceDue > 0 && tenantOnlinePay && hubtelCheckoutAvailable && invoice?.id && (
+                <a
+                  href={`/pay/${encodeURIComponent(invoice.id)}?token=${encodeURIComponent(token)}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 transition-colors"
+                >
+                  Pay with Hubtel
+                </a>
+              )}
             </div>
           </div>
 

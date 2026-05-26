@@ -13,7 +13,10 @@ import { NextRequest } from 'next/server'
 import type { TaxResult } from '@/lib/taxEngine/types'
 
 // Mock modules
-jest.mock('@/lib/supabaseServer')
+jest.mock('@/lib/supabaseServer', () => ({
+  /** Stable reference so `import { createSupabaseServerClient }` in the route stays wired to this mock. */
+  createSupabaseServerClient: jest.fn(),
+}))
 jest.mock('@/lib/auditLog', () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -64,9 +67,41 @@ jest.mock('@/lib/taxEngine/serialize', () => ({
 
 describe('POST /api/invoices/create - Canonical Tax Engine', () => {
   let mockSupabase: any
+  /** Same object returned every time `from('invoices')` runs so `insert` call counts stay on one mock. */
+  let invoicesTableMock: { insert: jest.Mock; delete: jest.Mock }
 
   beforeEach(() => {
     jest.clearAllMocks()
+
+    invoicesTableMock = {
+      insert: jest.fn(() => ({
+        select: jest.fn(() => ({
+          single: jest.fn(() =>
+            Promise.resolve({
+              data: {
+                id: 'new-invoice-id',
+                subtotal: 100.0,
+                total_tax: 21.9,
+                total: 121.9,
+                tax_lines: {
+                  lines: mockTaxResult.lines,
+                  meta: mockTaxResult.meta,
+                  pricing_mode: mockTaxResult.pricing_mode,
+                },
+                nhil: 2.5,
+                getfund: 2.5,
+                covid: 1.0,
+                vat: 15.9,
+              },
+              error: null,
+            })
+          ),
+        })),
+      })),
+      delete: jest.fn(() => ({
+        eq: jest.fn(() => Promise.resolve({ data: null, error: null })),
+      })),
+    }
 
     // Setup Supabase mock
     mockSupabase = {
@@ -75,16 +110,22 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
       },
       from: jest.fn((table: string) => {
         if (table === 'businesses') {
-          return {
-            select: jest.fn(() => ({
-              eq: jest.fn(() => ({
-                single: jest.fn(() => Promise.resolve({
-                  data: { id: 'test-business', address_country: 'GH', default_currency: 'GHS' },
-                  error: null,
-                })),
-              })),
-            })),
+          const businessRow = {
+            id: 'test-business',
+            address_country: 'GH',
+            default_currency: 'GHS',
+            owner_id: 'test-user',
+            archived_at: null,
           }
+          const chain: any = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.is = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => chain)
+          chain.maybeSingle = jest.fn(() => Promise.resolve({ data: businessRow, error: null }))
+          chain.single = jest.fn(() => Promise.resolve({ data: businessRow, error: null }))
+          return chain
         }
         if (table === 'invoice_settings') {
           return {
@@ -96,31 +137,31 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
           }
         }
         if (table === 'invoices') {
+          return invoicesTableMock
+        }
+        if (table === 'business_users') {
+          const chain: any = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => Promise.resolve({ data: [], error: null }))
+          return chain
+        }
+        if (table === 'tax_schedules') {
+          const chain: any = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.is = jest.fn(() => chain)
+          chain.lte = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => chain)
+          chain.maybeSingle = jest.fn(() => Promise.resolve({ data: null, error: null }))
+          return chain
+        }
+        if (table === 'products_services') {
           return {
-            insert: jest.fn(() => ({
-              select: jest.fn(() => ({
-                single: jest.fn(() => Promise.resolve({
-                  data: {
-                    id: 'new-invoice-id',
-                    subtotal: 100.00,
-                    total_tax: 21.90,
-                    total: 121.90,
-                    tax_lines: {
-                      lines: mockTaxResult.lines,
-                      meta: mockTaxResult.meta,
-                      pricing_mode: mockTaxResult.pricing_mode,
-                    },
-                    nhil: 2.50,
-                    getfund: 2.50,
-                    covid: 1.00,
-                    vat: 15.90,
-                  },
-                  error: null,
-                })),
-              })),
-            })),
-            delete: jest.fn(() => ({
-              eq: jest.fn(() => Promise.resolve({ data: null, error: null })),
+            select: jest.fn(() => ({
+              in: jest.fn(() => Promise.resolve({ data: [], error: null })),
             })),
           }
         }
@@ -142,8 +183,11 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
       }),
     }
 
-    // Mock createSupabaseServerClient
-    require('@/lib/supabaseServer').createSupabaseServerClient = jest.fn(() => Promise.resolve(mockSupabase))
+    const { createSupabaseServerClient } = require('@/lib/supabaseServer') as {
+      createSupabaseServerClient: jest.Mock
+    }
+    createSupabaseServerClient.mockReset()
+    createSupabaseServerClient.mockResolvedValue(mockSupabase)
   })
 
   it('persists canonical tax values from TaxResult', async () => {
@@ -163,10 +207,9 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
 
     // Verify invoice insert was called
     expect(mockSupabase.from).toHaveBeenCalledWith('invoices')
-    const insertCall = mockSupabase.from('invoices').insert as jest.Mock
-    expect(insertCall).toHaveBeenCalled()
+    expect(invoicesTableMock.insert).toHaveBeenCalled()
 
-    const invoiceData = insertCall.mock.calls[0][0]
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
     
     // Verify canonical values match TaxResult exactly (rounded to 2dp)
     expect(invoiceData.subtotal).toBe(100.00) // result.base_amount
@@ -189,8 +232,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('invoices').insert as jest.Mock
-    const invoiceData = insertCall.mock.calls[0][0]
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
     
     // Verify tax_lines is stored
     expect(invoiceData.tax_lines).toBeDefined()
@@ -215,8 +257,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('invoices').insert as jest.Mock
-    const invoiceData = insertCall.mock.calls[0][0]
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
     
     // Verify legacy columns match tax_lines (derived, not calculated)
     expect(invoiceData.nhil).toBe(2.50) // From tax_lines.lines
@@ -241,8 +282,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('invoices').insert as jest.Mock
-    const invoiceData = insertCall.mock.calls[0][0]
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
     
     // Verify effective date is issue_date for draft
     expect(invoiceData.tax_engine_effective_from).toBe('2025-12-31')
@@ -267,8 +307,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('invoices').insert as jest.Mock
-    const invoiceData = insertCall.mock.calls[0][0]
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
     
     // Verify effective date is current date for sent
     expect(invoiceData.tax_engine_effective_from).toBe(currentDate)
@@ -290,8 +329,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('invoices').insert as jest.Mock
-    const invoiceData = insertCall.mock.calls[0][0]
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
     
     // Verify: subtotal + total_tax = total (exact match from TaxResult)
     const calculatedTotal = invoiceData.subtotal + invoiceData.total_tax

@@ -63,10 +63,12 @@ export function getTaxBreakdown(tax_lines: any): Record<string, number> {
 
   // Extract code and amount from each line
   for (const line of lines) {
-    if (line && typeof line === 'object' && typeof line.code === 'string') {
+    if (line && typeof line === "object" && typeof line.code === "string") {
       const code = line.code
-      const amount = typeof line.amount === 'number' ? line.amount : 0
-      breakdown[code] = amount
+      if (typeof line.amount !== "number" || !Number.isFinite(line.amount)) {
+        continue
+      }
+      breakdown[code] = line.amount
     }
   }
 

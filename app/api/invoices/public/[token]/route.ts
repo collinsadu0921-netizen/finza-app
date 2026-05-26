@@ -3,6 +3,8 @@ import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { mergeInvoiceTermsFooter } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { invoiceCustomerStatusLabel } from "@/lib/invoices/invoiceCustomerPaymentDisplay"
 import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
+import { resolvePublicInvoicePaymentFlow } from "@/lib/tenantPayments/publicInvoicePaymentFlow"
+import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
 import {
   PUBLIC_BUSINESS_SELECT,
   PUBLIC_INVOICE_SELECT_WITH_CUSTOMER,
@@ -103,6 +105,11 @@ export async function GET(
       Number(inv.total ?? 0)
     )
 
+    let invoice_payment_flow: Awaited<ReturnType<typeof resolvePublicInvoicePaymentFlow>> | null = null
+    if (balanceDue > 0 && inv.business_id) {
+      invoice_payment_flow = await resolvePublicInvoicePaymentFlow(supabase, inv.business_id)
+    }
+
     return NextResponse.json({
       invoice: invoiceForClient,
       business: business || null,
@@ -112,6 +119,8 @@ export async function GET(
         balanceDue,
         statusLabel: invoiceCustomerStatusLabel(inv.status),
       },
+      tenant_invoice_online_payments_enabled: tenantInvoiceOnlinePaymentsEnabled(),
+      invoice_payment_flow,
     })
   } catch (error: unknown) {
     console.error("Error fetching public invoice:", error)

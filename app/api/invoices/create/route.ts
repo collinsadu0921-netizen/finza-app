@@ -9,6 +9,10 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
+import {
+  enrichGhanaTaxResultWithScheduleMetadata,
+  fetchGhanaEvatLevyScheduleMetadataMap,
+} from "@/lib/tax/ghanaTaxScheduleMetadata"
 
 export async function POST(request: NextRequest) {
   try {
@@ -241,11 +245,19 @@ export async function POST(request: NextRequest) {
       }
       
       taxResult = getCanonicalTaxResultFromLineItems(lineItems, config)
-      
+
+      // Phase 2A: attach GRA levy schedule metadata to lines (GH only); never changes amounts or totals.
+      if (jurisdiction === "GH") {
+        const scheduleMap = await fetchGhanaEvatLevyScheduleMetadataMap(supabase, {
+          effectiveDate: effectiveDateForCalculation,
+        })
+        taxResult = enrichGhanaTaxResultWithScheduleMetadata(taxResult, scheduleMap)
+      }
+
       // Persist canonical values (rounded to 2dp)
       baseSubtotal = Math.round(taxResult.base_amount * 100) / 100
       invoiceTotal = Math.round(taxResult.total_amount * 100) / 100
-      
+
       // Derive legacy columns from canonical tax lines (no rate logic, no cutoff logic, no country branching)
       legacyTaxColumns = deriveLegacyTaxColumnsFromTaxLines(taxResult.lines)
     } else {

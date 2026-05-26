@@ -62,6 +62,7 @@ export async function upsertTenantHubtelConnection(
     merchantNumber: string
     environment: "test" | "live"
     businessDisplayName?: string | null
+    status?: Exclude<HubtelConnectionStatus, "not_connected">
   }
 ): Promise<TenantHubtelConnectionView> {
   const merchantNumber = params.merchantNumber.trim()
@@ -72,6 +73,8 @@ export async function upsertTenantHubtelConnection(
     metadata.business_display_name = params.businessDisplayName.trim()
   }
 
+  const status = params.status ?? "pending_verification"
+
   const { data, error } = await supabase
     .from("tenant_hubtel_connections")
     .upsert(
@@ -80,7 +83,7 @@ export async function upsertTenantHubtelConnection(
         provider: "hubtel",
         merchant_number: merchantNumber,
         environment: params.environment,
-        status: "pending_verification",
+        status,
         metadata,
         updated_at: new Date().toISOString(),
       },

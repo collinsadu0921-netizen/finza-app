@@ -175,14 +175,78 @@ function pickManualPublicStr(obj: Record<string, unknown>, ...keys: string[]): s
   return ""
 }
 
+export type NormalizeManualWalletOptions = {
+  /** When false, empty wallet_number/display_label is allowed (disabled / draft manual_wallet). */
+  requireWalletOrLabel?: boolean
+}
+
+/**
+ * Merge PATCH `public_config` into existing without wiping identity fields when the client sends "".
+ */
+export function mergeManualWalletPublicConfig(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>
+): Record<string, unknown> {
+  const base = existing && typeof existing === "object" && !Array.isArray(existing) ? { ...existing } : {}
+
+  const readIncoming = (...keys: string[]): { present: boolean; value: string } => {
+    for (const k of keys) {
+      if (Object.prototype.hasOwnProperty.call(incoming, k)) {
+        const v = incoming[k]
+        return { present: true, value: typeof v === "string" ? v.trim() : "" }
+      }
+    }
+    return { present: false, value: "" }
+  }
+
+  const preserveIfEmpty = (
+    outKey: string,
+    inKeys: string[],
+    existingKeys: string[]
+  ): string => {
+    const { present, value } = readIncoming(...inKeys)
+    if (!present) return pickManualPublicStr(base, outKey, ...existingKeys)
+    if (value) return value
+    const kept = pickManualPublicStr(base, outKey, ...existingKeys)
+    return kept
+  }
+
+  const overwriteIfPresent = (outKey: string, inKeys: string[], existingKeys: string[]): string => {
+    const { present, value } = readIncoming(...inKeys)
+    if (!present) return pickManualPublicStr(base, outKey, ...existingKeys)
+    return value
+  }
+
+  return {
+    network: overwriteIfPresent("network", ["network"], ["network"]),
+    account_name: overwriteIfPresent("account_name", ["account_name", "accountName"], [
+      "account_name",
+      "accountName",
+    ]),
+    wallet_number: preserveIfEmpty("wallet_number", ["wallet_number", "walletNumber"], [
+      "wallet_number",
+      "walletNumber",
+    ]),
+    instructions: overwriteIfPresent("instructions", ["instructions"], ["instructions"]),
+    display_label: preserveIfEmpty("display_label", ["display_label", "displayLabel"], [
+      "display_label",
+      "displayLabel",
+    ]),
+  }
+}
+
 /** Normalizes and validates manual_wallet `public_config` (merged object). */
-export function normalizeManualWalletPublicConfig(merged: Record<string, unknown>): Record<string, unknown> {
+export function normalizeManualWalletPublicConfig(
+  merged: Record<string, unknown>,
+  options?: NormalizeManualWalletOptions
+): Record<string, unknown> {
   const network = pickManualPublicStr(merged, "network")
   const account_name = pickManualPublicStr(merged, "account_name", "accountName")
   const wallet_number = pickManualPublicStr(merged, "wallet_number", "walletNumber")
   const instructions = pickManualPublicStr(merged, "instructions")
   const display_label = pickManualPublicStr(merged, "display_label", "displayLabel")
-  if (!wallet_number && !display_label) {
+  const requireWalletOrLabel = options?.requireWalletOrLabel !== false
+  if (requireWalletOrLabel && !wallet_number && !display_label) {
     throw new Error("manual_wallet requires wallet_number or display_label")
   }
   return { network, account_name, wallet_number, instructions, display_label }
@@ -343,12 +407,13 @@ export async function createPaymentProvider(
     if (body.secrets != null && Object.keys(body.secrets).length > 0) {
       throw new Error("manual_wallet cannot include secrets")
     }
+    const is_enabled = body.is_enabled !== undefined ? body.is_enabled : true
     const public_config = normalizeManualWalletPublicConfig(
       (body.public_config && typeof body.public_config === "object" && !Array.isArray(body.public_config)
         ? body.public_config
-        : {}) as Record<string, unknown>
+        : {}) as Record<string, unknown>,
+      { requireWalletOrLabel: is_enabled }
     )
-    const is_enabled = body.is_enabled !== undefined ? body.is_enabled : true
 
     if (body.is_default) {
       await clearDefaultForEnv(supabase, businessId, body.environment)
@@ -420,26 +485,25 @@ export async function createPaymentProvider(
     })
 
     const hubSecrets = mergeHubtelSecrets({
-      bodyPosKey: pickOptionalStr(secretsIn, body.public_config, "pos_key", "posKey"),
-      bodyApiSecret: pickOptionalStr(secretsIn, body.public_config, "secret", "api_secret"),
+      bodyApiId: pickOptionalStr(secretsIn, body.public_config, "api_id", "apiId", "pos_key", "posKey"),
+      bodyApiKey: pickOptionalStr(secretsIn, body.public_config, "api_key", "apiKey", "secret", "api_secret"),
       existingCiphertext: null,
       legacy: legacy.hubtel,
     })
-    if (!hubSecrets) throw new Error("Hubtel requires pos_key and secret (or existing legacy values)")
+    if (!hubSecrets) throw new Error("Hubtel requires API ID and API Key")
+    if (!merchant.trim()) throw new Error("Hubtel requires Collection Account Number")
 
     public_config = {
       ...body.public_config,
       merchant_account_number: merchant,
+      collection_account_number: merchant,
     }
     ciphertext = encryptProviderSecretConfig({
-      pos_key: hubSecrets.pos_key,
-      api_secret: hubSecrets.api_secret,
+      api_id: hubSecrets.api_id,
+      api_key: hubSecrets.api_key,
     })
-    legacyHub = toLegacyHubtelSettings({
-      pos_key: hubSecrets.pos_key,
-      api_secret: hubSecrets.api_secret,
-      merchant_account_number: merchant,
-    })
+    // Service invoice Hubtel checkout reads encrypted business_payment_providers only — no plaintext dual-write.
+    legacyHub = null
   }
 
   const is_enabled = body.is_enabled !== undefined ? body.is_enabled : true
@@ -542,8 +606,15 @@ export async function updatePaymentProvider(
     if (body.secrets != null && Object.keys(body.secrets).length > 0) {
       throw new Error("manual_wallet cannot include secrets")
     }
-    const merged = { ...existing.public_config, ...pubIn }
-    const public_config = normalizeManualWalletPublicConfig(merged as Record<string, unknown>)
+    const existingPublic =
+      existing.public_config && typeof existing.public_config === "object" && !Array.isArray(existing.public_config)
+        ? (existing.public_config as Record<string, unknown>)
+        : {}
+    const merged = mergeManualWalletPublicConfig(existingPublic, pubIn)
+    const willBeEnabled = body.is_enabled !== undefined ? body.is_enabled : existing.is_enabled
+    const public_config = normalizeManualWalletPublicConfig(merged, {
+      requireWalletOrLabel: willBeEnabled,
+    })
 
     const patch: Record<string, unknown> = {
       public_config,
@@ -610,23 +681,27 @@ export async function updatePaymentProvider(
       legacy: legacy.hubtel,
     })
     const hubSecrets = mergeHubtelSecrets({
-      bodyPosKey: pickOptionalStr(secretsIn, pubIn, "pos_key", "posKey"),
-      bodyApiSecret: pickOptionalStr(secretsIn, pubIn, "secret", "api_secret"),
+      bodyApiId: pickOptionalStr(secretsIn, pubIn, "api_id", "apiId", "pos_key", "posKey"),
+      bodyApiKey: pickOptionalStr(secretsIn, pubIn, "api_key", "apiKey", "secret", "api_secret"),
       existingCiphertext: existing.secret_config_encrypted,
       legacy: legacy.hubtel,
     })
-    if (!hubSecrets) throw new Error("Hubtel requires pos_key and secret (leave blank to keep stored values)")
+    if (!hubSecrets) throw new Error("Hubtel requires API ID and API Key (leave blank to keep stored values)")
+    if (!merchant.trim()) {
+      throw new Error("Hubtel requires Collection Account Number (leave blank only when already saved)")
+    }
 
-    public_config = { ...public_config, merchant_account_number: merchant }
-    secret_config_encrypted = encryptProviderSecretConfig({
-      pos_key: hubSecrets.pos_key,
-      api_secret: hubSecrets.api_secret,
-    })
-    legacyHub = toLegacyHubtelSettings({
-      pos_key: hubSecrets.pos_key,
-      api_secret: hubSecrets.api_secret,
+    public_config = {
+      ...public_config,
       merchant_account_number: merchant,
+      collection_account_number: merchant,
+    }
+    secret_config_encrypted = encryptProviderSecretConfig({
+      api_id: hubSecrets.api_id,
+      api_key: hubSecrets.api_key,
     })
+    // No plaintext hubtel_settings dual-write for service invoice checkout credentials.
+    legacyHub = null
   } else {
     throw new Error("Unsupported provider_type for PATCH in this phase")
   }

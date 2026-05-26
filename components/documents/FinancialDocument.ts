@@ -199,6 +199,21 @@ function getDocumentLabels(documentType: DocumentType) {
 }
 
 /**
+ * Stored `tax_lines` from JSONB: PDF **totals** must include every non-zero line (including COVID).
+ * **Display rows** still omit COVID (unchanged product policy).
+ */
+export function computeStoredTaxDisplayForFinancialDocument(stored: TaxLine[]): {
+  displayLines: TaxLine[]
+  totalTaxFromStored: number
+} {
+  const nonZero = stored.filter((line) => Number(line.amount) !== 0)
+  const totalTaxFromStored =
+    Math.round(nonZero.reduce((sum, line) => sum + Number(line.amount), 0) * 100) / 100
+  const displayLines = nonZero.filter((line) => line.code.toUpperCase() !== "COVID")
+  return { displayLines, totalTaxFromStored }
+}
+
+/**
  * Generate HTML for a financial document
  */
 export function generateFinancialDocumentHTML(props: FinancialDocumentProps): string {
@@ -258,10 +273,11 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
 
   if (total > 0) {
     if (hasStoredTaxLines) {
-      taxLines = props.tax_lines!.filter(
-        (line) => Number(line.amount) !== 0 && line.code.toUpperCase() !== "COVID"
+      const { displayLines, totalTaxFromStored } = computeStoredTaxDisplayForFinancialDocument(
+        props.tax_lines!
       )
-      calculatedTotalTax = taxLines.reduce((sum, line) => sum + Number(line.amount), 0)
+      taxLines = displayLines
+      calculatedTotalTax = totalTaxFromStored
       baseAmount = total - calculatedTotalTax
     } else if (apply_taxes) {
       try {

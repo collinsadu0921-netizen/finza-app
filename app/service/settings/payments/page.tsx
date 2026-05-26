@@ -30,9 +30,6 @@ type SettingsResponse = {
 
 const ENV = "live"
 
-/** Hubtel collection API returns HTTP 501; keep credentials in DB but do not save updates from this form until implemented. */
-const HUBTEL_COLLECTION_IMPLEMENTED = false
-
 export default function ServicePaymentSettingsPage() {
   const router = useRouter()
   const [businessId, setBusinessId] = useState("")
@@ -41,10 +38,7 @@ export default function ServicePaymentSettingsPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  const [momoProviderId, setMomoProviderId] = useState<string | null>(null)
-  const [momoSecretPresent, setMomoSecretPresent] = useState(false)
-  const [hubtelProviderId, setHubtelProviderId] = useState<string | null>(null)
-  const [hubtelSecretPresent, setHubtelSecretPresent] = useState(false)
+  const [hubtelConfigured, setHubtelConfigured] = useState(false)
 
   const [manualProviderId, setManualProviderId] = useState<string | null>(null)
   const [manualIsDefault, setManualIsDefault] = useState(false)
@@ -54,17 +48,13 @@ export default function ServicePaymentSettingsPage() {
   const [mwWalletNumber, setMwWalletNumber] = useState("")
   const [mwInstructions, setMwInstructions] = useState("")
   const [mwDisplayLabel, setMwDisplayLabel] = useState("")
+  /** True after user edits manual wallet fields. */
+  const [manualWalletDirty, setManualWalletDirty] = useState(false)
 
-  // MTN MoMo fields
-  const [momoApiUser, setMomoApiUser] = useState("")
-  const [momoApiKey, setMomoApiKey] = useState("")
-  const [momoPrimaryKey, setMomoPrimaryKey] = useState("")
-  const [momoCallbackUrl, setMomoCallbackUrl] = useState("")
-
-  // Hubtel fields
-  const [hubtelPosKey, setHubtelPosKey] = useState("")
-  const [hubtelSecret, setHubtelSecret] = useState("")
-  const [hubtelMerchantAccount, setHubtelMerchantAccount] = useState("")
+  const hubtelIntegrationHref = useMemo(
+    () => buildServiceRoute("/service/settings/integrations/hubtel", businessId || null),
+    [businessId]
+  )
 
   const invoiceAppearanceHref = useMemo(
     () => buildServiceRoute("/service/settings/invoice-settings", businessId || null),
@@ -104,23 +94,8 @@ export default function ServicePaymentSettingsPage() {
         return
       }
 
-      const mtn = json.mtn_momo_direct
       const hub = json.hubtel
-
-      setMomoProviderId(mtn?.provider_id ?? null)
-      setMomoSecretPresent(Boolean(mtn?.masked?.secret_present))
-      const mPub = mtn?.masked?.public_config ?? {}
-      setMomoApiUser(typeof mPub.api_user === "string" ? mPub.api_user : "")
-      setMomoCallbackUrl(typeof mPub.callback_url === "string" ? mPub.callback_url : "")
-      setMomoApiKey("")
-      setMomoPrimaryKey("")
-
-      setHubtelProviderId(hub?.provider_id ?? null)
-      setHubtelSecretPresent(Boolean(hub?.masked?.secret_present))
-      const hPub = hub?.masked?.public_config ?? {}
-      setHubtelMerchantAccount(typeof hPub.merchant_account_number === "string" ? hPub.merchant_account_number : "")
-      setHubtelPosKey("")
-      setHubtelSecret("")
+      setHubtelConfigured(Boolean(hub?.masked?.configured ?? hub?.masked?.secret_present))
 
       const mw = json.manual_wallet
       setManualProviderId(mw?.provider_id ?? null)
@@ -150,6 +125,7 @@ export default function ServicePaymentSettingsPage() {
             ? mwPub.displayLabel
             : ""
       )
+      setManualWalletDirty(false)
 
       setLoading(false)
     } catch (err: unknown) {
@@ -169,102 +145,22 @@ export default function ServicePaymentSettingsPage() {
 
     setSaving(true)
     try {
-      const mtnSecrets: Record<string, string> = {}
-      if (momoApiKey.trim()) mtnSecrets.api_key = momoApiKey.trim()
-      if (momoPrimaryKey.trim()) mtnSecrets.primary_key = momoPrimaryKey.trim()
-
-      const mtnBody: Record<string, unknown> = {
-        business_id: businessId,
-        public_config: {
-          api_user: momoApiUser.trim(),
-          callback_url: momoCallbackUrl.trim(),
-        },
-        environment: ENV,
-      }
-      if (Object.keys(mtnSecrets).length > 0) {
-        mtnBody.secrets = mtnSecrets
-      }
-
-      const mtnRes = await fetch(
-        momoProviderId
-          ? `/api/settings/payment-providers/${momoProviderId}`
-          : `/api/settings/payment-providers`,
-        {
-          method: momoProviderId ? "PATCH" : "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            momoProviderId
-              ? mtnBody
-              : { ...mtnBody, provider_type: "mtn_momo_direct", is_enabled: true }
-          ),
-        }
-      )
-      const mtnJson = await mtnRes.json().catch(() => ({}))
-      if (!mtnRes.ok) {
-        setError(mtnJson.error || "Failed to save MTN MoMo settings")
+      if (!manualWalletDirty) {
+        setError("No changes to save. Edit manual wallet fields, or configure Hubtel under Settings → Integrations → Hubtel.")
         setSaving(false)
         return
       }
 
-      const shouldSaveHubtel =
-        hubtelProviderId != null ||
-        hubtelSecretPresent ||
-        hubtelMerchantAccount.trim().length > 0 ||
-        hubtelPosKey.trim().length > 0 ||
-        hubtelSecret.trim().length > 0
-
-      if (HUBTEL_COLLECTION_IMPLEMENTED && shouldSaveHubtel) {
-        const hubSecrets: Record<string, string> = {}
-        if (hubtelPosKey.trim()) hubSecrets.pos_key = hubtelPosKey.trim()
-        if (hubtelSecret.trim()) hubSecrets.secret = hubtelSecret.trim()
-
-        const hubBody: Record<string, unknown> = {
-          business_id: businessId,
-          public_config: {
-            merchant_account_number: hubtelMerchantAccount.trim(),
-          },
-          environment: ENV,
-        }
-        if (Object.keys(hubSecrets).length > 0) {
-          hubBody.secrets = hubSecrets
-        }
-
-        const hubRes = await fetch(
-          hubtelProviderId
-            ? `/api/settings/payment-providers/${hubtelProviderId}`
-            : `/api/settings/payment-providers`,
-          {
-            method: hubtelProviderId ? "PATCH" : "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(
-              hubtelProviderId
-                ? hubBody
-                : { ...hubBody, provider_type: "hubtel", is_enabled: true }
-            ),
-          }
-        )
-        const hubJson = await hubRes.json().catch(() => ({}))
-        if (!hubRes.ok) {
-          setError(hubJson.error || "Failed to save Hubtel settings")
+      if (manualWalletDirty) {
+        if (manualIsEnabled && !mwWalletNumber.trim() && !mwDisplayLabel.trim()) {
+          setError("Manual wallet requires a wallet number or display label when enabled.")
           setSaving(false)
           return
         }
-      }
-
-      const shouldSaveManual =
-        manualProviderId != null ||
-        mwNetwork.trim().length > 0 ||
-        mwAccountName.trim().length > 0 ||
-        mwWalletNumber.trim().length > 0 ||
-        mwInstructions.trim().length > 0 ||
-        mwDisplayLabel.trim().length > 0
-
-      if (shouldSaveManual) {
         const manualBody: Record<string, unknown> = {
           business_id: businessId,
           environment: ENV,
+          is_enabled: manualIsEnabled,
           public_config: {
             network: mwNetwork.trim(),
             account_name: mwAccountName.trim(),
@@ -280,7 +176,9 @@ export default function ServicePaymentSettingsPage() {
             credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(
-              manualProviderId ? manualBody : { ...manualBody, provider_type: "manual_wallet", is_enabled: true }
+              manualProviderId
+                ? manualBody
+                : { ...manualBody, provider_type: "manual_wallet", is_enabled: manualIsEnabled || true }
             ),
           }
         )
@@ -350,7 +248,7 @@ export default function ServicePaymentSettingsPage() {
             Payment integrations
           </h1>
           <p className="text-gray-600 dark:text-gray-400 text-lg">
-            API credentials and provider defaults so Finza can initiate or record collections (MTN MoMo, Hubtel, manual wallet, etc.).
+            Manual wallet instructions for customer invoice payments. Hubtel Online Checkout is configured separately.
           </p>
           <div className="mt-4 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/90 dark:bg-blue-950/35 px-4 py-3 text-sm text-blue-950 dark:text-blue-100">
             <span className="font-semibold">Bank account and MoMo numbers on the PDF?</span>{" "}
@@ -381,67 +279,21 @@ export default function ServicePaymentSettingsPage() {
           }}
           className="space-y-6"
         >
-          {/* MTN MoMo Section */}
-          <div
-            className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700"
-            data-tour="service-payment-settings-momo"
-          >
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">MTN MoMo API Credentials</h2>
-            {momoSecretPresent && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                API key and primary key are stored securely. Leave those fields blank to keep existing values, or enter new
-                values to replace them.
-              </p>
-            )}
-            <div className="space-y-4">
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">MoMo API User</label>
-                  <input
-                    type="text"
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                    placeholder="Enter API User"
-                    value={momoApiUser}
-                    onChange={(e) => setMomoApiUser(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">MoMo API Key</label>
-                  <input
-                    type="password"
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                    placeholder={momoSecretPresent ? "Leave blank to keep current key" : "Enter API Key"}
-                    value={momoApiKey}
-                    onChange={(e) => setMomoApiKey(e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">MoMo Primary Key</label>
-                  <input
-                    type="password"
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                    placeholder={momoSecretPresent ? "Leave blank to keep current key" : "Enter Primary Key"}
-                    value={momoPrimaryKey}
-                    onChange={(e) => setMomoPrimaryKey(e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">MoMo Callback URL</label>
-                  <input
-                    type="url"
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                    placeholder="https://yourdomain.com/api/payments/momo/callback"
-                    value={momoCallbackUrl}
-                    onChange={(e) => setMomoCallbackUrl(e.target.value)}
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    This URL will receive payment confirmation callbacks from MTN
-                  </p>
-                </div>
-              </div>
-            </div>
+          {/* Hubtel — configured on Integrations page only */}
+          <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/80 dark:bg-indigo-950/30 p-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Hubtel Online Checkout</h2>
+            <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
+              {hubtelConfigured
+                ? "Hubtel checkout is configured for this business."
+                : "Hubtel checkout is not configured yet."}{" "}
+              API credentials and Collection Account Number are managed on the Hubtel integration page only — not here.
+            </p>
+            <Link
+              href={hubtelIntegrationHref}
+              className="inline-flex text-sm font-semibold text-indigo-700 dark:text-indigo-300 hover:underline"
+            >
+              Settings → Integrations → Hubtel
+            </Link>
           </div>
 
           {/* Manual wallet — shown on customer invoice when set as default */}
@@ -471,7 +323,10 @@ export default function ServicePaymentSettingsPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                   placeholder="e.g. mtn, telecel, at"
                   value={mwNetwork}
-                  onChange={(e) => setMwNetwork(e.target.value)}
+                  onChange={(e) => {
+                    setManualWalletDirty(true)
+                    setMwNetwork(e.target.value)
+                  }}
                 />
               </div>
               <div>
@@ -481,7 +336,10 @@ export default function ServicePaymentSettingsPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                   placeholder="Name on the wallet"
                   value={mwAccountName}
-                  onChange={(e) => setMwAccountName(e.target.value)}
+                  onChange={(e) => {
+                    setManualWalletDirty(true)
+                    setMwAccountName(e.target.value)
+                  }}
                 />
               </div>
               <div>
@@ -491,7 +349,10 @@ export default function ServicePaymentSettingsPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                   placeholder="Number customers send money to"
                   value={mwWalletNumber}
-                  onChange={(e) => setMwWalletNumber(e.target.value)}
+                  onChange={(e) => {
+                    setManualWalletDirty(true)
+                    setMwWalletNumber(e.target.value)
+                  }}
                 />
               </div>
               <div>
@@ -501,7 +362,10 @@ export default function ServicePaymentSettingsPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
                   placeholder="Short title on pay page"
                   value={mwDisplayLabel}
-                  onChange={(e) => setMwDisplayLabel(e.target.value)}
+                  onChange={(e) => {
+                    setManualWalletDirty(true)
+                    setMwDisplayLabel(e.target.value)
+                  }}
                 />
               </div>
               <div>
@@ -510,7 +374,10 @@ export default function ServicePaymentSettingsPage() {
                   className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white min-h-[88px]"
                   placeholder="Reference format, hours, etc."
                   value={mwInstructions}
-                  onChange={(e) => setMwInstructions(e.target.value)}
+                  onChange={(e) => {
+                    setManualWalletDirty(true)
+                    setMwInstructions(e.target.value)
+                  }}
                 />
               </div>
               {manualProviderId && (
@@ -522,66 +389,6 @@ export default function ServicePaymentSettingsPage() {
                   Set as default payment method for invoices
                 </button>
               )}
-            </div>
-          </div>
-
-          {/* Hubtel Section — collection not implemented (API returns 501) */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-amber-200 dark:border-amber-900/50">
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Hubtel</h2>
-              <span className="text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
-                Not available
-              </span>
-            </div>
-            <p className="text-sm text-amber-900 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-4">
-              Hubtel in-app payment collection is not active. Existing saved credentials (if any) remain stored but cannot be
-              edited here until the integration is released. Use MTN MoMo, Paystack, or manual wallet instructions to collect
-              payments.
-            </p>
-            {hubtelSecretPresent && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Credentials are on file but cannot be updated while Hubtel is disabled.
-              </p>
-            )}
-            <div className="space-y-4 opacity-70">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Hubtel POS Key</label>
-                <input
-                  type="text"
-                  disabled
-                  readOnly
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400 cursor-not-allowed"
-                  placeholder={hubtelSecretPresent ? "On file (hidden)" : "Not configured"}
-                  value={hubtelPosKey}
-                  onChange={(e) => setHubtelPosKey(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Hubtel Secret</label>
-                <input
-                  type="password"
-                  disabled
-                  readOnly
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400 cursor-not-allowed"
-                  placeholder={hubtelSecretPresent ? "On file (hidden)" : "Not configured"}
-                  value={hubtelSecret}
-                  onChange={(e) => setHubtelSecret(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Hubtel Merchant Account Number</label>
-                <input
-                  type="text"
-                  disabled
-                  readOnly
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400 cursor-not-allowed"
-                  placeholder="Not editable"
-                  value={hubtelMerchantAccount}
-                  onChange={(e) => setHubtelMerchantAccount(e.target.value)}
-                />
-              </div>
             </div>
           </div>
 
