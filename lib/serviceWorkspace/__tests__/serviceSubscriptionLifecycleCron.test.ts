@@ -18,6 +18,8 @@ function emptyQueries(overrides: Partial<SubscriptionLifecycleCronQueries>): Sub
   return {
     listTrialEnding3d: async () => [],
     listTrialEnding1d: async () => [],
+    listExpiredUnpaidTrialsNeedingGrace: async () => [],
+    startTrialPostExpiryGrace: async () => ({ error: null }),
     listGraceEnding24h: async () => [],
     listLockExpiredGrace: async () => [],
     lockPastDueGraceExpired: async () => ({ error: null }),
@@ -28,6 +30,52 @@ function emptyQueries(overrides: Partial<SubscriptionLifecycleCronQueries>): Sub
 describe("executeServiceSubscriptionLifecycleCron", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  it("starts 3-day grace for expired unpaid trials and notifies", async () => {
+    const startGrace = jest.fn(async () => ({ error: null }))
+    const send = jest.fn(
+      async (): Promise<SendSubscriptionLifecycleNotificationResult> =>
+        ({ ok: true, providerMessageId: "re_grace" } as const)
+    )
+    const queries = emptyQueries({
+      listExpiredUnpaidTrialsNeedingGrace: async () => [
+        { id: "biz-expired", trial_ends_at: "2026-06-01T00:00:00.000Z" },
+      ],
+      startTrialPostExpiryGrace: startGrace,
+    })
+
+    const summary = await executeServiceSubscriptionLifecycleCron(queries, send, NOW)
+
+    expect(summary.trialGraceStartedChecked).toBe(1)
+    expect(summary.trialGraceStartedUpdated).toBe(1)
+    expect(summary.trialGraceStartedNotified).toBe(1)
+    expect(startGrace).toHaveBeenCalledTimes(1)
+    const graceIso = startGrace.mock.calls[0][1] as string
+    expect(new Date(graceIso).getTime()).toBeGreaterThan(NOW.getTime())
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: "biz-expired",
+        eventType: "trial_grace_started",
+      })
+    )
+  })
+
+  it("does not overwrite existing subscription_grace_until (start returns no row)", async () => {
+    const startGrace = jest.fn(async () => ({ error: null }))
+    const send = jest.fn(
+      async (): Promise<SendSubscriptionLifecycleNotificationResult> =>
+        ({ ok: true, providerMessageId: "re_skip" } as const)
+    )
+    const queries = emptyQueries({
+      listExpiredUnpaidTrialsNeedingGrace: async () => [],
+      startTrialPostExpiryGrace: startGrace,
+    })
+
+    const summary = await executeServiceSubscriptionLifecycleCron(queries, send, NOW)
+
+    expect(summary.trialGraceStartedChecked).toBe(0)
+    expect(startGrace).not.toHaveBeenCalled()
   })
 
   it("sends trial_ending_3d once per candidate", async () => {

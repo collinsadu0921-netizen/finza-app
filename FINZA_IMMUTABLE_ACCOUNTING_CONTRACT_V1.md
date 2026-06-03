@@ -4,6 +4,8 @@
 **Scope:** Ledger, posting, periods, snapshots, statements (P&L/BS/TB), VAT, AR/AP, cash.  
 **Status:** Authoritative spec + repo-backed audit + gap list + implementation plan. No code changes in this deliverable.
 
+> **Superseded for reporting source (2026-06):** Live P&L uses journal movement (`get_profit_and_loss_movement`); Balance Sheet uses cumulative ledger as-of. Trial Balance remains snapshot-based. See [docs/REPORTING_SOURCE_CONTRACT.md](docs/REPORTING_SOURCE_CONTRACT.md). Sections below that require P&L/BS from TB snapshot reflect the 2025 contract; ledger-derived movement/as-of paths are now canonical in the application.
+
 ---
 
 ## 1) CONTRACT v1.0 (Authoritative Spec)
@@ -52,8 +54,10 @@
 ### G. Statement contract: P&L / BS / TB source
 
 - Trial Balance SHALL be served from the canonical snapshot: `get_trial_balance_from_snapshot(period_id)` (which MAY regenerate the snapshot if missing or stale). No TB report SHALL read ledger by date range only, bypassing the snapshot.
-- P&L and Balance Sheet SHALL be derived ONLY from the same canonical trial balance snapshot (e.g. `get_profit_and_loss_from_trial_balance(period_id)` and `get_balance_sheet_from_trial_balance(period_id)`), which in turn use `get_trial_balance_from_snapshot(period_id)`. No P&L/BS report SHALL call legacy date-range functions that read ledger directly.
-- **Justification (repo evidence):** Migration 169 renames date-range `get_profit_and_loss` / `get_balance_sheet` to `_legacy` and defines canonical functions that take `period_id` and read from trial balance (234: `get_profit_and_loss_from_trial_balance`, `get_balance_sheet_from_trial_balance`). On-screen reports use `getBalanceSheetReport` / `getProfitAndLossReport` which call these period_id RPCs. Therefore the chosen rule is: **statements SHALL be derived only from snapshots** (TB snapshot → P&L/BS). Legacy functions bypass the snapshot and SHALL NOT be used for canonical reporting or export.
+- **Trial Balance** SHALL use period snapshot evidence via `get_trial_balance_from_snapshot(period_id)`.
+- **P&L** SHALL use journal movement in range via `get_profit_and_loss_movement` (live application). Legacy `get_profit_and_loss_from_trial_balance(period_id)` remains in DB history only.
+- **Balance Sheet** SHALL use cumulative ledger as-of via `get_balance_sheet_as_of` + `get_cumulative_net_income_as_of` (live application). Legacy `get_balance_sheet_from_trial_balance(period_id)` remains in DB history only.
+- *(Superseded 2025 rule:)* ~~P&L and Balance Sheet derived ONLY from TB snapshot closing balances.~~ Replaced by movement/as-of contract above; all paths remain ledger-derived, not operational-table reads.
 
 ### H. VAT contract
 

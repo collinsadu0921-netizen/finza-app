@@ -50,7 +50,7 @@ export type QuickActionsBarProps = {
 
 export default function QuickActionsBar({ actions, businessId }: QuickActionsBarProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       {actions.map((action) => {
         const finalHref =
           businessId && action.href.startsWith("/") && !action.href.includes("business_id")
@@ -61,7 +61,7 @@ export default function QuickActionsBar({ actions, businessId }: QuickActionsBar
             key={action.label}
             href={finalHref}
             data-tour={action.dataTour}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
             {action.icon && ICONS[action.icon]}
             {action.label}

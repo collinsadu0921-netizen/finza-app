@@ -3,7 +3,10 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -104,7 +107,7 @@ export async function POST(
       return NextResponse.json({ error: "business_id is required" }, { status: 400 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business_id, minTier: "professional",
     })
     if (denied) return denied

@@ -9,6 +9,8 @@ import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
 import EmptyState from "@/components/ui/EmptyState"
 import { useToast } from "@/components/ui/ToastProvider"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Asset = {
   id: string
@@ -25,6 +27,7 @@ type Asset = {
 
 export default function AssetsPage() {
   const router = useRouter()
+  const { readOnly } = useServiceFinancialWrite("accounting")
   const [loading, setLoading] = useState(true)
   const [assets, setAssets] = useState<Asset[]>([])
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([])
@@ -141,18 +144,22 @@ export default function AssetsPage() {
             title="Fixed Assets"
             subtitle="Manage fixed assets and depreciation"
             actions={
-              <Button
-                onClick={() => router.push("/assets/create")}
-                leftIcon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                }
-              >
-                Add fixed asset
-              </Button>
+              !readOnly ? (
+                <Button
+                  onClick={() => router.push("/assets/create")}
+                  leftIcon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  }
+                >
+                  Add fixed asset
+                </Button>
+              ) : undefined
             }
           />
+
+          {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-4" />}
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

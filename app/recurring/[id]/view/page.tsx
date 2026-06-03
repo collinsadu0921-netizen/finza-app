@@ -8,6 +8,8 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type RecurringInvoice = {
   id: string
@@ -53,6 +55,7 @@ function RecurringInvoiceViewContent() {
   const searchParams = useSearchParams()
   const id = params.id as string
   const toast = useToast()
+  const { readOnly } = useServiceFinancialWrite("recurring")
 
   const urlBusinessId = useMemo(
     () => searchParams.get("business_id")?.trim() || searchParams.get("businessId")?.trim() || null,
@@ -212,12 +215,16 @@ function RecurringInvoiceViewContent() {
             Back
           </button>
 
+          {readOnly && <ServiceReadOnlyNotice scope="recurring" />}
+
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Recurring invoice</h1>
               <p className="text-sm text-slate-500 mt-0.5">Template and schedule</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {!readOnly && (
+                <>
               <button
                 type="button"
                 onClick={handleToggleStatus}
@@ -236,6 +243,8 @@ function RecurringInvoiceViewContent() {
               >
                 Edit
               </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -361,6 +370,7 @@ function RecurringInvoiceViewContent() {
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Actions</h2>
+            {!readOnly && (
             <button
               type="button"
               onClick={handleGenerateNow}
@@ -377,7 +387,8 @@ function RecurringInvoiceViewContent() {
               </svg>
               Generate invoice now
             </button>
-            {recurringInvoice.status !== "active" && (
+            )}
+            {!readOnly && recurringInvoice.status !== "active" && (
               <p className="text-xs text-slate-500 mt-2">Resume the schedule to generate invoices.</p>
             )}
           </div>

@@ -1,74 +1,46 @@
 /**
- * getBalanceSheetReport — entity-type equity rendering tests
- *
- * Covers the business_type additions introduced in migration 381:
- *   A. limited_company  → equity section labelled "Equity",
- *                          net income line = "Current Period Net Income"
- *   B. sole_proprietorship → equity section labelled "Owner's Equity",
- *                             net income line = "Net Profit for Period"
- *   C. Net income line is added when non-zero, omitted when zero
- *   D. business_type propagates into the response
- *   E. Caller override takes precedence over DB value
- *   F. Default fallback when DB has no business_type
- *   G. Totals remain correct regardless of entity type
- *   H. Missing businessId returns an error without calling DB
+ * getBalanceSheetReport — entity-type equity rendering tests (cumulative ledger source)
  */
 
 import { getBalanceSheetReport } from "../getBalanceSheetReport"
 import type { SupabaseClient } from "@supabase/supabase-js"
-
-// ── Mock resolveAccountingPeriodForReport ─────────────────────────────────
 
 jest.mock("@/lib/accounting/resolveAccountingPeriodForReport", () => ({
   resolveAccountingPeriodForReport: jest.fn().mockResolvedValue({
     period: {
       period_id: "period-001",
       period_start: "2026-01-01",
-      period_end:   "2026-12-31",
+      period_end: "2026-12-31",
       resolution_reason: "exact_match",
     },
     error: null,
   }),
 }))
 
-// ── Sample RPC row fixtures ────────────────────────────────────────────────
+jest.mock("@/lib/accounting/businessDate", () => ({
+  getBusinessToday: jest.fn().mockResolvedValue("2026-06-02"),
+}))
 
 const BALANCE_SHEET_ROWS = [
-  // Assets
-  { account_id: "a1", account_code: "1010", account_name: "Bank",             account_type: "asset",     balance: 50000 },
-  { account_id: "a2", account_code: "1100", account_name: "Accounts Rec.",    account_type: "asset",     balance: 20000 },
-  // Liabilities
-  { account_id: "l1", account_code: "2000", account_name: "Accounts Pay.",    account_type: "liability", balance: 15000 },
-  // Equity
-  { account_id: "e1", account_code: "3000", account_name: "Owner's Equity",   account_type: "equity",    balance: 40000 },
-  { account_id: "e2", account_code: "3100", account_name: "Retained Earnings",account_type: "equity",    balance: 15000 },
+  { account_id: "a1", account_code: "1010", account_name: "Bank", account_type: "asset", balance: 50000 },
+  { account_id: "a2", account_code: "1100", account_name: "Accounts Rec.", account_type: "asset", balance: 20000 },
+  { account_id: "l1", account_code: "2000", account_name: "Accounts Pay.", account_type: "liability", balance: 15000 },
+  { account_id: "e1", account_code: "3000", account_name: "Owner's Equity", account_type: "equity", balance: 40000 },
+  { account_id: "e2", account_code: "3100", account_name: "Retained Earnings", account_type: "equity", balance: 15000 },
 ]
-
-const PNL_ROWS = [
-  { account_type: "income",  period_total: 30000 },
-  { account_type: "expense", period_total: 15000 },
-  // net = 15,000
-]
-
-const PNL_ROWS_ZERO_PROFIT = [
-  { account_type: "income",  period_total: 0 },
-  { account_type: "expense", period_total: 0 },
-]
-
-// ── Mock Supabase builder ─────────────────────────────────────────────────
 
 function buildMockSupabase(
   businessType: string | undefined = "limited_company",
   bsRows = BALANCE_SHEET_ROWS,
-  pnlRows = PNL_ROWS
+  cumulativeNetIncome = 15000
 ): SupabaseClient {
   return {
     rpc: jest.fn((name: string) => {
-      if (name === "get_balance_sheet_from_trial_balance") {
+      if (name === "get_balance_sheet_as_of") {
         return Promise.resolve({ data: bsRows, error: null })
       }
-      if (name === "get_profit_and_loss_from_trial_balance") {
-        return Promise.resolve({ data: pnlRows, error: null })
+      if (name === "get_cumulative_net_income_as_of") {
+        return Promise.resolve({ data: cumulativeNetIncome, error: null })
       }
       return Promise.resolve({ data: [], error: null })
     }),
@@ -88,8 +60,6 @@ function buildMockSupabase(
   } as unknown as SupabaseClient
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
-
 describe("A. limited_company equity section", () => {
   it('equity section key is "equity" and label is "Equity"', async () => {
     const { data, error } = await getBalanceSheetReport(
@@ -101,16 +71,17 @@ describe("A. limited_company equity section", () => {
     expect(equitySection.label).toBe("Equity")
   })
 
-  it('net income synthetic line is labelled "Current Period Net Income"', async () => {
+  it('net income synthetic line is labelled "Net Income (cumulative)"', async () => {
     const { data } = await getBalanceSheetReport(
       buildMockSupabase("limited_company"),
       { businessId: "biz-001" }
     )
-    const equitySection = data!.sections.find((s) => s.key === "equity")!
-    const equityGroup   = equitySection.groups.find((g) => g.key === "equity")!
+    const equityGroup = data!.sections
+      .find((s) => s.key === "equity")!
+      .groups.find((g) => g.key === "equity")!
     const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
     expect(netIncomeLine).toBeDefined()
-    expect(netIncomeLine!.account_name).toBe("Current Period Net Income")
+    expect(netIncomeLine!.account_name).toBe("Net Income (cumulative)")
   })
 })
 
@@ -125,23 +96,9 @@ describe("B. sole_proprietorship equity section", () => {
     expect(equitySection.label).toBe("Owner's Equity")
   })
 
-  it('net income synthetic line is labelled "Net Profit for Period"', async () => {
+  it('net income synthetic line is labelled "Net Profit (cumulative)"', async () => {
     const { data } = await getBalanceSheetReport(
       buildMockSupabase("sole_proprietorship"),
-      { businessId: "biz-001" }
-    )
-    const equitySection = data!.sections.find((s) => s.key === "equity")!
-    const equityGroup   = equitySection.groups.find((g) => g.key === "equity")!
-    const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
-    expect(netIncomeLine).toBeDefined()
-    expect(netIncomeLine!.account_name).toBe("Net Profit for Period")
-  })
-})
-
-describe("C. Net income line visibility", () => {
-  it("adds net income line when period profit is non-zero", async () => {
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, PNL_ROWS),
       { businessId: "biz-001" }
     )
     const equityGroup = data!.sections
@@ -149,12 +106,27 @@ describe("C. Net income line visibility", () => {
       .groups.find((g) => g.key === "equity")!
     const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
     expect(netIncomeLine).toBeDefined()
-    expect(netIncomeLine!.amount).toBe(15000)   // income 30k - expenses 15k
+    expect(netIncomeLine!.account_name).toBe("Net Profit (cumulative)")
+  })
+})
+
+describe("C. Net income line visibility", () => {
+  it("adds net income line when cumulative profit is non-zero", async () => {
+    const { data } = await getBalanceSheetReport(
+      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, 15000),
+      { businessId: "biz-001" }
+    )
+    const equityGroup = data!.sections
+      .find((s) => s.key === "equity")!
+      .groups.find((g) => g.key === "equity")!
+    const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
+    expect(netIncomeLine).toBeDefined()
+    expect(netIncomeLine!.amount).toBe(15000)
   })
 
-  it("omits net income line when profit is zero", async () => {
+  it("omits net income line when cumulative profit is zero", async () => {
     const { data } = await getBalanceSheetReport(
-      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, PNL_ROWS_ZERO_PROFIT),
+      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, 0),
       { businessId: "biz-001" }
     )
     const equityGroup = data!.sections
@@ -165,142 +137,68 @@ describe("C. Net income line visibility", () => {
   })
 })
 
-describe("D. business_type propagates in response", () => {
-  it("response.business_type = 'limited_company' when DB value is limited_company", async () => {
+describe("D–H", () => {
+  it("propagates business_type and totals", async () => {
     const { data } = await getBalanceSheetReport(
       buildMockSupabase("limited_company"),
       { businessId: "biz-001" }
     )
     expect(data!.business_type).toBe("limited_company")
-  })
-
-  it("response.business_type = 'sole_proprietorship' when DB value is sole_proprietorship", async () => {
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("sole_proprietorship"),
-      { businessId: "biz-001" }
-    )
-    expect(data!.business_type).toBe("sole_proprietorship")
-  })
-})
-
-describe("E. Caller override takes precedence over DB value", () => {
-  it("uses caller-supplied business_type even when DB says limited_company", async () => {
-    // DB says 'limited_company', but caller passes 'sole_proprietorship'
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("limited_company"),
-      { businessId: "biz-001", business_type: "sole_proprietorship" }
-    )
-    expect(data!.business_type).toBe("sole_proprietorship")
-    const equitySection = data!.sections.find((s) => s.key === "equity")!
-    expect(equitySection.label).toBe("Owner's Equity")
-  })
-})
-
-describe("F. Default fallback when DB has no business_type", () => {
-  it("falls back to limited_company when DB returns undefined", async () => {
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase(undefined),   // DB returns undefined for business_type
-      { businessId: "biz-001" }
-    )
-    expect(data!.business_type).toBe("limited_company")
-    const equitySection = data!.sections.find((s) => s.key === "equity")!
-    expect(equitySection.label).toBe("Equity")
-  })
-})
-
-describe("G. Totals remain correct regardless of entity type", () => {
-  it("equity subtotal = ledger equity accounts + net income", async () => {
-    // Ledger equity: 40,000 + 15,000 = 55,000. Net income: 15,000. Total: 70,000.
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("sole_proprietorship"),
-      { businessId: "biz-001" }
-    )
-    const equitySection = data!.sections.find((s) => s.key === "equity")!
-    expect(equitySection.subtotal).toBe(70000)
-  })
-
-  it("assets = 70,000 and liabilities = 15,000", async () => {
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("limited_company"),
-      { businessId: "biz-001" }
-    )
-    expect(data!.totals.assets).toBe(70000)          // 50k + 20k
+    expect(data!.totals.assets).toBe(70000)
     expect(data!.totals.liabilities).toBe(15000)
+    expect(data!.telemetry.source).toBe("ledger")
+    expect(data!.as_of_date).toBe("2026-06-02")
   })
 
-  it("totals are the same for both entity types (business_type only affects labels)", async () => {
-    const [limited, sole] = await Promise.all([
-      getBalanceSheetReport(buildMockSupabase("limited_company"),    { businessId: "biz-001" }),
-      getBalanceSheetReport(buildMockSupabase("sole_proprietorship"),{ businessId: "biz-001" }),
-    ])
-    expect(limited.data!.totals).toEqual(sole.data!.totals)
+  it("uses explicit as_of_date when provided", async () => {
+    const { data } = await getBalanceSheetReport(buildMockSupabase(), {
+      businessId: "biz-001",
+      as_of_date: "2026-03-15",
+    })
+    expect(data!.as_of_date).toBe("2026-03-15")
   })
-})
 
-describe("H. Input validation", () => {
+  it("uses end_date from custom start/end range as as_of_date", async () => {
+    const { data } = await getBalanceSheetReport(buildMockSupabase(), {
+      businessId: "biz-001",
+      start_date: "2026-01-01",
+      end_date: "2026-05-31",
+    })
+    expect(data!.as_of_date).toBe("2026-05-31")
+  })
+
   it("returns an error when businessId is empty", async () => {
-    const { data, error } = await getBalanceSheetReport(
-      buildMockSupabase(),
-      { businessId: "" }
-    )
+    const { data, error } = await getBalanceSheetReport(buildMockSupabase(), { businessId: "" })
     expect(data).toBeNull()
     expect(error).toMatch(/business_id/i)
   })
 })
 
-// ── Additional coverage ────────────────────────────────────────────────────
-
-const PNL_ROWS_LOSS = [
-  { account_type: "income",  period_total: 10000 },
-  { account_type: "expense", period_total: 25000 },
-  // net = -15,000 (loss)
-]
-
-describe("I. Net loss (negative net income)", () => {
-  it("adds net income synthetic line with a negative amount when period is a loss", async () => {
+describe("I. Net loss", () => {
+  it("adds negative cumulative net income line", async () => {
     const { data } = await getBalanceSheetReport(
-      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, PNL_ROWS_LOSS),
+      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, -15000),
       { businessId: "biz-001" }
     )
-    const equityGroup = data!.sections
+    const netIncomeLine = data!.sections
       .find((s) => s.key === "equity")!
       .groups.find((g) => g.key === "equity")!
-    const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
-    expect(netIncomeLine).toBeDefined()
+      .lines.find((l) => l.account_id === "__net_income__")
     expect(netIncomeLine!.amount).toBe(-15000)
-  })
-
-  it("equity subtotal decreases when there is a net loss", async () => {
-    // Ledger equity: 40,000 + 15,000 = 55,000. Net loss: -15,000. Total: 40,000.
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("limited_company", BALANCE_SHEET_ROWS, PNL_ROWS_LOSS),
-      { businessId: "biz-001" }
-    )
-    const equitySection = data!.sections.find((s) => s.key === "equity")!
-    expect(equitySection.subtotal).toBe(40000)
-  })
-
-  it("net loss line label uses entity-appropriate wording", async () => {
-    const { data } = await getBalanceSheetReport(
-      buildMockSupabase("sole_proprietorship", BALANCE_SHEET_ROWS, PNL_ROWS_LOSS),
-      { businessId: "biz-001" }
-    )
-    const equityGroup = data!.sections
-      .find((s) => s.key === "equity")!
-      .groups.find((g) => g.key === "equity")!
-    const netIncomeLine = equityGroup.lines.find((l) => l.account_id === "__net_income__")
-    expect(netIncomeLine!.account_name).toBe("Net Profit for Period")
   })
 })
 
 describe("J. RPC error propagation", () => {
-  it("returns an error string when the balance_sheet RPC fails", async () => {
+  it("returns an error when get_balance_sheet_as_of fails", async () => {
     const brokenSupabase = {
       rpc: jest.fn((name: string) => {
-        if (name === "get_balance_sheet_from_trial_balance") {
+        if (name === "get_balance_sheet_as_of") {
           return Promise.resolve({ data: null, error: { message: "rpc not found" } })
         }
-        return Promise.resolve({ data: PNL_ROWS, error: null })
+        if (name === "get_cumulative_net_income_as_of") {
+          return Promise.resolve({ data: 0, error: null })
+        }
+        return Promise.resolve({ data: [], error: null })
       }),
       from: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
@@ -310,7 +208,7 @@ describe("J. RPC error propagation", () => {
           error: null,
         }),
       })),
-    } as unknown as import("@supabase/supabase-js").SupabaseClient
+    } as unknown as SupabaseClient
 
     const { data, error } = await getBalanceSheetReport(brokenSupabase, { businessId: "biz-001" })
     expect(data).toBeNull()

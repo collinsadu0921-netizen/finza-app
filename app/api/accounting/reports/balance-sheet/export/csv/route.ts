@@ -3,15 +3,19 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
-import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
+import {
+  parseBalanceSheetReportQuery,
+  toBalanceSheetExportView,
+} from "@/lib/accounting/reports/balanceSheetExportHelpers"
 
 /**
  * GET /api/accounting/reports/balance-sheet/export/csv
  * 
  * Exports Balance Sheet as CSV.
- * Contract v2.0 — Statements sourced from snapshot TB
+ * Canonical source: getBalanceSheetReport (ledger as-of + cumulative net income)
  * 
  * Query Parameters:
  * - business_id (required)
@@ -38,18 +42,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
-    const periodId = searchParams.get("period_id")
     const periodStart = searchParams.get("period_start")
-    const rangeStart = searchParams.get("start_date")
-    const rangeEnd = searchParams.get("end_date")
-    const hasCustomRange =
-      !!(rangeStart?.trim() && rangeEnd?.trim() && /^\d{4}-\d{2}-\d{2}$/.test(rangeStart.trim()) && /^\d{4}-\d{2}-\d{2}$/.test(rangeEnd.trim()))
-    const asOfDateRaw = searchParams.get("as_of_date")
-    const asOfDate =
-      hasCustomRange
-        ? null
-        : asOfDateRaw?.trim() ||
-          (periodStart?.trim() ? null : new Date().toISOString().split("T")[0])
     const includeMetadata = searchParams.get("include_metadata") !== "0"
 
     try {
@@ -99,73 +92,35 @@ export async function GET(request: NextRequest) {
       await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
     }
 
-    const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
+    const { data: reportData, error: reportError } = await getBalanceSheetReport(
       supabase,
-      {
-        businessId: resolvedBusinessId,
-        period_id: periodId,
-        period_start: periodStart,
-        as_of_date: asOfDate,
-        start_date: hasCustomRange ? rangeStart!.trim() : null,
-        end_date: hasCustomRange ? rangeEnd!.trim() : null,
-      }
+      parseBalanceSheetReportQuery(resolvedBusinessId, searchParams)
     )
-    if (resolveError || !resolvedPeriod) {
+    if (reportError || !reportData) {
       return NextResponse.json(
-        { error: resolveError ?? "Accounting period could not be resolved. Provide period_id, period_start, or as_of_date." },
+        { error: reportError || "Failed to fetch balance sheet" },
         { status: 500 }
       )
     }
 
-    // Contract v2.0 — Statements sourced from snapshot TB
-    const { data: balanceSheetData, error: rpcError } = await supabase.rpc("get_balance_sheet_from_trial_balance", {
-      p_period_id: resolvedPeriod.period_id,
-    })
+    const view = toBalanceSheetExportView(reportData)
+    const {
+      asOfDate,
+      assetLines: assets,
+      liabilityLines: liabilities,
+      equityLines: equity,
+      totals,
+      cumulativeNetIncome: currentPeriodNetIncome,
+      rowCount,
+    } = view
 
-    if (rpcError) {
-      console.error("Error fetching balance sheet:", rpcError)
-      return NextResponse.json(
-        { error: rpcError.message || "Failed to fetch balance sheet" },
-        { status: 500 }
-      )
-    }
-
-    // Check row count (for warning, not blocking)
-    const rowCount = balanceSheetData?.length || 0
     const hasLargeRowCount = rowCount > 50000
-
-    // Separate by type
-    type BalanceRow = { account_type?: string; balance?: number | null; period_total?: number | null }
-    const assets = (balanceSheetData || []).filter((acc: BalanceRow) => acc.account_type === "asset")
-    const liabilities = (balanceSheetData || []).filter((acc: BalanceRow) => acc.account_type === "liability")
-    const equity = (balanceSheetData || []).filter((acc: BalanceRow) => acc.account_type === "equity")
-
-    // Calculate totals
-    const totalAssets = assets.reduce((sum: number, acc: BalanceRow) => sum + Number(acc.balance || 0), 0)
-    const totalLiabilities = liabilities.reduce((sum: number, acc: BalanceRow) => sum + Number(acc.balance || 0), 0)
-    const totalEquity = equity.reduce((sum: number, acc: BalanceRow) => sum + Number(acc.balance || 0), 0)
-
-    // Calculate current period net income when period_start (or period) provided (Contract v2.0 — snapshot P&L)
-    let currentPeriodNetIncome = 0
-    if (periodStart || periodId) {
-      const { data: pnlData } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-        p_period_id: resolvedPeriod.period_id,
-      })
-      if (pnlData && pnlData.length > 0) {
-        const incomeTotal = (pnlData || [])
-          .filter((acc: BalanceRow) => acc.account_type === "income")
-          .reduce((sum: number, acc: BalanceRow) => sum + Number(acc.period_total || 0), 0)
-        const expenseTotal = (pnlData || [])
-          .filter((acc: BalanceRow) => acc.account_type === "expense")
-          .reduce((sum: number, acc: BalanceRow) => sum + Number(acc.period_total || 0), 0)
-        currentPeriodNetIncome = incomeTotal - expenseTotal
-      }
-    }
-
-    const adjustedEquity = totalEquity + currentPeriodNetIncome
-    const totalLiabilitiesAndEquity = totalLiabilities + adjustedEquity
-    const balancingDifference = totalAssets - totalLiabilitiesAndEquity
-    const isBalanced = Math.abs(balancingDifference) < 0.01
+    const totalAssets = totals.assets
+    const totalLiabilities = totals.liabilities
+    const adjustedEquity = view.adjustedEquity
+    const totalLiabilitiesAndEquity = totals.liabilities_plus_equity
+    const balancingDifference = totals.imbalance
+    const isBalanced = totals.is_balanced
 
     // Generate CSV
     const csvRows: string[] = []
@@ -203,7 +158,7 @@ export async function GET(request: NextRequest) {
           escapeCsvValue(account.account_code || ""),
           escapeCsvValue(account.account_name || ""),
           escapeCsvValue(account.account_type || ""),
-          formatNumeric(account.balance || 0),
+          formatNumeric(account.amount),
         ]
         csvRows.push(row.join(","))
       }
@@ -230,7 +185,7 @@ export async function GET(request: NextRequest) {
           escapeCsvValue(account.account_code || ""),
           escapeCsvValue(account.account_name || ""),
           escapeCsvValue(account.account_type || ""),
-          formatNumeric(account.balance || 0),
+          formatNumeric(account.amount),
         ]
         csvRows.push(row.join(","))
       }
@@ -244,10 +199,10 @@ export async function GET(request: NextRequest) {
     // Equity section
     if (includeMetadata) {
       csvRows.push("")
-      csvRows.push("# Section,EQUITY")
+      csvRows.push(`# Section,${view.equitySectionLabel.toUpperCase()}`)
     } else {
       csvRows.push("")
-      csvRows.push("EQUITY")
+      csvRows.push(view.equitySectionLabel.toUpperCase())
     }
     if (equity.length === 0) {
       csvRows.push(includeMetadata ? "# No equity accounts with balances" : "No equity accounts with balances")
@@ -257,14 +212,14 @@ export async function GET(request: NextRequest) {
           escapeCsvValue(account.account_code || ""),
           escapeCsvValue(account.account_name || ""),
           escapeCsvValue(account.account_type || ""),
-          formatNumeric(account.balance || 0),
+          formatNumeric(account.amount),
         ]
         csvRows.push(row.join(","))
       }
       if (includeMetadata) {
-        csvRows.push(`# Total Equity,${formatNumeric(totalEquity)}`)
+        csvRows.push(`# Total ${view.equitySectionLabel},${formatNumeric(adjustedEquity)}`)
       } else {
-        csvRows.push(`Total Equity,${formatNumeric(totalEquity)}`)
+        csvRows.push(`Total ${view.equitySectionLabel},${formatNumeric(adjustedEquity)}`)
       }
     }
 
@@ -274,12 +229,10 @@ export async function GET(request: NextRequest) {
       csvRows.push("# Summary")
       csvRows.push(`# Total Assets,${formatNumeric(totalAssets)}`)
       csvRows.push(`# Total Liabilities,${formatNumeric(totalLiabilities)}`)
-      if (periodStart && currentPeriodNetIncome !== 0) {
-        csvRows.push(`# Current Period Net Income,${formatNumeric(currentPeriodNetIncome)}`)
-        csvRows.push(`# Adjusted Total Equity,${formatNumeric(adjustedEquity)}`)
-      } else {
-        csvRows.push(`# Total Equity,${formatNumeric(totalEquity)}`)
+      if (currentPeriodNetIncome !== 0) {
+        csvRows.push(`# Cumulative Net Income,${formatNumeric(currentPeriodNetIncome)}`)
       }
+      csvRows.push(`# Total ${view.equitySectionLabel},${formatNumeric(adjustedEquity)}`)
       csvRows.push(`# Total Liabilities + Equity,${formatNumeric(totalLiabilitiesAndEquity)}`)
       csvRows.push(`# Balancing Difference,${formatNumeric(balancingDifference)}`)
       csvRows.push(`# Is Balanced,${isBalanced ? "Yes" : "No"}`)
@@ -288,12 +241,10 @@ export async function GET(request: NextRequest) {
       csvRows.push("SUMMARY")
       csvRows.push(`Total Assets,${formatNumeric(totalAssets)}`)
       csvRows.push(`Total Liabilities,${formatNumeric(totalLiabilities)}`)
-      if (periodStart && currentPeriodNetIncome !== 0) {
-        csvRows.push(`Current Period Net Income,${formatNumeric(currentPeriodNetIncome)}`)
-        csvRows.push(`Adjusted Total Equity,${formatNumeric(adjustedEquity)}`)
-      } else {
-        csvRows.push(`Total Equity,${formatNumeric(totalEquity)}`)
+      if (currentPeriodNetIncome !== 0) {
+        csvRows.push(`Cumulative Net Income,${formatNumeric(currentPeriodNetIncome)}`)
       }
+      csvRows.push(`Total ${view.equitySectionLabel},${formatNumeric(adjustedEquity)}`)
       csvRows.push(`Total Liabilities + Equity,${formatNumeric(totalLiabilitiesAndEquity)}`)
       csvRows.push(`Balancing Difference,${formatNumeric(balancingDifference)}`)
       csvRows.push(`Is Balanced,${isBalanced ? "Yes" : "No"}`)

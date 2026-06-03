@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { getBusinessToday } from "@/lib/accounting/businessDate"
 
 /**
  * Canonical resolution reasons for report period (telemetry / debug).
@@ -212,21 +213,24 @@ export async function resolveAccountingPeriodForReport(
     }
   }
 
-  // 5. Latest period with journal activity (DB RPC)
+  // 5. Latest period with journal activity (DB RPC) — never a future period start
+  const businessToday = await getBusinessToday(supabase, businessId)
   const { data: defaultRows, error: resolveError } = await supabase.rpc(
     "resolve_default_accounting_period",
     { p_business_id: businessId }
   )
   if (!resolveError && defaultRows && defaultRows.length > 0) {
     const r = defaultRows[0]
-    const reason = mapDbResolutionReasonToEnum(r.resolution_reason)
-    return {
-      period: {
-        period_id: r.period_id,
-        period_start: r.period_start,
-        period_end: r.period_end,
-        resolution_reason: reason,
-      },
+    if (String(r.period_start) <= businessToday) {
+      const reason = mapDbResolutionReasonToEnum(r.resolution_reason)
+      return {
+        period: {
+          period_id: r.period_id,
+          period_start: r.period_start,
+          period_end: r.period_end,
+          resolution_reason: reason,
+        },
+      }
     }
   }
   if (resolveError) {
@@ -235,14 +239,7 @@ export async function resolveAccountingPeriodForReport(
   }
 
   // 6. Fallback: ensure current month period exists and return it
-  // Contract v1.1: normalize "today" to business timezone before period resolution
-  const { data: bizRow } = await supabase
-    .from("businesses")
-    .select("timezone")
-    .eq("id", businessId)
-    .maybeSingle()
-  const tz = (bizRow?.timezone ?? "UTC").trim() || "UTC"
-  const today = getDateInTimezone(new Date(), tz)
+  const today = businessToday
   const { error: ensureErr } = await supabase.rpc("ensure_accounting_period", {
     p_business_id: businessId,
     p_date: today,
@@ -270,27 +267,6 @@ export async function resolveAccountingPeriodForReport(
       period_end: fallbackRow.period_end,
       resolution_reason: "current_month_fallback",
     },
-  }
-}
-
-/**
- * Contract v1.1: Return YYYY-MM-DD for the given date interpreted in the given IANA timezone.
- */
-function getDateInTimezone(date: Date, timezone: string): string {
-  try {
-    const formatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-    const parts = formatter.formatToParts(date)
-    const year = parts.find((p) => p.type === "year")?.value ?? "0000"
-    const month = parts.find((p) => p.type === "month")?.value ?? "01"
-    const day = parts.find((p) => p.type === "day")?.value ?? "01"
-    return `${year}-${month}-${day}`
-  } catch {
-    return date.toISOString().split("T")[0]
   }
 }
 

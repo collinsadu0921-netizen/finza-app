@@ -2,63 +2,25 @@
  * GET /api/dashboard/service-metrics?business_id=...
  *
  * Read-only. Returns ledger-derived metrics for Service workspace dashboard.
- * Uses existing P&L and Balance Sheet report logic; no schema or posting changes.
+ * P&L metrics use getProfitAndLossReport (ledger movement); positions use cumulative ledger as-of today.
  * Optional: period_id, period_start (defaults to current period).
- *
- * QuickBooks-style split: when period_id / period_start is explicitly set, Revenue,
- * Expenses, Net profit, and Cash collected follow that period; Cash balance, AR, and AP
- * use the balance sheet as of today so position cards stay “live” while browsing history.
  */
 
 import { NextRequest, NextResponse } from "next/server"
+
+export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { getBusinessToday } from "@/lib/accounting/businessDate"
+import {
+  getFinancialOverviewPositions,
+} from "@/lib/accounting/reports/cumulativeBalanceSheet"
 import {
   getProfitAndLossReport,
+  pnlTotalsFromReport,
   type PnLReportResponse,
 } from "@/lib/accounting/reports/getProfitAndLossReport"
-import {
-  getBalanceSheetReport,
-  type BalanceSheetReportResponse,
-} from "@/lib/accounting/reports/getBalanceSheetReport"
-
 const CASH_CODES = ["1000", "1010", "1020", "1030"] as const
-const CASH_CODE_SET = new Set<string>(CASH_CODES)
-/** Accounts Receivable control account. Use 1100 (service/standard); 1200 is Inventory in retail. */
-const AR_CODE = "1100"
-
-function extractCash(bs: any): number {
-  let sum = 0
-  const assets = bs?.sections?.find((s: any) => s.key === "assets")
-  if (!assets) return 0
-  for (const g of assets.groups || []) {
-    for (const line of g.lines || []) {
-      if (CASH_CODE_SET.has(String(line.account_code).trim())) sum += Number(line.amount ?? 0)
-    }
-  }
-  return Math.round(sum * 100) / 100
-}
-
-function extractAR(bs: any): number {
-  const assets = bs?.sections?.find((s: any) => s.key === "assets")
-  if (!assets) return 0
-  for (const g of assets.groups || []) {
-    for (const line of g.lines || []) {
-      if (String(line.account_code).trim() === AR_CODE) return Math.round(Number(line.amount ?? 0) * 100) / 100
-    }
-  }
-  return 0
-}
-
-function extractAP(bs: any): number {
-  const liab = bs?.sections?.find((s: any) => s.key === "liabilities")
-  if (!liab) return 0
-  let sum = 0
-  for (const g of liab.groups || []) {
-    if (g.key === "current_liabilities") sum += Number(g.subtotal ?? 0)
-  }
-  return Math.round(sum * 100) / 100
-}
 
 function devServiceMetricsLog(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
@@ -114,8 +76,6 @@ export async function GET(request: NextRequest) {
 
     const periodId = searchParams.get("period_id") ?? undefined
     const periodStart = searchParams.get("period_start") ?? undefined
-    const explicitPeriod =
-      Boolean(periodId?.trim()) || Boolean(periodStart?.trim())
 
     const pnlPromise = (async () => {
       const t0 = performance.now()
@@ -128,102 +88,43 @@ export async function GET(request: NextRequest) {
       return r
     })()
 
-    /** Position metrics: live as-of today when user picked a historical report period. */
-    const todayUtc = new Date().toISOString().slice(0, 10)
-    let bsPositions: BalanceSheetReportResponse | null = null
-    let bsError = ""
-    let pnl: PnLReportResponse | null = null
+    const positionAsOfPromise = (async () => {
+      const t0 = performance.now()
+      const asOf = await getBusinessToday(supabase, businessId)
+      const r = await getFinancialOverviewPositions(supabase, businessId, asOf)
+      devServiceMetricsLog("Financial overview (cumulative as-of today)", t0)
+      return { ...r, asOf }
+    })()
 
-    if (explicitPeriod) {
-      const bsLivePromise = (async () => {
-        const t0 = performance.now()
-        const r = await getBalanceSheetReport(supabase, {
-          businessId,
-          as_of_date: todayUtc,
-        })
-        devServiceMetricsLog("Balance Sheet calculation (as-of today)", t0)
-        return r
-      })()
+    const [pnlOut, positionsOut] = await Promise.all([pnlPromise, positionAsOfPromise])
 
-      const [pnlOut, liveBs] = await Promise.all([pnlPromise, bsLivePromise])
-
-      if (pnlOut.error || !pnlOut.data) {
-        return finish(
-          NextResponse.json(
-            { error: pnlOut.error ?? "Could not resolve period or fetch P&L" },
-            { status: 500 }
-          )
-        )
-      }
-      pnl = pnlOut.data
-
-      bsPositions = liveBs.data
-      bsError = liveBs.error
-      if (!bsPositions) {
-        const tFb = performance.now()
-        const fallback = await getBalanceSheetReport(supabase, {
-          businessId,
-          period_id: periodId,
-          period_start: periodStart,
-        })
-        devServiceMetricsLog("Balance Sheet calculation (fallback aligned period)", tFb)
-        bsPositions = fallback.data
-        bsError = fallback.error
-      }
-    } else {
-      const bsAlignedPromise = (async () => {
-        const t0 = performance.now()
-        const r = await getBalanceSheetReport(supabase, {
-          businessId,
-          period_id: periodId,
-          period_start: periodStart,
-        })
-        devServiceMetricsLog("Balance Sheet calculation (period-aligned)", t0)
-        return r
-      })()
-
-      const [pnlOut, bsRes] = await Promise.all([pnlPromise, bsAlignedPromise])
-
-      if (pnlOut.error || !pnlOut.data) {
-        return finish(
-          NextResponse.json(
-            { error: pnlOut.error ?? "Could not resolve period or fetch P&L" },
-            { status: 500 }
-          )
-        )
-      }
-      pnl = pnlOut.data
-
-      bsPositions = bsRes.data
-      bsError = bsRes.error
-    }
-
-    if (!pnl) {
+    if (pnlOut.error || !pnlOut.data) {
       return finish(
-        NextResponse.json({ error: "Could not resolve period or fetch P&L" }, { status: 500 })
+        NextResponse.json(
+          { error: pnlOut.error ?? "Could not resolve period or fetch P&L" },
+          { status: 500 }
+        )
       )
     }
 
-    if (bsError || !bsPositions) {
+    const pnl = pnlOut.data
+
+    if (positionsOut.error || !positionsOut.data) {
       return finish(
-        NextResponse.json({ error: bsError || "Could not fetch balance sheet" }, { status: 500 })
+        NextResponse.json(
+          { error: positionsOut.error || "Could not fetch balance sheet positions" },
+          { status: 500 }
+        )
       )
     }
 
-    const incomeSections = pnl.sections.filter((s) => s.key === "income" || s.key === "other_income")
-    const expenseSections = pnl.sections.filter(
-      (s) =>
-        s.key === "cogs" ||
-        s.key === "operating_expenses" ||
-        s.key === "other_expenses" ||
-        s.key === "taxes"
-    )
-    const revenue = Math.round(incomeSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
-    const expenses = Math.round(expenseSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
-    const netProfit = pnl.totals?.net_profit ?? revenue - expenses
-    const cashBalance = extractCash(bsPositions)
-    const ar = extractAR(bsPositions)
-    const ap = extractAP(bsPositions)
+    const positions = positionsOut.data
+    const positionAsOfDate = positionsOut.asOf
+
+    const { revenue, expenses, netProfit } = pnlTotalsFromReport(pnl)
+    const cashBalance = positions.cashBalance
+    const ar = positions.accountsReceivable
+    const ap = positions.accountsPayable
 
     const prevStartRaw = searchParams.get("previous_period_start")
     const prevStart = prevStartRaw?.trim() ? prevStartRaw : null
@@ -267,47 +168,37 @@ export async function GET(request: NextRequest) {
     const previousPeriodPromise = (async (): Promise<PreviousPeriodPayload | null> => {
       if (!prevStart) return null
       const tPrev = performance.now()
-      const [pnlPrevRes, bsPrevRes] = await Promise.all([
-        getProfitAndLossReport(supabase, {
-          businessId,
-          period_start: prevStart,
-        }),
-        getBalanceSheetReport(supabase, {
-          businessId,
-          period_start: prevStart,
-        }),
-      ])
-      devServiceMetricsLog("previous period reports (P&L + BS parallel)", tPrev)
+      const pnlPrevRes = await getProfitAndLossReport(supabase, {
+        businessId,
+        period_start: prevStart,
+      })
+      devServiceMetricsLog("previous period P&L", tPrev)
 
       const pnlPrev = pnlPrevRes.data
-      const bsPrev = bsPrevRes.data
-      if (!pnlPrev || !bsPrev) return null
+      if (!pnlPrev) return null
 
-      const revPrev = Math.round(
-        pnlPrev.sections
-          .filter((s) => s.key === "income" || s.key === "other_income")
-          .reduce((sum, s) => sum + s.subtotal, 0) * 100
-      ) / 100
-      const expPrev = Math.round(
-        pnlPrev.sections
-          .filter(
-            (s) =>
-              s.key === "cogs" ||
-              s.key === "operating_expenses" ||
-              s.key === "other_expenses" ||
-              s.key === "taxes"
-          )
-          .reduce((sum, s) => sum + s.subtotal, 0) * 100
-      ) / 100
+      const prevEnd = (pnlPrev.period as Record<string, unknown>)?.period_end as string | undefined
+      let prevPositions: {
+        cashBalance: number
+        accountsReceivable: number
+        accountsPayable: number
+      } | null = null
+      if (prevEnd) {
+        const posRes = await getFinancialOverviewPositions(supabase, businessId, prevEnd)
+        if (posRes.data) prevPositions = posRes.data
+      }
+
+      const { revenue: revPrev, expenses: expPrev, netProfit: netProfitPrev } =
+        pnlTotalsFromReport(pnlPrev)
 
       return {
         revenue: revPrev,
         expenses: expPrev,
-        netProfit: pnlPrev.totals?.net_profit ?? revPrev - expPrev,
+        netProfit: netProfitPrev,
         cashCollected: 0,
-        accountsReceivable: explicitPeriod ? null : extractAR(bsPrev),
-        accountsPayable: explicitPeriod ? null : extractAP(bsPrev),
-        cashBalance: explicitPeriod ? null : extractCash(bsPrev),
+        accountsReceivable: prevPositions?.accountsReceivable ?? null,
+        accountsPayable: prevPositions?.accountsPayable ?? null,
+        cashBalance: prevPositions?.cashBalance ?? null,
       }
     })()
 
@@ -327,8 +218,8 @@ export async function GET(request: NextRequest) {
       accountsReceivable: ar,
       accountsPayable: ap,
       cashBalance,
-      positionBalancesAsOfToday: explicitPeriod,
-      positionAsOfDate: explicitPeriod ? todayUtc : null,
+      positionBalancesAsOfToday: true,
+      positionAsOfDate,
       previousPeriod: null as PreviousPeriodPayload | null,
     }
     if (previousPeriod) {

@@ -4,7 +4,10 @@ import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { getCurrencySymbol } from "@/lib/currency"
 
 export async function GET(
@@ -116,7 +119,7 @@ export async function PUT(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business.id, minTier: "professional",
     })
     if (denied) return denied
@@ -460,7 +463,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business.id, minTier: "professional",
     })
     if (denied) return denied

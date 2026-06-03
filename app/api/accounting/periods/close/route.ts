@@ -8,7 +8,7 @@ import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
 import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
 import { resolveAuthority } from "@/lib/accounting/firm/authority"
 import { logBlockedActionAttempt } from "@/lib/accounting/firm/activityLog"
-import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function POST(request: NextRequest) {
   try {
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const tierBlockClose = await enforceServiceIndustryBusinessTierForAccountingApi(
+    const tierBlockClose = await enforceServiceIndustryBusinessTierForAccountingWrite(
       supabase,
       user.id,
       resolvedBusinessId

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function GET(
   request: NextRequest,
@@ -66,6 +67,14 @@ export async function PUT(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierBlockPut = await enforceServiceIndustryBusinessTierForAccountingWrite(
+      supabase,
+      user.id,
+      business.id,
+      "business"
+    )
+    if (tierBlockPut) return tierBlockPut
 
     const body = await request.json()
     const { name, code, type, description } = body
@@ -153,6 +162,14 @@ export async function DELETE(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const tierBlockDel = await enforceServiceIndustryBusinessTierForAccountingWrite(
+      supabase,
+      user.id,
+      business.id,
+      "business"
+    )
+    if (tierBlockDel) return tierBlockDel
 
     // Verify account exists and is not system
     const { data: existing } = await supabase

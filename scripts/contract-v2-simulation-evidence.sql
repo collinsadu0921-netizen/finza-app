@@ -8,7 +8,7 @@ WITH
 -- 1) Full Invoice Lifecycle: one row; PASS = posting exists + date match; if status=paid require payments sum ≈ total (0.02)
 sent_invoices AS (
   SELECT i.id AS invoice_id, i.business_id, i.issue_date, i.sent_at, i.total, i.status,
-    (COALESCE((i.sent_at AT TIME ZONE 'UTC')::date, i.issue_date)) AS expected_je_date
+    (COALESCE(i.issue_date, (i.sent_at AT TIME ZONE 'UTC')::date)) AS expected_je_date
   FROM invoices i
   WHERE i.deleted_at IS NULL AND i.status IN ('sent', 'paid', 'partially_paid')
   ORDER BY i.updated_at DESC NULLS LAST

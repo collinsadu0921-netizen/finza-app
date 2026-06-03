@@ -1,12 +1,11 @@
 /**
- * Service subscription lifecycle batch job (trial reminders, grace ending, lock after grace).
- * Used by POST/GET /api/cron/service-subscription-lifecycle. Does not lock on period expiry alone.
+ * Service subscription lifecycle batch job.
+ * Used by POST/GET /api/cron/service-subscription-lifecycle.
  *
- * Query windows (UTC, safe for daily cron):
- * - trial_ending_3d: trial_ends_at in [now+2d, now+4d)
- * - trial_ending_1d: trial_ends_at in [now+12h, now+36h)
- * - grace_ending_24h: past_due, subscription_grace_until in (now, now+24h]
- * - subscription_locked: past_due, subscription_grace_until <= now (grace column required; never locks on period-only soft state)
+ * - trial_ending_3d / trial_ending_1d: reminders before trial ends
+ * - trial_grace_started: expired unpaid trial → past_due + 3-day grace (only if grace_until is null)
+ * - grace_ending_24h: grace expires within 24h (paid renewal or unpaid trial)
+ * - subscription_locked: past_due + grace_until <= now → locked (paid and unpaid)
  */
 import "server-only"
 
@@ -18,12 +17,16 @@ import {
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
+export const TRIAL_POST_EXPIRY_GRACE_DAYS = 3
 
 export type ServiceSubscriptionLifecycleCronSummary = {
   trialEnding3dChecked: number
   trialEnding3dSent: number
   trialEnding1dChecked: number
   trialEnding1dSent: number
+  trialGraceStartedChecked: number
+  trialGraceStartedUpdated: number
+  trialGraceStartedNotified: number
   graceEndingChecked: number
   graceEndingSent: number
   lockedChecked: number
@@ -34,13 +37,23 @@ export type ServiceSubscriptionLifecycleCronSummary = {
 
 export type TrialCandidateRow = { id: string; trial_ends_at: string }
 export type GraceCandidateRow = { id: string; subscription_grace_until: string }
+export type ExpiredUnpaidTrialRow = { id: string; trial_ends_at: string }
 
 export type SubscriptionLifecycleCronQueries = {
   listTrialEnding3d: (now: Date) => Promise<TrialCandidateRow[]>
   listTrialEnding1d: (now: Date) => Promise<TrialCandidateRow[]>
+  listExpiredUnpaidTrialsNeedingGrace: (now: Date) => Promise<ExpiredUnpaidTrialRow[]>
+  startTrialPostExpiryGrace: (
+    businessId: string,
+    graceUntilIso: string,
+    now: Date
+  ) => Promise<{ error: { message: string } | null }>
   listGraceEnding24h: (now: Date) => Promise<GraceCandidateRow[]>
   listLockExpiredGrace: (now: Date) => Promise<GraceCandidateRow[]>
-  lockPastDueGraceExpired: (businessId: string, now: Date) => Promise<{ error: { message: string } | null }>
+  lockPastDueGraceExpired: (
+    businessId: string,
+    now: Date
+  ) => Promise<{ error: { message: string } | null }>
 }
 
 function utcDateKeyFromIso(iso: string): string {
@@ -63,9 +76,10 @@ function countsAsEmailSent(r: SendSubscriptionLifecycleNotificationResult): bool
   return true
 }
 
-/**
- * Default Supabase-backed queries. Only locks when `subscription_grace_until` is set and <= now (past_due).
- */
+export function trialPostExpiryGraceUntilIso(now: Date): string {
+  return new Date(now.getTime() + TRIAL_POST_EXPIRY_GRACE_DAYS * DAY_MS).toISOString()
+}
+
 export function createSubscriptionLifecycleCronQueries(
   supabase: SupabaseClient
 ): SubscriptionLifecycleCronQueries {
@@ -81,6 +95,7 @@ export function createSubscriptionLifecycleCronQueries(
         .not("trial_ends_at", "is", null)
         .gte("trial_ends_at", gte)
         .lt("trial_ends_at", lt)
+        .eq("billing_exempt", false)
         .is("archived_at", null)
 
       if (error) throw new Error(`listTrialEnding3d: ${error.message}`)
@@ -98,10 +113,54 @@ export function createSubscriptionLifecycleCronQueries(
         .not("trial_ends_at", "is", null)
         .gte("trial_ends_at", gte)
         .lt("trial_ends_at", lt)
+        .eq("billing_exempt", false)
         .is("archived_at", null)
 
       if (error) throw new Error(`listTrialEnding1d: ${error.message}`)
       return (data ?? []) as TrialCandidateRow[]
+    },
+
+    async listExpiredUnpaidTrialsNeedingGrace(
+      now: Date
+    ): Promise<ExpiredUnpaidTrialRow[]> {
+      const nowIso = now.toISOString()
+      const { data, error } = await supabase
+        .from("businesses")
+        .select("id, trial_ends_at")
+        .eq("service_subscription_status", "trialing")
+        .not("trial_ends_at", "is", null)
+        .lte("trial_ends_at", nowIso)
+        .is("subscription_started_at", null)
+        .is("subscription_grace_until", null)
+        .eq("billing_exempt", false)
+        .is("archived_at", null)
+
+      if (error) {
+        throw new Error(`listExpiredUnpaidTrialsNeedingGrace: ${error.message}`)
+      }
+      return (data ?? []) as ExpiredUnpaidTrialRow[]
+    },
+
+    async startTrialPostExpiryGrace(
+      businessId: string,
+      graceUntilIso: string,
+      now: Date
+    ): Promise<{ error: { message: string } | null }> {
+      const { error } = await supabase
+        .from("businesses")
+        .update({
+          service_subscription_status: "past_due",
+          subscription_grace_until: graceUntilIso,
+          updated_at: now.toISOString(),
+        })
+        .eq("id", businessId)
+        .eq("service_subscription_status", "trialing")
+        .is("subscription_started_at", null)
+        .is("subscription_grace_until", null)
+        .eq("billing_exempt", false)
+        .is("archived_at", null)
+
+      return { error: error ? { message: error.message } : null }
     },
 
     async listGraceEnding24h(now: Date): Promise<GraceCandidateRow[]> {
@@ -115,6 +174,7 @@ export function createSubscriptionLifecycleCronQueries(
         .not("subscription_grace_until", "is", null)
         .gt("subscription_grace_until", nowIso)
         .lte("subscription_grace_until", beforeIso)
+        .eq("billing_exempt", false)
         .is("archived_at", null)
 
       if (error) throw new Error(`listGraceEnding24h: ${error.message}`)
@@ -129,6 +189,7 @@ export function createSubscriptionLifecycleCronQueries(
         .eq("service_subscription_status", "past_due")
         .not("subscription_grace_until", "is", null)
         .lte("subscription_grace_until", nowIso)
+        .eq("billing_exempt", false)
         .is("archived_at", null)
 
       if (error) throw new Error(`listLockExpiredGrace: ${error.message}`)
@@ -147,6 +208,7 @@ export function createSubscriptionLifecycleCronQueries(
         })
         .eq("id", businessId)
         .eq("service_subscription_status", "past_due")
+        .eq("billing_exempt", false)
         .is("archived_at", null)
 
       return { error: error ? { message: error.message } : null }
@@ -156,9 +218,6 @@ export function createSubscriptionLifecycleCronQueries(
 
 type SendFn = typeof sendSubscriptionLifecycleNotification
 
-/**
- * Core cron runner (inject `queries` + `send` for tests).
- */
 export async function executeServiceSubscriptionLifecycleCron(
   queries: SubscriptionLifecycleCronQueries,
   send: SendFn,
@@ -169,6 +228,9 @@ export async function executeServiceSubscriptionLifecycleCron(
     trialEnding3dSent: 0,
     trialEnding1dChecked: 0,
     trialEnding1dSent: 0,
+    trialGraceStartedChecked: 0,
+    trialGraceStartedUpdated: 0,
+    trialGraceStartedNotified: 0,
     graceEndingChecked: 0,
     graceEndingSent: 0,
     lockedChecked: 0,
@@ -189,6 +251,8 @@ export async function executeServiceSubscriptionLifecycleCron(
       return { ok: false, reason: msg }
     }
   }
+
+  const graceUntilIso = trialPostExpiryGraceUntilIso(now)
 
   try {
     const trial3d = await queries.listTrialEnding3d(now)
@@ -219,6 +283,38 @@ export async function executeServiceSubscriptionLifecycleCron(
       )
       if (countsAsEmailSent(r)) summary.trialEnding1dSent++
       else if (!r.ok) summary.errors.push(`trial_ending_1d ${row.id}: ${r.reason}`)
+    }
+
+    const expiredTrials = await queries.listExpiredUnpaidTrialsNeedingGrace(now)
+    summary.trialGraceStartedChecked = expiredTrials.length
+    for (const row of expiredTrials) {
+      try {
+        const { error } = await queries.startTrialPostExpiryGrace(
+          row.id,
+          graceUntilIso,
+          now
+        )
+        if (error) {
+          summary.errors.push(`trial_grace_start ${row.id}: ${error.message}`)
+          continue
+        }
+        summary.trialGraceStartedUpdated++
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        summary.errors.push(`trial_grace_start ${row.id}: threw ${msg}`)
+        continue
+      }
+
+      const r = await safeSend(
+        {
+          businessId: row.id,
+          eventType: "trial_grace_started",
+          lifecycleKey: `${graceUntilIso}|${row.id}`,
+        },
+        "trial_grace_started"
+      )
+      if (countsAsEmailSent(r)) summary.trialGraceStartedNotified++
+      else if (!r.ok) summary.errors.push(`trial_grace_started ${row.id}: ${r.reason}`)
     }
 
     const graceRows = await queries.listGraceEnding24h(now)

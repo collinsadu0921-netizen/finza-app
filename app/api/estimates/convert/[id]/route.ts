@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(
   request: NextRequest,
@@ -34,6 +35,14 @@ export async function POST(
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const scopedBusinessId = scope.businessId
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scopedBusinessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     // Fetch estimate (scoped by tenant)
     const { data: estimate, error: estimateError } = await supabase

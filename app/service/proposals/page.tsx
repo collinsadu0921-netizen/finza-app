@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import type { ProposalListRow } from "@/lib/proposals/proposalListApi"
@@ -14,7 +15,9 @@ import {
 
 export default function ServiceProposalsPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/proposals"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const PAGE_SIZE = 25
   const [rows, setRows] = useState<ProposalListRow[]>([])
   const [businessId, setBusinessId] = useState<string | null>(null)
@@ -72,11 +75,16 @@ export default function ServiceProposalsPage() {
   }, [page, PAGE_SIZE])
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
-    router.replace(`/service/proposals?${params.toString()}`)
-  }, [page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/proposals?${params.toString()}`
+    )
+  }, [page, pathname, searchParamsString, router])
 
   async function deleteProposal(id: string, title: string) {
     if (!businessId) {

@@ -1,7 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems, deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
@@ -45,10 +47,13 @@ const getDiscountAmount = (item: Pick<LineItem, "qty" | "unit_price" | "discount
 }
 
 import { Suspense } from "react"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 
 function CreateCreditNoteContent() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/credit-notes/create"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const invoiceId = searchParams.get("invoiceId")
 
   const [loading, setLoading] = useState(true)
@@ -68,10 +73,13 @@ function CreateCreditNoteContent() {
   const [invoiceList, setInvoiceList] = useState<Array<{ id: string; invoice_number: string; total: number; status: string; customers?: { name: string } | null }>>([])
   const [loadingInvoices, setLoadingInvoices] = useState(false)
 
+  useSyncServiceBusinessIdInUrl(businessId)
+
   const STORAGE_KEY = "credit_note_create_invoice_id"
 
   useEffect(() => {
-    const paramId = searchParams.get("invoiceId")
+    const params = new URLSearchParams(searchParamsString)
+    const paramId = params.get("invoiceId")
     if (paramId) {
       try {
         sessionStorage.setItem(STORAGE_KEY, paramId)
@@ -84,7 +92,12 @@ function CreateCreditNoteContent() {
     try {
       const stored = sessionStorage.getItem(STORAGE_KEY)
       if (stored) {
-        router.replace(`/credit-notes/create?invoiceId=${encodeURIComponent(stored)}`)
+        replaceIfChanged(
+          router,
+          pathname,
+          searchParamsString,
+          `${pathname}?invoiceId=${encodeURIComponent(stored)}`
+        )
         setLoading(false)
         return
       }
@@ -93,7 +106,7 @@ function CreateCreditNoteContent() {
     }
     setShowInvoicePicker(true)
     setLoading(false)
-  }, [searchParams])
+  }, [pathname, searchParamsString, router])
 
   useEffect(() => {
     if (!showInvoicePicker) return
@@ -392,7 +405,14 @@ function CreateCreditNoteContent() {
                       } catch {
                         /* ignore */
                       }
-                      router.replace(`/credit-notes/create?invoiceId=${encodeURIComponent(inv.id)}`)
+                      const nextParams = new URLSearchParams(searchParamsString)
+                      nextParams.set("invoiceId", inv.id)
+                      replaceIfChanged(
+                        router,
+                        pathname,
+                        searchParamsString,
+                        `${pathname}?${nextParams.toString()}`
+                      )
                     }}
                     className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 flex justify-between items-center"
                   >
@@ -716,9 +736,11 @@ function CreateCreditNoteContent() {
 
 export default function CreateCreditNotePage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <CreateCreditNoteContent />
-    </Suspense>
+    <ServiceFinancialWritePageGuard scope="creditNotes" backHref="/service/credit-notes">
+      <Suspense fallback={<div>Loading...</div>}>
+        <CreateCreditNoteContent />
+      </Suspense>
+    </ServiceFinancialWritePageGuard>
   )
 }
 

@@ -1,10 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type ProformaInvoice = {
   id: string
@@ -52,9 +55,12 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function ProformaListPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/proforma"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const PAGE_SIZE = 25
   const { format } = useBusinessCurrency()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("proforma")
   const [proformas, setProformas] = useState<ProformaInvoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -110,11 +116,16 @@ export default function ProformaListPage() {
   const visible = proformas
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
-    router.replace(`/service/proforma?${params.toString()}`)
-  }, [page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/proforma?${params.toString()}`
+    )
+  }, [page, pathname, searchParamsString, router])
 
   if (loading) {
     return (
@@ -137,17 +148,21 @@ export default function ProformaListPage() {
             <h1 className="text-2xl font-bold text-slate-900">Proforma Invoices</h1>
             <p className="text-sm text-slate-500 mt-0.5">Manage your proforma invoices</p>
           </div>
-          <button
-            data-tour="service-proformas-new"
-            onClick={() => router.push("/service/proforma/create")}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Proforma
-          </button>
+          {!readOnly && (
+            <button
+              data-tour="service-proformas-new"
+              onClick={() => guardWriteAction(() => router.push("/service/proforma/create"))}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Proforma
+            </button>
+          )}
         </div>
+
+        {readOnly && <ServiceReadOnlyNotice scope="proforma" className="mb-2" />}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -234,9 +249,9 @@ export default function ProformaListPage() {
             <p className="text-slate-500 text-sm mb-4">
               {search || statusFilter !== "all" ? "Try adjusting your search or filters." : "Create your first proforma invoice to get started."}
             </p>
-            {!search && statusFilter === "all" && (
+            {!search && statusFilter === "all" && !readOnly && (
               <button
-                onClick={() => router.push("/service/proforma/create")}
+                onClick={() => guardWriteAction(() => router.push("/service/proforma/create"))}
                 className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
               >
                 Create Proforma

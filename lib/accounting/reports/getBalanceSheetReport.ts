@@ -1,11 +1,17 @@
 /**
- * Canonical Balance Sheet report — ledger-derived from Trial Balance snapshot.
- * Single source of truth: get_balance_sheet_from_trial_balance(period_id).
- * Period: resolved only via resolveAccountingPeriodForReport().
+ * Canonical Balance Sheet report — cumulative ledger as-of date.
+ * Source: get_balance_sheet_as_of(business_id, as_of_date) + cumulative net income for equity.
+ * Period metadata: resolveAccountingPeriodForReport() (P&L period context only).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { getBusinessToday } from "@/lib/accounting/businessDate"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
+import {
+  fetchCumulativeBalanceSheetRows,
+  fetchCumulativeNetIncomeAsOf,
+  type CumulativeBsRow,
+} from "@/lib/accounting/reports/cumulativeBalanceSheet"
 import { getCurrencySymbol, getCurrencyName } from "@/lib/currency"
 
 export type BusinessType = "limited_company" | "sole_proprietorship"
@@ -93,8 +99,6 @@ function groupKeyFromAccount(code: string, accountType: string): BSGroupKey {
     if (n >= 1600 && n < 2000) return "fixed_assets"
     return "current_assets"
   }
-  // contra_asset (e.g. Accumulated Depreciation 1650) is grouped under fixed_assets as a deduction.
-  // The RPC returns these with a negative balance so Σ(asset + contra_asset amounts) = net book value.
   if (accountType === "contra_asset") {
     return "fixed_assets"
   }
@@ -104,6 +108,40 @@ function groupKeyFromAccount(code: string, accountType: string): BSGroupKey {
   }
   if (accountType === "equity") return "equity"
   return "current_assets"
+}
+
+/** Effective cumulative as-of date for balance sheet positions. */
+export async function resolveBalanceSheetAsOfDate(
+  supabase: SupabaseClient,
+  input: BalanceSheetReportInput,
+  resolvedPeriod: { period_start: string; period_end: string }
+): Promise<string> {
+  const explicit = input.as_of_date?.trim()
+  if (explicit && /^\d{4}-\d{2}-\d{2}$/.test(explicit)) {
+    return explicit
+  }
+
+  const rangeStart = input.start_date?.trim()
+  const rangeEnd = input.end_date?.trim()
+  if (
+    rangeStart &&
+    rangeEnd &&
+    /^\d{4}-\d{2}-\d{2}$/.test(rangeStart) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(rangeEnd)
+  ) {
+    return rangeEnd
+  }
+
+  const hasExplicitPeriod =
+    Boolean(input.period_id?.trim()) ||
+    Boolean(input.period_start?.trim()) ||
+    (Boolean(rangeStart) && !rangeEnd)
+
+  if (hasExplicitPeriod) {
+    return resolvedPeriod.period_end
+  }
+
+  return getBusinessToday(supabase, input.businessId)
 }
 
 export async function getBalanceSheetReport(
@@ -130,47 +168,41 @@ export async function getBalanceSheetReport(
     return { data: null, error: resolveError ?? "Accounting period could not be resolved" }
   }
 
-  const { data: bsRows, error: bsError } = await supabase.rpc("get_balance_sheet_from_trial_balance", {
-    p_period_id: resolvedPeriod.period_id,
-  })
+  const asOfDate = await resolveBalanceSheetAsOfDate(supabase, input, resolvedPeriod)
+
+  const { rows: raw, error: bsError } = await fetchCumulativeBalanceSheetRows(
+    supabase,
+    businessId,
+    asOfDate
+  )
   if (bsError) {
-    return { data: null, error: bsError.message ?? "Failed to fetch balance sheet" }
+    return { data: null, error: bsError }
   }
 
-  const raw = (bsRows ?? []) as Array<{
-    account_id?: string
-    account_code?: string
-    account_name?: string
-    account_type?: string
-    balance?: number
-  }>
-
-  const { data: pnlRows } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-    p_period_id: resolvedPeriod.period_id,
-  })
-  const pnl = (pnlRows ?? []) as Array<{ account_type?: string; period_total?: number }>
-  const netIncome = pnl.reduce((sum, r) => {
-    const t = Number(r.period_total ?? 0)
-    const isIncome = r.account_type === "income" || r.account_type === "revenue"
-    return sum + (isIncome ? t : r.account_type === "expense" ? -t : 0)
-  }, 0)
-  const currentPeriodNetIncome = Math.round(netIncome * 100) / 100
+  const { netIncome: cumulativeNetIncome, error: niError } = await fetchCumulativeNetIncomeAsOf(
+    supabase,
+    businessId,
+    asOfDate
+  )
+  if (niError) {
+    return { data: null, error: niError }
+  }
+  const currentPeriodNetIncome = cumulativeNetIncome
 
   const { data: biz } = await supabase
     .from("businesses")
     .select("default_currency, business_type")
     .eq("id", businessId)
     .single()
-  const currencyCode = (biz as any)?.default_currency ?? "USD"
+  const currencyCode = (biz as { default_currency?: string })?.default_currency ?? "USD"
   const currency = {
     code: currencyCode,
     symbol: getCurrencySymbol(currencyCode) || currencyCode,
     name: getCurrencyName(currencyCode) || currencyCode,
   }
-  // Resolve entity type: caller override → DB value → default
   const resolvedBusinessType: BusinessType =
     input.business_type ??
-    ((biz as any)?.business_type as BusinessType | undefined) ??
+    ((biz as { business_type?: BusinessType })?.business_type as BusinessType | undefined) ??
     "limited_company"
 
   const assetsByGroup = new Map<BSGroupKey, BSLine[]>()
@@ -188,7 +220,7 @@ export async function getBalanceSheetReport(
     equityByGroup.set(k as BSGroupKey, [])
   })
 
-  for (const row of raw) {
+  for (const row of raw as CumulativeBsRow[]) {
     const code = String(row.account_code ?? "").trim()
     const name = String(row.account_name ?? "").trim()
     const amount = Math.round(Number(row.balance ?? 0) * 100) / 100
@@ -196,7 +228,6 @@ export async function getBalanceSheetReport(
     const groupKey = groupKeyFromAccount(code, type)
     const accountId = row.account_id != null ? String(row.account_id) : ""
     const line: BSLine = { account_id: accountId, account_code: code, account_name: name, amount }
-    // contra_asset rows have negative balance (returned by RPC) and group under fixed_assets
     if (type === "asset" || type === "contra_asset") assetsByGroup.get(groupKey)!.push(line)
     else if (type === "liability") liabilitiesByGroup.get(groupKey)!.push(line)
     else if (type === "equity") equityByGroup.get(groupKey)!.push(line)
@@ -221,15 +252,12 @@ export async function getBalanceSheetReport(
   const imbalance = Math.round((totalAssets - liabilitiesPlusEquity) * 100) / 100
   const isBalanced = Math.abs(imbalance) < 0.01
 
-  // Entity-type-specific equity section:
-  // • limited_company  → "Equity"         net income line labelled "Current Period Net Income"
-  // • sole_proprietorship → "Owner's Equity"  net income line labelled "Net Profit for Period"
   const isSoleProp = resolvedBusinessType === "sole_proprietorship"
   const equitySectionLabel = isSoleProp ? "Owner's Equity" : "Equity"
-  const netIncomeLineLabel = isSoleProp ? "Net Profit for Period" : "Current Period Net Income"
+  const netIncomeLineLabel = isSoleProp
+    ? "Net Profit (cumulative)"
+    : "Net Income (cumulative)"
 
-  // Add current period net income as a visible synthetic line in the equity group
-  // so it appears explicitly in the statement rather than silently inflating the subtotal.
   const equityGroupWithNetIncome: BSGroup[] = equityGroups.map((g) => {
     if (g.key !== "equity") return g
     const syntheticLine: BSLine = {
@@ -238,10 +266,8 @@ export async function getBalanceSheetReport(
       account_name: netIncomeLineLabel,
       amount: currentPeriodNetIncome,
     }
-    // Only add the line when there is a non-zero net income value
-    const lines = currentPeriodNetIncome !== 0
-      ? [...g.lines, syntheticLine]
-      : g.lines
+    const lines =
+      currentPeriodNetIncome !== 0 ? [...g.lines, syntheticLine] : g.lines
     return {
       ...g,
       label: equitySectionLabel,
@@ -280,7 +306,7 @@ export async function getBalanceSheetReport(
         resolution_reason: resolvedPeriod.resolution_reason,
       },
       currency,
-      as_of_date: resolvedPeriod.period_end,
+      as_of_date: asOfDate,
       business_type: resolvedBusinessType,
       sections,
       totals: {
@@ -295,8 +321,8 @@ export async function getBalanceSheetReport(
         resolved_period_reason: resolvedPeriod.resolution_reason,
         resolved_period_start: resolvedPeriod.period_start,
         resolved_period_end: resolvedPeriod.period_end,
-        source: "trial_balance",
-        version: 1,
+        source: "ledger",
+        version: 2,
       },
     },
     error: "",

@@ -8,7 +8,7 @@ import {
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
 import { getCurrencySymbol } from "@/lib/currency"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(request: NextRequest) {
   try {
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
 
-    const tierDenied = await enforceServiceIndustryMinTier(
+    const tierDenied = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business_id,

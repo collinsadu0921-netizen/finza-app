@@ -1,13 +1,16 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { formatMoney } from "@/lib/money"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import type { EstimateListRow, EstimatesListResponse } from "@/lib/estimates/estimateListApi"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Estimate = EstimateListRow
 
@@ -38,7 +41,10 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function EstimatesPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/estimates"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("estimates")
   const PAGE_SIZE = 25
   const [estimates, setEstimates] = useState<Estimate[]>([])
   const [loading, setLoading] = useState(true)
@@ -154,11 +160,16 @@ export default function EstimatesPage() {
   }, [statusFilter, debouncedSearch, page, PAGE_SIZE])
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
-    router.replace(`/service/estimates?${params.toString()}`)
-  }, [page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/estimates?${params.toString()}`
+    )
+  }, [page, pathname, searchParamsString, router])
 
   const formatDate = (d: string | null) => {
     if (!d) return "—"
@@ -195,17 +206,21 @@ export default function EstimatesPage() {
             <h1 className="text-2xl font-bold text-slate-900">Quotes</h1>
             <p className="text-sm text-slate-500 mt-0.5">Manage and track your quotes</p>
           </div>
-          <button
-            data-tour="service-estimates-new"
-            onClick={() => router.push("/estimates/new")}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Quote
-          </button>
+          {!readOnly && (
+            <button
+              data-tour="service-estimates-new"
+              onClick={() => router.push("/estimates/new")}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Quote
+            </button>
+          )}
         </div>
+
+        {readOnly && <ServiceReadOnlyNotice scope="estimates" className="mb-2" />}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -318,7 +333,7 @@ export default function EstimatesPage() {
                 ? "Try adjusting your search or filters."
                 : "Create your first quote to get started."}
             </p>
-            {!debouncedSearch && statusFilter === "all" && (
+            {!readOnly && !debouncedSearch && statusFilter === "all" && (
               <button
                 onClick={() => router.push("/estimates/new")}
                 className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
@@ -387,11 +402,11 @@ export default function EstimatesPage() {
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {estimate.status === "accepted" && (
+                          {!readOnly && estimate.status === "accepted" && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                convertToInvoice(estimate.id)
+                                guardWriteAction(() => convertToInvoice(estimate.id))
                               }}
                               className="text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-medium hover:bg-emerald-100 transition-colors"
                             >

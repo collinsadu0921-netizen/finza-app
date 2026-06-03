@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function PUT(
   request: NextRequest,
@@ -22,7 +25,7 @@ export async function PUT(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business.id, minTier: "starter",
     })
     if (denied) return denied
@@ -90,7 +93,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business.id, minTier: "starter",
     })
     if (denied) return denied

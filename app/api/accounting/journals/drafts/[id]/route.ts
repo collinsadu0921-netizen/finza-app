@@ -6,6 +6,7 @@ import { resolveAuthority } from "@/lib/accounting/firm/authority"
 import { logBlockedActionAttempt, logFirmActivity } from "@/lib/accounting/firm/activityLog"
 import { getBusinessIdFromRequest, missingBusinessIdResponse } from "@/lib/accounting/requireBusinessId"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/journals/drafts/{id}
@@ -270,6 +271,14 @@ export async function PATCH(
           { status: 403 }
         )
       }
+
+      const tierBlockDraftPatch = await enforceServiceIndustryBusinessTierForAccountingWrite(
+        supabase,
+        user.id,
+        draft.client_business_id,
+        "business"
+      )
+      if (tierBlockDraftPatch) return tierBlockDraftPatch
     } else {
       const onboardingCheck = await checkFirmOnboardingForAction(
         supabase,
@@ -599,6 +608,14 @@ export async function DELETE(
           { status: 403 }
         )
       }
+
+      const tierBlockDraftDel = await enforceServiceIndustryBusinessTierForAccountingWrite(
+        supabase,
+        user.id,
+        draft.client_business_id,
+        "business"
+      )
+      if (tierBlockDraftDel) return tierBlockDraftDel
     } else {
       const onboardingCheck = await checkFirmOnboardingForAction(
         supabase,

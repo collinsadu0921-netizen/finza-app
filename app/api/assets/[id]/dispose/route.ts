@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(
   request: NextRequest,
@@ -24,7 +24,7 @@ export async function POST(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceIndustryMinTier(
+    const denied = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,

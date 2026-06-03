@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { normalizeCountry } from "@/lib/payments/eligibility"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(
   request: NextRequest,
@@ -171,7 +174,7 @@ export async function PUT(
       )
     }
 
-    const putAccessDenied = await enforceServiceWorkspaceAccess({
+    const putAccessDenied = await enforceServiceWorkspaceWriteAccess({
       supabase,
       userId: user?.id,
       businessId: existingReturn.business_id,

@@ -27,6 +27,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
+import { fetchCanonicalPnLNetProfit } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { getCurrencySymbol, getCurrencyName } from "@/lib/currency"
 
 // ─── Input / Output types ────────────────────────────────────────────────────
@@ -161,32 +162,18 @@ export async function getCashFlowReport(
   }
   const rows = (movRows ?? []) as AccountMovementRow[]
 
-  // ── 3. Fetch net profit from P&L (indirect method starting point) ──────────
-  const { data: pnlRows, error: pnlError } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-    // Fall back to direct date-based P&L if period_id variant is unavailable.
-    // The canonical variant used by existing reports.
-    p_period_id: resolvedPeriod.period_id,
+  // ── 3. Net profit — canonical P&L movement (indirect method starting point) ─
+  const { netProfit, error: pnlError } = await fetchCanonicalPnLNetProfit(supabase, {
+    businessId,
+    period_id:    input.period_id,
+    period_start: input.period_start,
+    as_of_date:   input.as_of_date,
+    start_date:   input.start_date,
+    end_date:     input.end_date,
   })
-  let netProfit = 0
-  if (!pnlError && pnlRows) {
-    const pnl = pnlRows as Array<{ account_type?: string; period_total?: number }>
-    netProfit = pnl.reduce((sum, r2) => {
-      const t = Number(r2.period_total ?? 0)
-      const isIncome = r2.account_type === "income" || r2.account_type === "revenue"
-      return sum + (isIncome ? t : r2.account_type === "expense" ? -t : 0)
-    }, 0)
-  } else {
-    // Fallback: compute from account movements (income/expense accounts)
-    for (const row of rows) {
-      const type = String(row.account_type ?? "")
-      if (type === "income" || type === "revenue") {
-        netProfit += r(row.period_movement)
-      } else if (type === "expense") {
-        netProfit -= r(row.period_movement)
-      }
-    }
+  if (pnlError) {
+    return { data: null, error: pnlError }
   }
-  netProfit = Math.round(netProfit * 100) / 100
 
   // ── 4. Currency ───────────────────────────────────────────────────────────
   const { data: biz } = await supabase

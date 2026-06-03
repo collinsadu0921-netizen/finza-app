@@ -23,6 +23,7 @@ import { createClient } from "@supabase/supabase-js"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
+import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
 
 export const dynamic = "force-dynamic"
 
@@ -200,9 +201,18 @@ export async function POST(request: NextRequest) {
   if (payErr) {
     console.error("[paystack/charge] payment insert error:", payErr)
     return NextResponse.json(
-      { success: false, error: "Failed to record payment" },
+      { success: false, error: payErr.message || "Failed to record payment" },
       { status: 500 }
     )
+  }
+
+  const journalAssert = await assertPaymentJournalPosted(
+    supabase,
+    payment.id,
+    invoice.business_id
+  )
+  if (!journalAssert.ok) {
+    return NextResponse.json({ success: false, error: journalAssert.error }, { status: 500 })
   }
 
   return NextResponse.json({

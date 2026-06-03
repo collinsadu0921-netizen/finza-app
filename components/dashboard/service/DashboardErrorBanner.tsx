@@ -6,13 +6,13 @@ export type DashboardErrorBannerProps = {
 }
 
 export default function DashboardErrorBanner({
-  message = "Could not load dashboard metrics. Please try again.",
+  message = "We could not load your dashboard summary. Please refresh and try again.",
   onRetry,
 }: DashboardErrorBannerProps) {
   return (
     <div
       role="alert"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-800 dark:bg-red-900/20"
+      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-800 dark:bg-red-900/20"
     >
       <p className="text-sm font-medium text-red-800 dark:text-red-200">{message}</p>
       {onRetry && (

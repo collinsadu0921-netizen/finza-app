@@ -8,6 +8,8 @@ import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engi
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(request: NextRequest) {
   try {
@@ -95,6 +97,14 @@ export async function POST(request: NextRequest) {
     }
 
     const business_id = invoice.business_id
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business_id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     try {
       await assertBusinessNotArchived(supabase, business_id)
@@ -271,12 +281,28 @@ export async function POST(request: NextRequest) {
         ? `Payment method "${method}" is not supported. Please select a different method.`
         : paymentError.message?.includes("violates check constraint")
         ? `A field value was rejected by the database: ${paymentError.message}`
-        : paymentError.message || "Payment could not be saved. Please check all fields and try again."
+        : paymentError.message?.includes("assert_accounting_period") ||
+            paymentError.message?.toLowerCase().includes("period") ||
+            paymentError.message?.toLowerCase().includes("locked")
+          ? paymentError.message
+          : paymentError.message || "Payment could not be saved. Please check all fields and try again."
       return NextResponse.json(
         {
           success: false,
           error: userMessage,
           message: paymentError.message
+        },
+        { status: 500 }
+      )
+    }
+
+    const journalAssert = await assertPaymentJournalPosted(supabase, payment.id, business_id)
+    if (!journalAssert.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: journalAssert.error,
+          message: journalAssert.error,
         },
         { status: 500 }
       )

@@ -3,6 +3,7 @@ import "server-only"
 import type { NextRequest } from "next/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { userHasBusinessAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { isBusinessBillingExempt } from "@/lib/serviceWorkspace/loadBusinessBillingRow"
 import {
   FINZA_PAYSTACK_METADATA_PURPOSE_KEY,
   FINZA_PAYSTACK_SUBSCRIPTION_PURPOSE,
@@ -83,6 +84,17 @@ export async function initiateServiceSubscriptionPayment(
 
   if (!business) {
     return Response.json({ error: "Business not found" }, { status: 404 })
+  }
+
+  if (await isBusinessBillingExempt(supabase, businessId)) {
+    return Response.json(
+      {
+        error:
+          "This workspace has internal billing exemption. Subscription checkout is not required.",
+        code: "BILLING_EXEMPT",
+      },
+      { status: 403 }
+    )
   }
 
   const countryCode = normalizeCountry((business as { address_country?: string }).address_country)

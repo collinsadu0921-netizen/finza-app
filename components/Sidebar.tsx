@@ -31,7 +31,9 @@ import {
   ServiceSidebarCediMark,
   ServiceSidebarInvoiceCediIcon,
 } from "@/lib/service/serviceSidebarNavIcons"
-import { ChevronDown, Lock } from "lucide-react"
+import { ChevronDown, Lock, LogOut, PanelLeft, PanelLeftClose } from "lucide-react"
+import { useSidebarLayout } from "@/components/sidebar/SidebarLayoutContext"
+import SidebarNavTooltip from "@/components/sidebar/SidebarNavTooltip"
 
 /** Match service dashboard + public documents — not `name` first (legal entity vs trading name). */
 function sidebarBusinessLabel(row: {
@@ -58,7 +60,10 @@ export default function Sidebar() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const urlBusinessId = searchParams.get("business_id")?.trim() ?? null
-  const [isOpen, setIsOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const { collapsed: desktopCollapsed, toggleCollapsed, enabled: sidebarLayoutEnabled } =
+    useSidebarLayout()
+  const isDesktopRail = sidebarLayoutEnabled && desktopCollapsed
   // Initialize from sessionStorage immediately to prevent flash
   const [businessIndustry, setBusinessIndustry] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -298,9 +303,9 @@ export default function Sidebar() {
     return () => window.removeEventListener(BUSINESS_BRANDING_UPDATED_EVENT, onBrandingUpdated)
   }, [urlBusinessId, serviceBusinessId, commitSidebarBranding])
 
-  // Auto-close mobile menu when route changes
+  // Auto-close mobile drawer when route changes
   useEffect(() => {
-    setIsOpen(false)
+    setMobileOpen(false)
   }, [pathname])
 
   const loadIndustry = async (accountingBusinessId: string | null, path: string) => {
@@ -739,12 +744,15 @@ export default function Sidebar() {
     <>
       {/* Mobile menu button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        type="button"
+        onClick={() => setMobileOpen((open) => !open)}
         className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white dark:bg-slate-900 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700"
-        aria-label="Toggle menu"
+        aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={mobileOpen}
+        aria-controls="finza-app-sidebar"
       >
         <svg className="w-6 h-6 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          {isOpen ? (
+          {mobileOpen ? (
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           ) : (
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -753,20 +761,23 @@ export default function Sidebar() {
       </button>
 
       {/* Mobile overlay */}
-      {isOpen && (
+      {mobileOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black/40 z-40"
-          onClick={() => setIsOpen(false)}
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar */}
       <aside
+        id="finza-app-sidebar"
         className={`
-          fixed top-0 left-0 h-full w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-40
-          transform transition-transform duration-300 ease-in-out
-          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+          fixed top-0 left-0 h-full bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-40
+          w-64 transition-[transform,width] duration-300 ease-in-out
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
           lg:translate-x-0
+          ${isDesktopRail ? "lg:w-[4.5rem]" : "lg:w-64"}
         `}
       >
         <div className="flex flex-col h-full">
@@ -774,19 +785,45 @@ export default function Sidebar() {
           <div
             className={`border-b border-slate-200 dark:border-slate-800 ${
               isServiceWorkspaceRoute
-                ? "box-border flex h-16 items-center pl-6 pr-4"
-                : "px-3 py-2"
+                ? isDesktopRail
+                  ? "box-border flex h-auto flex-col items-center gap-1 px-2 py-3"
+                  : "box-border flex h-16 items-center gap-1 pl-4 pr-2"
+                : isDesktopRail
+                  ? "flex flex-col items-center gap-1 px-2 py-3"
+                  : "flex items-center gap-1 px-3 py-2"
             }`}
           >
             {isServiceWorkspaceRoute ? (
               <Link
                 href="/service/dashboard"
                 prefetch
-                className="flex min-h-0 w-full min-w-0 items-center justify-start rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
+                className={`flex min-h-0 min-w-0 items-center rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400 ${
+                  isDesktopRail ? "justify-center p-1" : "flex-1 justify-start"
+                }`}
                 aria-label="Finza — Service dashboard"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setMobileOpen(false)}
               >
-                {!finzaSidebarSvgFailed ? (
+                {isDesktopRail ? (
+                  !finzaSidebarSvgFailed ? (
+                    <img
+                      src="/finza-mark.svg"
+                      alt=""
+                      width={36}
+                      height={36}
+                      decoding="async"
+                      loading="eager"
+                      className="block h-9 w-9 shrink-0 object-contain object-center"
+                      onError={() => setFinzaSidebarSvgFailed(true)}
+                    />
+                  ) : (
+                    <span
+                      className="flex h-9 w-9 shrink-0 items-center justify-center"
+                      aria-hidden
+                    >
+                      <span className="h-[10px] w-[10px] shrink-0 rounded-[3px] bg-[#112033] dark:bg-slate-100" />
+                    </span>
+                  )
+                ) : !finzaSidebarSvgFailed ? (
                   <img
                     src="/brand/finza-logo-colored-solid.svg"
                     alt="Finza"
@@ -800,10 +837,10 @@ export default function Sidebar() {
                 ) : (
                   <>
                     <span
-                      className="mr-3 h-[10px] w-[10px] shrink-0 rounded-[3px] bg-blue-600 dark:bg-blue-500"
+                      className="h-[10px] w-[10px] shrink-0 rounded-[3px] bg-blue-600 dark:bg-blue-500"
                       aria-hidden
                     />
-                    <span className="text-[30px] font-extrabold leading-none tracking-[-0.03em] text-slate-900 dark:text-white">
+                    <span className="ml-3 text-[30px] font-extrabold leading-none tracking-[-0.03em] text-slate-900 dark:text-white">
                       Finza
                     </span>
                   </>
@@ -813,9 +850,14 @@ export default function Sidebar() {
               <button
                 type="button"
                 onClick={() => router.push(businessIndustry === "retail" ? "/retail/dashboard" : "/service/dashboard")}
-                className="w-full min-w-0 rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400"
+                className={`min-w-0 rounded-lg text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-slate-400 ${
+                  isDesktopRail ? "p-1" : "w-full"
+                }`}
+                aria-label={businessDisplay.name?.trim() || "Workspace dashboard"}
               >
-                <div className="flex min-w-0 items-center gap-2">
+                <div
+                  className={`flex min-w-0 items-center ${isDesktopRail ? "justify-center" : "gap-2"}`}
+                >
                   <BusinessLogoDisplay
                     logoUrl={businessDisplay.logo_url}
                     businessName={businessDisplay.name?.trim() || "Workspace"}
@@ -824,26 +866,49 @@ export default function Sidebar() {
                     brandingResolved={sidebarBrandingResolved}
                     className="shrink-0"
                   />
-                  {businessDisplay.name ? (
-                    <p
-                      className="min-w-0 flex-1 text-sm font-semibold leading-tight text-slate-900 line-clamp-1 dark:text-white"
-                      title={businessDisplay.name}
-                    >
-                      {businessDisplay.name}
-                    </p>
-                  ) : (
-                    <p className="min-w-0 flex-1 text-sm font-semibold leading-tight text-slate-500 dark:text-slate-400">
-                      Dashboard
-                    </p>
-                  )}
+                  {!isDesktopRail &&
+                    (businessDisplay.name ? (
+                      <p
+                        className="min-w-0 flex-1 text-sm font-semibold leading-tight text-slate-900 line-clamp-1 dark:text-white"
+                        title={businessDisplay.name}
+                      >
+                        {businessDisplay.name}
+                      </p>
+                    ) : (
+                      <p className="min-w-0 flex-1 text-sm font-semibold leading-tight text-slate-500 dark:text-slate-400">
+                        Dashboard
+                      </p>
+                    ))}
                 </div>
+              </button>
+            )}
+            {!isDesktopRail && (
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                className="hidden shrink-0 rounded-md p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 lg:inline-flex dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label="Collapse sidebar"
+              >
+                <PanelLeftClose className="h-5 w-5" aria-hidden="true" />
+              </button>
+            )}
+            {isDesktopRail && (
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                className="hidden rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 lg:inline-flex dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label="Expand sidebar"
+              >
+                <PanelLeft className="h-4 w-4" aria-hidden="true" />
               </button>
             )}
           </div>
 
           {/* Navigation */}
           <nav
-            className="flex-1 overflow-y-auto p-3 sm:p-4 [scrollbar-width:thin] [scrollbar-color:rgba(148,163,184,0.35)_transparent] dark:[scrollbar-color:rgba(100,116,139,0.3)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/30 dark:[&::-webkit-scrollbar-thumb]:bg-slate-500/25"
+            className={`flex-1 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:rgba(148,163,184,0.35)_transparent] dark:[scrollbar-color:rgba(100,116,139,0.3)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/30 dark:[&::-webkit-scrollbar-thumb]:bg-slate-500/25 ${
+              isDesktopRail ? "px-2 py-2" : "p-3 sm:p-4"
+            }`}
           >
             {/* Menu Sections */}
             <div className="space-y-1">
@@ -857,33 +922,46 @@ export default function Sidebar() {
                     section.title === "OPERATIONS" ||
                     section.title === "BILLING" ||
                     section.title === "RETAIL OPERATIONS"
-                  const isExpanded = expandedSections[section.title] ?? defaultExpanded
+                  const isExpanded =
+                    isDesktopRail || (expandedSections[section.title] ?? defaultExpanded)
 
                   return (
                     <div key={sectionIdx} className={isServiceMenu ? "mb-3" : "mb-2"}>
                       {sectionIdx > 0 && (
                         <div
-                          className={`h-px bg-slate-100 dark:bg-slate-800 ${isServiceMenu ? "my-3 mx-2" : "my-2 mx-3"}`}
+                          className={`h-px bg-slate-100 dark:bg-slate-800 ${
+                            isDesktopRail
+                              ? "my-2 mx-1"
+                              : isServiceMenu
+                                ? "my-3 mx-2"
+                                : "my-2 mx-3"
+                          }`}
                         />
                       )}
-                      <button
-                        type="button"
-                        onClick={() => toggleSection(section.title)}
-                        className={
-                          isServiceMenu
-                            ? "w-full text-left px-3 py-2.5 rounded-lg flex items-center justify-between gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 tracking-wide hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors duration-150"
-                            : "w-full text-left px-3 py-2 rounded-lg flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-150"
-                        }
-                      >
-                        <span>{section.title}</span>
-                        <ChevronDown
-                          className={`w-4 h-4 shrink-0 text-slate-500 dark:text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
-                          aria-hidden="true"
-                          strokeWidth={2}
-                        />
-                      </button>
+                      {!isDesktopRail && (
+                        <button
+                          type="button"
+                          onClick={() => toggleSection(section.title)}
+                          className={
+                            isServiceMenu
+                              ? "w-full text-left px-3 py-2.5 rounded-lg flex items-center justify-between gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 tracking-wide hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors duration-150"
+                              : "w-full text-left px-3 py-2 rounded-lg flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-150"
+                          }
+                        >
+                          <span>{section.title}</span>
+                          <ChevronDown
+                            className={`w-4 h-4 shrink-0 text-slate-500 dark:text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                            aria-hidden="true"
+                            strokeWidth={2}
+                          />
+                        </button>
+                      )}
                       {isExpanded && (
-                        <div className="mt-1 space-y-0.5">
+                        <div
+                          className={
+                            isDesktopRail ? "space-y-1" : "mt-1 space-y-0.5"
+                          }
+                        >
                           {section.items.map((item, itemIdx) => {
                             const active =
                               !item.skipActiveHighlight &&
@@ -931,8 +1009,9 @@ export default function Sidebar() {
                                 "h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500"
                             }
 
-                            let rowClass =
-                              "flex w-full items-center gap-2.5 rounded-md border-l-2 py-2 pl-2 pr-2 text-left text-sm transition-colors duration-150 "
+                            let rowClass = isDesktopRail
+                              ? "relative flex w-full items-center justify-center rounded-md border-l-2 p-2 text-left text-sm transition-colors duration-150 "
+                              : "flex w-full items-center gap-2.5 rounded-md border-l-2 py-2 pl-2 pr-2 text-left text-sm transition-colors duration-150 "
                             if (active) {
                               rowClass +=
                                 "border-blue-600 bg-blue-50/90 dark:bg-blue-950/35 dark:border-blue-500 font-semibold text-slate-900 dark:text-slate-100 "
@@ -954,17 +1033,22 @@ export default function Sidebar() {
                                 "border-transparent text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 "
                             }
 
-                            return (
+                            const navLabel = tierBlocked
+                              ? upgradeLabel(item.minTier!)
+                              : item.label
+
+                            const navButton = (
                               <button
-                                key={itemIdx}
                                 type="button"
-                                aria-label={tierUpgradeAriaLabel}
+                                aria-label={tierUpgradeAriaLabel ?? navLabel}
                                 title={
-                                  tierBlocked
-                                    ? upgradeLabel(item.minTier!)
-                                    : contextBlocked
-                                      ? "Select a business to open this page"
-                                      : undefined
+                                  isDesktopRail
+                                    ? undefined
+                                    : tierBlocked
+                                      ? upgradeLabel(item.minTier!)
+                                      : contextBlocked
+                                        ? "Select a business to open this page"
+                                        : undefined
                                 }
                                 onMouseEnter={() => {
                                   if (!isServiceMenu || navLocked || tierBlocked) return
@@ -980,12 +1064,12 @@ export default function Sidebar() {
                                         effectiveServiceBusinessId
                                       )
                                     )
-                                    setIsOpen(false)
+                                    setMobileOpen(false)
                                     return
                                   }
                                   if (contextBlocked) return
                                   router.push(target)
-                                  setIsOpen(false)
+                                  setMobileOpen(false)
                                 }}
                                 aria-disabled={
                                   contextBlocked && !tierBlocked ? true : undefined
@@ -1001,14 +1085,30 @@ export default function Sidebar() {
                                 ) : isServiceMenu ? (
                                   <span className="w-4 shrink-0" aria-hidden />
                                 ) : null}
-                                <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                                {tierBlocked && (
+                                {!isDesktopRail && (
+                                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                                )}
+                                {!isDesktopRail && tierBlocked && (
                                   <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
                                     <Lock className="h-3 w-3 opacity-90" aria-hidden="true" />
                                     Upgrade
                                   </span>
                                 )}
+                                {isDesktopRail && tierBlocked && (
+                                  <Lock
+                                    className="absolute right-0.5 top-0.5 h-2.5 w-2.5 text-amber-600 dark:text-amber-400"
+                                    aria-hidden="true"
+                                  />
+                                )}
                               </button>
+                            )
+
+                            return isDesktopRail ? (
+                              <SidebarNavTooltip key={itemIdx} label={navLabel}>
+                                {navButton}
+                              </SidebarNavTooltip>
+                            ) : (
+                              <div key={itemIdx}>{navButton}</div>
                             )
                           })}
                         </div>
@@ -1025,21 +1125,42 @@ export default function Sidebar() {
           </nav>
 
           {/* Sidebar Footer */}
-          <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-1">
-            <button
-              onClick={async () => {
-                clearTabIndustryMode()
-                clearSelectedBusinessId()
-                await supabase.auth.signOut()
-                router.push("/login")
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-slate-600 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-            >
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Logout
-            </button>
+          <div
+            className={`border-t border-slate-200 dark:border-slate-800 space-y-1 ${
+              isDesktopRail ? "p-2" : "p-3"
+            }`}
+          >
+            {isDesktopRail ? (
+              <SidebarNavTooltip label="Logout">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    clearTabIndustryMode()
+                    clearSelectedBusinessId()
+                    await supabase.auth.signOut()
+                    router.push("/login")
+                  }}
+                  className="flex w-full items-center justify-center rounded-md p-2 text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                  aria-label="Logout"
+                >
+                  <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+                </button>
+              </SidebarNavTooltip>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  clearTabIndustryMode()
+                  clearSelectedBusinessId()
+                  await supabase.auth.signOut()
+                  router.push("/login")
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-slate-600 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              >
+                <LogOut className="w-4 h-4 shrink-0" aria-hidden="true" />
+                Logout
+              </button>
+            )}
           </div>
         </div>
       </aside>

@@ -1,12 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { supabase } from "@/lib/supabaseClient"
+import { getCurrentBusiness } from "@/lib/business"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
 
 export default function ServiceNewMaterialPage() {
   const router = useRouter()
+  const [businessId, setBusinessId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [name, setName] = useState("")
@@ -15,6 +19,19 @@ export default function ServiceNewMaterialPage() {
   const [reorder_level, setReorderLevel] = useState("0")
   const [initial_quantity, setInitialQuantity] = useState("0")
   const [is_active, setIsActive] = useState(true)
+
+  useEffect(() => {
+    ;(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (business) setBusinessId(business.id)
+    })()
+  }, [])
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

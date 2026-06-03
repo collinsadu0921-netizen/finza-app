@@ -5,6 +5,8 @@ import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Asset = {
   id: string
@@ -35,6 +37,7 @@ export default function AssetViewPage() {
   const params = useParams()
   const assetId = params.id as string
   const toast = useToast()
+  const { readOnly } = useServiceFinancialWrite("accounting")
   const [loading, setLoading] = useState(true)
   const [asset, setAsset] = useState<Asset | null>(null)
   const [depreciationEntries, setDepreciationEntries] = useState<DepreciationEntry[]>([])
@@ -194,7 +197,7 @@ export default function AssetViewPage() {
               </p>
             </div>
             <div className="flex gap-3">
-              {asset.status === "active" && (
+              {!readOnly && asset.status === "active" && (
                 <>
                   <button
                     onClick={() => setShowDepreciationModal(true)}
@@ -218,6 +221,8 @@ export default function AssetViewPage() {
               )}
             </div>
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Asset Details */}

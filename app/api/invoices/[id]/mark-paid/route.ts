@@ -7,6 +7,8 @@ import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engi
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
+import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 /**
  * Mark Invoice as Paid
@@ -43,6 +45,14 @@ export async function POST(
     } catch (e: any) {
       return NextResponse.json({ error: e?.message || "Business is archived" }, { status: 403 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const body = await request.json()
     const { payment_reference, method = "cash", date, notes } = body
@@ -155,6 +165,11 @@ export async function POST(
         { error: paymentError.message || "Failed to create payment" },
         { status: 500 }
       )
+    }
+
+    const journalAssert = await assertPaymentJournalPosted(supabase, payment.id, business.id)
+    if (!journalAssert.ok) {
+      return NextResponse.json({ error: journalAssert.error }, { status: 500 })
     }
 
     // The database trigger will automatically:

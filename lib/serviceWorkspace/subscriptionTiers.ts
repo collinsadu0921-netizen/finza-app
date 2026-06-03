@@ -11,13 +11,10 @@
  * - Business: full general ledger, reconciliation, periods, loans, CIT, system audit.
  *
  * Subscription status (service_subscription_status):
- * - trialing  — 14-day free trial; check trial_ends_at to determine if still active.
- *               When trial_ends_at passes, effective tier silently downgrades to
- *               'starter' — no hard lock; user keeps Essentials and sees upgrade CTA.
+ * - trialing  — active trial while trial_ends_at > now()
+ * - past_due  — unpaid trial post-expiry grace OR paid renewal payment failed (3-day grace)
  * - active    — paid subscription current
- * - past_due  — renewal payment failed; MoMo grace window (3 days) still open
- * - locked    — renewal payment grace period expired; access blocked until payment.
- *               NOTE: trial expiry does NOT set locked — only failed payment grace does.
+ * - locked    — grace expired; workspace read-only until payment (view-only)
  */
 
 export const SERVICE_SUBSCRIPTION_TIERS = ["starter", "professional", "business"] as const

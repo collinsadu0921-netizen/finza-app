@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "business_id and name are required" }, { status: 400 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business_id, minTier: "starter",
     })
     if (denied) return denied

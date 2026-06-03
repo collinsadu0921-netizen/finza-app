@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function PUT(
   request: NextRequest,
@@ -38,7 +41,7 @@ export async function PUT(
       return NextResponse.json({ error: "business_id is required" }, { status: 400 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business_id, minTier: "professional",
     })
     if (denied) return denied
@@ -166,7 +169,7 @@ export async function DELETE(
       )
     }
 
-    const desDenied = await enforceServiceWorkspaceAccess({
+    const desDenied = await enforceServiceWorkspaceWriteAccess({
       supabase, userId: user.id, businessId: business_id, minTier: "professional",
     })
     if (desDenied) return desDenied

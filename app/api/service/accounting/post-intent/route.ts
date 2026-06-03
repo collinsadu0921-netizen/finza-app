@@ -14,7 +14,7 @@ import {
   validateServiceIntent,
   type AccountForValidation,
 } from "@/lib/service/accounting/intentTypes"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceWorkspaceWriteAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase,
       userId: user.id,
       businessId,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function GET(
   request: NextRequest,
@@ -65,6 +66,14 @@ export async function PUT(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const body = await request.json()
     const {
@@ -166,6 +175,14 @@ export async function DELETE(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const writeDeniedDel = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDeniedDel) return writeDeniedDel
 
     // Verify payment exists and belongs to business
     const { data: existingPayment } = await supabase

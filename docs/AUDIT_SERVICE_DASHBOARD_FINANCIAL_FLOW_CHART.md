@@ -2,6 +2,8 @@
 
 **Scope:** Service workspace dashboard “Financial flow” chart only. Read-only; no fixes implemented.
 
+> **Source contract (2026-06):** Live P&L uses journal movement via `get_profit_and_loss_movement`, not Trial Balance `closing_balance`. See [REPORTING_SOURCE_CONTRACT.md](./REPORTING_SOURCE_CONTRACT.md). Sections below that reference `get_profit_and_loss_from_trial_balance` describe the pre-2026 path.
+
 ---
 
 ## 1. Where the chart data is sourced
@@ -20,15 +22,15 @@
 2. Periods: query `accounting_periods` for `business_id`, order `period_start` desc, limit `periods` (1–24).
 3. For each period (after reversing to chronological order): call `getPnLTotals(supabase, businessId, row.period_start)`.
 4. `getPnLTotals` calls `getProfitAndLossReport(supabase, { businessId, period_start })` which:
-   - Resolves period via `resolveAccountingPeriodForReport` (gets `period_id`).
-   - Calls RPC **`get_profit_and_loss_from_trial_balance(p_period_id)`**.
+   - Resolves period via `resolveAccountingPeriodForReport` (gets `period_start` / `period_end`).
+   - Calls RPC **`get_profit_and_loss_movement(p_business_id, p_start_date, p_end_date)`** (journal movement in range).
 
-**Underlying SQL/RPC chain:**
+**Underlying SQL/RPC chain (current):**
 
-- **`get_profit_and_loss_from_trial_balance(p_period_id)`** (migration 234): returns rows from **`get_trial_balance_from_snapshot(p_period_id)`** filtered by `account_type IN ('income', 'expense')`; exposes `account_code`, `account_name`, `account_type`, `period_total` (from `closing_balance`).
-- **`get_trial_balance_from_snapshot(p_period_id)`** (migration 247): reads table **`trial_balance_snapshots`** for that `period_id` (with `business_id` check). If no row or `is_stale = TRUE`, calls **`generate_trial_balance(p_period_id, NULL)`** to regenerate from ledger, then re-reads the snapshot.
+- **`get_profit_and_loss_movement`** (migrations 489/490): aggregates `journal_entry_lines` joined to `journal_entries` and `accounts` for the business and inclusive date range. Income/revenue = Σ(credit − debit); expense = Σ(debit − credit).
+- Period bounds come from `resolveAccountingPeriodForReport` / `resolvePnLMovementRange`.
 
-So the **data source for the chart** is: **RPC `get_profit_and_loss_from_trial_balance`** → **`get_trial_balance_from_snapshot`** → **table `trial_balance_snapshots`** (with regeneration from ledger when missing or stale). There is no direct SQL in the route; the route uses the JS helper `getProfitAndLossReport`, which calls the RPC.
+So the **data source for the chart** is: **service-timeline** → **`getProfitAndLossReport`** → **`get_profit_and_loss_movement`** → **ledger** (`journal_entries`, `journal_entry_lines`). Trial Balance snapshots are not used for P&L movement.
 
 ---
 
@@ -74,7 +76,7 @@ So the **data source for the chart** is: **RPC `get_profit_and_loss_from_trial_b
   - `expenses` = sum of cogs/operating/other_expenses/taxes section subtotals.
   - **`netProfit = data.totals?.net_profit ?? revenue - expenses`** (API derives it from P&L totals or revenue − expenses).
 - **getProfitAndLossReport** (lib): Builds `totals.net_profit` from section subtotals (gross profit, operating profit, then **netProfit = operatingProfit**). So at report level, net profit is also derived from sections, not a separate DB column.
-- **RPC** `get_profit_and_loss_from_trial_balance` returns account-level `period_total`; it does not return a precomputed “profit” field. Profit exists only after the app aggregates sections and computes totals.
+- **`get_profit_and_loss_movement`** returns account-level `period_total` (movement, not closing balance); it does not return a precomputed “profit” field. Profit exists only after the app aggregates sections and computes totals.
 
 **Conclusion:** Profit is **derived** (revenue − expenses or P&L totals from section aggregation) in both the timeline API and the P&L report layer; it is **not** queried as an independent value from the DB.
 
@@ -82,13 +84,10 @@ So the **data source for the chart** is: **RPC `get_profit_and_loss_from_trial_b
 
 ## 5. Snapshot tables vs ledger aggregation
 
-**Snapshot table is used** for the chart path.
+**Ledger movement is used** for the chart path (not Trial Balance closing balances).
 
-- Chart data goes through: **service-timeline** → **getProfitAndLossReport** → RPC **get_profit_and_loss_from_trial_balance(p_period_id)** → **get_trial_balance_from_snapshot(p_period_id)**.
-- **get_trial_balance_from_snapshot** (migration 247):
-  - Reads **`trial_balance_snapshots`** for the given `period_id` (and business_id).
-  - If no row or `is_stale = TRUE`, calls **`generate_trial_balance(p_period_id, NULL)`** to (re)build from ledger and write/update the snapshot, then re-reads.
-- So at read time the chart uses **trial_balance_snapshots**; ledger is only used when the snapshot is missing or stale (via `generate_trial_balance`). No direct aggregation from `journal_entries` / `journal_entry_lines` in the chart request path.
+- Chart data goes through: **service-timeline** → **getProfitAndLossReport** → **`get_profit_and_loss_movement`** → direct aggregation from **`journal_entries`** / **`journal_entry_lines`**.
+- **Trial Balance snapshots** remain the source for Trial Balance reports only; they are not the live P&L source for the dashboard chart.
 
 ---
 

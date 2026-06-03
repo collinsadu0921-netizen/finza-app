@@ -18,7 +18,10 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import {
+  enforceServiceIndustryMinTier,
+  enforceServiceIndustryMinTierWrite,
+} from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET() {
   try {
@@ -156,7 +159,7 @@ export async function POST(request: NextRequest) {
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const tierDeniedAdvPost = await enforceServiceIndustryMinTier(
+    const tierDeniedAdvPost = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,

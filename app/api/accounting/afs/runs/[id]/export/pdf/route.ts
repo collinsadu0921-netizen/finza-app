@@ -4,6 +4,10 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
+import { toBalanceSheetExportView } from "@/lib/accounting/reports/balanceSheetExportHelpers"
+import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import { toPnLExportView } from "@/lib/accounting/reports/pnlExportHelpers"
 
 /**
  * GET /api/accounting/afs/runs/[id]/export/pdf
@@ -103,39 +107,54 @@ export async function GET(
 
     const businessName = (business as any)?.legal_name || (business as any)?.name || "Business"
     const businessType: string = (business as any)?.business_type ?? "limited_company"
-    const isSoleProp = businessType === "sole_proprietorship"
-    const equitySectionTitle = isSoleProp ? "Owner's Equity" : "Equity"
-    const netIncomeLabel = isSoleProp ? "Net Profit for Period" : "Current Period Net Income"
+    // ── Fetch report data ─────────────────────────────────────────────────────
 
-    // ── Fetch report data via snapshot RPCs ───────────────────────────────────
-
-    // P&L
-    const { data: pnlRows } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-      p_period_id: periodId,
+    // P&L (canonical ledger movement)
+    const { data: pnlReportData, error: pnlReportError } = await getProfitAndLossReport(supabase, {
+      businessId: resolvedBusinessId,
+      period_start: run.period_start ?? null,
+      end_date: run.period_end ?? null,
     })
-    type PnlRow = { account_code?: string; account_name?: string; account_type?: string; period_total?: number | null }
-    const pnlData = (pnlRows ?? []) as PnlRow[]
+    if (pnlReportError || !pnlReportData) {
+      return NextResponse.json(
+        { error: pnlReportError || "Failed to fetch P&L for AFS export" },
+        { status: 500 }
+      )
+    }
+    const pnlView = toPnLExportView(pnlReportData)
+    const incomeRows = pnlView.incomeLines
+    const expenseRows = pnlView.expenseLines
+    const totalIncome = pnlView.totalRevenue
+    const totalExpenses = pnlView.totalExpenses
+    const netProfit = pnlView.netProfit
+    const pnlPeriodStart = pnlView.periodStart
+    const pnlPeriodEnd = pnlView.periodEnd
 
-    const incomeRows = pnlData.filter((r) => r.account_type === "income" || r.account_type === "revenue")
-    const expenseRows = pnlData.filter((r) => r.account_type === "expense")
-    const totalIncome = incomeRows.reduce((s, r) => s + Number(r.period_total ?? 0), 0)
-    const totalExpenses = expenseRows.reduce((s, r) => s + Number(r.period_total ?? 0), 0)
-    const netProfit = Math.round((totalIncome - totalExpenses) * 100) / 100
-
-    // Balance Sheet
-    const { data: bsRows } = await supabase.rpc("get_balance_sheet_from_trial_balance", {
-      p_period_id: periodId,
+    // Balance Sheet (canonical ledger as-of + cumulative net income)
+    const { data: bsReportData, error: bsReportError } = await getBalanceSheetReport(supabase, {
+      businessId: resolvedBusinessId,
+      period_start: run.period_start ?? null,
+      end_date: run.period_end ?? null,
+      business_type: businessType as "limited_company" | "sole_proprietorship",
     })
-    type BsRow = { account_code?: string; account_name?: string; account_type?: string; balance?: number | null }
-    const bsData = (bsRows ?? []) as BsRow[]
-
-    const assetRows      = bsData.filter((r) => r.account_type === "asset" || r.account_type === "contra_asset")
-    const liabilityRows  = bsData.filter((r) => r.account_type === "liability")
-    const equityRows     = bsData.filter((r) => r.account_type === "equity")
-    const totalAssets     = Math.round(assetRows.reduce((s, r) => s + Number(r.balance ?? 0), 0) * 100) / 100
-    const totalLiabilities = Math.round(liabilityRows.reduce((s, r) => s + Number(r.balance ?? 0), 0) * 100) / 100
-    const totalEquity     = Math.round(equityRows.reduce((s, r) => s + Number(r.balance ?? 0), 0) * 100) / 100
-    const adjustedEquity  = Math.round((totalEquity + netProfit) * 100) / 100
+    if (bsReportError || !bsReportData) {
+      return NextResponse.json(
+        { error: bsReportError || "Failed to fetch balance sheet for AFS export" },
+        { status: 500 }
+      )
+    }
+    const bsView = toBalanceSheetExportView(bsReportData)
+    const {
+      assetLines: assetRows,
+      liabilityLines: liabilityRows,
+      equityLines: equityRows,
+      totals: bsTotals,
+      adjustedEquity,
+      equitySectionLabel: equitySectionTitle,
+      asOfDate: bsAsOfDate,
+    } = bsView
+    const totalAssets = bsTotals.assets
+    const totalLiabilities = bsTotals.liabilities
 
     // Trial Balance
     const { data: tbRows } = await supabase.rpc("get_trial_balance_snapshot", {
@@ -272,7 +291,7 @@ export async function GET(
     doc.fontSize(14).font("Helvetica-Bold").fillColor("#1e3a5f")
       .text("Statement of Profit or Loss", margin, margin)
     doc.fontSize(9).font("Helvetica").fillColor("#555555")
-      .text(`${businessName}   |   ${resolvedPeriod.period_start} to ${resolvedPeriod.period_end}${currencyCode ? "   |   " + currencyCode : ""}`, margin)
+      .text(`${businessName}   |   ${pnlPeriodStart} to ${pnlPeriodEnd}${currencyCode ? "   |   " + currencyCode : ""}`, margin)
     doc.fillColor("#000000").moveDown(0.4)
 
     sectionHeading("Revenue / Income")
@@ -309,13 +328,13 @@ export async function GET(
     doc.fontSize(14).font("Helvetica-Bold").fillColor("#1e3a5f")
       .text("Statement of Financial Position", margin, margin)
     doc.fontSize(9).font("Helvetica").fillColor("#555555")
-      .text(`${businessName}   |   As at ${resolvedPeriod.period_end}${currencyCode ? "   |   " + currencyCode : ""}`, margin)
+      .text(`${businessName}   |   As at ${bsAsOfDate}${currencyCode ? "   |   " + currencyCode : ""}`, margin)
     doc.fillColor("#000000").moveDown(0.4)
 
     sectionHeading("Assets")
     tableHeader(["Code", "Account", "Balance"])
     assetRows.forEach((r, i) => {
-      tableRow(r.account_code ?? "", r.account_name ?? "", fmt(r.balance), i % 2 === 1)
+      tableRow(r.account_code ?? "", r.account_name ?? "", fmt(r.amount), i % 2 === 1)
     })
     totalRow("Total Assets", fmt(totalAssets))
 
@@ -323,7 +342,7 @@ export async function GET(
     sectionHeading("Liabilities")
     tableHeader(["Code", "Account", "Balance"])
     liabilityRows.forEach((r, i) => {
-      tableRow(r.account_code ?? "", r.account_name ?? "", fmt(r.balance), i % 2 === 1)
+      tableRow(r.account_code ?? "", r.account_name ?? "", fmt(r.amount), i % 2 === 1)
     })
     totalRow("Total Liabilities", fmt(totalLiabilities))
 
@@ -331,23 +350,19 @@ export async function GET(
     sectionHeading(equitySectionTitle)
     tableHeader(["Code", "Account", "Balance"])
     equityRows.forEach((r, i) => {
-      tableRow(r.account_code ?? "", r.account_name ?? "", fmt(r.balance), i % 2 === 1)
+      tableRow(r.account_code ?? "", r.account_name ?? "", fmt(r.amount), i % 2 === 1)
     })
-    // Always show net income/loss as a visible line in the equity section
-    if (netProfit !== 0) {
-      tableRow("", netIncomeLabel, fmt(netProfit), equityRows.length % 2 === 1)
-    }
     totalRow(`Total ${equitySectionTitle}`, fmt(adjustedEquity))
 
     doc.moveDown(0.4)
     ensureSpace(rowH)
-    totalRow("Total Liabilities + " + equitySectionTitle, fmt(Math.round((totalLiabilities + adjustedEquity) * 100) / 100))
+    totalRow("Total Liabilities + " + equitySectionTitle, fmt(bsTotals.liabilities_plus_equity))
 
     // Balanced indicator
-    const isBalanced = Math.abs(totalAssets - (totalLiabilities + adjustedEquity)) < 0.02
+    const isBalanced = bsTotals.is_balanced
     doc.moveDown(0.3)
     doc.fontSize(8).font("Helvetica").fillColor(isBalanced ? "#1a6e3a" : "#c0392b")
-      .text(isBalanced ? "✓ Statement is balanced" : `⚠ Imbalance: ${fmt(totalAssets - totalLiabilities - adjustedEquity)}`, margin)
+      .text(isBalanced ? "✓ Statement is balanced" : `⚠ Imbalance: ${fmt(bsTotals.imbalance)}`, margin)
     doc.fillColor("#000000")
 
     // ── 4. TRIAL BALANCE ──────────────────────────────────────────────────────

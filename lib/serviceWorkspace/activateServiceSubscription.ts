@@ -1,6 +1,7 @@
 import "server-only"
 
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { isBusinessBillingExempt } from "@/lib/serviceWorkspace/loadBusinessBillingRow"
 import type { BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
@@ -34,6 +35,10 @@ export async function activateServiceSubscription(
   supabase: SupabaseClient,
   input: ActivateInput
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (await isBusinessBillingExempt(supabase, input.businessId)) {
+    return { ok: true }
+  }
+
   const paidAt = input.paidAt ?? new Date().toISOString()
   const nowIso = new Date().toISOString()
 

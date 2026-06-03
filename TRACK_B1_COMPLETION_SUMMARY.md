@@ -1,7 +1,8 @@
 # Track B1 — Report Bypass Containment: Completion Summary
 
 **Date:** 2025-01-17  
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE  
+**Source contract updated:** 2026-06 — see [docs/REPORTING_SOURCE_CONTRACT.md](docs/REPORTING_SOURCE_CONTRACT.md). Live P&L and Balance Sheet routes now use journal movement and cumulative as-of respectively; Trial Balance remains snapshot-based.
 
 ---
 
@@ -13,12 +14,12 @@
 
 ### CANONICAL Routes (7 total)
 - `/api/accounting/reports/trial-balance` - Uses `get_trial_balance_from_snapshot`
-- `/api/accounting/reports/profit-and-loss` - Uses `get_profit_and_loss_from_trial_balance`
-- `/api/accounting/reports/balance-sheet` - Uses `get_balance_sheet_from_trial_balance`
+- `/api/accounting/reports/profit-and-loss` - Uses `get_profit_and_loss_movement` (via `getProfitAndLossReport`)
+- `/api/accounting/reports/balance-sheet` - Uses cumulative ledger as-of (via `getBalanceSheetReport`)
 - `/api/accounting/reports/general-ledger` - Direct ledger queries
 - `/api/reports/trial-balance` - Uses `get_trial_balance_from_snapshot` (legacy wrapper)
-- `/api/reports/profit-loss` - Uses `get_profit_and_loss_from_trial_balance` (legacy wrapper)
-- `/api/reports/balance-sheet` - Uses `get_balance_sheet_from_trial_balance` (legacy wrapper)
+- `/api/reports/profit-loss` - Uses `getProfitAndLossReport` (legacy wrapper)
+- `/api/reports/balance-sheet` - Uses `getBalanceSheetReport` (legacy wrapper)
 
 ### LEGACY Routes (4 total)
 - `/api/reports/aging` - Reads `invoices`, `payments`

@@ -15,6 +15,8 @@ import ReadinessBanner from "@/components/accounting/ReadinessBanner"
 import PeriodCloseCenter from "@/components/PeriodCloseCenter"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import type { ScreenProps } from "./types"
 
 type ClosedByUser = {
@@ -39,6 +41,8 @@ type AccountingPeriod = {
 
 export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
   const router = useRouter()
+  const { readOnly: serviceReadOnly } = useServiceFinancialWrite("accounting")
+  const readOnly = mode === "service" && serviceReadOnly
   const { ready, authority_source, loading: readinessLoading, refetch: refetchReadiness } = useAccountingReadiness(businessId)
   const noContext = !businessId
   const [loading, setLoading] = useState(true)
@@ -477,6 +481,8 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
             </div>
           </div>
 
+          {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
+
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-6">
               {error}
@@ -583,7 +589,7 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
                                 >
                                   {isExpanded ? "Hide" : "Close Center"}
                                 </button>
-                                {canReopen && (
+                                {canReopen && !readOnly && (
                                   <button
                                     onClick={() => openReopenModal(period)}
                                     disabled={isProcessing}
@@ -694,6 +700,7 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
                                   businessId={businessId!}
                                   onPeriodUpdate={loadPeriods}
                                   hasActiveEngagement={hasActiveEngagement}
+                                  readOnly={readOnly}
                                 />
                               </td>
                             </tr>

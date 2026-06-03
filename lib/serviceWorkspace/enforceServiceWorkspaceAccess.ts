@@ -1,8 +1,5 @@
 /**
  * Server-side guards for the service workspace.
- *
- * Uses resolveServiceEntitlement (the same logic as the client context) so
- * that server and client always make identical access decisions.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -12,12 +9,8 @@ import { type ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptio
 import {
   resolveServiceEntitlement,
   entitlementIncludesTier,
-  type RawBusinessSubscriptionRow,
 } from "@/lib/serviceWorkspace/resolveServiceEntitlement"
-
-// ---------------------------------------------------------------------------
-// Membership check
-// ---------------------------------------------------------------------------
+import { loadBusinessSubscriptionRow } from "@/lib/serviceWorkspace/loadBusinessBillingRow"
 
 export async function userHasBusinessAccess(
   supabase: SupabaseClient,
@@ -44,32 +37,6 @@ export async function userHasBusinessAccess(
   return !!bu
 }
 
-// ---------------------------------------------------------------------------
-// Subscription state loader
-// ---------------------------------------------------------------------------
-
-async function loadBusinessSubscriptionRow(
-  supabase: SupabaseClient,
-  businessId: string
-): Promise<RawBusinessSubscriptionRow> {
-  const { data } = await supabase
-    .from("businesses")
-    .select(
-      "service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle, subscription_started_at"
-    )
-    .eq("id", businessId)
-    .is("archived_at", null)
-    .maybeSingle()
-
-  if (!data) return {}
-
-  return data as RawBusinessSubscriptionRow
-}
-
-// ---------------------------------------------------------------------------
-// Legacy helper kept for callers that need raw grace-only state
-// ---------------------------------------------------------------------------
-
 export function isSubscriptionPaymentLocked(
   graceUntil: string | Date | null | undefined
 ): boolean {
@@ -79,32 +46,28 @@ export function isSubscriptionPaymentLocked(
   return Date.now() >= end.getTime()
 }
 
-// ---------------------------------------------------------------------------
-// Main enforcement function
-// ---------------------------------------------------------------------------
-
 export type EnforceServiceAccessOptions = {
   supabase: SupabaseClient
   userId: string | null | undefined
   businessId: string
   minTier: ServiceSubscriptionTier
+  /** read: allow read-only locked tenants; write: also require canWriteFinancialRecords */
+  mode?: "read" | "write"
 }
+
+export const TRIAL_EXPIRED_READ_ONLY_MESSAGE =
+  "Your trial has ended. Upgrade to continue creating or editing financial records."
 
 /**
  * Returns null when access is allowed; a NextResponse (401 or 403) otherwise.
  *
- * Check order:
- * 1. Auth            — userId must be present
- * 2. Membership      — user must own or be a member of the business
- * 3. Payment lock    — subscription_grace_until expired → 403 SUBSCRIPTION_LOCKED
- * 4. Effective tier  — resolveServiceEntitlement() determines effectiveTier
- *                      (handles active trial, trial expiry downgrade, paid sub)
- *                      → 403 TIER_REQUIRED if effectiveTier < minTier
+ * Read mode: membership + tier (read-only lock does not block).
+ * Write mode: also blocks when financial writes are locked.
  */
 export async function enforceServiceWorkspaceAccess(
   opts: EnforceServiceAccessOptions
 ): Promise<NextResponse | null> {
-  const { supabase, userId, businessId, minTier } = opts
+  const { supabase, userId, businessId, minTier, mode = "read" } = opts
 
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -121,18 +84,19 @@ export async function enforceServiceWorkspaceAccess(
   const row = await loadBusinessSubscriptionRow(supabase, businessId)
   const entitlement = resolveServiceEntitlement(row)
 
-  // MoMo renewal grace expired — hard block regardless of tier
-  if (entitlement.isSubscriptionLocked) {
+  if (mode === "write" && !entitlement.canWriteFinancialRecords) {
     return NextResponse.json(
       {
-        error: "Subscription payment overdue. Renew to restore access.",
-        code: "SUBSCRIPTION_LOCKED",
+        error: TRIAL_EXPIRED_READ_ONLY_MESSAGE,
+        code: "TRIAL_EXPIRED_READ_ONLY",
+        trialGraceExpired: entitlement.trialGraceExpired,
+        trialGraceActive: entitlement.trialGraceActive,
+        isReadOnlyLocked: entitlement.isReadOnlyLocked,
       },
       { status: 403 }
     )
   }
 
-  // Effective tier check (handles active trial and trial-expiry downgrade)
   if (!entitlementIncludesTier(entitlement, minTier)) {
     return NextResponse.json(
       {
@@ -144,17 +108,16 @@ export async function enforceServiceWorkspaceAccess(
     )
   }
 
-  return null // access granted
+  return null
 }
 
-// ---------------------------------------------------------------------------
-// VAT-specific helper (Professional tier + subscription check)
-// ---------------------------------------------------------------------------
+/** Write guard — blocks read-only locked / expired unpaid trial tenants. */
+export async function enforceServiceWorkspaceWriteAccess(
+  opts: Omit<EnforceServiceAccessOptions, "mode">
+): Promise<NextResponse | null> {
+  return enforceServiceWorkspaceAccess({ ...opts, mode: "write" })
+}
 
-/**
- * Resolve which business a VAT returns API call applies to, then enforce
- * Professional tier + subscription (mirrors TierGate on VAT pages).
- */
 export async function resolveProfessionalVatBusinessId(
   supabase: SupabaseClient,
   userId: string | null | undefined,
@@ -180,7 +143,10 @@ export async function resolveProfessionalVatBusinessId(
     const b = await getCurrentBusiness(supabase, userId)
     if (!b?.id) {
       return NextResponse.json(
-        { error: "business_id is required, or complete onboarding to set a workspace." },
+        {
+          error:
+            "business_id is required, or complete onboarding to set a workspace.",
+        },
         { status: 400 }
       )
     }
@@ -192,14 +158,11 @@ export async function resolveProfessionalVatBusinessId(
     userId,
     businessId,
     minTier: "professional",
+    mode: "read",
   })
   if (denied) return denied
   return { businessId }
 }
-
-// ---------------------------------------------------------------------------
-// Kept for callers that only need subscription state without tier enforcement
-// ---------------------------------------------------------------------------
 
 /** @deprecated Prefer resolveServiceEntitlement() + loadBusinessSubscriptionRow() */
 export async function getBusinessSubscriptionState(
@@ -207,9 +170,10 @@ export async function getBusinessSubscriptionState(
   businessId: string
 ) {
   const row = await loadBusinessSubscriptionRow(supabase, businessId)
-  const { rawTier, isSubscriptionLocked: locked } = resolveServiceEntitlement(row)
+  const { rawTier, isReadOnlyLocked: locked } = resolveServiceEntitlement(row)
   return {
     tier: rawTier,
     graceUntil: row.subscription_grace_until ?? null,
+    locked,
   }
 }

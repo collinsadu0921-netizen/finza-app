@@ -47,9 +47,13 @@ export type ServiceSubscriptionContextValue = {
   // --- Trial ---
   isTrialing: boolean
   trialExpired: boolean
+  trialExpiredWithoutPayment: boolean
+  trialGraceActive: boolean
+  trialGraceExpired: boolean
   trialEndsAt: Date | null
   trialStartedAt: Date | null
   trialDaysLeft: number | null
+  canWriteFinancialRecords: boolean
 
   // --- Billing period ---
   /** Billing cycle: 'monthly' | 'quarterly' | 'annual'. Null until loaded. */
@@ -68,6 +72,8 @@ export type ServiceSubscriptionContextValue = {
   /** When the grace deadline expires (subscription_grace_until). Null if not set. */
   graceEndsAt: Date | null
   subscriptionLocked: boolean
+  billingExempt: boolean
+  billingExemptReason: string | null
 }
 
 const defaultValue: ServiceSubscriptionContextValue = {
@@ -81,9 +87,13 @@ const defaultValue: ServiceSubscriptionContextValue = {
   canAccessTier: () => true,
   isTrialing: false,
   trialExpired: false,
+  trialExpiredWithoutPayment: false,
+  trialGraceActive: false,
+  trialGraceExpired: false,
   trialEndsAt: null,
   trialStartedAt: null,
   trialDaysLeft: null,
+  canWriteFinancialRecords: true,
   billingCycle: null,
   currentPeriodEndsAt: null,
   subscriptionStartedAt: null,
@@ -92,13 +102,15 @@ const defaultValue: ServiceSubscriptionContextValue = {
   inGracePeriod: false,
   graceEndsAt: null,
   subscriptionLocked: false,
+  billingExempt: false,
+  billingExemptReason: null,
 }
 
 const ServiceSubscriptionContext =
   createContext<ServiceSubscriptionContextValue>(defaultValue)
 
 const SERVICE_COLUMNS =
-  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle, subscription_started_at"
+  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle, subscription_started_at, billing_exempt, billing_exempt_reason"
 
 function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitlement {
   const r: RawBusinessSubscriptionRow = {
@@ -110,6 +122,8 @@ function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitleme
     current_period_ends_at:      (row?.current_period_ends_at      as string) ?? null,
     billing_cycle:               (row?.billing_cycle               as string) ?? null,
     subscription_started_at:     (row?.subscription_started_at     as string) ?? null,
+    billing_exempt:              (row?.billing_exempt              as boolean) ?? null,
+    billing_exempt_reason:       (row?.billing_exempt_reason       as string) ?? null,
   }
   return resolveServiceEntitlement(r)
 }
@@ -212,9 +226,13 @@ export function ServiceSubscriptionProvider({
       canAccessTier,
       isTrialing:         entitlement.isTrialing,
       trialExpired:       entitlement.trialExpired,
+      trialExpiredWithoutPayment: entitlement.trialExpiredWithoutPayment,
+      trialGraceActive:   entitlement.trialGraceActive,
+      trialGraceExpired:  entitlement.trialGraceExpired,
       trialEndsAt:        entitlement.trialEndsAt,
       trialStartedAt:     entitlement.trialStartedAt,
       trialDaysLeft:      entitlement.trialDaysLeft,
+      canWriteFinancialRecords: entitlement.canWriteFinancialRecords,
       billingCycle:       entitlement.billingCycle,
       currentPeriodEndsAt: entitlement.currentPeriodEndsAt,
       subscriptionStartedAt: entitlement.subscriptionStartedAt,
@@ -223,6 +241,8 @@ export function ServiceSubscriptionProvider({
       inGracePeriod:      entitlement.inGracePeriod,
       graceEndsAt:        entitlement.graceEndsAt,
       subscriptionLocked: entitlement.isSubscriptionLocked,
+      billingExempt: entitlement.billingExempt,
+      billingExemptReason: entitlement.billingExemptReason,
     }),
     [entitlement, businessId, loading, entitlementResolved, canAccessTier]
   )

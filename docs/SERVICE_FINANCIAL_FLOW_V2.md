@@ -12,7 +12,7 @@ NEXT_PUBLIC_SERVICE_ANALYTICS_V2=true
 ```
 
 - **`true`** — Chart data from `GET /api/dashboard/service-analytics` (ledger aggregation by day/week/month). Cash toggle and line chart with full tooltip (Date, Revenue, Expenses, Profit, Cash Movement).
-- **`false`** or unset — Chart data from `GET /api/dashboard/service-timeline` (existing snapshot-based P&L per accounting period). No cash series.
+- **`false`** or unset — Chart data from `GET /api/dashboard/service-timeline` (canonical P&L movement per accounting period via `getProfitAndLossReport`). No cash series.
 
 ## Rollback
 
@@ -21,13 +21,14 @@ To revert to the previous behaviour:
 1. Set `NEXT_PUBLIC_SERVICE_ANALYTICS_V2=false` or remove the variable.
 2. Restart the app so the client picks up the new env.
 
-No database or accounting changes are reverted; the dashboard simply switches back to the snapshot-based timeline API.
+No database or accounting changes are reverted; the dashboard simply switches back to the timeline API (still ledger movement P&L per period).
 
 ## What is not changed
 
-- Ledger posting, journal entries, trial_balance_snapshots
-- Accounting workspace reports (P&L, Balance Sheet, Trial Balance)
-- Period locking, reconciliation, `get_profit_and_loss_from_trial_balance`, `generate_trial_balance`
+- Ledger posting, journal entries, trial_balance_snapshots (Trial Balance reports still use snapshots)
+- Accounting workspace reports (P&L movement, Balance Sheet as-of, Trial Balance snapshot)
+- Period locking, reconciliation, `generate_trial_balance`
+- Legacy DB function `get_profit_and_loss_from_trial_balance` (retained in migrations; not live P&L source)
 
 ## Data source (v2)
 

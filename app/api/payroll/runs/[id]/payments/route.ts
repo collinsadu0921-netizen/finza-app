@@ -4,7 +4,10 @@ import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import {
+  enforceServiceIndustryMinTier,
+  enforceServiceIndustryMinTierWrite,
+} from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 async function getRunPaymentData(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -160,7 +163,7 @@ export async function POST(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const tierDeniedPayPost = await enforceServiceIndustryMinTier(
+    const tierDeniedPayPost = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,

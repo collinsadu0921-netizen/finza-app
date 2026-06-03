@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 import PageHeader from "@/components/ui/PageHeader"
 import Button from "@/components/ui/Button"
 
@@ -17,6 +18,8 @@ export default function ServiceNewServicePage() {
   const [default_price, setDefaultPrice] = useState("")
   const [tax_code, setTaxCode] = useState("")
   const [is_active, setIsActive] = useState(true)
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   useEffect(() => {
     ;(async () => {

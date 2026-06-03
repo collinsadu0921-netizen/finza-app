@@ -7,6 +7,7 @@ import {
   createSubscriptionCheckoutSession,
 } from "@/lib/payments/subscription/subscriptionCheckoutService"
 import { isMockSubscriptionFlowEnabled } from "@/lib/payments/subscription/mockFeatureFlag"
+import { isBusinessBillingExempt } from "@/lib/serviceWorkspace/loadBusinessBillingRow"
 
 const BILLING_CYCLES: BillingCycle[] = ["monthly", "quarterly", "annual"]
 
@@ -31,6 +32,17 @@ export async function POST(request: NextRequest) {
       typeof body.business_id === "string" ? body.business_id : null
     )
     if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: scope.status })
+
+    if (await isBusinessBillingExempt(supabase, scope.businessId)) {
+      return NextResponse.json(
+        {
+          error:
+            "This workspace has internal billing exemption. Subscription checkout is not required.",
+          code: "BILLING_EXEMPT",
+        },
+        { status: 403 }
+      )
+    }
 
     const tier = tryParseServiceSubscriptionTier(typeof body.target_tier === "string" ? body.target_tier : null)
     const cycle = parseBillingCycle(body.billing_cycle)

@@ -20,6 +20,8 @@ import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect, type MenuSelectOption } from "@/components/ui/MenuSelect"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { openWhatsAppUrlInBrowser } from "@/lib/communication/openWhatsAppClient"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 
 type Customer = {
   id: string
@@ -187,7 +189,7 @@ const LineItemRow = memo(function LineItemRow({
 // PRIMARY COMPONENT: NewInvoicePage
 // Refactored to "Paper Metaphor" Draft Document
 // ------------------------------------------------------------
-export default function NewInvoicePage() {
+function NewInvoicePageContent() {
   const router = useRouter()
   const pathname = usePathname()
   const isUnderService = pathname?.startsWith("/service") ?? false
@@ -205,6 +207,8 @@ export default function NewInvoicePage() {
   const [businessId, setBusinessId] = useState("")
   const [businessIndustry, setBusinessIndustry] = useState<string | null>(null)
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   // Invoice from Job (service workspace only)
   const [invoiceFromJob, setInvoiceFromJob] = useState(false)
@@ -1366,5 +1370,13 @@ export default function NewInvoicePage() {
         </div>
       </div>
     </Wrapper>
+  )
+}
+
+export default function NewInvoicePage() {
+  return (
+    <ServiceFinancialWritePageGuard scope="invoices" backHref="/service/invoices">
+      <NewInvoicePageContent />
+    </ServiceFinancialWritePageGuard>
   )
 }

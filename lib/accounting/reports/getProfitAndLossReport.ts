@@ -1,13 +1,13 @@
 /**
- * Canonical Profit & Loss report — ledger-derived from Trial Balance snapshot.
- * Single source of truth: get_profit_and_loss_from_trial_balance(period_id).
- * Period: resolveAccountingPeriodForReport(), except when both start_date and end_date are set —
- * then all overlapping accounting periods are aggregated (quarterly CIT auto-fetch).
+ * Canonical Profit & Loss report — ledger period movement (je.date in range).
+ * Source: get_profit_and_loss_movement(business_id, start_date, end_date).
+ * income/revenue: credits - debits; expense: debits - credits.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { getCurrencySymbol, getCurrencyName } from "@/lib/currency"
+import { fetchProfitAndLossMovementRows, type PnLMovementRow } from "./pnlMovement"
+import { resolvePnLMovementRange } from "./resolvePnLMovementRange"
 
 export type PnLReportInput = {
   businessId: string
@@ -52,7 +52,7 @@ export type PnLReportResponse = {
   totals: {
     gross_profit: number
     operating_profit: number
-    profit_before_tax: number  // gross_profit minus operating+other expenses; BEFORE taxes/CIT
+    profit_before_tax: number
     net_profit: number
   }
   telemetry: {
@@ -73,48 +73,8 @@ const SECTION_LABELS: Record<PnLSectionKey, string> = {
   taxes: "Taxes",
 }
 
-type PnLRpcRow = {
-  account_id?: string
-  account_code?: string
-  account_name?: string
-  account_type?: string
-  period_total?: number
-}
-
-/**
- * Sum P&L rows from multiple accounting periods (e.g. quarterly auto-fetch on CIT).
- * Keys by account_id, else account_code + name + type.
- */
-function mergePnLRpcRows(batches: PnLRpcRow[][]): PnLRpcRow[] {
-  const map = new Map<string, PnLRpcRow>()
-  for (const rows of batches) {
-    for (const row of rows) {
-      const code = String(row.account_code ?? "").trim()
-      const name = String(row.account_name ?? "").trim()
-      const id = row.account_id != null ? String(row.account_id) : ""
-      const type = String(row.account_type ?? "")
-      const key = id || `${code}|${name}|${type}`
-      const amt = Math.round(Number(row.period_total ?? 0) * 100) / 100
-      const prev = map.get(key)
-      if (prev) {
-        prev.period_total = Math.round((Number(prev.period_total ?? 0) + amt) * 100) / 100
-      } else {
-        map.set(key, {
-          ...row,
-          account_id: id || undefined,
-          account_code: code,
-          account_name: name,
-          period_total: amt,
-        })
-      }
-    }
-  }
-  return [...map.values()]
-}
-
 function sectionKeyFromAccount(code: string, accountType: string): PnLSectionKey {
   const n = parseInt(code, 10) || 0
-  // Accept both "income" (accounts table) and "revenue" (chart_of_accounts table)
   if (accountType === "income" || accountType === "revenue") {
     if (n >= 4000 && n < 5000) return "income"
     if (n >= 8000 && n < 9000) return "other_income"
@@ -130,15 +90,17 @@ function sectionKeyFromAccount(code: string, accountType: string): PnLSectionKey
   return "operating_expenses"
 }
 
-function buildReportFromMergedRows(
-  raw: PnLRpcRow[],
+function buildReportFromMovementRows(
+  raw: PnLMovementRow[],
   resolvedPeriod: {
     period_id: string
     period_start: string
     period_end: string
     resolution_reason: PnLReportResponse["period"]["resolution_reason"]
   },
-  currency: PnLReportResponse["currency"]
+  currency: PnLReportResponse["currency"],
+  movementStart: string,
+  movementEnd: string
 ): PnLReportResponse {
   const sectionMap = new Map<PnLSectionKey, PnLLine[]>()
   const keys: PnLSectionKey[] = [
@@ -182,8 +144,8 @@ function buildReportFromMergedRows(
   return {
     period: {
       period_id: resolvedPeriod.period_id,
-      period_start: resolvedPeriod.period_start,
-      period_end: resolvedPeriod.period_end,
+      period_start: movementStart,
+      period_end: movementEnd,
       resolution_reason: resolvedPeriod.resolution_reason,
     },
     currency,
@@ -196,10 +158,10 @@ function buildReportFromMergedRows(
     },
     telemetry: {
       resolved_period_reason: resolvedPeriod.resolution_reason,
-      resolved_period_start: resolvedPeriod.period_start,
-      resolved_period_end: resolvedPeriod.period_end,
-      source: "trial_balance",
-      version: 1,
+      resolved_period_start: movementStart,
+      resolved_period_end: movementEnd,
+      source: "ledger",
+      version: 2,
     },
   }
 }
@@ -213,113 +175,20 @@ export async function getProfitAndLossReport(
     return { data: null, error: "Missing required parameter: business_id" }
   }
 
-  const rangeStart = input.start_date?.trim() ?? ""
-  const rangeEnd = input.end_date?.trim() ?? ""
-  const hasExplicitDateRange =
-    rangeStart &&
-    rangeEnd &&
-    /^\d{4}-\d{2}-\d{2}$/.test(rangeStart) &&
-    /^\d{4}-\d{2}-\d{2}$/.test(rangeEnd) &&
-    rangeStart <= rangeEnd
-
-  if (hasExplicitDateRange) {
-    let { data: overlapping, error: ovErr } = await supabase
-      .from("accounting_periods")
-      .select("id, period_start, period_end")
-      .eq("business_id", businessId)
-      .lte("period_start", rangeEnd)
-      .gte("period_end", rangeStart)
-      .order("period_start", { ascending: true })
-
-    if (ovErr) {
-      return { data: null, error: ovErr.message }
-    }
-
-    if (!overlapping?.length) {
-      await supabase.rpc("ensure_accounting_period", { p_business_id: businessId, p_date: rangeStart })
-      await supabase.rpc("ensure_accounting_period", { p_business_id: businessId, p_date: rangeEnd })
-      const refetch = await supabase
-        .from("accounting_periods")
-        .select("id, period_start, period_end")
-        .eq("business_id", businessId)
-        .lte("period_start", rangeEnd)
-        .gte("period_end", rangeStart)
-        .order("period_start", { ascending: true })
-      overlapping = refetch.data ?? []
-      if (refetch.error) {
-        return { data: null, error: refetch.error.message }
-      }
-    }
-
-    if (!overlapping?.length) {
-      return {
-        data: null,
-        error: "No accounting periods found for the selected date range. Check that the period exists in Accounting.",
-      }
-    }
-
-    const rowBatches: PnLRpcRow[][] = []
-    for (const p of overlapping) {
-      const { data: rows, error: rpcError } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-        p_period_id: p.id,
-      })
-      if (rpcError) {
-        return { data: null, error: rpcError.message ?? "Failed to fetch profit & loss" }
-      }
-      rowBatches.push((rows ?? []) as PnLRpcRow[])
-    }
-
-    const mergedRaw = mergePnLRpcRows(rowBatches)
-    const first = overlapping[0]
-    const last = overlapping[overlapping.length - 1]
-    const resolvedPeriod = {
-      period_id: first.id,
-      period_start: first.period_start,
-      period_end: last.period_end,
-      resolution_reason: "date_range" as PnLReportResponse["period"]["resolution_reason"],
-    }
-
-    const { data: biz } = await supabase
-      .from("businesses")
-      .select("default_currency")
-      .eq("id", businessId)
-      .single()
-    const currencyCode = biz?.default_currency ?? "USD"
-    const currency = {
-      code: currencyCode,
-      symbol: getCurrencySymbol(currencyCode) || currencyCode,
-      name: getCurrencyName(currencyCode) || currencyCode,
-    }
-
-    return {
-      data: buildReportFromMergedRows(mergedRaw, resolvedPeriod, currency),
-      error: "",
-    }
+  const { range, error: rangeError } = await resolvePnLMovementRange(supabase, input)
+  if (rangeError || !range) {
+    return { data: null, error: rangeError ?? "Accounting period could not be resolved" }
   }
 
-  const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
+  const { rows, error: fetchError } = await fetchProfitAndLossMovementRows(
     supabase,
-    {
-      businessId,
-      period_id: input.period_id,
-      period_start: input.period_start,
-      as_of_date: input.as_of_date,
-      start_date: input.start_date,
-      end_date: input.end_date,
-    }
+    businessId,
+    range.movementStart,
+    range.movementEnd
   )
-  if (resolveError || !resolvedPeriod) {
-    return { data: null, error: resolveError ?? "Accounting period could not be resolved" }
+  if (fetchError) {
+    return { data: null, error: fetchError }
   }
-
-  const { data: rows, error: rpcError } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-    p_period_id: resolvedPeriod.period_id,
-  })
-  if (rpcError) {
-    return { data: null, error: rpcError.message ?? "Failed to fetch profit & loss" }
-  }
-
-  const raw = (rows ?? []) as PnLRpcRow[]
 
   const { data: biz } = await supabase
     .from("businesses")
@@ -334,7 +203,51 @@ export async function getProfitAndLossReport(
   }
 
   return {
-    data: buildReportFromMergedRows(raw, resolvedPeriod, currency),
+    data: buildReportFromMovementRows(
+      rows,
+      range.period,
+      currency,
+      range.movementStart,
+      range.movementEnd
+    ),
     error: "",
   }
+}
+
+/** Shared period input for dependent reports (Cash Flow, Equity Changes, AFS). */
+export type PnLPeriodInput = Pick<
+  PnLReportInput,
+  "businessId" | "period_id" | "period_start" | "as_of_date" | "start_date" | "end_date"
+>
+
+/** Canonical net profit for a period/range — same source as on-screen P&L. */
+export async function fetchCanonicalPnLNetProfit(
+  supabase: SupabaseClient,
+  input: PnLPeriodInput
+): Promise<{ netProfit: number; report: PnLReportResponse | null; error: string }> {
+  const { data, error } = await getProfitAndLossReport(supabase, input)
+  if (error || !data) {
+    return { netProfit: 0, report: null, error: error ?? "Failed to fetch canonical P&L" }
+  }
+  return { netProfit: data.totals.net_profit, report: data, error: "" }
+}
+
+/** Dashboard/timeline helpers — revenue, expenses, net profit from canonical report. */
+export function pnlTotalsFromReport(data: PnLReportResponse): {
+  revenue: number
+  expenses: number
+  netProfit: number
+} {
+  const incomeSections = data.sections.filter((s) => s.key === "income" || s.key === "other_income")
+  const expenseSections = data.sections.filter(
+    (s) =>
+      s.key === "cogs" ||
+      s.key === "operating_expenses" ||
+      s.key === "other_expenses" ||
+      s.key === "taxes"
+  )
+  const revenue = Math.round(incomeSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
+  const expenses = Math.round(expenseSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
+  const netProfit = data.totals.net_profit
+  return { revenue, expenses, netProfit }
 }

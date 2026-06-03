@@ -10,7 +10,7 @@ import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingCont
 /**
  * GET /api/accounting/reports/profit-and-loss
  *
- * Canonical P&L — ledger-derived from Trial Balance. Period via resolveAccountingPeriodForReport only.
+ * Canonical P&L — ledger period movement via getProfitAndLossReport.
  * Query: business_id (required), period_id | period_start | as_of_date | start_date, end_date (optional).
  */
 export async function GET(request: NextRequest) {

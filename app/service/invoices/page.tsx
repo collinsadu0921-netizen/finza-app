@@ -1,9 +1,17 @@
 "use client"
 
 import { useEffect, useState, useRef, Suspense, useCallback } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
+import { getAllUserBusinesses, resolvePreferredBusinessForUser, setSelectedBusinessId } from "@/lib/business"
+import {
+  buildInvoiceListHref,
+  findBusinessWithMostInvoices,
+  hasActiveInvoiceListFilters,
+  invoiceListHrefNeedsUpdate,
+  SERVICE_INVOICES_LIST_PATH,
+  shouldResetInvoiceListPage,
+} from "@/lib/invoices/invoiceListClient"
 import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatDate } from "@/lib/exportUtils"
 import { getGhanaLegacyView } from "@/lib/taxes/readTaxLines"
@@ -13,6 +21,8 @@ import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 function devInvoiceTiming(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
@@ -152,10 +162,18 @@ function InvoicesPageSkeleton() {
 
 function InvoicesPageContent() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
+  const urlBusinessIdParam =
+    searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
+  const listPathname = pathname?.startsWith(SERVICE_INVOICES_LIST_PATH)
+    ? pathname
+    : SERVICE_INVOICES_LIST_PATH
   const toast = useToast()
   const { format, formatWithCode, currencyCode: businessCurrencyCode } =
     useBusinessCurrency()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("invoices")
 
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
@@ -188,6 +206,7 @@ function InvoicesPageContent() {
   const isInitialLoadRef = useRef(true)
   const businessIdRef = useRef("")
   const skipFilterEffectOnce = useRef(true)
+  const prevPathnameRef = useRef<string | null>(null)
 
   useEffect(() => {
     businessIdRef.current = businessId
@@ -199,11 +218,22 @@ function InvoicesPageContent() {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) return { ok: false as const, error: "Not logged in" }
-    const business = await getCurrentBusiness(supabase, user.id)
+    const scope = await resolvePreferredBusinessForUser(supabase, user.id, urlBusinessIdParam)
     devInvoiceTiming("auth+business resolution", tAuth)
-    if (!business) return { ok: false as const, error: "Business not found" }
+    if (!scope.ok) {
+      return { ok: false as const, error: scope.error }
+    }
+    const { data: business, error: businessError } = await supabase
+      .from("businesses")
+      .select("*")
+      .eq("id", scope.businessId)
+      .is("archived_at", null)
+      .maybeSingle()
+    if (businessError || !business) {
+      return { ok: false as const, error: "Business not found" }
+    }
     return { ok: true as const, business }
-  }, [])
+  }, [urlBusinessIdParam])
 
   const buildInvoiceListParams = useCallback(
     (bid: string) => {
@@ -223,35 +253,152 @@ function InvoicesPageContent() {
   )
 
   const fetchInvoiceList = useCallback(
-    async (bid: string): Promise<{ invoices: Invoice[]; pagination: InvoiceListPagination }> => {
+    async (
+      bid: string,
+      pageOverride?: number
+    ): Promise<{ invoices: Invoice[]; pagination: InvoiceListPagination }> => {
       const params = buildInvoiceListParams(bid)
+      if (pageOverride != null) {
+        params.set("page", String(pageOverride))
+      }
       const t0 = performance.now()
       const res = await fetch(`/api/invoices/list?${params.toString()}`)
       devInvoiceTiming("invoices API load", t0)
+      if (res.status === 403) {
+        throw new Error("You do not have access to invoices for this business")
+      }
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
       const payload = await res.json()
       return {
         invoices: (payload.invoices || []) as Invoice[],
         pagination:
           payload.pagination ||
-          ({ page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 } as InvoiceListPagination),
+          ({
+            page: pageOverride ?? page,
+            pageSize: PAGE_SIZE,
+            totalCount: 0,
+            totalPages: 0,
+          } as InvoiceListPagination),
       }
     },
     [buildInvoiceListParams, page]
+  )
+
+  const loadCustomersForBusiness = useCallback(async (bid: string) => {
+    const t0 = performance.now()
+    const { data } = await supabase
+      .from("customers")
+      .select("id, name")
+      .eq("business_id", bid)
+      .is("deleted_at", null)
+      .order("name")
+    devInvoiceTiming("customers load", t0)
+    setCustomers(data || [])
+  }, [])
+
+  const applyInvoiceListResult = useCallback(
+    async (bid: string, currentPage: number, opts?: { allowBusinessRecovery?: boolean }) => {
+      let activeBid = bid
+      let { invoices: data, pagination: pg } = await fetchInvoiceList(activeBid, currentPage)
+
+      const filtersActive = hasActiveInvoiceListFilters({
+        statusFilter,
+        customerFilter,
+        startDate,
+        endDate,
+        searchInput: searchQuery,
+      })
+
+      if (
+        opts?.allowBusinessRecovery &&
+        data.length === 0 &&
+        pg.totalCount === 0 &&
+        !filtersActive
+      ) {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (user) {
+          const accessible = await getAllUserBusinesses(supabase, user.id)
+          if (accessible.length > 1) {
+            const better = await findBusinessWithMostInvoices(
+              supabase,
+              accessible.map((b) => b.id)
+            )
+            if (better && better !== activeBid) {
+              activeBid = better
+              setSelectedBusinessId(better)
+              skipFilterEffectOnce.current = true
+              setBusinessId(better)
+              await loadCustomersForBusiness(better)
+              if (currentPage !== 1) setPage(1)
+              const retry = await fetchInvoiceList(better, 1)
+              data = retry.invoices
+              pg = retry.pagination
+            }
+          }
+        }
+      }
+
+      if (shouldResetInvoiceListPage(data.length, pg, currentPage)) {
+        setPage(1)
+        const retry = await fetchInvoiceList(activeBid, 1)
+        data = retry.invoices
+        pg = retry.pagination
+      }
+      setInvoices(data)
+      setPagination(pg)
+      setTotalInvoices(pg.totalCount || data.length)
+      return { data, pg, businessId: activeBid }
+    },
+    [
+      fetchInvoiceList,
+      statusFilter,
+      customerFilter,
+      startDate,
+      endDate,
+      searchQuery,
+      loadCustomersForBusiness,
+    ]
+  )
+
+  const syncWorkspaceBusiness = useCallback(
+    async (opts?: { reloadCustomers?: boolean }) => {
+      const resolved = await resolveAuthBusiness()
+      if (!resolved.ok) {
+        setError(resolved.error)
+        return null
+      }
+      const bid = resolved.business.id
+      const previous = businessIdRef.current
+      setSelectedBusinessId(bid)
+      if (bid !== previous) {
+        skipFilterEffectOnce.current = true
+        setBusinessId(bid)
+        if (opts?.reloadCustomers !== false) {
+          await loadCustomersForBusiness(bid)
+        }
+      }
+      try {
+        await applyInvoiceListResult(bid, page, { allowBusinessRecovery: true })
+        setError("")
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to load invoices")
+      }
+      return bid
+    },
+    [resolveAuthBusiness, loadCustomersForBusiness, applyInvoiceListResult, page]
   )
 
   const reloadInvoicesOnly = useCallback(async () => {
     const bid = businessIdRef.current
     if (!bid) return
     try {
-      const { invoices: data, pagination: pg } = await fetchInvoiceList(bid)
-      setInvoices(data)
-      setPagination(pg)
-      setTotalInvoices(pg.totalCount || data.length)
+      await applyInvoiceListResult(bid, page)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load invoices")
     }
-  }, [fetchInvoiceList])
+  }, [applyInvoiceListResult, page])
 
   useEffect(() => {
     let cancelled = false
@@ -267,42 +414,14 @@ function InvoicesPageContent() {
         return
       }
       const bid = resolved.business.id
+      setSelectedBusinessId(bid)
       setBusinessId(bid)
 
       try {
-        const customersPromise = (async () => {
-          const t0 = performance.now()
-          const { data } = await supabase
-            .from("customers")
-            .select("id, name")
-            .eq("business_id", bid)
-            .is("deleted_at", null)
-            .order("name")
-          devInvoiceTiming("customers load", t0)
-          return data || []
-        })()
-
-        const invoicesPromise = (async () => {
-          const params = buildInvoiceListParams(bid)
-          const t0 = performance.now()
-          const res = await fetch(`/api/invoices/list?${params.toString()}`)
-          devInvoiceTiming("invoices API load", t0)
-          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
-          const payload = await res.json()
-          return {
-            invoices: (payload.invoices || []) as Invoice[],
-            pagination:
-              payload.pagination ||
-              ({ page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 } as InvoiceListPagination),
-          }
-        })()
-
-        const [custRows, invData] = await Promise.all([customersPromise, invoicesPromise])
-        if (cancelled) return
-        setCustomers(custRows)
-        setInvoices(invData.invoices)
-        setPagination(invData.pagination)
-        setTotalInvoices(invData.pagination.totalCount || invData.invoices.length)
+        await Promise.all([
+          loadCustomersForBusiness(bid),
+          applyInvoiceListResult(bid, page, { allowBusinessRecovery: true }),
+        ])
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load invoices")
       } finally {
@@ -315,44 +434,62 @@ function InvoicesPageContent() {
     return () => {
       cancelled = true
     }
-    // One-shot mount: filter-driven reloads use reloadInvoicesOnly. Intentionally freeze first-query params to initial render state.
+    // One-shot mount: filter/page reloads use reloadInvoicesOnly / syncWorkspaceBusiness.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolveAuthBusiness])
+  }, [])
+
+  // External navigation changed ?business_id= (back/forward, deep link) after initial load.
+  useEffect(() => {
+    if (isInitialLoadRef.current) return
+    if (!urlBusinessIdParam || urlBusinessIdParam === businessIdRef.current) return
+    void syncWorkspaceBusiness()
+  }, [urlBusinessIdParam, syncWorkspaceBusiness])
+
+  // Re-sync when returning from invoice view (same tab) after setSelectedBusinessId.
+  useEffect(() => {
+    const onBusinessChanged = () => {
+      if (isInitialLoadRef.current) return
+      if (!pathname?.startsWith("/service/invoices")) return
+      void syncWorkspaceBusiness()
+    }
+    window.addEventListener("finza:business-changed", onBusinessChanged)
+    return () => window.removeEventListener("finza:business-changed", onBusinessChanged)
+  }, [pathname, syncWorkspaceBusiness])
+
+  // Re-sync workspace when navigating back to the list route from another page.
+  useEffect(() => {
+    if (isInitialLoadRef.current) return
+    if (!pathname?.startsWith("/service/invoices")) {
+      prevPathnameRef.current = pathname ?? null
+      return
+    }
+    const prev = prevPathnameRef.current
+    prevPathnameRef.current = pathname ?? null
+    if (!prev || prev.startsWith("/service/invoices")) return
+    void syncWorkspaceBusiness()
+  }, [pathname, syncWorkspaceBusiness])
 
   useEffect(() => {
     const handleFocus = () => {
       if (isInitialLoadRef.current) return
-      void (async () => {
-        const before = businessIdRef.current
-        const resolved = await resolveAuthBusiness()
-        if (!resolved.ok) return
-        const bid = resolved.business.id
-        if (bid !== before) {
-          skipFilterEffectOnce.current = true
-          setBusinessId(bid)
-          const t0 = performance.now()
-          const { data } = await supabase
-            .from("customers")
-            .select("id, name")
-            .eq("business_id", bid)
-            .is("deleted_at", null)
-            .order("name")
-          devInvoiceTiming("customers load", t0)
-          setCustomers(data || [])
-        }
-        try {
-          const { invoices: data, pagination: pg } = await fetchInvoiceList(bid)
-          setInvoices(data)
-          setPagination(pg)
-          setTotalInvoices(pg.totalCount || data.length)
-        } catch (err: unknown) {
-          setError(err instanceof Error ? err.message : "Failed to load invoices")
-        }
-      })()
+      void syncWorkspaceBusiness()
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return
+      handleFocus()
+    }
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) handleFocus()
     }
     window.addEventListener("focus", handleFocus)
-    return () => window.removeEventListener("focus", handleFocus)
-  }, [resolveAuthBusiness, fetchInvoiceList])
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("pageshow", handlePageShow)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("pageshow", handlePageShow)
+    }
+  }, [syncWorkspaceBusiness])
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
@@ -377,11 +514,16 @@ function InvoicesPageContent() {
   }, [businessId, statusFilter, customerFilter, startDate, endDate, searchQuery, page, reloadInvoicesOnly])
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
-    if (page <= 1) params.delete("page")
-    else params.set("page", String(page))
-    router.replace(`/service/invoices?${params.toString()}`)
-  }, [page, router, searchParams])
+    if (!businessId) return
+    const targetHref = buildInvoiceListHref(listPathname, {
+      businessId,
+      page,
+      statusFilter,
+      preserveSearch: searchParamsString,
+    })
+    if (!invoiceListHrefNeedsUpdate(listPathname, searchParamsString, targetHref)) return
+    router.replace(targetHref, { scroll: false })
+  }, [businessId, page, statusFilter, searchParamsString, listPathname, router])
 
   const fetchPaymentTotals = async (ids: string[]) => {
     if (!ids.length) return { payments: {} as Record<string, number>, creditNotes: {} as Record<string, number> }
@@ -539,8 +681,22 @@ function InvoicesPageContent() {
     toast.showToast("Exported to Excel", "success")
   }
 
-  const clearFilters = () => { setPage(1); setStatusFilter("all"); setCustomerFilter("all"); setStartDate(""); setEndDate(""); setSearchInput(""); setSearchQuery("") }
-  const hasFilters = statusFilter !== "all" || customerFilter !== "all" || startDate || endDate || searchInput
+  const clearFilters = () => {
+    setPage(1)
+    setStatusFilter("all")
+    setCustomerFilter("all")
+    setStartDate("")
+    setEndDate("")
+    setSearchInput("")
+    setSearchQuery("")
+  }
+  const hasFilters = hasActiveInvoiceListFilters({
+    statusFilter,
+    customerFilter,
+    startDate,
+    endDate,
+    searchInput,
+  })
 
   if (loading) {
     return <InvoicesPageSkeleton />
@@ -572,17 +728,21 @@ function InvoicesPageContent() {
                 </button>
               </>
             )}
-            <button
-              type="button"
-              data-tour="service-invoices-new"
-              onClick={() => router.push("/invoices/create")}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-              New Invoice
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                data-tour="service-invoices-new"
+                onClick={() => guardWriteAction(() => router.push("/invoices/create"))}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                New Invoice
+              </button>
+            )}
           </div>
         </div>
+
+        {readOnly && <ServiceReadOnlyNotice scope="invoices" className="mb-2" />}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -694,13 +854,24 @@ function InvoicesPageContent() {
             </div>
             <p className="text-slate-600 font-semibold text-lg">No invoices found</p>
             <p className="text-slate-400 text-sm mt-1 mb-6">
-              {hasFilters ? "Try adjusting your filters" : "Create your first invoice to get started"}
+              {hasFilters
+                ? "No invoices match the active filters. Try clearing filters or adjusting your search."
+                : "No invoices found for the selected business. Create your first invoice to get started."}
             </p>
-            {!hasFilters && (
+            {hasFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-2 px-4 py-2 mb-4 text-sm font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Clear filters
+              </button>
+            )}
+            {!hasFilters && !readOnly && (
               <button
                 type="button"
                 data-tour="service-invoices-new"
-                onClick={() => router.push("/invoices/create")}
+                onClick={() => guardWriteAction(() => router.push("/invoices/create"))}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 type ProformaRow = Record<string, unknown> & {
   id: string
@@ -96,6 +97,16 @@ export async function POST(
     const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    if (!emailOnly) {
+      const writeDenied = await enforceServiceIndustryFinancialWrite(
+        supabase,
+        user.id,
+        scope.businessId,
+        "starter"
+      )
+      if (writeDenied) return writeDenied
     }
 
     const { row: proforma, error: proformaError } = await loadProformaForSend(supabase, proformaId, scope.businessId)

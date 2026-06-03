@@ -5,6 +5,7 @@ import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/fir
 import { buildCanonicalPostingPayload, validateCanonicalPayload } from "@/lib/accounting/manualJournalDraftPosting"
 import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * POST /api/accounting/journals/drafts/{id}/post
@@ -89,6 +90,14 @@ export async function POST(
           { status: 403 }
         )
       }
+
+      const tierBlockPost = await enforceServiceIndustryBusinessTierForAccountingWrite(
+        supabase,
+        user.id,
+        draft.client_business_id,
+        "business"
+      )
+      if (tierBlockPost) return tierBlockPost
     } else {
       // ---------- Firm-mode: onboarding + draft belongs to firm ----------
       const onboardingCheck = await checkFirmOnboardingForAction(

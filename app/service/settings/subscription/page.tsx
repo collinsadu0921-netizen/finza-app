@@ -283,6 +283,19 @@ type SubscriptionProviderFlagState = { mock_checkout_enabled: boolean }
 const PAYSTACK_SUBSCRIPTION_MOMO_RETRY_FRIENDLY =
   "Mobile Money payment was not completed. Retry and approve the prompt on your phone."
 
+/** Shown when MoMo charge is initiated but still awaiting customer approval (provider-neutral). */
+const SUBSCRIPTION_MOMO_PENDING_TOAST_TITLE = "Payment request sent"
+const SUBSCRIPTION_MOMO_PENDING_TOAST_BODY =
+  "Check your phone, Mobile Money app, or approval screen to confirm the payment."
+const SUBSCRIPTION_MOMO_PENDING_TOAST_MESSAGE = `${SUBSCRIPTION_MOMO_PENDING_TOAST_TITLE}\n${SUBSCRIPTION_MOMO_PENDING_TOAST_BODY}`
+
+const SUBSCRIPTION_MOMO_PENDING_HELPER_TEXT =
+  "Depending on your provider, you may be asked to confirm in-app, enter your PIN, or complete an approval screen."
+
+function showSubscriptionMomoPendingToast(showToast: (message: string, type: "info") => void) {
+  showToast(SUBSCRIPTION_MOMO_PENDING_TOAST_MESSAGE, "info")
+}
+
 /** Label for Paystack card checkout only (`channel: "card"`). */
 function tierPrimaryCardCtaLine(
   currentTier: ServiceSubscriptionTier,
@@ -487,10 +500,7 @@ function SubscriptionPaystackActions({
         setMomoError(null)
         setMomoDetail(null)
         setMomoAttempted(false)
-        toast.showToast(
-          "Approve the payment on your phone. We will confirm with MTN and update your plan when payment succeeds.",
-          "success"
-        )
+        showSubscriptionMomoPendingToast(toast.showToast)
         setShowMomo(false)
         if (pollRef.current) clearInterval(pollRef.current)
         let attempts = 0
@@ -554,12 +564,15 @@ function SubscriptionPaystackActions({
           return
         }
 
-        if (effectiveStatus === "pay_offline" || effectiveStatus === "pending") {
+        if (
+          effectiveStatus === "pay_offline" ||
+          effectiveStatus === "pending" ||
+          effectiveStatus === "send_otp"
+        ) {
           setMomoError(null)
           setMomoDetail(null)
           setMomoAttempted(false)
-          const base = "Mobile Money charge started. Approve the payment on your phone."
-          toast.showToast(displayText ? `${base} ${displayText}` : base, "success")
+          showSubscriptionMomoPendingToast(toast.showToast)
           setShowMomo(false)
           return
         }
@@ -567,11 +580,7 @@ function SubscriptionPaystackActions({
         setMomoError(null)
         setMomoDetail(null)
         setMomoAttempted(false)
-        toast.showToast(
-          displayText ||
-            "Approve the payment on your phone. When it succeeds, your plan updates and a new billing period starts from that time.",
-          "success"
-        )
+        showSubscriptionMomoPendingToast(toast.showToast)
         setShowMomo(false)
       }
     } catch (e: unknown) {
@@ -713,6 +722,9 @@ function SubscriptionPaystackActions({
           {gateway === "mtn_momo_sandbox" && (
             <p className="text-[11px] text-slate-500">Sandbox gateway: MTN wallets only.</p>
           )}
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            {SUBSCRIPTION_MOMO_PENDING_HELPER_TEXT}
+          </p>
           {gateway === "paystack" && momoError && (
             <div
               role="alert"
@@ -859,6 +871,8 @@ function SubscriptionPageInner() {
     graceEndsAt,
     inGracePeriod,
     subscriptionLocked,
+    billingExempt,
+    billingExemptReason,
   } = useServiceSubscription()
   const [cycle, setCycle] = useState<BillingCycle>("monthly")
   const [providerFlags, setProviderFlags] = useState<SubscriptionProviderFlagState>({
@@ -940,8 +954,41 @@ function SubscriptionPageInner() {
             </div>
           ) : (
             <>
+              {billingExempt && (
+                <div className="mb-4 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <svg
+                    className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                    />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-emerald-900">
+                      Internal account — Business access active
+                    </p>
+                    <p className="mt-0.5 text-xs text-emerald-800">
+                      This workspace is exempt from subscription billing. Full Business-tier features are
+                      enabled without payment.
+                      {billingExemptReason ? (
+                        <>
+                          {" "}
+                          <span className="font-medium">({billingExemptReason})</span>
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Trial active */}
-              {isTrialing && (
+              {!billingExempt && isTrialing && (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4">
                   <svg className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -984,7 +1031,7 @@ function SubscriptionPageInner() {
               )}
 
               {/* Trial expired */}
-              {trialExpired && (
+              {!billingExempt && trialExpired && (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
                   <svg className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
@@ -999,7 +1046,7 @@ function SubscriptionPageInner() {
               )}
 
               {/* Payment locked */}
-              {subscriptionLocked && (
+              {!billingExempt && subscriptionLocked && (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
                   <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
@@ -1017,7 +1064,7 @@ function SubscriptionPageInner() {
               )}
 
               {/* Past due — payment failed; grace window from subscription_grace_until */}
-              {status === "past_due" && !subscriptionLocked && (
+              {!billingExempt && status === "past_due" && !subscriptionLocked && (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
@@ -1046,7 +1093,7 @@ function SubscriptionPageInner() {
               )}
 
               {/* Period expired — grace state (access still allowed but renewal needed) */}
-              {!subscriptionLocked && periodExpired && (
+              {!billingExempt && !subscriptionLocked && periodExpired && (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1206,7 +1253,9 @@ function SubscriptionPageInner() {
           {TIER_ORDER.map((t) => {
             const isCurrent   = t === effectiveTier
             // Show payment actions when: trial (any state), period expired (grace), or locked
-            const needsSubscription = isTrialing || trialExpired || subscriptionLocked || periodExpired
+            const needsSubscription =
+              !billingExempt &&
+              (isTrialing || trialExpired || subscriptionLocked || periodExpired)
             const isUpgrade   =
               !loading && !needsSubscription && SERVICE_TIER_RANK[t] > SERVICE_TIER_RANK[effectiveTier]
             const isDowngrade  =

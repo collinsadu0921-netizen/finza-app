@@ -1,14 +1,16 @@
 "use client"
 
 import { useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 
 export default function InvoiceCreateRedirect() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/invoices/create"
 
   useEffect(() => {
-    router.replace("/service/invoices/new")
-  }, [router])
+    replaceIfChanged(router, pathname, "", "/service/invoices/new")
+  }, [router, pathname])
 
   return (
     <div className="p-6">

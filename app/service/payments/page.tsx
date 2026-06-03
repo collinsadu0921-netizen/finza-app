@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate } from "@/lib/exportUtils"
@@ -10,6 +11,8 @@ import { Money } from "@/components/ui/Money"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { formatMoney } from "@/lib/money"
 import { cn } from "@/lib/utils"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Payment = {
   id: string
@@ -34,7 +37,10 @@ type DateRange = "this_month" | "last_month" | "custom"
 
 export default function ServicePaymentsPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/payments"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
+  const { readOnly } = useServiceFinancialWrite("payments")
   const PAGE_SIZE = 25
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
@@ -249,11 +255,16 @@ export default function ServicePaymentsPage() {
   const paymentCount = payments.length
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
-    router.replace(`/service/payments?${params.toString()}`)
-  }, [page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/payments?${params.toString()}`
+    )
+  }, [page, pathname, searchParamsString, router])
 
   if (loading && !businessId) {
     return (
@@ -270,6 +281,8 @@ export default function ServicePaymentsPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Page Header */}
+        {readOnly && <ServiceReadOnlyNotice scope="payments" className="mb-4" />}
+
         <div className="mb-8 flex items-center justify-between">
           <div data-tour="service-payments-overview">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">Payments</h1>

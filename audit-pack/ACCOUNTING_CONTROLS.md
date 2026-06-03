@@ -5,6 +5,8 @@
 **Classification:** Auditor-facing control documentation  
 **Audience:** External accountants, auditors, compliance reviewers
 
+> **Reporting source contract (2026-06):** See [../docs/REPORTING_SOURCE_CONTRACT.md](../docs/REPORTING_SOURCE_CONTRACT.md).
+
 ---
 
 ## EXECUTIVE SUMMARY
@@ -210,10 +212,10 @@ Trial Balance is the single canonical truth source for all downstream financial 
   - Persisted to `trial_balance_snapshots` table
 - **Hard Invariant:** Total debits MUST equal total credits (tolerance: 0.01)
   - Enforced with RAISE EXCEPTION if imbalance detected
-- **Downstream Consumption:** P&L and Balance Sheet consume Trial Balance snapshot only
-  - P&L: `get_profit_and_loss_from_trial_balance()` filters income/expense accounts from snapshot
-  - Balance Sheet: `get_balance_sheet_from_trial_balance()` filters asset/liability/equity accounts from snapshot
-  - **No direct ledger queries:** Statements do not query `journal_entry_lines` directly
+- **Downstream consumption:** Trial Balance reports consume snapshot via `get_trial_balance_from_snapshot`
+  - Live P&L: `get_profit_and_loss_movement` (journal movement in range)
+  - Live Balance Sheet: `get_balance_sheet_as_of` + cumulative net income
+  - Legacy DB functions `get_profit_and_loss_from_trial_balance` / `get_balance_sheet_from_trial_balance` retained in migrations only
 
 **Financial statements are derived from Trial Balance, not calculated independently from ledger data.**
 
@@ -222,9 +224,8 @@ Trial Balance is the single canonical truth source for all downstream financial 
   - Calculates `total_debits` and `total_credits` from `journal_entry_lines`
   - Raises exception if `ABS(total_debits - total_credits) > 0.01`
   - Persists snapshot with `is_balanced = TRUE` only if balanced
-- **Consumption:** P&L and Balance Sheet functions query `trial_balance_snapshots` only
-  - `get_profit_and_loss_from_trial_balance()` calls `get_trial_balance_from_snapshot()` first
-  - `get_balance_sheet_from_trial_balance()` calls `get_trial_balance_from_snapshot()` first
+- **Consumption:** Trial Balance reports query `trial_balance_snapshots` via `get_trial_balance_from_snapshot()`
+  - Live application P&L and Balance Sheet use journal movement and cumulative as-of (see reporting source contract)
 - **Validation:** `validate_statement_reconciliation()` verifies statements reconcile to Trial Balance
   - Checks Balance Sheet equation: Assets = Liabilities + Equity
   - Raises exception if reconciliation fails
@@ -233,7 +234,7 @@ Trial Balance is the single canonical truth source for all downstream financial 
 - **Trial Balance imbalance:** Exception raised: `"PHASE 9 VIOLATION: Trial Balance does not balance. Total Debits: X, Total Credits: Y, Difference: Z. All journal entries must be balanced before generating trial balance."`
 - **Statement reconciliation failure:** Exception raised: `"PHASE 9 VIOLATION: Balance Sheet does not balance. Assets: X, Liabilities: Y, Equity: Z, Difference: W"`
 
-**Database Function:** `generate_trial_balance()`, `get_trial_balance_from_snapshot()`, `get_profit_and_loss_from_trial_balance()`, `get_balance_sheet_from_trial_balance()`, `validate_statement_reconciliation()`  
+**Database Function:** `generate_trial_balance()`, `get_trial_balance_from_snapshot()`, `get_profit_and_loss_movement()`, `validate_statement_reconciliation()` (+ legacy `get_profit_and_loss_from_trial_balance`, `get_balance_sheet_from_trial_balance` in migrations)  
 **Table:** `trial_balance_snapshots`  
 **Migration:** 169_trial_balance_canonicalization.sql
 

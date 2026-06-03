@@ -6,7 +6,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createAuditLog } from "@/lib/auditLog"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 const GH_CIT_RATE = 0.25  // 25% standard Ghana CIT rate
 
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Provision not found" }, { status: 404 })
       }
 
-      const deniedPost = await enforceServiceWorkspaceAccess({
+      const deniedPost = await enforceServiceWorkspaceWriteAccess({
         supabase,
         userId: user?.id,
         businessId: provRow.business_id,
@@ -110,7 +113,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const deniedPay = await enforceServiceWorkspaceAccess({
+      const deniedPay = await enforceServiceWorkspaceWriteAccess({
         supabase,
         userId: user?.id,
         businessId: payBusinessId,
@@ -163,7 +166,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "business_id, period_label, and chargeable_income required" }, { status: 400 })
     }
 
-    const deniedCreate = await enforceServiceWorkspaceAccess({
+    const deniedCreate = await enforceServiceWorkspaceWriteAccess({
       supabase,
       userId: user?.id,
       businessId: business_id,

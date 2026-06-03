@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { getTaxEngineCode } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
@@ -73,6 +74,8 @@ export default function CreateRecurringInvoicePage() {
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
   const [businessCountry, setBusinessCountry] = useState<string>("GH")
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   const [showCustomerModal, setShowCustomerModal] = useState(false)
   const [newCustomerName, setNewCustomerName] = useState("")

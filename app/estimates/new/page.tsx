@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { getCurrentBusiness } from "@/lib/business"
@@ -9,6 +9,10 @@ import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes 
 import { getCurrencySymbol } from "@/lib/currency"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
+
+const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 
 type Customer = {
   id: string
@@ -51,8 +55,11 @@ const getLineTotal = (item: Pick<EstimateItem, "quantity" | "price" | "discount_
   return round2(Math.max(0, gross - getDiscountAmount(item)))
 }
 
-export default function NewEstimatePage() {
+function NewEstimatePageContent() {
   const router = useRouter()
+  const pathname = usePathname()
+  const isUnderService = pathname?.startsWith("/service") ?? false
+  const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
@@ -76,6 +83,8 @@ export default function NewEstimatePage() {
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
   const [businessCurrencyCode, setBusinessCurrencyCode] = useState<string | null>(null)
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   // FX (foreign currency) settings
   const [fxEnabled, setFxEnabled] = useState(false)
@@ -457,7 +466,7 @@ export default function NewEstimatePage() {
   )
 
   return (
-    <ProtectedLayout>
+    <Wrapper>
       <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950 pb-20 font-sans">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -948,6 +957,14 @@ export default function NewEstimatePage() {
 
         </div>
       </div>
-    </ProtectedLayout>
+    </Wrapper>
+  )
+}
+
+export default function NewEstimatePage() {
+  return (
+    <ServiceFinancialWritePageGuard scope="estimates" backHref="/service/estimates">
+      <NewEstimatePageContent />
+    </ServiceFinancialWritePageGuard>
   )
 }

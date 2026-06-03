@@ -3,15 +3,16 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
-import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import { parsePnLReportQuery, toPnLExportView } from "@/lib/accounting/reports/pnlExportHelpers"
 
 /**
  * GET /api/accounting/reports/profit-and-loss/export/pdf
  * 
  * Exports Profit & Loss as PDF.
- * Contract v2.0 — Statements sourced from snapshot TB
+ * Canonical source: getProfitAndLossReport (ledger period movement)
  * 
  * Safety Limit: Max 5,000 rows (PDF limit)
  */
@@ -81,21 +82,30 @@ export async function GET(request: NextRequest) {
       await supabase.rpc("create_system_accounts", { p_business_id: resolvedBusinessId })
     }
 
-    const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
+    const { data: reportData, error: reportError } = await getProfitAndLossReport(
       supabase,
-      { businessId: resolvedBusinessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
+      parsePnLReportQuery(resolvedBusinessId, searchParams)
     )
-    if (resolveError || !resolvedPeriod) {
+    if (reportError || !reportData) {
       return NextResponse.json(
-        { error: resolveError ?? "Accounting period could not be resolved. Provide period_id, period_start, as_of_date, or start_date and end_date." },
+        { error: reportError || "Failed to fetch profit & loss" },
         { status: 500 }
       )
     }
 
-    const effectiveStartDate = resolvedPeriod.period_start
-    const effectiveEndDate = resolvedPeriod.period_end
+    const view = toPnLExportView(reportData)
+    const {
+      periodStart: effectiveStartDate,
+      periodEnd: effectiveEndDate,
+      incomeLines: incomeAccounts,
+      expenseLines: expenseAccounts,
+      totalRevenue,
+      totalExpenses,
+      netProfit,
+      rowCount,
+      resolutionReason,
+    } = view
 
-    // Validate date range (reject absurd ranges > 10 years)
     const start = new Date(effectiveStartDate)
     const end = new Date(effectiveEndDate)
     const yearsDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)
@@ -106,21 +116,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Contract v2.0 — Statements sourced from snapshot TB
-    const { data: pnlData, error: rpcError } = await supabase.rpc("get_profit_and_loss_from_trial_balance", {
-      p_period_id: resolvedPeriod.period_id,
-    })
-
-    if (rpcError) {
-      console.error("Error fetching profit & loss:", rpcError)
-      return NextResponse.json(
-        { error: rpcError.message || "Failed to fetch profit & loss" },
-        { status: 500 }
-      )
-    }
-
-    // Safety limit: PDF max 5,000 rows
-    const rowCount = pnlData?.length || 0
     if (rowCount > 5000) {
       return NextResponse.json(
         { error: `Profit & Loss has ${rowCount} rows, which exceeds the maximum PDF export limit of 5,000 rows. Please use CSV export instead or use a smaller date range.` },
@@ -149,20 +144,12 @@ export async function GET(request: NextRequest) {
       .eq("id", resolvedBusinessId)
       .single()
     
-    const periodLabel = resolvedPeriod.resolution_reason === "period_id" || periodStart
-      ? `Period: ${effectiveStartDate} to ${effectiveEndDate}`
-      : `Date Range: ${effectiveStartDate} to ${effectiveEndDate}`
+    const periodLabel =
+      (resolutionReason === "period_id" || periodStart) && resolutionReason !== "date_range"
+        ? `Period: ${effectiveStartDate} to ${effectiveEndDate}`
+        : `Date Range: ${effectiveStartDate} to ${effectiveEndDate}`
     doc.fontSize(12).font("Helvetica").text(`${business?.name || "Business"} — ${periodLabel}`, { align: "center" })
     doc.moveDown(1)
-
-    // Separate income and expense accounts
-    const incomeAccounts = (pnlData || []).filter((acc: any) => acc.account_type === "income")
-    const expenseAccounts = (pnlData || []).filter((acc: any) => acc.account_type === "expense")
-
-    // Calculate totals
-    const totalRevenue = incomeAccounts.reduce((sum: number, acc: any) => sum + Number(acc.period_total || 0), 0)
-    const totalExpenses = expenseAccounts.reduce((sum: number, acc: any) => sum + Number(acc.period_total || 0), 0)
-    const netProfit = totalRevenue - totalExpenses
 
     // Revenue section
     doc.fontSize(12).font("Helvetica-Bold").text("REVENUE (INCOME)", 50, doc.y)

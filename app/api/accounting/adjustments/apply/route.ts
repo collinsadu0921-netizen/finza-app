@@ -4,6 +4,7 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { logAudit } from "@/lib/auditLog"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * POST /api/accounting/adjustments/apply
@@ -75,6 +76,14 @@ export async function POST(request: NextRequest) {
       )
     }
     const resolvedBusinessId = resolved.businessId
+
+    const tierBlockAdj = await enforceServiceIndustryBusinessTierForAccountingWrite(
+      supabase,
+      user.id,
+      resolvedBusinessId,
+      "business"
+    )
+    if (tierBlockAdj) return tierBlockAdj
 
     // PHASE 6: Validate adjustment_reason is required
     if (!adjustment_reason || typeof adjustment_reason !== 'string' || adjustment_reason.trim().length === 0) {

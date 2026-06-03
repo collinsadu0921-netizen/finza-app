@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { createAuditLog } from "@/lib/auditLog"
@@ -131,6 +132,14 @@ export async function PATCH(
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scope.businessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const { data: existingProforma } = await supabase
       .from("proforma_invoices")

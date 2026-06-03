@@ -20,10 +20,12 @@ import { formatMoney } from "@/lib/money"
 
 // FINZA Design System Components
 import { StatusBadge } from "@/components/ui/StatusBadge"
-import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
+import { getCurrentBusiness, getSelectedBusinessId, setSelectedBusinessId } from "@/lib/business"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfClient"
 import { PrepareEvatDraftCard } from "@/components/invoices/PrepareEvatDraftCard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Invoice = {
   id: string
@@ -114,10 +116,12 @@ export default function InvoiceViewPage() {
     setResolvedBusinessId(businessIdFromUrl ?? getSelectedBusinessId())
   }, [businessIdFromUrl])
 
-  const invoiceApiSuffix = resolvedBusinessId
-    ? `?business_id=${encodeURIComponent(resolvedBusinessId)}`
-    : ""
+  const invoiceApiSuffix =
+    resolvedBusinessId != null
+      ? `?business_id=${encodeURIComponent(resolvedBusinessId)}`
+      : ""
   const { openConfirm } = useConfirm()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("invoices")
 
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<Invoice | null>(null)
@@ -152,7 +156,8 @@ export default function InvoiceViewPage() {
         throw new Error("Invoice ID is missing")
       }
 
-      const response = await fetch(`/api/invoices/${invoiceId}${invoiceApiSuffix}`)
+      // Invoice id is sufficient — API resolves tenant from the invoice row after access check.
+      const response = await fetch(`/api/invoices/${invoiceId}`)
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
@@ -177,6 +182,17 @@ export default function InvoiceViewPage() {
       setItems(data.items || [])
       setPayments(data.payments || [])
       setCreditNotes(data.creditNotes || [])
+
+      if (data.invoice?.business_id) {
+        const actualBusinessId = data.invoice.business_id as string
+        setResolvedBusinessId(actualBusinessId)
+        setSelectedBusinessId(actualBusinessId)
+        if (typeof window !== "undefined" && businessIdFromUrl !== actualBusinessId) {
+          const url = new URL(window.location.href)
+          url.searchParams.set("business_id", actualBusinessId)
+          window.history.replaceState({}, "", `${url.pathname}${url.search}`)
+        }
+      }
 
       if (data.reconciliationWarning) {
         setReconcileResult({
@@ -218,7 +234,7 @@ export default function InvoiceViewPage() {
       setError(err.message || "We couldn't load this invoice. Please refresh or check your connection.")
       setLoading(false)
     }
-  }, [invoiceId, invoiceApiSuffix])
+  }, [invoiceId, businessIdFromUrl])
 
   useEffect(() => {
     if (invoiceId) {
@@ -288,6 +304,7 @@ Thank you.`
   const currency = resolveCurrencyDisplay(invoice)
 
   const handleDeleteInvoice = () => {
+    if (!guardWriteAction(() => {})) return
     openConfirm({
       title: "Delete draft invoice",
       description: "Are you sure you want to delete this draft invoice? This cannot be undone.",
@@ -465,7 +482,7 @@ Thank you.`
 
               <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:flex-nowrap sm:items-center sm:justify-end">
                 <div className="flex flex-1 flex-row flex-nowrap items-center gap-2 sm:flex-initial sm:justify-end">
-                  {invoice.status === "draft" && (
+                  {!readOnly && invoice.status === "draft" && (
                     <button
                       type="button"
                       onClick={() => router.push(`/service/invoices/${invoiceId}/edit`)}
@@ -500,6 +517,7 @@ Thank you.`
                   )}
                 </div>
 
+                {!readOnly && (
                 <div className="flex w-full shrink-0 sm:w-auto">
                   {invoice.status === "draft" ? (
                     <div className="flex w-full rounded-xl border border-slate-200 shadow-sm dark:border-slate-600 sm:w-auto [&>div>button]:h-10 [&>div>button]:rounded-l-xl [&>div>button]:rounded-r-none [&>div>button]:border-0 [&>div>button]:border-r [&>div>button]:border-slate-200 dark:[&>div>button]:border-slate-600">
@@ -558,9 +576,12 @@ Thank you.`
                     </div>
                   )}
                 </div>
+                )}
               </div>
             </div>
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="invoices" className="mb-6" />}
 
           {/* Financial Position Bar — dashboard style (formatMoney, sans-serif) */}
           <div className="mb-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-gray-800">
@@ -821,13 +842,15 @@ Thank you.`
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Management</h3>
                 <div className="space-y-2">
+                  {!readOnly && (
                   <button
                     onClick={() => router.push(`/service/credit-notes/create?invoiceId=${invoice.id}`)}
                     className="w-full text-left px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded transition-colors"
                   >
                     Issue Credit Note
                   </button>
-                  {invoice.status === "draft" && (
+                  )}
+                  {!readOnly && invoice.status === "draft" && (
                     <button
                       type="button"
                       onClick={handleDeleteInvoice}
@@ -844,7 +867,7 @@ Thank you.`
                 <div className="bg-slate-50 dark:bg-slate-800/50 px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Payment History</h3>
                   {/* Only show 'Add' if there's balance */}
-                  {remainingBalance > 0.01 && invoice.status !== 'draft' && (
+                  {remainingBalance > 0.01 && invoice.status !== 'draft' && !readOnly && (
                     <button
                       onClick={() => setShowPaymentModal(true)}
                       className="text-xs text-blue-600 font-medium hover:underline"

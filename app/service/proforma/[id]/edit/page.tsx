@@ -9,6 +9,7 @@ import { formatMoney } from "@/lib/money"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 
 type Customer = {
   id: string
@@ -51,6 +52,14 @@ const getLineTotal = (item: Pick<LineItem, "qty" | "unit_price" | "discount_type
 }
 
 export default function ProformaEditPage() {
+  return (
+    <ServiceFinancialWritePageGuard scope="proforma" backHref="/service/proforma">
+      <ProformaEditPageContent />
+    </ServiceFinancialWritePageGuard>
+  )
+}
+
+function ProformaEditPageContent() {
   const router = useRouter()
   const params = useParams()
   const searchParams = useSearchParams()

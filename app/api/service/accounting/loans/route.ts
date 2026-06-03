@@ -17,7 +17,10 @@ import {
   validateServiceIntent,
   type AccountForValidation,
 } from "@/lib/service/accounting/intentTypes"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
@@ -111,7 +114,7 @@ export async function POST(request: NextRequest) {
     const businessId: string | undefined = body.business_id
     if (!businessId) return NextResponse.json({ error: "Missing business_id" }, { status: 400 })
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase,
       userId: user.id,
       businessId,

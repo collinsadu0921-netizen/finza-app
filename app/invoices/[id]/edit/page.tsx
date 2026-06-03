@@ -16,6 +16,7 @@ import SendMethodDropdown, { SendMethod } from "@/components/invoices/SendMethod
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 
 type Customer = {
   id: string
@@ -83,6 +84,19 @@ type Invoice = {
 }
 
 export default function InvoiceEditPage() {
+  const pathname = usePathname()
+  const isUnderService = pathname?.startsWith("/service") ?? false
+  if (isUnderService) {
+    return (
+      <ServiceFinancialWritePageGuard scope="invoices" backHref="/service/invoices">
+        <InvoiceEditPageContent />
+      </ServiceFinancialWritePageGuard>
+    )
+  }
+  return <InvoiceEditPageContent />
+}
+
+function InvoiceEditPageContent() {
   const router = useRouter()
   const params = useParams()
   const pathname = usePathname()

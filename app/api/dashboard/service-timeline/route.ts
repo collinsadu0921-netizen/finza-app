@@ -2,13 +2,18 @@
  * GET /api/dashboard/service-timeline?business_id=...&periods=6
  *
  * Read-only. Returns ledger-derived revenue/expense/profit per period for chart.
- * periods default 6. Uses get_profit_and_loss_from_trial_balance per period.
+ * periods default 6. Uses getProfitAndLossReport (ledger movement) per period.
  */
 
 import { NextRequest, NextResponse } from "next/server"
+
+export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import {
+  getProfitAndLossReport,
+  pnlTotalsFromReport,
+} from "@/lib/accounting/reports/getProfitAndLossReport"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 /** Bounded parallel P&L fetches — fewer round-trips than sequential, avoids 12-at-once load. */
@@ -29,18 +34,7 @@ async function getPnLTotals(
     period_start: periodStart,
   })
   if (!data) return null
-  const incomeSections = data.sections.filter((s) => s.key === "income" || s.key === "other_income")
-  const expenseSections = data.sections.filter(
-    (s) =>
-      s.key === "cogs" ||
-      s.key === "operating_expenses" ||
-      s.key === "other_expenses" ||
-      s.key === "taxes"
-  )
-  const revenue = Math.round(incomeSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
-  const expenses = Math.round(expenseSections.reduce((sum, s) => sum + s.subtotal, 0) * 100) / 100
-  const netProfit = data.totals?.net_profit ?? revenue - expenses
-  return { revenue, expenses, netProfit }
+  return pnlTotalsFromReport(data)
 }
 
 /**

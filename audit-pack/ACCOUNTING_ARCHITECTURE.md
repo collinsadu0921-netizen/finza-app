@@ -5,9 +5,9 @@
 **Classification:** Auditor-facing technical documentation  
 **Audience:** External accountants, auditors, compliance reviewers
 
----
+> **Live reporting source contract (2026-06):** See [../docs/REPORTING_SOURCE_CONTRACT.md](../docs/REPORTING_SOURCE_CONTRACT.md).
 
-## EXECUTIVE SUMMARY
+---
 
 The Finza accounting system implements a double-entry, ledger-based accounting model with strict period locking, immutability controls, and canonical reporting functions. All financial statements are derived exclusively from the ledger (journal entries and ledger lines), with no direct calculation from operational source data.
 
@@ -16,7 +16,7 @@ The Finza accounting system implements a double-entry, ledger-based accounting m
 - **Period locking enforced:** Locked periods are immutable; soft-closed periods allow adjustments only
 - **Ledger-only reporting:** All financial statements are derived from `journal_entries` and `journal_entry_lines` tables
 - **Immutability enforced:** Journal entries and ledger lines cannot be updated or deleted once created
-- **Canonical functions:** Trial Balance is the single source of truth for all downstream statements
+- **Canonical functions:** Trial Balance snapshots provide period evidence; P&L uses journal movement; Balance Sheet uses cumulative ledger as-of
 
 ---
 
@@ -63,11 +63,18 @@ TRIAL BALANCE (trial_balance_snapshots)
     └─ Persisted snapshot for downstream consumption
     │
     ▼
-FINANCIAL STATEMENTS
+FINANCIAL STATEMENTS (live application)
     │
-    ├─ Profit & Loss: get_profit_and_loss_from_trial_balance()
-    ├─ Balance Sheet: get_balance_sheet_from_trial_balance()
-    └─ Both consume trial_balance_snapshots only (no direct ledger queries)
+    ├─ Trial Balance: get_trial_balance_from_snapshot()  → snapshot evidence
+    ├─ Profit & Loss: get_profit_and_loss_movement()     → journal movement in range
+    ├─ Balance Sheet: get_balance_sheet_as_of()          → cumulative ledger as-of
+    │                  + get_cumulative_net_income_as_of()
+    └─ Dependent reports (Cash Flow, Equity Changes, AFS P&L):
+                       canonical P&L net profit via getProfitAndLossReport
+
+LEGACY DB FUNCTIONS (migrations; not live app source for P&L/BS):
+    get_profit_and_loss_from_trial_balance()
+    get_balance_sheet_from_trial_balance()
 ```
 
 ---
@@ -152,7 +159,7 @@ FINANCIAL STATEMENTS
 
 **Constraints:**
 - Hard invariant: `total_debits` MUST equal `total_credits` (enforced with RAISE EXCEPTION in `generate_trial_balance`)
-- Single source of truth for all downstream financial statements
+- Single source of truth for **Trial Balance reports** and period reconciliation evidence
 
 ---
 
@@ -245,17 +252,26 @@ FINANCIAL STATEMENTS
 
 ### Financial Statement Functions
 
-**11. `get_profit_and_loss_from_trial_balance(p_period_id UUID)`**
-- **Purpose:** Returns P&L statement (income and expense accounts only)
-- **Source:** Trial balance snapshot only (no direct ledger queries)
+**11. `get_profit_and_loss_movement(p_business_id, p_start_date, p_end_date)`** *(live P&L)*
+- **Purpose:** Canonical P&L — journal movement in inclusive date range
+- **Source:** `journal_entries` + `journal_entry_lines` + `accounts`
+- **Migration:** 489/490
+
+**12. `get_balance_sheet_as_of` / `get_cumulative_net_income_as_of`** *(live Balance Sheet)*
+- **Purpose:** Cumulative ledger as-of + equity net income through date
+- **Migration:** 486 (phase 2h)
+
+**13. `get_profit_and_loss_from_trial_balance(p_period_id UUID)`** *(legacy DB; not live app source)*
+- **Purpose:** P&L from TB snapshot closing balances (historical)
+- **Source:** Trial balance snapshot only
 - **Migration:** 169_trial_balance_canonicalization.sql
 
-**12. `get_balance_sheet_from_trial_balance(p_period_id UUID)`**
-- **Purpose:** Returns Balance Sheet (asset, liability, equity accounts only)
-- **Source:** Trial balance snapshot only (no direct ledger queries)
+**14. `get_balance_sheet_from_trial_balance(p_period_id UUID)`** *(legacy DB; not live app source)*
+- **Purpose:** Balance Sheet from TB snapshot (historical)
+- **Source:** Trial balance snapshot only
 - **Migration:** 169_trial_balance_canonicalization.sql
 
-**13. `validate_statement_reconciliation(p_period_id UUID)`**
+**15. `validate_statement_reconciliation(p_period_id UUID)`**
 - **Purpose:** Validates P&L and Balance Sheet reconcile to Trial Balance
 - **Validation:** Balance Sheet equation (Assets = Liabilities + Equity)
 - **Returns:** JSONB with reconciliation result (raises exception on failure)
@@ -298,8 +314,9 @@ FINANCIAL STATEMENTS
 
 ### 4. Trial Balance Canonicalization
 - **Generation:** `generate_trial_balance()` enforces `total_debits = total_credits` (hard invariant)
-- **Consumption:** P&L and Balance Sheet functions consume `trial_balance_snapshots` only
-- **Validation:** `validate_statement_reconciliation()` verifies statements reconcile to Trial Balance
+- **Consumption:** Trial Balance reports consume `trial_balance_snapshots` via `get_trial_balance_from_snapshot`
+- **Live P&L/BS:** Application uses journal movement and cumulative as-of (see `docs/REPORTING_SOURCE_CONTRACT.md`)
+- **Validation:** `validate_statement_reconciliation()` verifies statements reconcile to Trial Balance where applicable
 - **Failure:** Exception raised with imbalance details
 
 ---

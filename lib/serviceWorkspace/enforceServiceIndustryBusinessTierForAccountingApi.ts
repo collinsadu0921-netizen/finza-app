@@ -8,7 +8,10 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 
 export async function enforceServiceIndustryBusinessTierForAccountingApi(
@@ -36,5 +39,34 @@ export async function enforceServiceIndustryBusinessTierForAccountingApi(
   const ind = (biz?.industry ?? "").toLowerCase()
   if (ind !== "service" && ind !== "professional") return null
 
-  return enforceServiceWorkspaceAccess({ supabase, userId, businessId, minTier })
+  return enforceServiceWorkspaceAccess({ supabase, userId, businessId, minTier, mode: "read" })
+}
+
+/** Same as above but blocks read-only locked tenants from mutating ledger/accounting data. */
+export async function enforceServiceIndustryBusinessTierForAccountingWrite(
+  supabase: SupabaseClient,
+  userId: string,
+  businessId: string,
+  minTier: ServiceSubscriptionTier = "business"
+): Promise<NextResponse | null> {
+  const { data: firmRow } = await supabase
+    .from("accounting_firm_users")
+    .select("firm_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle()
+
+  if (firmRow) return null
+
+  const { data: biz } = await supabase
+    .from("businesses")
+    .select("industry")
+    .eq("id", businessId)
+    .is("archived_at", null)
+    .maybeSingle()
+
+  const ind = (biz?.industry ?? "").toLowerCase()
+  if (ind !== "service" && ind !== "professional") return null
+
+  return enforceServiceWorkspaceWriteAccess({ supabase, userId, businessId, minTier })
 }

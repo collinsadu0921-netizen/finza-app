@@ -170,14 +170,14 @@ FROM vat_ledger;
 -- SECTION 6 — PERIOD CUT-OFF VALIDATION
 -- ============================================================================
 
--- 6.1 Invoice: issue_date, sent_at vs journal_entries.date (expect COALESCE(sent_at::date, issue_date))
+-- 6.1 Invoice: issue_date, sent_at vs journal_entries.date (expect COALESCE(issue_date, sent_at::date))
 SELECT '6.1_invoice_je_date_mismatch' AS check_id, i.business_id, i.id AS invoice_id,
   i.issue_date, i.sent_at,
-  (COALESCE((i.sent_at AT TIME ZONE 'UTC')::date, i.issue_date)) AS expected_je_date,
+  (COALESCE(i.issue_date, (i.sent_at AT TIME ZONE 'UTC')::date)) AS expected_je_date,
   je.date AS actual_je_date
 FROM invoices i
 JOIN journal_entries je ON je.reference_id = i.id AND je.reference_type = 'invoice'
-WHERE je.date IS DISTINCT FROM (COALESCE((i.sent_at AT TIME ZONE 'UTC')::date, i.issue_date))
+WHERE je.date IS DISTINCT FROM (COALESCE(i.issue_date, (i.sent_at AT TIME ZONE 'UTC')::date))
   AND i.deleted_at IS NULL;
 
 -- 6.2 Payment: payment.date vs journal_entries.date

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,6 +40,14 @@ export async function POST(request: NextRequest) {
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scope.businessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
     try {
       await assertBusinessNotArchived(supabase, scope.businessId)
     } catch (e: any) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
 import { calculateTaxes, getLegacyTaxAmounts } from "@/lib/taxEngine"
 import { legacyToCanonicalResult } from "@/lib/taxEngine/adapters"
 import { deriveLegacyGhanaTaxAmounts, getTaxEngineCode } from "@/lib/taxEngine/helpers"
@@ -15,6 +16,7 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function GET(
   request: NextRequest,
@@ -42,17 +44,12 @@ export async function GET(
     }
 
     const requestedBusinessId = new URL(request.url).searchParams.get("business_id")
-    const scope = await resolveBusinessScopeForUser(supabase, user.id, requestedBusinessId)
-    if (!scope.ok) {
-      return NextResponse.json({ error: scope.error }, { status: scope.status })
-    }
-    const scopedBusinessId = scope.businessId
 
+    // Resolve invoice by id first — do not filter by selected/stale business context.
     const { data: invoiceCheck, error: checkError } = await supabase
       .from("invoices")
       .select("id, business_id, deleted_at")
       .eq("id", invoiceId)
-      .eq("business_id", scopedBusinessId)
       .maybeSingle()
 
     if (checkError) {
@@ -74,6 +71,27 @@ export async function GET(
       return NextResponse.json(
         { error: "Invoice has been deleted" },
         { status: 404 }
+      )
+    }
+
+    const invoiceBusinessId = invoiceCheck.business_id
+    const role = await getUserRole(supabase, user.id, invoiceBusinessId)
+    if (!role) {
+      return NextResponse.json(
+        { error: "Invoice not found" },
+        { status: 404 }
+      )
+    }
+
+    // Stale/wrong requested business_id is ignored when the user can access the invoice tenant.
+    const scopedBusinessId = invoiceBusinessId
+    if (
+      requestedBusinessId &&
+      requestedBusinessId.trim() !== invoiceBusinessId
+    ) {
+      console.info(
+        "GET /api/invoices/[id]: ignoring stale business_id query param",
+        { invoiceId, requestedBusinessId, invoiceBusinessId }
       )
     }
 
@@ -271,6 +289,14 @@ export async function PUT(
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const scopedBusinessId = scope.businessId
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scopedBusinessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const {
       customer_id,
@@ -680,6 +706,14 @@ export async function DELETE(
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const scopedBusinessId = scope.businessId
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scopedBusinessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const { data: existingInvoice } = await supabase
       .from("invoices")

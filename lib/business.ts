@@ -17,8 +17,14 @@ export function getSelectedBusinessId(): string | null {
 export function setSelectedBusinessId(id: string | null): void {
   if (typeof window === "undefined") return
   try {
+    const current = localStorage.getItem(WORKSPACE_KEY)
+    if (id && current === id) return
+    if (!id && !current) return
     if (id) localStorage.setItem(WORKSPACE_KEY, id)
     else localStorage.removeItem(WORKSPACE_KEY)
+    window.dispatchEvent(
+      new CustomEvent("finza:business-changed", { detail: { businessId: id } })
+    )
   } catch {}
 }
 
@@ -250,6 +256,21 @@ export async function resolveBusinessScopeForUser(
     return { ok: false, status: 404, error: "Business not found" }
   }
   return { ok: true, businessId: business.id }
+}
+
+/**
+ * Client-side business resolution for list pages: URL param → localStorage workspace → server fallback.
+ */
+export async function resolvePreferredBusinessForUser(
+  supabase: SupabaseClient,
+  userId: string,
+  requestedBusinessId?: string | null
+): Promise<ResolveBusinessScopeResult> {
+  const fromRequest =
+    typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
+  const fromStorage = getSelectedBusinessId()
+  const explicit = fromRequest || fromStorage || null
+  return resolveBusinessScopeForUser(supabase, userId, explicit)
 }
 
 /**

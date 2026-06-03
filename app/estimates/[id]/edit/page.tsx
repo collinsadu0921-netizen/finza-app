@@ -11,6 +11,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { getCurrencySymbol } from "@/lib/currency"
 import type { TaxResult } from "@/lib/taxEngine/types"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 
 type Customer = {
   id: string
@@ -61,6 +62,19 @@ type Estimate = {
 }
 
 export default function EstimateEditPage() {
+  const pathname = usePathname()
+  const isUnderService = pathname?.startsWith("/service") ?? false
+  if (isUnderService) {
+    return (
+      <ServiceFinancialWritePageGuard scope="estimates" backHref="/service/estimates">
+        <EstimateEditPageContent />
+      </ServiceFinancialWritePageGuard>
+    )
+  }
+  return <EstimateEditPageContent />
+}
+
+function EstimateEditPageContent() {
   const router = useRouter()
   const params = useParams()
   const pathname = usePathname()

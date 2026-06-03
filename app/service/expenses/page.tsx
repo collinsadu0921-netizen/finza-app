@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
@@ -9,6 +10,9 @@ import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate
 import { formatMoney } from "@/lib/money"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import Link from "next/link"
 
 type Expense = {
   id: string
@@ -30,7 +34,9 @@ type Expense = {
 
 export default function ExpensesPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/expenses"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const PAGE_SIZE = 25
   const toast = useToast()
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -48,6 +54,7 @@ export default function ExpensesPage() {
   })
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  const { readOnly, guardWriteAction, upgradeHref } = useServiceFinancialWrite("expenses")
 
   useEffect(() => { loadData() }, [])
 
@@ -117,11 +124,16 @@ export default function ExpensesPage() {
   const totalTaxes = expenses.reduce((sum, exp) => sum + Number(exp.nhil || 0) + Number(exp.getfund || 0) + Number(exp.covid || 0) + Number(exp.vat || 0), 0)
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
-    router.replace(`/service/expenses?${params.toString()}`)
-  }, [page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/expenses?${params.toString()}`
+    )
+  }, [page, pathname, searchParamsString, router])
 
   // This-month total
   const now = new Date()
@@ -194,15 +206,17 @@ export default function ExpensesPage() {
             <p className="text-sm text-slate-500 mt-0.5">Track and manage your business expenses</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => router.push("/service/expenses/categories")}
-              className="inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-              Categories
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => guardWriteAction(() => router.push("/service/expenses/categories"))}
+                className="inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                Categories
+              </button>
+            )}
             {expenses.length > 0 && (
               <>
                 <button
@@ -225,18 +239,22 @@ export default function ExpensesPage() {
                 </button>
               </>
             )}
-            <button
-              data-tour="service-expenses-new"
-              onClick={() => router.push("/service/expenses/create")}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Expense
-            </button>
+            {!readOnly && (
+              <button
+                data-tour="service-expenses-new"
+                onClick={() => guardWriteAction(() => router.push("/service/expenses/create"))}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Expense
+              </button>
+            )}
           </div>
         </div>
+
+        {readOnly && <ServiceReadOnlyNotice scope="expenses" className="mb-2" />}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -353,15 +371,27 @@ export default function ExpensesPage() {
               {filtersActive ? "No expenses match your filters" : "No expenses yet"}
             </p>
             <p className="text-slate-500 text-sm mb-4">
-              {filtersActive ? "Try adjusting your search or filters." : "Start tracking your business expenses."}
+              {filtersActive
+                ? "Try adjusting your search or filters."
+                : readOnly
+                  ? "You can view past expenses here. Upgrade to add new ones."
+                  : "Start tracking your business expenses."}
             </p>
-            {!filtersActive && (
+            {!filtersActive && !readOnly && (
               <button
-                onClick={() => router.push("/service/expenses/create")}
+                onClick={() => guardWriteAction(() => router.push("/service/expenses/create"))}
                 className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
               >
                 Add Expense
               </button>
+            )}
+            {!filtersActive && readOnly && (
+              <Link
+                href={upgradeHref}
+                className="inline-block px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                Upgrade to add expenses
+              </Link>
             )}
           </div>
         ) : (
@@ -409,12 +439,19 @@ export default function ExpensesPage() {
                           <span className="text-sm font-semibold text-slate-900 tabular-nums">{formatMoney(Number(expense.total), business?.currency_code || "GHS")}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); router.push(`/service/expenses/${expense.id}/edit`) }}
-                            className="text-xs px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg font-medium hover:bg-slate-100 transition-colors mr-2"
-                          >
-                            Edit
-                          </button>
+                          {!readOnly && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                guardWriteAction(() =>
+                                  router.push(`/service/expenses/${expense.id}/edit`)
+                                )
+                              }}
+                              className="text-xs px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg font-medium hover:bg-slate-100 transition-colors mr-2"
+                            >
+                              Edit
+                            </button>
+                          )}
                           <span className="text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors">View →</span>
                         </td>
                       </tr>

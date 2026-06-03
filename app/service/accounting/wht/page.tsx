@@ -8,6 +8,8 @@ import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import type { WhtReceivableRow } from "@/lib/wht/receivableTypes"
 
 type WHTBill = {
@@ -44,6 +46,7 @@ function statusClass(s: WhtReceivableRow["deduction_status"]): string {
 export default function WHTRegisterPage() {
   const router = useRouter()
   const toast = useToast()
+  const { readOnly } = useServiceFinancialWrite("accounting")
 
   const [businessId, setBusinessId] = useState("")
   const [currencyCode, setCurrencyCode] = useState("")
@@ -227,6 +230,8 @@ export default function WHTRegisterPage() {
             </p>
           </div>
 
+          {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
+
           {/* Workspace tabs */}
           <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 mb-8">
             <button
@@ -325,7 +330,7 @@ export default function WHTRegisterPage() {
                     />
                     Select all
                   </label>
-                  {selected.size > 0 && (
+                  {selected.size > 0 && !readOnly && (
                     <div className="flex items-center gap-4">
                       <span className="text-sm text-gray-600 dark:text-gray-400">
                         {selected.size} selected · {formatMoney(selectedTotal, currencyCode || null)} WHT

@@ -7,10 +7,14 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { readApiJson } from "@/lib/readApiJson"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import { TRIAL_EXPIRED_READ_ONLY_MESSAGE } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 type ExpenseCategory = {
   id: string
@@ -21,11 +25,16 @@ export default function CreateExpensePage() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const isUnderService = pathname?.startsWith("/service") ?? false
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("expenses")
+  const expensesListHref = isUnderService ? "/service/expenses" : "/expenses"
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   const [supplier, setSupplier] = useState("")
   const [categoryId, setCategoryId] = useState("")
@@ -61,15 +70,16 @@ export default function CreateExpensePage() {
   }, [])
 
   useEffect(() => {
-    const ds = searchParams.get("draft_supplier")
+    const params = new URLSearchParams(searchParamsString)
+    const ds = params.get("draft_supplier")
     if (ds) setSupplier(ds)
-    const da = searchParams.get("draft_amount")
+    const da = params.get("draft_amount")
     if (da) setAmount(da)
-    const dn = searchParams.get("draft_notes")
+    const dn = params.get("draft_notes")
     if (dn) setNotes(dn)
-    const dd = searchParams.get("draft_date")
+    const dd = params.get("draft_date")
     if (dd && /^\d{4}-\d{2}-\d{2}$/.test(dd)) setDate(dd)
-  }, [searchParams])
+  }, [searchParamsString])
 
   const incomingPrefillKeyRef = useRef<string>("")
   const receiptFileInputRef = useRef<HTMLInputElement>(null)
@@ -180,8 +190,16 @@ export default function CreateExpensePage() {
     }
   }
 
+  useEffect(() => {
+    if (readOnly) setShowCategoryModal(false)
+  }, [readOnly])
+
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (isUnderService && readOnly) {
+      setError(TRIAL_EXPIRED_READ_ONLY_MESSAGE)
+      return
+    }
     if (!newCategoryName.trim() || !businessId) return
 
     try {
@@ -417,6 +435,11 @@ export default function CreateExpensePage() {
     e.preventDefault()
     setError("")
 
+    if (isUnderService && readOnly) {
+      setError(TRIAL_EXPIRED_READ_ONLY_MESSAGE)
+      return
+    }
+
     if (!supplier.trim()) {
       setError("Supplier name is required")
       return
@@ -499,7 +522,7 @@ export default function CreateExpensePage() {
         throw new Error(errorData.error || "Failed to create expense")
       }
 
-      router.push("/service/expenses")
+      router.push(expensesListHref)
     } catch (err: any) {
       setError(err.message || "Failed to create expense")
       setLoading(false)
@@ -544,8 +567,7 @@ export default function CreateExpensePage() {
       ? Math.round(totalIncludingTaxes * fxRateNum * 100) / 100
       : null
 
-  return (
-    <Wrapper>
+  const pageBody = (
       <div className="min-h-screen bg-slate-50">
         <div className="max-w-3xl mx-auto p-6">
           <div className="mb-6">
@@ -603,8 +625,11 @@ export default function CreateExpensePage() {
                     </label>
                     <button
                       type="button"
-                      onClick={() => setShowCategoryModal(true)}
-                      className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                      onClick={() =>
+                        guardWriteAction(() => setShowCategoryModal(true))
+                      }
+                      disabled={isUnderService && readOnly}
+                      className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1007,7 +1032,16 @@ export default function CreateExpensePage() {
           )}
         </div>
       </div>
-    </Wrapper>
   )
+
+  if (isUnderService) {
+    return (
+      <ServiceFinancialWritePageGuard scope="expenses" backHref={expensesListHref}>
+        {pageBody}
+      </ServiceFinancialWritePageGuard>
+    )
+  }
+
+  return <Wrapper>{pageBody}</Wrapper>
 }
 

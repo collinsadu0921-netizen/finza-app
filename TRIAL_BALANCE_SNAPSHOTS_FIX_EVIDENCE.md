@@ -8,7 +8,9 @@
 
 **Supporting evidence:**
 
-- **Path:** `/api/accounting/reports/profit-and-loss` and `/api/accounting/reports/balance-sheet` call `get_profit_and_loss_from_trial_balance(p_period_id)` / `get_balance_sheet_from_trial_balance(p_period_id)` → both call `get_trial_balance_from_snapshot(p_period_id)`.
+- **Path (Trial Balance):** TB report routes call `get_trial_balance_from_snapshot(p_period_id)`; missing snapshots trigger `generate_trial_balance`.
+- **Path (P&L / Balance Sheet, current):** Live routes use `getProfitAndLossReport` / `getBalanceSheetReport` (journal movement and cumulative as-of). See `docs/REPORTING_SOURCE_CONTRACT.md`.
+- **Historical note:** Pre-2026, P&L/BS routes called `get_profit_and_loss_from_trial_balance` / `get_balance_sheet_from_trial_balance` → `get_trial_balance_from_snapshot`.
 - **get_trial_balance_from_snapshot:**  
   - `SELECT * INTO snapshot_record FROM trial_balance_snapshots WHERE period_id = p_period_id`  
   - If no row: `PERFORM generate_trial_balance(p_period_id, NULL)`  

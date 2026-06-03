@@ -10,6 +10,8 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { downloadProformaPdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type ProformaInvoice = {
   id: string
@@ -78,6 +80,7 @@ export default function ProformaViewPage() {
   const businessIdFromUrl =
     searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
   const { openConfirm } = useConfirm()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("proforma")
 
   const [loading, setLoading] = useState(true)
   const [proforma, setProforma] = useState<ProformaInvoice | null>(null)
@@ -423,6 +426,8 @@ export default function ProformaViewPage() {
           Back to Proformas
         </button>
 
+        {readOnly && <ServiceReadOnlyNotice scope="proforma" className="mb-2" />}
+
         {/* Header card */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -461,7 +466,7 @@ export default function ProformaViewPage() {
                 {pdfDownloading ? "Preparing…" : "Download PDF"}
               </button>
               {/* DRAFT */}
-              {proforma.status === "draft" && (
+              {!readOnly && proforma.status === "draft" && (
                 <>
                   <button
                     onClick={() => router.push(`/service/proforma/${proformaId}/edit`)}
@@ -489,7 +494,7 @@ export default function ProformaViewPage() {
                 </>
               )}
               {/* SENT */}
-              {proforma.status === "sent" && (
+              {!readOnly && proforma.status === "sent" && (
                 <>
                   <button
                     onClick={openSendModal}
@@ -524,7 +529,7 @@ export default function ProformaViewPage() {
                 </>
               )}
               {/* ACCEPTED */}
-              {proforma.status === "accepted" && (
+              {!readOnly && proforma.status === "accepted" && (
                 <>
                   <button
                     onClick={handleConvertToInvoice}

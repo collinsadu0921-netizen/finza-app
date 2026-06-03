@@ -8,6 +8,8 @@ import { formatMoney } from "@/lib/money"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Bill = {
   id: string
@@ -92,6 +94,7 @@ export default function BillsPage() {
   const router = useRouter()
   const toast = useToast()
   const { format, currencyCode: businessHomeCode } = useBusinessCurrency()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("bills")
   const [loading, setLoading] = useState(true)
   const [bills, setBills] = useState<Bill[]>([])
   const [error, setError] = useState("")
@@ -211,16 +214,20 @@ export default function BillsPage() {
               <h1 className="text-2xl font-bold text-slate-900">Supplier Bills</h1>
               <p className="text-sm text-slate-500 mt-0.5">Manage accounts payable and supplier invoices</p>
             </div>
-            <button
-              onClick={() => router.push("/bills/create")}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Bill
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => guardWriteAction(() => router.push("/bills/create"))}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Bill
+              </button>
+            )}
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="bills" className="mb-2" />}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -325,9 +332,9 @@ export default function BillsPage() {
               <p className="text-slate-500 text-sm mb-4">
                 {filtersActive ? "Try adjusting your search or filters." : "Create your first supplier bill to track accounts payable."}
               </p>
-              {!filtersActive && (
+              {!filtersActive && !readOnly && (
                 <button
-                  onClick={() => router.push("/bills/create")}
+                  onClick={() => guardWriteAction(() => router.push("/bills/create"))}
                   className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
                 >
                   Add Bill

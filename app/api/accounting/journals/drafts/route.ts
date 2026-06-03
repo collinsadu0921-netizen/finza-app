@@ -5,6 +5,7 @@ import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/fir
 import { resolveAuthority } from "@/lib/accounting/firm/authority"
 import { logBlockedActionAttempt, logFirmActivity } from "@/lib/accounting/firm/activityLog"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
  * GET /api/accounting/journals/drafts
@@ -416,6 +417,14 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         )
       }
+
+      const tierBlockDraftPost = await enforceServiceIndustryBusinessTierForAccountingWrite(
+        supabase,
+        user.id,
+        client_business_id,
+        "business"
+      )
+      if (tierBlockDraftPost) return tierBlockDraftPost
     } else {
       // ---------- Firm-mode: engagement + resolveAuthority ----------
       const { data: firmUser } = await supabase

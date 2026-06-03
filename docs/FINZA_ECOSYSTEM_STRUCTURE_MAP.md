@@ -61,7 +61,7 @@ Structural map of the Finza ecosystem. No opinions, no fixes, no refactors.
 
 **Snapshot / reporting system:**
 - `generate_trial_balance(p_period_id, ...)` — Builds trial balance from `period_opening_balances` + `journal_entry_lines`; persists snapshot (e.g. trial_balance_snapshots or equivalent). Migration 169, 240.
-- `get_trial_balance_from_snapshot` — Reads from snapshot. Reports (P&L, balance sheet, general ledger) consume ledger/snapshot data via API routes under `/api/accounting/reports/`, `/api/accounting/trial-balance`, etc.
+- `get_trial_balance_from_snapshot` — Reads from snapshot for **Trial Balance** reports. **P&L** uses `get_profit_and_loss_movement`; **Balance Sheet** uses cumulative ledger as-of. See [REPORTING_SOURCE_CONTRACT.md](./REPORTING_SOURCE_CONTRACT.md).
 
 **Tax engine (VAT / NHIL / GETFund / COVID):**
 - **Library:** `lib/taxEngine/` — `index.ts`, `types.ts`, `adapters.ts`, `serialize.ts`, `errors.ts`, `helpers.ts`; jurisdictions: `ghana.ts`, `ghana-shared.ts`, `nigeria.ts`, `kenya.ts`, `zambia.ts`, `east-africa.ts`.

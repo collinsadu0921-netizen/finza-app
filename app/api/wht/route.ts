@@ -5,7 +5,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createAuditLog } from "@/lib/auditLog"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import {
+  enforceServiceWorkspaceAccess,
+  enforceServiceWorkspaceWriteAccess,
+} from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 export async function GET(request: NextRequest) {
   try {
@@ -62,7 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "business_id, bill_ids, and remittance_date are required" }, { status: 400 })
     }
 
-    const deniedPost = await enforceServiceWorkspaceAccess({
+    const deniedPost = await enforceServiceWorkspaceWriteAccess({
       supabase,
       userId: user?.id,
       businessId: business_id,

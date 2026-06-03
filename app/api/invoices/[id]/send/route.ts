@@ -15,6 +15,7 @@ import { mergeInvoiceTermsFooter } from "@/lib/invoices/loadInvoiceSettingsForDo
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 /** Performs the SEND transition: status → 'sent', assign invoice_number if missing, update DB. Triggers trigger_auto_post_invoice. */
 async function performSendTransition(
@@ -182,6 +183,16 @@ export async function POST(
         { success: false, error: e?.message || "Business is archived" },
         { status: 403 }
       )
+    }
+
+    if (!resendOnly) {
+      const writeDenied = await enforceServiceIndustryFinancialWrite(
+        supabase,
+        user.id,
+        invoice.business_id,
+        "starter"
+      )
+      if (writeDenied) return writeDenied
     }
 
     if (resendOnly) {

@@ -6,7 +6,10 @@ import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngin
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import {
+  enforceServiceIndustryMinTier,
+  enforceServiceIndustryMinTierWrite,
+} from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; position?: string | null }): boolean {
   const employmentType = String(staff.employment_type || "").toLowerCase()
@@ -86,7 +89,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const tierDeniedPost = await enforceServiceIndustryMinTier(
+    const tierDeniedPost = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,

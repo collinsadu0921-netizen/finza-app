@@ -14,6 +14,7 @@ export type SubscriptionLifecycleEventType =
   | "subscription_reactivated"
   | "trial_ending_3d"
   | "trial_ending_1d"
+  | "trial_grace_started"
 
 export type SendSubscriptionLifecycleNotificationInput = {
   businessId: string
@@ -58,6 +59,8 @@ function subjectForEvent(eventType: SubscriptionLifecycleEventType): string {
       return "Your Finza trial ends in 3 days"
     case "trial_ending_1d":
       return "Your Finza trial ends tomorrow"
+    case "trial_grace_started":
+      return "Your Finza trial has ended — 3 days to choose a plan"
     default:
       return "Finza subscription update"
   }
@@ -109,6 +112,10 @@ function buildEmailBody(opts: {
     case "trial_ending_1d":
       headline = "Trial ending tomorrow"
       bodyText = `Your Finza trial for ${name} ends tomorrow. Subscribe now to avoid interruption.`
+      break
+    case "trial_grace_started":
+      headline = "Trial ended — grace period started"
+      bodyText = `Your free trial for ${name} has ended. You have 3 days to choose a paid plan while you can still create and edit records. After that, the workspace becomes read-only until you subscribe.`
       break
   }
 

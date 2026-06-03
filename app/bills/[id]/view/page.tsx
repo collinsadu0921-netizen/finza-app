@@ -9,6 +9,8 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
 import { formatMoney } from "@/lib/money"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Bill = {
   id: string
@@ -105,6 +107,7 @@ export default function BillViewPage() {
   const router = useRouter()
   const params = useParams()
   const id = params.id as string
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("bills")
 
   const [loading, setLoading] = useState(true)
   const [bill, setBill] = useState<Bill | null>(null)
@@ -300,6 +303,7 @@ Thank you.`
               </div>
               <p className="text-sm text-slate-500 mt-0.5">Supplier bill details and payment tracking</p>
             </div>
+            {!readOnly && (
             <button
               onClick={() => router.push(`/bills/${id}/edit`)}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors flex-shrink-0"
@@ -309,7 +313,10 @@ Thank you.`
               </svg>
               Edit
             </button>
+            )}
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="bills" className="mb-6 export-hide print-hide" />}
 
           {/* Summary stat cards */}
           <div className={`grid grid-cols-1 gap-4 mb-6 export-hide print-hide ${bill.wht_applicable ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
@@ -612,9 +619,9 @@ Thank you.`
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Payments</h2>
-                  {bill.status !== "paid" && (
+                  {bill.status !== "paid" && !readOnly && (
                     <button
-                      onClick={() => setShowPaymentModal(true)}
+                      onClick={() => guardWriteAction(() => setShowPaymentModal(true))}
                       className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 font-medium text-sm transition-all flex items-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -650,8 +657,9 @@ Thank you.`
                               <p className="text-xs text-slate-500">Ref: {payment.reference}</p>
                             )}
                           </div>
+                          {!readOnly && (
                           <button
-                            onClick={() => setEditingPayment(payment)}
+                            onClick={() => guardWriteAction(() => setEditingPayment(payment))}
                             className="text-slate-400 hover:text-slate-600 p-1"
                             title="Edit payment"
                           >
@@ -659,6 +667,7 @@ Thank you.`
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                             </svg>
                           </button>
+                          )}
                         </div>
                       </div>
                     ))}

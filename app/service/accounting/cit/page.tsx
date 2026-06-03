@@ -8,6 +8,8 @@ import { formatMoney } from "@/lib/money"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 function getQuarterDateRange(year: number, quarter: number): { start: string; end: string } {
   const quarterBounds: Record<number, [number, number]> = {
@@ -94,6 +96,7 @@ type CITProvision = {
 export default function CITPage() {
   const router = useRouter()
   const toast = useToast()
+  const { readOnly } = useServiceFinancialWrite("accounting")
 
   const [businessId, setBusinessId] = useState("")
   const [currencyCode, setCurrencyCode] = useState("")
@@ -413,6 +416,7 @@ export default function CITPage() {
                   CIT provisions and quarterly payments · {activeRate.label}
                 </p>
               </div>
+              {!readOnly && (
               <button
                 onClick={() => { setCitRate(rateInfo.rate); setShowForm(true) }}
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2.5 rounded-lg hover:from-blue-700 hover:to-indigo-700 font-medium shadow-lg transition-all flex items-center gap-2"
@@ -422,8 +426,11 @@ export default function CITPage() {
                 </svg>
                 New Provision
               </button>
+              )}
             </div>
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
 
           {/* Info Banner */}
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-4 mb-6">
@@ -517,7 +524,7 @@ export default function CITPage() {
                       </td>
                       <td className="px-4 py-3">{statusBadge(prov.status)}</td>
                       <td className="px-4 py-3">
-                        {prov.status === "draft" && (
+                        {!readOnly && prov.status === "draft" && (
                           <button
                             onClick={() => handlePost(prov.id)}
                             disabled={posting === prov.id}
@@ -526,7 +533,7 @@ export default function CITPage() {
                             {posting === prov.id ? "Posting…" : "Post to Ledger"}
                           </button>
                         )}
-                        {prov.status === "posted" && (
+                        {!readOnly && prov.status === "posted" && (
                           <button
                             onClick={() => {
                               setPayingProvision(prov)

@@ -7,6 +7,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
+
+export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 
@@ -82,6 +84,7 @@ async function buildJournalActivityItems(
   const invoiceIds: string[] = []
   const billIds: string[] = []
   const expenseIds: string[] = []
+  const paymentIds: string[] = []
 
   for (const e of entries) {
     const refId = e.reference_id as string | null
@@ -90,9 +93,12 @@ async function buildJournalActivityItems(
     if (refType === "invoice") invoiceIds.push(refId)
     else if (refType === "bill") billIds.push(refId)
     else if (refType === "expense") expenseIds.push(refId)
+    else if (refType === "payment" || refType === "receipt" || refType === "customer_payment")
+      paymentIds.push(refId)
   }
 
-  const [{ data: invDocs }, { data: billDocs }, { data: expDocs }] = await Promise.all([
+  const [{ data: invDocs }, { data: billDocs }, { data: expDocs }, { data: paymentRows }] =
+    await Promise.all([
     invoiceIds.length
       ? supabase.from("invoices").select("id, currency_code, total").in("id", invoiceIds)
       : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
@@ -102,11 +108,37 @@ async function buildJournalActivityItems(
     expenseIds.length
       ? supabase.from("expenses").select("id, currency_code, total").in("id", expenseIds)
       : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
+    paymentIds.length
+      ? supabase
+          .from("payments")
+          .select("id, invoice_id, amount")
+          .in("id", paymentIds)
+          .is("deleted_at", null)
+      : Promise.resolve({
+          data: [] as { id: string; invoice_id: string; amount: number | null }[],
+        }),
   ])
 
   const docMap = new Map<string, DocCurrency>()
   for (const d of [...(invDocs ?? []), ...(billDocs ?? []), ...(expDocs ?? [])]) {
     docMap.set(d.id, { currency_code: d.currency_code, total: d.total })
+  }
+
+  const paymentInvoiceMap = new Map<string, { invoice_id: string; amount: number | null }>()
+  for (const p of paymentRows ?? []) {
+    paymentInvoiceMap.set(p.id, { invoice_id: p.invoice_id, amount: p.amount })
+  }
+
+  const paymentInvoiceIds = [...new Set([...paymentInvoiceMap.values()].map((p) => p.invoice_id))]
+  const missingInvIds = paymentInvoiceIds.filter((id) => !docMap.has(id))
+  if (missingInvIds.length > 0) {
+    const { data: payInvDocs } = await supabase
+      .from("invoices")
+      .select("id, currency_code, total")
+      .in("id", missingInvIds)
+    for (const d of payInvDocs ?? []) {
+      docMap.set(d.id, { currency_code: d.currency_code, total: d.total })
+    }
   }
 
   return entries.map((e) => {
@@ -119,15 +151,37 @@ async function buildJournalActivityItems(
     const type: Exclude<ActivityType, "email"> = SOURCE_TYPE_MAP[srcRaw] ?? "expense"
 
     const refId = e.reference_id as string | null
-    const doc = refId ? docMap.get(refId) : null
+    const refType = (e.reference_type as string | null)?.toLowerCase()
+    const paymentLink = refId ? paymentInvoiceMap.get(refId) : null
+    const invoiceIdForPayment = paymentLink?.invoice_id
+    const doc =
+      refType === "invoice" && refId
+        ? docMap.get(refId)
+        : invoiceIdForPayment
+          ? docMap.get(invoiceIdForPayment)
+          : refId
+            ? docMap.get(refId)
+            : null
     const currencyCode: string | undefined = doc?.currency_code ?? undefined
+    const paymentAmount =
+      paymentLink?.amount != null ? Math.round(Number(paymentLink.amount) * 100) / 100 : null
     const amount =
-      doc?.total != null ? Math.round(doc.total * 100) / 100 : journalAmount
+      paymentAmount != null
+        ? paymentAmount
+        : doc?.total != null
+          ? Math.round(doc.total * 100) / 100
+          : journalAmount
 
     let href: string | undefined
-    if (e.source_type === "invoice" && refId) href = `/service/invoices/${refId}`
-    else if ((e.source_type === "bill" || e.source_type === "expense") && refId)
+    const srcType = ((e.source_type ?? e.reference_type) as string | null)?.toLowerCase()
+    if (srcType === "invoice" && refId) href = `/service/invoices/${refId}`
+    else if ((srcType === "bill" || srcType === "expense") && refId)
       href = `/service/expenses/${refId}`
+    else if (
+      (srcType === "payment" || srcType === "receipt" || srcType === "customer_payment") &&
+      invoiceIdForPayment
+    )
+      href = `/service/invoices/${invoiceIdForPayment}`
 
     const rawDesc = e.description as string | null
     const description =
@@ -182,6 +236,8 @@ export async function GET(request: NextRequest) {
     devServiceActivityLog("auth/business/access resolution", tAuth)
 
     const limit = Math.min(20, Math.max(1, parseInt(searchParams.get("limit") ?? "10", 10) || 10))
+    /** Fetch extra journal rows so payment entries compete with email noise before merge cap. */
+    const journalFetchLimit = Math.min(30, Math.max(limit, limit * 3))
 
     const [
       { data: entries, error: journalError },
@@ -200,7 +256,7 @@ export async function GET(request: NextRequest) {
           )
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
-          .limit(limit)
+          .limit(journalFetchLimit)
         devServiceActivityLog("query: journal_entries", t0)
         return r
       })(),

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 type PayrollRun = {
   id: string
   payroll_month: string
@@ -16,6 +18,7 @@ type PayrollRun = {
 export default function PayrollPage() {
   const router = useRouter()
   const payrollBase = usePayrollBasePath()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("payroll")
   const [loading, setLoading] = useState(true)
   const [runs, setRuns] = useState<PayrollRun[]>([])
 
@@ -61,16 +64,20 @@ export default function PayrollPage() {
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Payroll Runs</h1>
               <p className="text-gray-600 dark:text-gray-400">Manage monthly payroll processing</p>
             </div>
-            <button
-              onClick={() => router.push(`${payrollBase}/run`)}
-              className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              New Payroll Run
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => guardWriteAction(() => router.push(`${payrollBase}/run`))}
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Payroll Run
+              </button>
+            )}
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="payroll" className="mb-4" />}
 
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div className="overflow-x-auto">

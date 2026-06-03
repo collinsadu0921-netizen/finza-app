@@ -6,4 +6,7 @@
  * is not service/professional industry — same behavior as accounting helper.
  */
 
-export { enforceServiceIndustryBusinessTierForAccountingApi as enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+export {
+  enforceServiceIndustryBusinessTierForAccountingApi as enforceServiceIndustryMinTier,
+  enforceServiceIndustryBusinessTierForAccountingWrite as enforceServiceIndustryMinTierWrite,
+} from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"

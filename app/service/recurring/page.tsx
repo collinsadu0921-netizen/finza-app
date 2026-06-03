@@ -3,10 +3,13 @@
 import { useState, useEffect, useMemo, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { getUrlBusinessId } from "@/lib/navigation/serviceBusinessUrl"
 import { useToast } from "@/components/ui/ToastProvider"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type RecurringInvoice = {
   id: string
@@ -58,10 +61,12 @@ function formatFrequency(frequency: string) {
 function RecurringInvoicesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const toast = useToast()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("recurring")
   const urlBusinessId = useMemo(
-    () => searchParams.get("business_id")?.trim() || searchParams.get("businessId")?.trim() || null,
-    [searchParams]
+    () => getUrlBusinessId(searchParamsString),
+    [searchParamsString]
   )
   const withWorkspace = (path: string) => buildServiceRoute(path, urlBusinessId ?? undefined)
 
@@ -108,6 +113,7 @@ function RecurringInvoicesPageContent() {
   }
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
+    if (!guardWriteAction(() => {})) return
     try {
       const businessId = await getWorkspaceBusinessId()
       const newStatus = currentStatus === "active" ? "paused" : "active"
@@ -128,6 +134,7 @@ function RecurringInvoicesPageContent() {
   }
 
   const handleGenerateNow = async (id: string) => {
+    if (!guardWriteAction(() => {})) return
     try {
       const businessId = await getWorkspaceBusinessId()
       const response = await fetch("/api/recurring-invoices/generate", {
@@ -180,17 +187,21 @@ function RecurringInvoicesPageContent() {
               {hasFilters ? " matching filters" : ""}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push(withWorkspace("/recurring/create"))}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
-            New recurring invoice
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => router.push(withWorkspace("/recurring/create"))}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+              New recurring invoice
+            </button>
+          )}
         </div>
+
+        {readOnly && <ServiceReadOnlyNotice scope="recurring" className="mb-2" />}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -321,21 +332,43 @@ function RecurringInvoicesPageContent() {
                       </td>
                       <td className="px-5 py-4 text-right">
                         <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            title="Generate now"
-                            onClick={() => handleGenerateNow(recurring.id)}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                              />
-                            </svg>
-                          </button>
+                          {!readOnly && (
+                            <>
+                              <button
+                                type="button"
+                                title="Generate now"
+                                onClick={() => handleGenerateNow(recurring.id)}
+                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => router.push(withWorkspace(`/recurring/${recurring.id}/edit`))}
+                                className="text-xs font-semibold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStatus(recurring.id, recurring.status)}
+                                className={`text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
+                                  recurring.status === "active"
+                                    ? "text-amber-700 hover:bg-amber-50"
+                                    : "text-emerald-700 hover:bg-emerald-50"
+                                }`}
+                              >
+                                {recurring.status === "active" ? "Pause" : "Resume"}
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             onClick={() => router.push(withWorkspace(`/recurring/${recurring.id}/view`))}
@@ -345,24 +378,6 @@ function RecurringInvoicesPageContent() {
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                             </svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => router.push(withWorkspace(`/recurring/${recurring.id}/edit`))}
-                            className="text-xs font-semibold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleStatus(recurring.id, recurring.status)}
-                            className={`text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
-                              recurring.status === "active"
-                                ? "text-amber-700 hover:bg-amber-50"
-                                : "text-emerald-700 hover:bg-emerald-50"
-                            }`}
-                          >
-                            {recurring.status === "active" ? "Pause" : "Resume"}
                           </button>
                         </div>
                       </td>

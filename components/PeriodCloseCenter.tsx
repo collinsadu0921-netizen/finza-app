@@ -59,6 +59,8 @@ type PeriodCloseCenterProps = {
   onPeriodUpdate: () => void
   /** When false: show Soft close (owner path). When true or null: show Request close (firm path). */
   hasActiveEngagement?: boolean | null
+  /** When true, hide period close/reopen actions (service trial read-only). */
+  readOnly?: boolean
 }
 
 export default function PeriodCloseCenter({
@@ -66,6 +68,7 @@ export default function PeriodCloseCenter({
   businessId,
   onPeriodUpdate,
   hasActiveEngagement = null,
+  readOnly = false,
 }: PeriodCloseCenterProps) {
   const [readiness, setReadiness] = useState<ReadinessResult | null>(null)
   const [closeRequestInfo, setCloseRequestInfo] = useState<CloseRequestInfo | null>(null)
@@ -503,6 +506,11 @@ export default function PeriodCloseCenter({
       ) : null}
 
       {/* Actions */}
+      {readOnly ? (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          Period close actions are unavailable while this workspace is read-only.
+        </p>
+      ) : (
       <div className="flex flex-wrap gap-3">
         {canSoftClose && (
           <button
@@ -580,6 +588,7 @@ export default function PeriodCloseCenter({
           </span>
         )}
       </div>
+      )}
 
       {/* Confirm modals */}
       {confirmModal === "soft_close" && (

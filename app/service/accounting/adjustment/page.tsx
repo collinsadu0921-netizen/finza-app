@@ -7,6 +7,8 @@ import { getCurrentBusiness } from "@/lib/business"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import TierGate from "@/components/service/TierGate"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Account = {
   id: string
@@ -30,6 +32,7 @@ function isBankOrCash(acc: Account) {
 
 function ServiceWithdrawalPageInner() {
   const router = useRouter()
+  const { readOnly } = useServiceFinancialWrite("accounting")
   const [loading, setLoading] = useState(true)
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [coaLoaded, setCoaLoaded] = useState(false)
@@ -100,7 +103,7 @@ function ServiceWithdrawalPageInner() {
   const noEquity = coaLoaded && equityAccounts.length === 0
   const formDisabled = noBankCash || noEquity
   const isValid = numAmount > 0 && fromAccountId != null && equityId != null
-  const canPost = Boolean(businessId && isValid && !isSubmitting && !formDisabled)
+  const canPost = Boolean(businessId && isValid && !isSubmitting && !formDisabled && !readOnly)
 
   const handleConfirmPost = async () => {
     if (!canPost || !businessId || !fromAccountId || !equityId || numAmount <= 0) return
@@ -183,6 +186,8 @@ function ServiceWithdrawalPageInner() {
         >
           ← Back to Accounting
         </button>
+
+        {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
 
         <h1 className="text-2xl font-bold mb-2">Owner Withdrawal</h1>
         <p className="text-gray-600 dark:text-gray-400 mb-6">

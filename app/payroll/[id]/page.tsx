@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type PayrollEntry = {
   id: string
@@ -102,6 +104,7 @@ export default function PayrollRunViewPage() {
   const params = useParams()
   const runId = params.id as string
   const toast = useToast()
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("payroll")
 
   const [loading, setLoading] = useState(true)
   const [payrollRun, setPayrollRun] = useState<PayrollRun | null>(null)
@@ -451,10 +454,11 @@ export default function PayrollRunViewPage() {
                   Approving payroll posts salary expense and payroll liabilities to accounting. It does not mark salaries as paid.
                 </p>
               )}
+              {!readOnly && (
               <div className="flex flex-wrap gap-2">
               {payrollRun.status === "draft" && (
                 <button
-                  onClick={handleApprove}
+                  onClick={() => guardWriteAction(handleApprove)}
                   disabled={updating}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
@@ -462,7 +466,7 @@ export default function PayrollRunViewPage() {
                 </button>
               )}
               <button
-                onClick={handleGeneratePayslips}
+                onClick={() => guardWriteAction(handleGeneratePayslips)}
                 disabled={generating || payrollRun.status === "draft"}
                 title={payrollRun.status === "draft" ? "Approve payroll first before generating payslips" : undefined}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -476,7 +480,7 @@ export default function PayrollRunViewPage() {
               </button>
               {hasPayslips && (
                 <button
-                  onClick={handleSendAll}
+                  onClick={() => guardWriteAction(handleSendAll)}
                   disabled={sendingAll}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
                 >
@@ -490,7 +494,7 @@ export default function PayrollRunViewPage() {
               )}
               {isRunPayable && (
                 <button
-                  onClick={openPaymentModal}
+                  onClick={() => guardWriteAction(openPaymentModal)}
                   disabled={!canRecordPayment}
                   title={!canRecordPayment ? "Payroll net salary is fully paid." : undefined}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -502,8 +506,11 @@ export default function PayrollRunViewPage() {
                 </button>
               )}
               </div>
+              )}
             </div>
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="payroll" className="mb-4" />}
 
           {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">

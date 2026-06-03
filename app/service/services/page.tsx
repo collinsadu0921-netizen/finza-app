@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import LoadingScreen from "@/components/ui/LoadingScreen"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 
@@ -15,7 +16,9 @@ type ServiceCatalogRow = {
 
 export default function ServiceServicesPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/services"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const { format } = useBusinessCurrency()
   const PAGE_SIZE = 25
   const [rows, setRows] = useState<ServiceCatalogRow[]>([])
@@ -62,11 +65,16 @@ export default function ServiceServicesPage() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
-    router.replace(`/service/services?${params.toString()}`)
-  }, [page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/services?${params.toString()}`
+    )
+  }, [page, pathname, searchParamsString, router])
 
   if (loading) return <LoadingScreen />
 

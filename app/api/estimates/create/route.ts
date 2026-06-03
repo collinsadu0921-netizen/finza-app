@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireBusinessScopeForUser } from "@/lib/business"
 import { createDraftEstimateForBusiness } from "@/lib/estimates/createDraftEstimateForBusiness"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,6 +37,14 @@ export async function POST(request: NextRequest) {
       )
     }
     const businessId = scope.businessId
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      businessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const result = await createDraftEstimateForBusiness({
       supabase,

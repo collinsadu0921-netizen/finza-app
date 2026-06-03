@@ -9,6 +9,7 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(
   request: NextRequest,
@@ -43,6 +44,14 @@ export async function POST(
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scope.businessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     // Fetch proforma and verify ownership
     const { data: proforma, error: proformaError } = await supabase

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { insertExpenseForBusiness } from "@/lib/expenses/insertExpenseForBusiness"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
@@ -45,6 +46,14 @@ export async function POST(request: NextRequest) {
     if (!role) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business_id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const result = await insertExpenseForBusiness(supabase, {
       businessId: business_id,

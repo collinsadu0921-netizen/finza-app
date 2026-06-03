@@ -57,7 +57,18 @@ export default function Toast({ message, type, isVisible, onClose, duration = 30
   return (
     <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border-l-4 shadow-lg min-w-[300px] max-w-md animate-in slide-in-from-top-5 fade-in duration-200 ${typeStyles[type]}`}>
       <div className="flex-shrink-0">{icons[type]}</div>
-      <p className="flex-1 text-sm font-medium">{message}</p>
+      <p className="flex-1 text-sm font-medium whitespace-pre-line leading-snug">
+        {message.includes("\n") ? (
+          <>
+            <span className="block font-semibold">{message.split("\n")[0]}</span>
+            <span className="block font-normal mt-0.5 opacity-95">
+              {message.split("\n").slice(1).join("\n")}
+            </span>
+          </>
+        ) : (
+          message
+        )}
+      </p>
       <button
         onClick={onClose}
         className="flex-shrink-0 text-current opacity-70 hover:opacity-100 transition-opacity"

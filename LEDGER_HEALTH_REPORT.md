@@ -77,12 +77,11 @@ HAVING ABS(COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0)) > 0.001;
 | Route | `app/api/accounting/reports/profit-and-loss/route.ts` |
 | Implementation | Calls `getProfitAndLossReport(supabase, { businessId, ... })` |
 | Lib | `lib/accounting/reports/getProfitAndLossReport.ts` |
-| Data source | `supabase.rpc("get_profit_and_loss_from_trial_balance", { p_period_id })` |
-| DB function | `get_profit_and_loss_from_trial_balance(p_period_id)` (migration 234) |
-| DB behaviour | Reads from `get_trial_balance_from_snapshot(p_period_id)` and filters `account_type IN ('income','expense')` |
-| Snapshot source | Trial balance snapshot is built from **ledger** (`period_opening_balances` + `journal_entry_lines`) via `generate_trial_balance` |
+| Data source | `supabase.rpc("get_profit_and_loss_movement", { p_business_id, p_start_date, p_end_date })` |
+| DB function | `get_profit_and_loss_movement` (migrations 489/490) |
+| DB behaviour | Aggregates journal movement in date range; income/revenue = credit − debit; expense = debit − credit |
 
-**Conclusion:** P&L is **not** reading from `invoices` (or any operational table). It reads only from the Trial Balance snapshot, which is built from the ledger. If invoices/expenses were never posted to the ledger, they will not appear in P&L regardless of status — that is by design; the “missing” data is due to missing ledger entries, not report fragmentation.
+**Conclusion:** P&L is **not** reading from `invoices` (or any operational table). It reads from **ledger journal movement** for the resolved period range. Trial Balance snapshots remain separate evidence for TB reports. If invoices/expenses were never posted to the ledger, they will not appear in P&L regardless of status — that is by design; the “missing” data is due to missing ledger entries, not report fragmentation.
 
 ---
 

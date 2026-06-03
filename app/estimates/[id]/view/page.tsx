@@ -10,6 +10,8 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { downloadEstimatePdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type Estimate = {
   id: string
@@ -57,6 +59,7 @@ export default function EstimateViewPage() {
     searchParams.get("business_id") ?? searchParams.get("businessId") ?? null
   const { currencySymbol } = useBusinessCurrency()
   const { openConfirm } = useConfirm()
+  const { readOnly } = useServiceFinancialWrite("estimates")
 
   const [loading, setLoading] = useState(true)
   const [estimate, setEstimate] = useState<Estimate | null>(null)
@@ -393,6 +396,8 @@ export default function EstimateViewPage() {
             Back to Quotes
           </button>
 
+          {readOnly && <ServiceReadOnlyNotice scope="estimates" />}
+
           {/* Header card */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
@@ -419,7 +424,7 @@ export default function EstimateViewPage() {
                   {pdfDownloading ? "Preparing…" : "Download PDF"}
                 </button>
                 {/* Edit button */}
-                {!estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
+                {!readOnly && !estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
                   <button onClick={() => router.push(`/service/estimates/${estimateId}/edit`)} className="px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors">
                     Edit{estimate.status === "sent" ? " (Revision)" : ""}
                   </button>
@@ -434,7 +439,7 @@ export default function EstimateViewPage() {
                   </div>
                 )}
                 {/* Send / send again */}
-                {!estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
+                {!readOnly && !estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
                   <button onClick={() => setShowSendModal(true)} className="px-3 py-2 text-sm font-semibold text-white bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors">
                     {estimate.status === "sent" ? "Send" : "Send"}
                   </button>
@@ -449,7 +454,7 @@ export default function EstimateViewPage() {
                     )}
                   </button>
                 )}
-                {!estimate.converted_to && estimate.status === "sent" && (
+                {!readOnly && !estimate.converted_to && estimate.status === "sent" && (
                   <>
                     <button
                       type="button"
@@ -470,7 +475,7 @@ export default function EstimateViewPage() {
                   </>
                 )}
                 {/* Convert to Proforma */}
-                {!estimate.converted_to && (estimate.status === "sent" || estimate.status === "accepted") && (
+                {!readOnly && !estimate.converted_to && (estimate.status === "sent" || estimate.status === "accepted") && (
                   <button onClick={handleConvertToProforma} disabled={convertingToProforma} className="px-3 py-2 text-sm font-medium text-purple-700 border border-purple-200 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50">
                     {convertingToProforma ? "Creating..." : "→ Proforma"}
                   </button>

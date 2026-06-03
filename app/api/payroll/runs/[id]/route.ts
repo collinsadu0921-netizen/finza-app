@@ -5,7 +5,10 @@ import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import {
+  enforceServiceIndustryMinTier,
+  enforceServiceIndustryMinTierWrite,
+} from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET(
   request: NextRequest,
@@ -158,7 +161,7 @@ export async function PUT(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const tierDeniedPut = await enforceServiceIndustryMinTier(
+    const tierDeniedPut = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,

@@ -4,6 +4,7 @@ import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engi
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { performServiceJobReversal } from "@/lib/service/jobReversal"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function GET(
   request: NextRequest,
@@ -168,6 +169,14 @@ export async function PUT(
           )
         }
       }
+
+      const writeDenied = await enforceServiceIndustryFinancialWrite(
+        supabase,
+        user.id,
+        businessId,
+        "starter"
+      )
+      if (writeDenied) return writeDenied
     }
 
     // APPLY validation: cap credit notes to invoice gross (minus other applied credit notes).

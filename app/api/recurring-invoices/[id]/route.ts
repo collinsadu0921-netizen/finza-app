@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { extractTaxLineRows } from "@/lib/taxes/extractTaxLineRows"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function GET(
   request: NextRequest,
@@ -100,6 +101,14 @@ export async function PUT(
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scope.businessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     // Verify recurring invoice exists and belongs to business
     const { data: existing } = await supabase
@@ -216,6 +225,14 @@ export async function DELETE(
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const writeDeniedDel = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scope.businessId,
+      "starter"
+    )
+    if (writeDeniedDel) return writeDeniedDel
 
     // Soft delete (must affect exactly one row)
     const { data: deletedRow, error } = await supabase

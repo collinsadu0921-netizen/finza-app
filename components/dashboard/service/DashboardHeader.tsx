@@ -29,8 +29,8 @@ export default function DashboardHeader({
   showRefreshButton = true,
 }: DashboardHeaderProps) {
   return (
-    <header className="flex w-full min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex flex-wrap items-center gap-4">
+    <header className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 sm:gap-3">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
             Period
@@ -69,14 +69,14 @@ export default function DashboardHeader({
         </span>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         {showEmptyPeriodCta && onSwitchToLastActive && (
           <button
             type="button"
             onClick={onSwitchToLastActive}
-            className="rounded border border-blue-600 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-500 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+            className="rounded border border-blue-600 bg-blue-50 px-2.5 py-1 text-sm font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-500 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
           >
-            Switch to last active period
+            Use latest period with activity
           </button>
         )}
         {onRefresh && showRefreshButton && (
@@ -84,7 +84,7 @@ export default function DashboardHeader({
             type="button"
             onClick={onRefresh}
             title="Refresh dashboard"
-            className="flex items-center gap-1.5 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            className="flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path

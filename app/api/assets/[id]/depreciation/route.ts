@@ -8,13 +8,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 async function resolveAndEnforce(supabase: any, user: any) {
   if (!user) return { denied: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
   const business = await getCurrentBusiness(supabase, user.id)
   if (!business) return { denied: NextResponse.json({ error: "Business not found" }, { status: 404 }) }
-  const denied = await enforceServiceIndustryMinTier(
+  const denied = await enforceServiceIndustryMinTierWrite(
     supabase,
     user.id,
     business.id,

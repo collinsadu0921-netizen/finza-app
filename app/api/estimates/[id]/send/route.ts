@@ -10,6 +10,7 @@ import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTag
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
 import { buildEstimateEmailHtml } from "@/lib/email/templates/estimate"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(
   request: NextRequest,
@@ -56,6 +57,14 @@ export async function POST(
       )
     }
     const scopedBusinessId = scope.businessId
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scopedBusinessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const { data: estimateRow, error: estimateError } = await supabase
       .from("estimates")

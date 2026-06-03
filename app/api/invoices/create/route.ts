@@ -13,6 +13,7 @@ import {
   enrichGhanaTaxResultWithScheduleMetadata,
   fetchGhanaEvatLevyScheduleMetadataMap,
 } from "@/lib/tax/ghanaTaxScheduleMetadata"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,6 +33,14 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       )
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const body = await request.json()
     const {

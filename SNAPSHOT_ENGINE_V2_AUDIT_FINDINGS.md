@@ -4,6 +4,8 @@
 **Purpose:** Pre-implementation audit for Snapshot Engine v2 (stale-aware, lock-safe, non-blocking)  
 **Mode:** READ-ONLY AUDIT
 
+> **Source contract (2026-06):** Live P&L and Balance Sheet no longer consume Trial Balance snapshots. Trial Balance remains snapshot-based. See [docs/REPORTING_SOURCE_CONTRACT.md](docs/REPORTING_SOURCE_CONTRACT.md). Route tables below reflect the 2026-02 audit; live app paths are updated in the contract doc.
+
 ---
 
 ## TASK A — SNAPSHOT READ ENTRY POINTS
@@ -24,19 +26,17 @@
 | Trial Balance (Accounting) | `app/api/accounting/reports/trial-balance/route.ts` | 101 | `get_trial_balance_from_snapshot` | ✅ Direct |
 | Trial Balance (Public) | `app/api/reports/trial-balance/route.ts` | 108 | `get_trial_balance_from_snapshot` | ✅ Direct |
 | Trial Balance (Legacy) | `app/api/accounting/trial-balance/route.ts` | 116 | `get_trial_balance_from_snapshot` | ✅ Direct |
-| P&L (Accounting) | `app/api/accounting/reports/profit-and-loss/route.ts` | 97 | `get_profit_and_loss_from_trial_balance` | ✅ Via `get_trial_balance_from_snapshot` |
-| P&L (Public) | `app/api/reports/profit-loss/route.ts` | 77 | `get_profit_and_loss_from_trial_balance` | ✅ Via `get_trial_balance_from_snapshot` |
-| Balance Sheet (Accounting) | `app/api/accounting/reports/balance-sheet/route.ts` | 95 | `get_balance_sheet_from_trial_balance` | ✅ Via `get_trial_balance_from_snapshot` |
-| Balance Sheet (Public) | `app/api/reports/balance-sheet/route.ts` | 110 | `get_balance_sheet_from_trial_balance` | ✅ Via `get_trial_balance_from_trial_balance` |
+| P&L (Accounting) | `app/api/accounting/reports/profit-and-loss/route.ts` | 97 | `getProfitAndLossReport` → `get_profit_and_loss_movement` | ❌ Ledger movement (not snapshot) |
+| P&L (Public) | `app/api/reports/profit-loss/route.ts` | 77 | Same | ❌ Ledger movement |
+| Balance Sheet (Accounting) | `app/api/accounting/reports/balance-sheet/route.ts` | 95 | `getBalanceSheetReport` → ledger as-of | ❌ Cumulative as-of (not snapshot) |
+| Balance Sheet (Public) | `app/api/reports/balance-sheet/route.ts` | 110 | Same | ❌ Cumulative as-of |
 | Trial Balance CSV Export | `app/api/accounting/reports/trial-balance/export/csv/route.ts` | 100 | `get_trial_balance_from_snapshot` | ✅ Direct |
 
-### Confirmation: P&L and Balance Sheet Depend Solely on Snapshot
+### Confirmation: Live P&L and Balance Sheet vs snapshot (2026-06)
 
-✅ **CONFIRMED** — Both `get_profit_and_loss_from_trial_balance` and `get_balance_sheet_from_trial_balance` call `get_trial_balance_from_snapshot` (migration 169, lines 286 and 325). They do NOT query `journal_entry_lines` directly.
+**Trial Balance** routes still depend solely on `get_trial_balance_from_snapshot`.
 
-**Evidence:**
-- `get_profit_and_loss_from_trial_balance`: Filters `get_trial_balance_from_snapshot` results for `account_type IN ('income', 'expense')` (migration 169, lines 284-297)
-- `get_balance_sheet_from_trial_balance`: Filters `get_trial_balance_from_snapshot` results for `account_type IN ('asset', 'liability', 'equity')` (migration 169, lines 322-334)
+**Live P&L and Balance Sheet** (application layer) use journal movement and cumulative ledger as-of respectively — not TB `closing_balance`. Legacy DB functions `get_profit_and_loss_from_trial_balance` and `get_balance_sheet_from_trial_balance` remain in migrations for historical/audit reference.
 
 ---
 

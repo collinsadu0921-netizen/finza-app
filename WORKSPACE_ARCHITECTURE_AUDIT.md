@@ -152,7 +152,7 @@
 
 ### Single ledger
 
-- **Canonical reporting:** P&L, Balance Sheet, Trial Balance use `get_profit_and_loss_from_trial_balance`, `get_balance_sheet_from_trial_balance`, `get_trial_balance_from_snapshot` (period_id). These read from **trial_balance_snapshots** and/or period-bound snapshot generation (migrations 169, 234). General Ledger uses `get_general_ledger` / `get_general_ledger_paginated` (journal_entries, journal_entry_lines). Evidence: route files under `app/api/accounting/reports/` and migrations.
+- **Canonical reporting:** Trial Balance uses `get_trial_balance_from_snapshot` (snapshot evidence). P&L uses `get_profit_and_loss_movement` via `getProfitAndLossReport`. Balance Sheet uses `get_balance_sheet_as_of` + `get_cumulative_net_income_as_of` via `getBalanceSheetReport`. General Ledger uses `get_general_ledger` / `get_general_ledger_paginated`. See `docs/REPORTING_SOURCE_CONTRACT.md`.
 - **Tables:** Single set of ledger tables (e.g. journal_entries, journal_entry_lines, trial_balance_snapshots, accounting_periods) per business. No evidence of workspace-specific or duplicated ledgers.
 
 ### Bypass of canonical APIs

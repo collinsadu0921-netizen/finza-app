@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, usePathname } from "next/navigation"
 import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { supabase } from "@/lib/supabaseClient"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 
 type LineItem = {
   id: string
@@ -42,6 +43,19 @@ type Material = {
 }
 
 export default function EditBillPage() {
+  const pathname = usePathname()
+  const isUnderService = pathname?.startsWith("/service") ?? false
+  if (isUnderService) {
+    return (
+      <ServiceFinancialWritePageGuard scope="bills" backHref="/service/bills">
+        <EditBillPageContent />
+      </ServiceFinancialWritePageGuard>
+    )
+  }
+  return <EditBillPageContent />
+}
+
+function EditBillPageContent() {
   const router = useRouter()
   const params = useParams()
   const id = params.id as string

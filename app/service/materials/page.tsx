@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
@@ -29,7 +30,9 @@ type MaterialsSummary = {
 
 export default function ServiceMaterialsPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/materials"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const { format } = useBusinessCurrency()
   const PAGE_SIZE = 25
   const [rows, setRows] = useState<MaterialRow[]>([])
@@ -113,7 +116,7 @@ export default function ServiceMaterialsPage() {
   const filtersActive = !!(search || filterStatus !== "all" || filterStock !== "all")
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (searchQuery) params.set("search", searchQuery)
     else params.delete("search")
     if (filterStatus !== "all") params.set("status", filterStatus)
@@ -122,8 +125,13 @@ export default function ServiceMaterialsPage() {
     else params.delete("stock")
     if (page > 1) params.set("page", String(page))
     else params.delete("page")
-    router.replace(`/service/materials?${params.toString()}`)
-  }, [searchQuery, filterStatus, filterStock, page, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/materials?${params.toString()}`
+    )
+  }, [searchQuery, filterStatus, filterStock, page, pathname, searchParamsString, router])
 
   if (loading) {
     return (

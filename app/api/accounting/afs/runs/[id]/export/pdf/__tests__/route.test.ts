@@ -20,14 +20,31 @@ import { NextRequest } from "next/server"
 jest.mock("@/lib/supabaseServer")
 jest.mock("@/lib/accounting/auth")
 jest.mock("@/lib/accounting/resolveAccountingPeriodForReport")
+jest.mock("@/lib/accounting/reports/getBalanceSheetReport")
+jest.mock("@/lib/accounting/reports/getProfitAndLossReport")
+jest.mock("@/lib/accounting/permissions", () => ({
+  assertAccountingAccess: jest.fn(),
+  accountingUserFromRequest: jest.fn().mockReturnValue({ role: "owner" }),
+}))
+jest.mock("@/lib/accounting/resolveAccountingContext", () => ({
+  resolveAccountingContext: jest.fn(async ({ searchParams }: { searchParams: URLSearchParams }) => {
+    const businessId = searchParams.get("business_id")
+    if (!businessId) return { error: "Missing required parameter: business_id" }
+    return { businessId }
+  }),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority }   from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
+import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
+import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<typeof createSupabaseServerClient>
 const mockCheckAuth       = checkAccountingAuthority   as jest.MockedFunction<typeof checkAccountingAuthority>
 const mockResolvePeriod   = resolveAccountingPeriodForReport as jest.MockedFunction<typeof resolveAccountingPeriodForReport>
+const mockGetBalanceSheetReport = getBalanceSheetReport as jest.MockedFunction<typeof getBalanceSheetReport>
+const mockGetProfitAndLossReport = getProfitAndLossReport as jest.MockedFunction<typeof getProfitAndLossReport>
 
 // ── Minimal pdfkit stub ───────────────────────────────────────────────────
 // pdfkit is a dynamic import inside the handler; Jest can intercept it.
@@ -89,16 +106,139 @@ const AFS_RUN = {
   created_at:   "2026-01-01T00:00:00Z",
 }
 
-const PNL_ROWS = [
-  { account_code: "4000", account_name: "Service Revenue", account_type: "income",  period_total: 120000 },
-  { account_code: "5000", account_name: "Operating Costs",  account_type: "expense", period_total:  80000 },
-]
+const MOCK_PNL_REPORT = {
+  period: {
+    period_id: "period-001",
+    period_start: "2026-01-01",
+    period_end: "2026-12-31",
+    resolution_reason: "exact_match",
+  },
+  currency: { code: "GHS", symbol: "₵", name: "Ghana Cedi" },
+  sections: [
+    {
+      key: "income" as const,
+      label: "Income",
+      lines: [{ account_id: "i1", account_code: "4000", account_name: "Service Revenue", amount: 120000 }],
+      subtotal: 120000,
+    },
+    {
+      key: "operating_expenses" as const,
+      label: "Operating Expenses",
+      lines: [{ account_id: "e1", account_code: "5000", account_name: "Operating Costs", amount: 80000 }],
+      subtotal: 80000,
+    },
+  ],
+  totals: {
+    gross_profit: 120000,
+    operating_profit: 40000,
+    profit_before_tax: 40000,
+    net_profit: 40000,
+  },
+  telemetry: {
+    resolved_period_reason: "exact_match",
+    resolved_period_start: "2026-01-01",
+    resolved_period_end: "2026-12-31",
+    source: "ledger" as const,
+    version: 2,
+  },
+}
 
-const BS_ROWS = [
-  { account_code: "1010", account_name: "Bank",             account_type: "asset",     balance: 100000 },
-  { account_code: "2000", account_name: "Accounts Payable", account_type: "liability", balance:  30000 },
-  { account_code: "3000", account_name: "Share Capital",    account_type: "equity",    balance:  70000 },
-]
+function buildLossPnlReport() {
+  return {
+    ...MOCK_PNL_REPORT,
+    sections: [
+      {
+        key: "income" as const,
+        label: "Income",
+        lines: [{ account_id: "i1", account_code: "4000", account_name: "Revenue", amount: 50000 }],
+        subtotal: 50000,
+      },
+      {
+        key: "operating_expenses" as const,
+        label: "Operating Expenses",
+        lines: [{ account_id: "e1", account_code: "5000", account_name: "Operating Costs", amount: 120000 }],
+        subtotal: 120000,
+      },
+    ],
+    totals: {
+      gross_profit: 50000,
+      operating_profit: -70000,
+      profit_before_tax: -70000,
+      net_profit: -70000,
+    },
+  }
+}
+
+const MOCK_BS_REPORT = {
+  period: {
+    period_id: "period-001",
+    period_start: "2026-01-01",
+    period_end: "2026-12-31",
+    resolution_reason: "exact_match",
+  },
+  currency: { code: "GHS", symbol: "₵", name: "Ghana Cedi" },
+  as_of_date: "2026-12-31",
+  business_type: "limited_company" as const,
+  sections: [
+    {
+      key: "assets" as const,
+      label: "Assets",
+      groups: [
+        {
+          key: "current_assets" as const,
+          label: "Current Assets",
+          lines: [{ account_id: "a1", account_code: "1010", account_name: "Bank", amount: 100000 }],
+          subtotal: 100000,
+        },
+      ],
+      subtotal: 100000,
+    },
+    {
+      key: "liabilities" as const,
+      label: "Liabilities",
+      groups: [
+        {
+          key: "current_liabilities" as const,
+          label: "Current Liabilities",
+          lines: [{ account_id: "l1", account_code: "2000", account_name: "Accounts Payable", amount: 30000 }],
+          subtotal: 30000,
+        },
+      ],
+      subtotal: 30000,
+    },
+    {
+      key: "equity" as const,
+      label: "Equity",
+      groups: [
+        {
+          key: "equity" as const,
+          label: "Equity",
+          lines: [
+            { account_id: "e1", account_code: "3000", account_name: "Share Capital", amount: 70000 },
+            { account_id: "__net_income__", account_code: "", account_name: "Net Income (cumulative)", amount: 0 },
+          ],
+          subtotal: 70000,
+        },
+      ],
+      subtotal: 70000,
+    },
+  ],
+  totals: {
+    assets: 100000,
+    liabilities: 30000,
+    equity: 70000,
+    liabilities_plus_equity: 100000,
+    is_balanced: true,
+    imbalance: 0,
+  },
+  telemetry: {
+    resolved_period_reason: "exact_match",
+    resolved_period_start: "2026-01-01",
+    resolved_period_end: "2026-12-31",
+    source: "ledger" as const,
+    version: 2,
+  },
+}
 
 const TB_ROWS = [
   { account_code: "1010", account_name: "Bank",             account_type: "asset",     debit_total: 100000, credit_total: 0 },
@@ -107,9 +247,7 @@ const TB_ROWS = [
 
 function buildMockSupabase(businessType = "limited_company") {
   const rpc = jest.fn((name: string) => {
-    if (name === "get_profit_and_loss_from_trial_balance")  return Promise.resolve({ data: PNL_ROWS, error: null })
-    if (name === "get_balance_sheet_from_trial_balance")    return Promise.resolve({ data: BS_ROWS,  error: null })
-    if (name === "get_trial_balance_snapshot")              return Promise.resolve({ data: TB_ROWS,  error: null })
+    if (name === "get_trial_balance_snapshot") return Promise.resolve({ data: TB_ROWS, error: null })
     return Promise.resolve({ data: [], error: null })
   })
 
@@ -159,6 +297,8 @@ beforeEach(() => {
 
   mockCheckAuth.mockResolvedValue({ authorized: true, authority_source: "owner" } as any)
   mockResolvePeriod.mockResolvedValue({ period: RESOLVED_PERIOD, error: null } as any)
+  mockGetBalanceSheetReport.mockResolvedValue({ data: MOCK_BS_REPORT as any, error: "" })
+  mockGetProfitAndLossReport.mockResolvedValue({ data: MOCK_PNL_REPORT as any, error: "" })
 })
 
 // ── A. Auth & validation guards ───────────────────────────────────────────
@@ -276,45 +416,60 @@ describe("C. Content-Disposition filename", () => {
 // ── D. Entity-type equity label ───────────────────────────────────────────
 
 describe("D. Entity-type equity label reaches PDF render path", () => {
-  it("calls all three RPCs for a limited_company run", async () => {
-    const mockSup = buildMockSupabase("limited_company")
-    mockCreateSupabase.mockResolvedValue(mockSup as any)
+  it("uses getBalanceSheetReport for a limited_company run", async () => {
+    mockCreateSupabase.mockResolvedValue(buildMockSupabase("limited_company") as any)
 
     await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
 
-    const rpcCalls = (mockSup.rpc as jest.Mock).mock.calls.map((c: any[]) => c[0])
-    expect(rpcCalls).toContain("get_profit_and_loss_from_trial_balance")
-    expect(rpcCalls).toContain("get_balance_sheet_from_trial_balance")
-    expect(rpcCalls).toContain("get_trial_balance_snapshot")
+    expect(mockGetBalanceSheetReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        businessId: "biz-001",
+        business_type: "limited_company",
+        period_start: "2026-01-01",
+        end_date: "2026-12-31",
+      })
+    )
   })
 
-  it("calls all three RPCs for a sole_proprietorship run", async () => {
-    const mockSup = buildMockSupabase("sole_proprietorship")
-    mockCreateSupabase.mockResolvedValue(mockSup as any)
+  it("uses getBalanceSheetReport for a sole_proprietorship run", async () => {
+    mockCreateSupabase.mockResolvedValue(buildMockSupabase("sole_proprietorship") as any)
 
     await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
 
-    const rpcCalls = (mockSup.rpc as jest.Mock).mock.calls.map((c: any[]) => c[0])
-    expect(rpcCalls).toContain("get_profit_and_loss_from_trial_balance")
-    expect(rpcCalls).toContain("get_balance_sheet_from_trial_balance")
-    expect(rpcCalls).toContain("get_trial_balance_snapshot")
+    expect(mockGetBalanceSheetReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ business_type: "sole_proprietorship" })
+    )
   })
 })
 
-// ── E. Trial Balance RPC uses resolved period_id ──────────────────────────
+// ── E. Trial Balance snapshot uses resolved period_id ─────────────────────
 
-describe("E. RPCs are called with the resolved period_id", () => {
-  it("passes period-001 to all three report RPCs", async () => {
+describe("E. Snapshot RPCs use the resolved period_id", () => {
+  it("passes period-001 to trial balance snapshot RPC and uses canonical P&L report", async () => {
     const mockSup = buildMockSupabase()
     mockCreateSupabase.mockResolvedValue(mockSup as any)
 
     await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
 
     const rpc = mockSup.rpc as jest.Mock
-    for (const call of rpc.mock.calls) {
+    const tbCalls = rpc.mock.calls.filter((c: any[]) => c[0] === "get_trial_balance_snapshot")
+    expect(tbCalls.length).toBeGreaterThanOrEqual(1)
+    for (const call of tbCalls) {
       const [, args] = call
       expect(args?.p_period_id).toBe("period-001")
     }
+    expect(rpc.mock.calls.some((c: any[]) => c[0] === "get_profit_and_loss_from_trial_balance")).toBe(false)
+    expect(mockGetProfitAndLossReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        businessId: "biz-001",
+        period_start: "2026-01-01",
+        end_date: "2026-12-31",
+      })
+    )
+    expect(mockGetBalanceSheetReport).toHaveBeenCalled()
   })
 })
 
@@ -411,9 +566,7 @@ describe("I. Empty trial balance and net loss path", () => {
     const mockSup = {
       ...buildMockSupabase(),
       rpc: jest.fn((name: string) => {
-        if (name === "get_profit_and_loss_from_trial_balance") return Promise.resolve({ data: PNL_ROWS, error: null })
-        if (name === "get_balance_sheet_from_trial_balance")   return Promise.resolve({ data: BS_ROWS,  error: null })
-        if (name === "get_trial_balance_snapshot")             return Promise.resolve({ data: [],       error: null }) // empty TB
+        if (name === "get_trial_balance_snapshot") return Promise.resolve({ data: [], error: null })
         return Promise.resolve({ data: [], error: null })
       }),
     }
@@ -424,20 +577,8 @@ describe("I. Empty trial balance and net loss path", () => {
   })
 
   it("returns 200 when P&L shows a net loss (expenses > income)", async () => {
-    const lossRows = [
-      { account_code: "4000", account_name: "Revenue",         account_type: "income",  period_total:  50000 },
-      { account_code: "5000", account_name: "Operating Costs", account_type: "expense", period_total: 120000 },
-    ]
-    const mockSup = {
-      ...buildMockSupabase(),
-      rpc: jest.fn((name: string) => {
-        if (name === "get_profit_and_loss_from_trial_balance") return Promise.resolve({ data: lossRows, error: null })
-        if (name === "get_balance_sheet_from_trial_balance")   return Promise.resolve({ data: BS_ROWS,  error: null })
-        if (name === "get_trial_balance_snapshot")             return Promise.resolve({ data: TB_ROWS,  error: null })
-        return Promise.resolve({ data: [], error: null })
-      }),
-    }
-    mockCreateSupabase.mockResolvedValue(mockSup as any)
+    mockGetProfitAndLossReport.mockResolvedValue({ data: buildLossPnlReport() as any, error: "" })
+    mockCreateSupabase.mockResolvedValue(buildMockSupabase() as any)
 
     const res = await GET(makeRequest("run-001", { business_id: "biz-001" }), makeParams("run-001"))
     // Net loss should not crash the route — it still renders "Net Loss for Period"

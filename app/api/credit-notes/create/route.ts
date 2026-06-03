@@ -8,6 +8,7 @@ import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,6 +49,14 @@ export async function POST(request: NextRequest) {
     if (!business || business.id !== business_id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business_id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const { data: invoice } = await supabase
       .from("invoices")

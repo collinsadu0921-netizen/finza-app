@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import {
+  enforceServiceIndustryMinTier,
+  enforceServiceIndustryMinTierWrite,
+} from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function GET(
   request: NextRequest,
@@ -95,7 +98,7 @@ export async function PUT(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const deniedPut = await enforceServiceIndustryMinTier(
+    const deniedPut = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,
@@ -232,7 +235,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const deniedDel = await enforceServiceIndustryMinTier(
+    const deniedDel = await enforceServiceIndustryMinTierWrite(
       supabase,
       user.id,
       business.id,

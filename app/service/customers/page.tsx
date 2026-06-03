@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { getCurrentBusiness } from "@/lib/business"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import Link from "next/link"
@@ -24,7 +25,9 @@ const STATUS_FILTERS = [
 
 export default function ServiceCustomersPage() {
   const router = useRouter()
+  const pathname = usePathname() ?? "/service/customers"
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const PAGE_SIZE = 25
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -83,15 +86,20 @@ export default function ServiceCustomersPage() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(searchParamsString)
     if (page <= 1) params.delete("page")
     else params.set("page", String(page))
     if (statusFilter === "all") params.delete("status")
     else params.set("status", statusFilter)
     if (!submittedSearch) params.delete("search")
     else params.set("search", submittedSearch)
-    router.replace(`/service/customers?${params.toString()}`)
-  }, [page, statusFilter, submittedSearch, router, searchParams])
+    replaceIfChanged(
+      router,
+      pathname,
+      searchParamsString,
+      `/service/customers?${params.toString()}`
+    )
+  }, [page, statusFilter, submittedSearch, pathname, searchParamsString, router])
 
   const handleSearch = () => {
     setPage(1)

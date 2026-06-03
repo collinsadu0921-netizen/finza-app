@@ -17,6 +17,10 @@ import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscri
 import ServiceWorkspaceSubscriptionBanners from "@/components/service/ServiceWorkspaceSubscriptionBanners"
 import StoreSwitcher from "./StoreSwitcher"
 import Sidebar from "./Sidebar"
+import {
+  SidebarLayoutProvider,
+  SIDEBAR_MAIN_OFFSET_CLASS,
+} from "@/components/sidebar/SidebarLayoutContext"
 import { isCashierAuthenticated } from "@/lib/cashierSession"
 import { resolveAccess, isPosSurfacePath } from "@/lib/accessControl"
 import { getUserRole } from "@/lib/userRoles"
@@ -344,6 +348,9 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const invoiceIdFromPath =
     pathname?.match(/\/service\/invoices\/([0-9a-f-]{36})\/(?:view|edit)/i)?.[1] ?? null
 
+  const showAppSidebar = !hideRetailOwnerChrome && !isAccountingRoute
+  const mainSidebarOffset = showAppSidebar ? SIDEBAR_MAIN_OFFSET_CLASS : ""
+
   return (
     <ProtectedLayoutContext.Provider value={true}>
       <WorkspaceBusinessProvider
@@ -351,6 +358,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
       >
       <Suspense fallback={null}>
         <ServiceSubscriptionProvider>
+          <SidebarLayoutProvider enabled={showAppSidebar}>
           <RetailPosIdleSessionWatcher pathname={pathname} />
           <AppIdleTimeoutWatcher pathname={pathname} />
           <div
@@ -358,17 +366,17 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
             data-export-mode={isExportMode ? "true" : undefined}
           >
             <ServiceWorkspaceSubscriptionBanners
-              contentOffsetClassName={hideRetailOwnerChrome || isAccountingRoute ? "" : "lg:pl-64"}
+              contentOffsetClassName={mainSidebarOffset}
             />
             {/* Sidebar - hidden in print/export/preview (export-hide) */}
-            {!hideRetailOwnerChrome && !isAccountingRoute && (
+            {showAppSidebar && (
               <div className="export-hide print-hide">
                 <Sidebar />
               </div>
             )}
 
             {/* Main Layout */}
-            <div className={hideRetailOwnerChrome || isAccountingRoute ? "" : "lg:pl-64"}>
+            <div className={mainSidebarOffset}>
           {/* Top navigation for non-accounting workspaces. */}
           {!hideRetailOwnerChrome && !pathname?.startsWith('/service') && !isAccountingRoute && (
             <nav className="export-hide print-hide bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm sticky top-0 z-30">
@@ -421,6 +429,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
           </main>
             </div>
           </div>
+          </SidebarLayoutProvider>
         </ServiceSubscriptionProvider>
       </Suspense>
       </WorkspaceBusinessProvider>

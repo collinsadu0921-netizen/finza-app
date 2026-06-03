@@ -7,6 +7,8 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 const safeNumber = (v: unknown): number =>
   Number.isFinite(Number(v)) ? Number(v) : 0
@@ -62,6 +64,7 @@ export default function CreditNoteViewPage() {
   const id = (typeof params?.id === "string" ? params.id : "") as string
   const toast = useToast()
   const { openConfirm } = useConfirm()
+  const { readOnly } = useServiceFinancialWrite("creditNotes")
 
   const [creditNote, setCreditNote] = useState<CreditNote | null>(null)
   const [items, setItems] = useState<CreditNoteItem[]>([])
@@ -306,6 +309,8 @@ Thank you.`
             Back to Credit Notes
           </button>
 
+          {readOnly && <ServiceReadOnlyNotice scope="creditNotes" />}
+
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
               {error}
@@ -325,7 +330,7 @@ Thank you.`
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2">
-                {creditNote.status !== "applied" && (
+                {!readOnly && creditNote.status !== "applied" && (
                   <button
                     onClick={handleApplyClick}
                     disabled={applyDisabled}
@@ -494,7 +499,7 @@ Thank you.`
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Actions</h2>
             <div className="flex flex-wrap gap-3">
-              {(creditNote.status === "draft" || creditNote.status === "issued") && (
+              {!readOnly && (creditNote.status === "draft" || creditNote.status === "issued") && (
                 <button
                   onClick={handleSendCreditNote}
                   disabled={sendLoading || !creditNote.invoices?.customers?.email?.trim()}

@@ -10,6 +10,7 @@ import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { canEditEstimate, shouldCreateRevision } from "@/lib/documentState"
 import { pickEstimateItemProductServiceId } from "@/lib/estimates/pickEstimateItemProductServiceId"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 /** Fields PUT overwrites on the estimate row — used to restore draft header after failed line replace. */
 const ESTIMATE_PUT_REVERT_KEYS = [
@@ -213,6 +214,14 @@ export async function PUT(
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const scopedBusinessId = scope.businessId
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scopedBusinessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const { data: existingEstimate, error: checkError } = await supabase
       .from("estimates")

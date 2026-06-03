@@ -12,6 +12,8 @@ import {
 } from "@/lib/accounting/useAccountingReadiness"
 import ReadinessBanner from "@/components/accounting/ReadinessBanner"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import type { ScreenProps } from "./types"
 
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "income", "expense"] as const
@@ -27,6 +29,8 @@ type Account = {
 
 export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps) {
   const router = useRouter()
+  const { readOnly: serviceReadOnly } = useServiceFinancialWrite("accounting")
+  const readOnly = mode === "service" && serviceReadOnly
   const { ready, authority_source, loading: readinessLoading, refetch: refetchReadiness } = useAccountingReadiness(businessId)
   const noContext = !businessId
   const [loading, setLoading] = useState(true)
@@ -237,6 +241,7 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                 View and add accounts. Only asset, liability, and equity (non-system) accounts are eligible for opening balances.
               </p>
             </div>
+            {!readOnly && (
             <button
               type="button"
               onClick={openCreateModal}
@@ -244,7 +249,10 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
             >
               Add account
             </button>
+            )}
           </div>
+
+          {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
 
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-6">

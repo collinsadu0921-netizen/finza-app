@@ -283,8 +283,8 @@ LOOP
 
 ### Account_type excluded from reports
 
-- **P&L:** `get_profit_and_loss_from_trial_balance` (234_fix_trial_balance_account_type_ambiguous.sql) iterates over `get_trial_balance_from_snapshot(p_period_id)` and uses account_type (income/expense) for P&L. So custom income/expense accounts are included.
-- **Balance sheet:** `get_balance_sheet_from_trial_balance` uses snapshot and filters by account type (asset, liability, equity). Custom asset/liability/equity are included.
+- **P&L:** Live reports use `get_profit_and_loss_movement(business_id, start, end)` via `getProfitAndLossReport`. Custom income/expense accounts with journal activity in the period are included. *(Legacy DB function `get_profit_and_loss_from_trial_balance` filtered TB snapshot by account type.)*
+- **Balance sheet:** Live reports use `getBalanceSheetReport` (ledger as-of + cumulative net income). Custom asset/liability/equity are included.
 - **Trial balance:** All accounts in snapshot; no type exclusion.
 
 ---

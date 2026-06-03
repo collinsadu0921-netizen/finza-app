@@ -1,13 +1,15 @@
 # Service Dashboard Financial Widgets — Audit Report
 
+> **Source contract (2026-06):** P&L widgets use journal movement (`get_profit_and_loss_movement`); Balance Sheet uses cumulative ledger as-of. See [REPORTING_SOURCE_CONTRACT.md](./REPORTING_SOURCE_CONTRACT.md).
+
 ## 1. Data source (tables / flow)
 
 | Widget | Source | Flow |
 |--------|--------|------|
-| **Revenue** | Ledger (trial balance) | `service-metrics` → `getProfitAndLossReport` → `resolveAccountingPeriodForReport` → `get_profit_and_loss_from_trial_balance(period_id)` → `get_trial_balance_from_snapshot(period_id)` → `trial_balance_snapshots` (or regenerate from `period_opening_balances` + `journal_entry_lines`) |
-| **Expenses** | Same as Revenue | Same P&L report; expense sections (cogs, operating_expenses, other_expenses, taxes) summed |
+| **Revenue** | Ledger (P&L movement) | `service-metrics` → `getProfitAndLossReport` → `resolveAccountingPeriodForReport` → `get_profit_and_loss_movement(business_id, start, end)` |
+| **Expenses** | Same as Revenue | Same P&L report; expense sections summed |
 | **Net Profit** | Same as Revenue | `pnl.totals.net_profit` from same P&L report |
-| **Accounts Receivable** | Ledger (trial balance) | `service-metrics` → `getBalanceSheetReport` → same period → `get_balance_sheet_from_trial_balance` → **extractAR(bs)** looks for **account_code "1200"** in assets (see bug below) |
+| **Accounts Receivable** | Ledger (Balance Sheet as-of) | `service-metrics` → `getBalanceSheetReport` → `get_balance_sheet_as_of` + cumulative net income → **extractAR(bs)** looks for **account_code "1200"** (see bug below) |
 | **Accounts Payable** | Same | **extractAP(bs)** sums `current_liabilities` subtotal from balance sheet |
 | **Cash Balance** | Same | **extractCash(bs)** sums asset lines with account_code in `["1000","1010","1020","1030"]` |
 | **Financial flow chart** | Same ledger | **Timeline**: `service-timeline` (last 12 `accounting_periods`, P&L per period) or `service-analytics` (V2, RPC `get_service_analytics_timeline`). **Chart** uses same timeline; no separate source. |
@@ -31,7 +33,7 @@ No missing business scope or join that would override `business_id`.
 ## 3. Aggregation / logic issues
 
 - **SUM(NULL):** Handled with `Number(x ?? 0)` and `Math.round(…* 100)/100` in JS; RPCs use `COALESCE` in SQL. No observed SUM(NULL) bug.
-- **JOINs:** P&L and Balance Sheet read from trial balance snapshot (no joins that would nullify results).
+- **JOINs:** P&L reads journal movement; Balance Sheet reads ledger as-of (no TB closing-balance path for live widgets).
 - **Revenue and paid invoices:** Revenue is from **ledger** (income accounts in trial balance). Once an invoice is **posted**, its revenue is in the ledger; when it’s **paid**, the cash/AR posting does not remove revenue—it only moves AR/cash. So paid invoices are included in revenue for the period in which the revenue was posted. No condition that excludes “paid” invoices in the dashboard path.
 - **Real bug (AR widget):** In `app/api/dashboard/service-metrics/route.ts`, **AR_CODE = "1200"**. In this codebase, **Accounts Receivable is 1100**; **1200 is Inventory** (asset). So **extractAR** looks for the wrong account and effectively returns **0** for service businesses that use 1100 for AR. This is a **logic bug**.
 
@@ -80,7 +82,7 @@ No missing business scope or join that would override `business_id`.
 
 ### C. Centralized financial aggregation
 
-- **Recommendation:** Keep using **ledger (trial balance)** as the single source of truth. The dashboard already does. Optionally add a small server-side helper that returns “default period + previous period” and the corresponding metrics in one place, so the cockpit has one contract and period resolution lives in one place.
+- **Recommendation:** Keep using **ledger-derived reports** as the single source of truth. The dashboard already does. Optionally add a small server-side helper that returns “default period + previous period” and the corresponding metrics in one place, so the cockpit has one contract and period resolution lives in one place.
 
 ---
 
@@ -93,10 +95,10 @@ No missing business scope or join that would override `business_id`.
 | `app/api/dashboard/service-metrics/route.ts` | P&L + Balance Sheet; **AR_CODE = "1200"** → AR bug |
 | `app/api/dashboard/service-timeline/route.ts` | Last 12 periods, P&L per period |
 | `app/api/dashboard/service-analytics/route.ts` | V2 timeline RPC |
-| `lib/accounting/reports/getProfitAndLossReport.ts` | Resolves period, calls get_profit_and_loss_from_trial_balance |
-| `lib/accounting/reports/getBalanceSheetReport.ts` | Resolves period, calls get_balance_sheet_from_trial_balance |
+| `lib/accounting/reports/getProfitAndLossReport.ts` | Resolves period; calls `get_profit_and_loss_movement` |
+| `lib/accounting/reports/getBalanceSheetReport.ts` | Resolves period; calls `get_balance_sheet_as_of` + cumulative net income |
 | `lib/accounting/resolveAccountingPeriodForReport.ts` | period_id → period_start → as_of_date → … → resolve_default_accounting_period → current month |
-| DB: `get_trial_balance_from_snapshot`, `get_profit_and_loss_from_trial_balance`, `get_balance_sheet_from_trial_balance`, `resolve_default_accounting_period` | Canonical reporting and period resolution |
+| DB: `get_trial_balance_from_snapshot`, `get_profit_and_loss_movement`, `get_balance_sheet_as_of`, `get_cumulative_net_income_as_of`, `resolve_default_accounting_period` | TB snapshot + P&L movement + BS as-of |
 
 ---
 

@@ -10,6 +10,8 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 
 type Customer = {
   id: string
@@ -73,6 +75,8 @@ function ProformaCreateForm() {
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [homeCurrencyCode, setHomeCurrencyCode] = useState<string | null>(null)
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   // FX (foreign currency) settings
   const [fxEnabled, setFxEnabled] = useState(false)
@@ -952,8 +956,10 @@ function ProformaCreateForm() {
 
 export default function ProformaCreatePage() {
   return (
-    <Suspense fallback={<div className="p-6 text-gray-500">Loading...</div>}>
-      <ProformaCreateForm />
-    </Suspense>
+    <ServiceFinancialWritePageGuard scope="proforma" backHref="/service/proforma">
+      <Suspense fallback={<div className="p-6 text-gray-500">Loading...</div>}>
+        <ProformaCreateForm />
+      </Suspense>
+    </ServiceFinancialWritePageGuard>
   )
 }

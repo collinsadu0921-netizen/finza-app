@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { TIER_PRICING, type BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { activateServiceSubscription } from "@/lib/serviceWorkspace/activateServiceSubscription"
+import { isBusinessBillingExempt } from "@/lib/serviceWorkspace/loadBusinessBillingRow"
 import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
 
 export const FINZA_PAYSTACK_METADATA_PURPOSE_KEY = "finza_purpose"
@@ -113,6 +114,10 @@ export async function applyPaystackSubscriptionWebhook(
   }
 
   const supabase = createSupabaseAdminClient() as SupabaseClient
+
+  if (await isBusinessBillingExempt(supabase, businessId)) {
+    return { handled: true, applied: false, message: "billing_exempt — subscription webhook ignored" }
+  }
 
   const { data: existing } = await supabase
     .from("paystack_subscription_webhook_events")

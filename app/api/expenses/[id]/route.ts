@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { handleFilePersistence } from "@/lib/fileHandlingServer"
 import { getCurrencySymbol } from "@/lib/currency"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function GET(
   request: NextRequest,
@@ -104,6 +105,14 @@ export async function PUT(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const body = await request.json()
     const {
@@ -347,6 +356,14 @@ export async function DELETE(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const { data: existingExpense } = await supabase
       .from("expenses")

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 export async function POST(
   request: NextRequest,
@@ -33,6 +34,14 @@ export async function POST(
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      scope.businessId,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const reason =
       typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : null

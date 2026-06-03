@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog, getIpAddress, getUserAgent } from "@/lib/auditLog"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { sendCreditNoteEmail } from "@/lib/email/sendCreditNoteEmail"
+import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 
 /**
  * POST /api/credit-notes/[id]/send
@@ -39,6 +40,14 @@ export async function POST(
     if (!business) {
       return NextResponse.json({ error: "Business not found" }, { status: 403 })
     }
+
+    const writeDenied = await enforceServiceIndustryFinancialWrite(
+      supabase,
+      user.id,
+      business.id,
+      "starter"
+    )
+    if (writeDenied) return writeDenied
 
     const body = await request.json().catch(() => ({}))
     const emailOverride = typeof body?.email === "string" ? body.email.trim() : null

@@ -12,6 +12,9 @@ import { getCurrencySymbol } from "@/lib/currency"
 import FileAttachment, { FileInput } from "@/components/ui/FileAttachment"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { generateStoragePath, uploadFileToStorage, extractFilename } from "@/lib/fileHandling"
+import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import { TRIAL_EXPIRED_READ_ONLY_MESSAGE } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 
 type ExpenseCategory = {
   id: string
@@ -25,6 +28,8 @@ export default function EditExpensePage() {
   const expenseId = (params?.id as string) ?? ""
   const isUnderService = pathname?.startsWith("/service") ?? false
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
+  const expensesListHref = isUnderService ? "/service/expenses" : "/expenses"
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("expenses")
   
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(true)
@@ -288,6 +293,11 @@ export default function EditExpensePage() {
     e.preventDefault()
     setError("")
 
+    if (isUnderService && readOnly) {
+      setError(TRIAL_EXPIRED_READ_ONLY_MESSAGE)
+      return
+    }
+
     if (!supplier.trim()) {
       setError("Supplier name is required")
       return
@@ -446,8 +456,7 @@ export default function EditExpensePage() {
     )
   }
 
-  return (
-    <Wrapper>
+  const pageBody = (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
@@ -915,7 +924,16 @@ export default function EditExpensePage() {
           )}
         </div>
       </div>
-    </Wrapper>
   )
+
+  if (isUnderService) {
+    return (
+      <ServiceFinancialWritePageGuard scope="expenses" backHref={expensesListHref}>
+        {pageBody}
+      </ServiceFinancialWritePageGuard>
+    )
+  }
+
+  return <Wrapper>{pageBody}</Wrapper>
 }
 

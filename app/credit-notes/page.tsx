@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
+import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
 type CreditNote = {
   id: string
@@ -65,6 +67,7 @@ export default function CreditNotesPage() {
   const createPath = isServiceRoute ? "/service/credit-notes/create" : "/credit-notes/create"
   const viewPath = (creditNoteId: string) =>
     isServiceRoute ? `/service/credit-notes/${creditNoteId}/view` : `/credit-notes/${creditNoteId}/view`
+  const { readOnly, guardWriteAction } = useServiceFinancialWrite("creditNotes")
 
   useEffect(() => {
     loadCreditNotes()
@@ -136,17 +139,23 @@ export default function CreditNotesPage() {
               <h1 className="text-2xl font-bold text-slate-900">Credit Notes</h1>
               <p className="text-sm text-slate-500 mt-0.5">Manage invoice adjustments and refunds</p>
             </div>
-            <button
-              data-tour="service-credit-notes-new"
-              onClick={() => router.push(createPath)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Create Credit Note
-            </button>
+            {!readOnly && (
+              <button
+                data-tour="service-credit-notes-new"
+                onClick={() => guardWriteAction(() => router.push(createPath))}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Create Credit Note
+              </button>
+            )}
           </div>
+
+          {readOnly && isServiceRoute && (
+            <ServiceReadOnlyNotice scope="creditNotes" className="mb-2" />
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
@@ -234,9 +243,9 @@ export default function CreditNotesPage() {
                   ? "Try adjusting your search or filters."
                   : "Create a credit note to adjust or refund an invoice."}
               </p>
-              {!search && statusFilter === "all" && (
+              {!search && statusFilter === "all" && !readOnly && (
                 <button
-                  onClick={() => router.push(createPath)}
+                  onClick={() => guardWriteAction(() => router.push(createPath))}
                   className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
                 >
                   Create Credit Note

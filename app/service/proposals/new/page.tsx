@@ -1,15 +1,30 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 
 export default function NewProposalPage() {
   const router = useRouter()
+  const [businessId, setBusinessId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    ;(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const business = await getCurrentBusiness(supabase, user.id)
+      if (business) setBusinessId(business.id)
+    })()
+  }, [])
+
+  useSyncServiceBusinessIdInUrl(businessId)
 
   async function create() {
     try {

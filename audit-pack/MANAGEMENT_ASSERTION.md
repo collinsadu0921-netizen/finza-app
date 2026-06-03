@@ -5,6 +5,8 @@
 **Classification:** Management assertion (draft)  
 **Audience:** External accountants, auditors, compliance reviewers
 
+> **Reporting source contract (2026-06):** See [../docs/REPORTING_SOURCE_CONTRACT.md](../docs/REPORTING_SOURCE_CONTRACT.md). Trial Balance = snapshot evidence; P&L = journal movement; Balance Sheet = cumulative as-of.
+
 ---
 
 ## MANAGEMENT ASSERTION REGARDING ACCOUNTING RECORDS AND CONTROLS
@@ -29,7 +31,7 @@ We assert that:
 
 5. **All journal entries are balanced:** Every journal entry in the `journal_entries` table has balanced debits and credits (total debits = total credits, tolerance: 0.01). This is enforced by the `enforce_double_entry_balance()` database trigger and validated by the `run_accounting_invariant_audit()` function.
 
-6. **All financial statements are derived from the ledger:** All Profit & Loss and Balance Sheet statements are generated exclusively from the `journal_entries` and `journal_entry_lines` tables via the Trial Balance snapshot. No financial statements are calculated directly from operational source data (sales, invoices, expenses). This is enforced by canonical reporting functions (`get_profit_and_loss_from_trial_balance()`, `get_balance_sheet_from_trial_balance()`) and validated by the `validate_statement_reconciliation()` function.
+6. **All financial statements are derived from the ledger:** Profit & Loss and Balance Sheet are generated from `journal_entries` and `journal_entry_lines` via canonical reporting functions (`get_profit_and_loss_movement`, `get_balance_sheet_as_of`, `get_cumulative_net_income_as_of`). Trial Balance uses snapshot evidence (`get_trial_balance_from_snapshot`). No financial statements are calculated directly from operational source data (sales, invoices, expenses).
 
 ---
 
@@ -54,10 +56,11 @@ We assert that:
    - Database trigger: `enforce_opening_balance_immutability()` blocks UPDATE/DELETE on `period_opening_balances`
    - Validation: `run_accounting_invariant_audit()` verifies immutability (historical records unchanged)
 
-4. **Trial Balance canonicalization is enforced:** The System ensures Trial Balance is the single canonical truth source for all financial statements. All statements (P&L, Balance Sheet) consume Trial Balance snapshot only (no direct ledger queries). Trial Balance must balance (debits = credits). This is enforced by:
+4. **Trial Balance canonicalization is enforced:** Trial Balance is the canonical period evidence for debits/credits/closing balances. Live P&L and Balance Sheet in the application use journal movement and cumulative as-of respectively. Trial Balance must balance (debits = credits). This is enforced by:
    - Generation: `generate_trial_balance()` enforces balance invariant (raises exception if imbalance)
-   - Consumption: `get_profit_and_loss_from_trial_balance()` and `get_balance_sheet_from_trial_balance()` consume `trial_balance_snapshots` only
-   - Validation: `validate_statement_reconciliation()` verifies statements reconcile to Trial Balance
+   - Consumption: `get_trial_balance_from_snapshot()` for Trial Balance reports
+   - Live P&L/BS: `get_profit_and_loss_movement`, `get_balance_sheet_as_of` (see reporting source contract)
+   - Validation: `validate_statement_reconciliation()` where applicable
 
 5. **Opening balance rollforward is enforced:** The System ensures opening balances for each period equal the closing balances of the prior period (ledger-derived rollforward). Opening balances are immutable after generation. This is enforced by:
    - Generation: `generate_opening_balances()` validates prior period is locked before generating
