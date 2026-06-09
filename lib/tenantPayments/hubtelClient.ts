@@ -81,7 +81,8 @@ function hubtelStatusUrlTemplate(): string {
   )
 }
 
-function buildStatusUrl(merchantAccountNumber: string, clientReference: string): string {
+/** Build Hubtel Transaction Status Check URL (exported for tests). */
+export function buildHubtelStatusCheckUrl(merchantAccountNumber: string, clientReference: string): string {
   const encodedRef = encodeURIComponent(clientReference)
   const encodedMerchant = encodeURIComponent(merchantAccountNumber)
   let url = hubtelStatusUrlTemplate()
@@ -91,8 +92,12 @@ function buildStatusUrl(merchantAccountNumber: string, clientReference: string):
   if (url.includes("{clientReference}")) {
     return url.replace("{clientReference}", encodedRef)
   }
-  if (url.includes("?")) {
-    return `${url}${url.endsWith("?") || url.endsWith("&") ? "" : "&"}clientReference=${encodedRef}`
+  if (url.includes("clientReference=")) {
+    return url
+  }
+  const querySep = url.includes("?") ? (url.endsWith("?") || url.endsWith("&") ? "" : "&") : "?"
+  if (url.includes(encodedMerchant)) {
+    return `${url}${querySep}clientReference=${encodedRef}`
   }
   const base = url.replace(/\/$/, "")
   return `${base}/${encodedMerchant}/status?clientReference=${encodedRef}`
@@ -236,23 +241,109 @@ export async function createHubtelCheckout(
   return normalizeHubtelCheckoutResponse(res.json)
 }
 
-export async function checkHubtelTransactionStatus(params: {
+export type HubtelStatusCheckContext = {
+  paymentProviderTransactionId?: string
+  providerTransactionId?: string | null
+  checkoutId?: string | null
+  workspace?: string
+  invoiceId?: string | null
+}
+
+type HubtelStatusFetchResult = {
+  ok: boolean
+  status: number
+  json: Record<string, unknown> | null
+  text: string
+}
+
+function hubtelStatusProxyConfigured(): boolean {
+  const url = process.env.HUBTEL_STATUS_PROXY_URL?.trim()
+  const secret = process.env.HUBTEL_STATUS_PROXY_SECRET?.trim()
+  return Boolean(url && secret)
+}
+
+async function fetchHubtelStatusViaProxy(params: {
   credentials: HubtelCredentials
   clientReference: string
-}): Promise<NormalizedHubtelStatusResponse> {
+  context?: HubtelStatusCheckContext
+}): Promise<HubtelStatusFetchResult> {
+  const proxyUrl = process.env.HUBTEL_STATUS_PROXY_URL!.trim()
+  const secret = process.env.HUBTEL_STATUS_PROXY_SECRET!.trim()
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_FETCH_MS)
+
+  try {
+    const res = await fetch(proxyUrl, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "x-finza-internal-secret": secret,
+      },
+      body: JSON.stringify({
+        apiId: params.credentials.apiId,
+        apiKey: params.credentials.apiKey,
+        merchantAccountNumber: params.credentials.merchantAccountNumber,
+        clientReference: params.clientReference,
+        reference: params.clientReference,
+        checkoutId: params.context?.checkoutId ?? params.context?.providerTransactionId ?? null,
+        providerTransactionId: params.context?.providerTransactionId ?? null,
+        paymentProviderTransactionId: params.context?.paymentProviderTransactionId ?? null,
+        workspace: params.context?.workspace ?? null,
+        invoiceId: params.context?.invoiceId ?? null,
+      }),
+      cache: "no-store",
+    })
+    const text = await res.text()
+    let json: Record<string, unknown> | null = null
+    try {
+      const parsed = text ? JSON.parse(text) : null
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        json = parsed as Record<string, unknown>
+      }
+    } catch {
+      json = null
+    }
+    return { ok: res.ok, status: res.status, json, text }
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new HubtelHttpError("Hubtel status proxy request timed out", "timeout")
+    }
+    throw new HubtelHttpError("Hubtel status proxy request failed", "network")
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function fetchHubtelStatusDirect(params: {
+  credentials: HubtelCredentials
+  clientReference: string
+}): Promise<HubtelStatusFetchResult> {
   const authHeader = buildHubtelBasicAuthHeader(params.credentials.apiId, params.credentials.apiKey)
-  const url = buildStatusUrl(params.credentials.merchantAccountNumber, params.clientReference)
+  const url = buildHubtelStatusCheckUrl(params.credentials.merchantAccountNumber, params.clientReference)
+  return hubtelFetch(url, { method: "GET", authHeader })
+}
 
-  const res = await hubtelFetch(url, { method: "GET", authHeader })
-
+function interpretHubtelStatusFetchResult(res: HubtelStatusFetchResult): NormalizedHubtelStatusResponse {
   if (res.status === 403) {
     throw new HubtelHttpError("Hubtel status check forbidden (IP whitelist may be required)", "http_forbidden", 403)
   }
   if (!res.ok || !res.json) {
     throw new HubtelHttpError(`Hubtel status check failed (${res.status})`, "http_error", res.status)
   }
-
   return normalizeHubtelStatusResponse(res.json)
+}
+
+export async function checkHubtelTransactionStatus(params: {
+  credentials: HubtelCredentials
+  clientReference: string
+  context?: HubtelStatusCheckContext
+}): Promise<NormalizedHubtelStatusResponse> {
+  const res = hubtelStatusProxyConfigured()
+    ? await fetchHubtelStatusViaProxy(params)
+    : await fetchHubtelStatusDirect(params)
+
+  return interpretHubtelStatusFetchResult(res)
 }
 
 /** Compare monetary amounts with 2-decimal tolerance (major currency units). */

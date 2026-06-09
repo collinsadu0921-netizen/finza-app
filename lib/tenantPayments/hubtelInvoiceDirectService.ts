@@ -657,7 +657,17 @@ export async function verifyTenantHubtelInvoiceByReference(
 
   let statusData: NormalizedHubtelStatusResponse
   try {
-    statusData = await checkHubtelTransactionStatus({ credentials: creds, clientReference: reference })
+    statusData = await checkHubtelTransactionStatus({
+      credentials: creds,
+      clientReference: reference,
+      context: {
+        paymentProviderTransactionId: txn.id,
+        providerTransactionId: txn.provider_transaction_id,
+        checkoutId: txn.provider_transaction_id,
+        workspace: WORKSPACE,
+        invoiceId: txn.invoice_id,
+      },
+    })
   } catch (e: unknown) {
     if (isHubtelStatusCheckUnavailableError(e)) {
       const verificationError = e instanceof Error ? e.message : "Status verification unavailable"
