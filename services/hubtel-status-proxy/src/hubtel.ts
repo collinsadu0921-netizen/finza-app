@@ -22,25 +22,35 @@ function statusUrlTemplate(): string {
   )
 }
 
+function appendClientReferenceQuery(url: string, encodedRef: string): string {
+  if (/clientReference=/i.test(url)) return url
+  const querySep = url.includes("?") ? (url.endsWith("?") || url.endsWith("&") ? "" : "&") : "?"
+  return `${url}${querySep}clientReference=${encodedRef}`
+}
+
 export function buildHubtelStatusCheckUrl(merchantAccountNumber: string, clientReference: string): string {
   const encodedRef = encodeURIComponent(clientReference)
   const encodedMerchant = encodeURIComponent(merchantAccountNumber)
   let url = statusUrlTemplate()
   if (url.includes("{merchantAccountNumber}")) {
-    url = url.replace("{merchantAccountNumber}", encodedMerchant)
+    url = url.replace(/\{merchantAccountNumber\}/g, encodedMerchant)
   }
   if (url.includes("{clientReference}")) {
-    return url.replace("{clientReference}", encodedRef)
+    return url.replace(/\{clientReference\}/g, encodedRef)
   }
-  if (url.includes("clientReference=")) {
-    return url
+
+  const pathWithoutQuery = url.split("?")[0].replace(/\/$/, "")
+  const canonicalStatusPath = `/transactions/${encodedMerchant}/status`
+  const alreadyHasMerchantStatusPath =
+    pathWithoutQuery.endsWith(canonicalStatusPath) ||
+    pathWithoutQuery.endsWith(`${canonicalStatusPath}/`) ||
+    (url.includes(encodedMerchant) && /\/status(\/|\?|$)/i.test(url))
+
+  if (alreadyHasMerchantStatusPath) {
+    return appendClientReferenceQuery(url, encodedRef)
   }
-  const querySep = url.includes("?") ? (url.endsWith("?") || url.endsWith("&") ? "" : "&") : "?"
-  if (url.includes(encodedMerchant)) {
-    return `${url}${querySep}clientReference=${encodedRef}`
-  }
-  const base = url.replace(/\/$/, "")
-  return `${base}/${encodedMerchant}/status?clientReference=${encodedRef}`
+
+  return appendClientReferenceQuery(`${pathWithoutQuery}/${encodedMerchant}/status`, encodedRef)
 }
 
 function pickStr(obj: Record<string, unknown>, key: string): string | null {

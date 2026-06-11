@@ -16,17 +16,20 @@ import type { PostgrestError } from "@supabase/supabase-js"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { ensureAccountingInitializedForServerJob } from "@/lib/accountingBootstrap"
 import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
+import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
 import { normalizeCountry, assertProviderAllowed } from "@/lib/payments/eligibility"
 import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
 import {
   checkHubtelTransactionStatus,
   createHubtelCheckout,
   hubtelAmountsMatch,
+  hubtelStatusProxyConfigured,
   isHubtelStatusCheckUnavailableError,
   type HubtelCredentials,
   type NormalizedHubtelStatusResponse,
 } from "./hubtelClient"
 import { generateHubtelClientReference } from "./hubtelReferences"
+import { logHubtelVerifyOutcome } from "./hubtelStatusCheckLog"
 import { resolveTenantProviderConfig } from "./resolveProvider"
 import type { ResolvedHubtelConfig } from "./types"
 
@@ -435,6 +438,10 @@ async function ensureHubtelInvoicePaymentRow(
     .single()
 
   if (!insErr && created?.id) {
+    const journalAssert = await assertPaymentJournalPosted(supabase, created.id, txn.business_id)
+    if (!journalAssert.ok) {
+      throw new Error(journalAssert.error)
+    }
     return { paymentId: created.id, inserted: true }
   }
 
@@ -684,6 +691,17 @@ export async function verifyTenantHubtelInvoiceByReference(
         .eq("id", txn.id)
         .in("status", [...OPEN_TXN_STATUSES])
 
+      logHubtelVerifyOutcome({
+        clientReference: reference,
+        paymentProviderTransactionId: txn.id,
+        invoiceId: txn.invoice_id,
+        txnStatus: txn.status,
+        outcome: "verification_unavailable",
+        applied: false,
+        proxyConfigured: hubtelStatusProxyConfigured(),
+        message: verificationError,
+      })
+
       return {
         ok: true,
         status: "verification_unavailable",
@@ -710,6 +728,16 @@ export async function verifyTenantHubtelInvoiceByReference(
   if (statusData.status === "Paid") {
     try {
       const { applied } = await reconcileVerifiedHubtelInvoicePayment(supabase, txn, statusData)
+      logHubtelVerifyOutcome({
+        clientReference: reference,
+        paymentProviderTransactionId: txn.id,
+        invoiceId: txn.invoice_id,
+        txnStatus: txn.status,
+        outcome: applied ? "settled" : "already_settled",
+        applied,
+        proxyConfigured: hubtelStatusProxyConfigured(),
+        message: applied ? "Payment confirmed" : "Already confirmed",
+      })
       return {
         ok: true,
         status: "paid",
@@ -718,11 +746,84 @@ export async function verifyTenantHubtelInvoiceByReference(
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Payment recording failed"
+      logHubtelVerifyOutcome({
+        clientReference: reference,
+        paymentProviderTransactionId: txn.id,
+        invoiceId: txn.invoice_id,
+        txnStatus: txn.status,
+        outcome: "payment_recording_failed",
+        applied: false,
+        proxyConfigured: hubtelStatusProxyConfigured(),
+        message: msg,
+      })
       return { ok: false, error: msg, statusCode: 500 }
     }
   }
 
   return { ok: true, status: "pending", applied: false }
+}
+
+export type RetryPendingHubtelInvoiceResult = {
+  clientReference: string
+  ok: boolean
+  status?: HubtelPublicStatus
+  applied?: boolean
+  message?: string
+  error?: string
+}
+
+/** Retry Hubtel status verification for sessions stuck in pending_verification / pending_accounting_setup. */
+export async function retryPendingHubtelInvoiceVerifications(
+  supabase: SupabaseClient,
+  businessId: string,
+  options?: { clientReference?: string; limit?: number }
+): Promise<RetryPendingHubtelInvoiceResult[]> {
+  const limit = Math.min(Math.max(options?.limit ?? 20, 1), 50)
+  const singleRef = options?.clientReference?.trim()
+
+  if (singleRef) {
+    const result = await verifyTenantHubtelInvoiceByReference(supabase, singleRef)
+    return [
+      {
+        clientReference: singleRef,
+        ok: result.ok,
+        status: result.ok ? result.status : undefined,
+        applied: result.ok ? result.applied : undefined,
+        message: result.ok ? result.message : undefined,
+        error: result.ok ? undefined : result.error,
+      },
+    ]
+  }
+
+  const { data: rows, error } = await supabase
+    .from("payment_provider_transactions")
+    .select("reference")
+    .eq("business_id", businessId)
+    .eq("provider_type", PROVIDER_TYPE)
+    .eq("workspace", WORKSPACE)
+    .in("status", ["pending_verification", "pending_accounting_setup"])
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  const results: RetryPendingHubtelInvoiceResult[] = []
+  for (const row of rows ?? []) {
+    const ref = row.reference?.trim()
+    if (!ref) continue
+    const result = await verifyTenantHubtelInvoiceByReference(supabase, ref)
+    results.push({
+      clientReference: ref,
+      ok: result.ok,
+      status: result.ok ? result.status : undefined,
+      applied: result.ok ? result.applied : undefined,
+      message: result.ok ? result.message : undefined,
+      error: result.ok ? undefined : result.error,
+    })
+  }
+  return results
 }
 
 export type RecordHubtelCallbackResult = {

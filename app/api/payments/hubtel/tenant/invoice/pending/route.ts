@@ -5,7 +5,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
-import { verifyTenantHubtelInvoiceByReference } from "@/lib/tenantPayments/hubtelInvoiceDirectService"
+import {
+  retryPendingHubtelInvoiceVerifications,
+  verifyTenantHubtelInvoiceByReference,
+} from "@/lib/tenantPayments/hubtelInvoiceDirectService"
+import { hubtelStatusProxyConfigured } from "@/lib/tenantPayments/hubtelClient"
 
 export const dynamic = "force-dynamic"
 
@@ -86,7 +90,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({ items })
+    return NextResponse.json({ items, statusProxyConfigured: hubtelStatusProxyConfigured() })
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Internal error"
     return NextResponse.json({ error: message }, { status: 500 })
@@ -103,15 +107,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const body = (await request.json()) as { business_id?: string; clientReference?: string }
+    const body = (await request.json()) as {
+      business_id?: string
+      clientReference?: string
+      retryAll?: boolean
+    }
     const scope = await resolveBusinessScopeForUser(supabase, user.id, body.business_id)
     if (!scope.ok) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
     const clientReference = (body.clientReference ?? "").trim()
-    if (!clientReference) {
-      return NextResponse.json({ error: "clientReference is required" }, { status: 400 })
+    const retryAll = body.retryAll === true
+
+    if (!clientReference && !retryAll) {
+      return NextResponse.json(
+        { error: "clientReference is required, or set retryAll: true to retry all pending sessions" },
+        { status: 400 }
+      )
+    }
+
+    if (retryAll) {
+      const results = await retryPendingHubtelInvoiceVerifications(supabase, scope.businessId)
+      return NextResponse.json({
+        success: true,
+        statusProxyConfigured: hubtelStatusProxyConfigured(),
+        retried: results.length,
+        results,
+      })
     }
 
     const { data: txn } = await supabase
@@ -137,6 +160,7 @@ export async function POST(request: NextRequest) {
       status: result.status,
       applied: result.applied,
       message: result.message,
+      statusProxyConfigured: hubtelStatusProxyConfigured(),
     })
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Internal error"

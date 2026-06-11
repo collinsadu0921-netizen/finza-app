@@ -6,10 +6,31 @@ import {
 } from "@/lib/tenantPayments/hubtelClient"
 
 describe("buildHubtelStatusCheckUrl", () => {
+  const envBackup = process.env.HUBTEL_STATUS_CHECK_URL_TEMPLATE
+
+  afterEach(() => {
+    if (envBackup === undefined) {
+      delete process.env.HUBTEL_STATUS_CHECK_URL_TEMPLATE
+    } else {
+      process.env.HUBTEL_STATUS_CHECK_URL_TEMPLATE = envBackup
+    }
+  })
+
   it("does not duplicate merchant/status path segments", () => {
+    delete process.env.HUBTEL_STATUS_CHECK_URL_TEMPLATE
     const url = buildHubtelStatusCheckUrl("2038909", "FZHB6A279H1MWBR5C61YP3S8DG3D3OYS")
     expect(url).toBe(
       "https://api-txnstatus.hubtel.com/transactions/2038909/status?clientReference=FZHB6A279H1MWBR5C61YP3S8DG3D3OYS"
+    )
+    expect(url).not.toMatch(/\/status\/2038909\/status/)
+  })
+
+  it("does not duplicate path when template already includes merchant and /status", () => {
+    process.env.HUBTEL_STATUS_CHECK_URL_TEMPLATE =
+      "https://api-txnstatus.hubtel.com/transactions/{merchantAccountNumber}/status"
+    const url = buildHubtelStatusCheckUrl("2038909", "FZHBTEST")
+    expect(url).toBe(
+      "https://api-txnstatus.hubtel.com/transactions/2038909/status?clientReference=FZHBTEST"
     )
     expect(url).not.toMatch(/\/status\/2038909\/status/)
   })

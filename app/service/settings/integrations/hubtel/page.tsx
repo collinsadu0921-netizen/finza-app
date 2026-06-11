@@ -296,6 +296,8 @@ function HubtelPendingVerificationPanel({ businessId }: { businessId: string | n
   const [items, setItems] = useState<PendingItem[]>([])
   const [loading, setLoading] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
+  const [retryingAll, setRetryingAll] = useState(false)
+  const [statusProxyConfigured, setStatusProxyConfigured] = useState<boolean | null>(null)
 
   const load = async () => {
     if (!businessId) return
@@ -307,6 +309,9 @@ function HubtelPendingVerificationPanel({ businessId }: { businessId: string | n
       )
       const data = await res.json()
       setItems(Array.isArray(data.items) ? data.items : [])
+      if (typeof data.statusProxyConfigured === "boolean") {
+        setStatusProxyConfigured(data.statusProxyConfigured)
+      }
     } catch {
       setItems([])
     } finally {
@@ -317,6 +322,21 @@ function HubtelPendingVerificationPanel({ businessId }: { businessId: string | n
   useEffect(() => {
     void load()
   }, [businessId])
+
+  const retryAll = async () => {
+    setRetryingAll(true)
+    try {
+      await fetch("/api/payments/hubtel/tenant/invoice/pending", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business_id: businessId, retryAll: true }),
+      })
+      await load()
+    } finally {
+      setRetryingAll(false)
+    }
+  }
 
   const retry = async (clientReference: string) => {
     setRetrying(clientReference)
@@ -342,6 +362,22 @@ function HubtelPendingVerificationPanel({ businessId }: { businessId: string | n
         Payments Hubtel reported but Finza could not confirm via status check (common on Vercel without a static IP).
         Retry verification or record payment manually after confirming with Hubtel.
       </p>
+      {statusProxyConfigured === false ? (
+        <p className="mt-2 text-xs font-medium text-amber-900">
+          Hubtel status proxy is not configured on this deployment. Set HUBTEL_STATUS_PROXY_URL and
+          HUBTEL_STATUS_PROXY_SECRET on Vercel, then redeploy.
+        </p>
+      ) : null}
+      {items.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => void retryAll()}
+          disabled={retryingAll}
+          className="mt-3 text-xs font-semibold text-amber-900 underline disabled:opacity-50"
+        >
+          {retryingAll ? "Retrying all…" : "Retry all pending verifications"}
+        </button>
+      ) : null}
       {loading ? (
         <p className="mt-3 text-sm text-gray-500">Loading…</p>
       ) : items.length === 0 ? (

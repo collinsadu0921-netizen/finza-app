@@ -1,5 +1,12 @@
 import "server-only"
 
+import {
+  isHubtelStatusProxyEnvConfigured,
+  logHubtelStatusCheck,
+  redactHubtelStatusUrlForLog,
+  sanitizeHubtelProxyUrlForLog,
+} from "./hubtelStatusCheckLog"
+
 export type HubtelCredentials = {
   apiId: string
   apiKey: string
@@ -81,26 +88,36 @@ function hubtelStatusUrlTemplate(): string {
   )
 }
 
-/** Build Hubtel Transaction Status Check URL (exported for tests). */
+function appendHubtelClientReferenceQuery(url: string, encodedRef: string): string {
+  if (/clientReference=/i.test(url)) return url
+  const querySep = url.includes("?") ? (url.endsWith("?") || url.endsWith("&") ? "" : "&") : "?"
+  return `${url}${querySep}clientReference=${encodedRef}`
+}
+
+/** Build Hubtel Transaction Status Check URL (exported for tests). Uses clientReference only. */
 export function buildHubtelStatusCheckUrl(merchantAccountNumber: string, clientReference: string): string {
   const encodedRef = encodeURIComponent(clientReference)
   const encodedMerchant = encodeURIComponent(merchantAccountNumber)
   let url = hubtelStatusUrlTemplate()
   if (url.includes("{merchantAccountNumber}")) {
-    url = url.replace("{merchantAccountNumber}", encodedMerchant)
+    url = url.replace(/\{merchantAccountNumber\}/g, encodedMerchant)
   }
   if (url.includes("{clientReference}")) {
-    return url.replace("{clientReference}", encodedRef)
+    return url.replace(/\{clientReference\}/g, encodedRef)
   }
-  if (url.includes("clientReference=")) {
-    return url
+
+  const pathWithoutQuery = url.split("?")[0].replace(/\/$/, "")
+  const canonicalStatusPath = `/transactions/${encodedMerchant}/status`
+  const alreadyHasMerchantStatusPath =
+    pathWithoutQuery.endsWith(canonicalStatusPath) ||
+    pathWithoutQuery.endsWith(`${canonicalStatusPath}/`) ||
+    (url.includes(encodedMerchant) && /\/status(\/|\?|$)/i.test(url))
+
+  if (alreadyHasMerchantStatusPath) {
+    return appendHubtelClientReferenceQuery(url, encodedRef)
   }
-  const querySep = url.includes("?") ? (url.endsWith("?") || url.endsWith("&") ? "" : "&") : "?"
-  if (url.includes(encodedMerchant)) {
-    return `${url}${querySep}clientReference=${encodedRef}`
-  }
-  const base = url.replace(/\/$/, "")
-  return `${base}/${encodedMerchant}/status?clientReference=${encodedRef}`
+
+  return appendHubtelClientReferenceQuery(`${pathWithoutQuery}/${encodedMerchant}/status`, encodedRef)
 }
 
 const DEFAULT_FETCH_MS = 25_000
@@ -256,10 +273,8 @@ type HubtelStatusFetchResult = {
   text: string
 }
 
-function hubtelStatusProxyConfigured(): boolean {
-  const url = process.env.HUBTEL_STATUS_PROXY_URL?.trim()
-  const secret = process.env.HUBTEL_STATUS_PROXY_SECRET?.trim()
-  return Boolean(url && secret)
+export function hubtelStatusProxyConfigured(): boolean {
+  return isHubtelStatusProxyEnvConfigured()
 }
 
 async function fetchHubtelStatusViaProxy(params: {
@@ -339,11 +354,86 @@ export async function checkHubtelTransactionStatus(params: {
   clientReference: string
   context?: HubtelStatusCheckContext
 }): Promise<NormalizedHubtelStatusResponse> {
-  const res = hubtelStatusProxyConfigured()
-    ? await fetchHubtelStatusViaProxy(params)
-    : await fetchHubtelStatusDirect(params)
+  const useProxy = hubtelStatusProxyConfigured()
+  const proxyConfigured = useProxy
+  const target = useProxy
+    ? sanitizeHubtelProxyUrlForLog(process.env.HUBTEL_STATUS_PROXY_URL!.trim())
+    : redactHubtelStatusUrlForLog(
+        buildHubtelStatusCheckUrl(params.credentials.merchantAccountNumber, params.clientReference)
+      )
 
-  return interpretHubtelStatusFetchResult(res)
+  logHubtelStatusCheck({
+    phase: "start",
+    mode: useProxy ? "proxy" : "direct",
+    target,
+    clientReference: params.clientReference,
+    merchantAccountNumber: params.credentials.merchantAccountNumber,
+    checkoutId: params.context?.checkoutId ?? params.context?.providerTransactionId ?? null,
+    paymentProviderTransactionId: params.context?.paymentProviderTransactionId ?? null,
+    invoiceId: params.context?.invoiceId ?? null,
+    proxyConfigured,
+  })
+
+  let res: HubtelStatusFetchResult
+  try {
+    res = useProxy ? await fetchHubtelStatusViaProxy(params) : await fetchHubtelStatusDirect(params)
+  } catch (e: unknown) {
+    const errorKind = e instanceof HubtelHttpError ? e.kind : undefined
+    logHubtelStatusCheck({
+      phase: "error",
+      mode: useProxy ? "proxy" : "direct",
+      target,
+      clientReference: params.clientReference,
+      merchantAccountNumber: params.credentials.merchantAccountNumber,
+      checkoutId: params.context?.checkoutId ?? params.context?.providerTransactionId ?? null,
+      paymentProviderTransactionId: params.context?.paymentProviderTransactionId ?? null,
+      invoiceId: params.context?.invoiceId ?? null,
+      httpStatus: e instanceof HubtelHttpError ? e.httpStatus : null,
+      errorKind,
+      proxyConfigured,
+      verificationOutcome: "fetch_failed",
+    })
+    throw e
+  }
+
+  let normalized: NormalizedHubtelStatusResponse
+  try {
+    normalized = interpretHubtelStatusFetchResult(res)
+  } catch (e: unknown) {
+    const errorKind = e instanceof HubtelHttpError ? e.kind : undefined
+    logHubtelStatusCheck({
+      phase: "error",
+      mode: useProxy ? "proxy" : "direct",
+      target,
+      clientReference: params.clientReference,
+      merchantAccountNumber: params.credentials.merchantAccountNumber,
+      checkoutId: params.context?.checkoutId ?? params.context?.providerTransactionId ?? null,
+      paymentProviderTransactionId: params.context?.paymentProviderTransactionId ?? null,
+      invoiceId: params.context?.invoiceId ?? null,
+      httpStatus: res.status,
+      errorKind,
+      proxyConfigured,
+      verificationOutcome: "interpret_failed",
+    })
+    throw e
+  }
+
+  logHubtelStatusCheck({
+    phase: "response",
+    mode: useProxy ? "proxy" : "direct",
+    target,
+    clientReference: params.clientReference,
+    merchantAccountNumber: params.credentials.merchantAccountNumber,
+    checkoutId: params.context?.checkoutId ?? params.context?.providerTransactionId ?? null,
+    paymentProviderTransactionId: params.context?.paymentProviderTransactionId ?? null,
+    invoiceId: params.context?.invoiceId ?? null,
+    httpStatus: res.status,
+    hubtelPaymentStatus: normalized.status,
+    proxyConfigured,
+    verificationOutcome: normalized.status,
+  })
+
+  return normalized
 }
 
 /** Compare monetary amounts with 2-decimal tolerance (major currency units). */
