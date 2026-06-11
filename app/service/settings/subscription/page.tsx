@@ -21,6 +21,11 @@ import { formatMoney } from "@/lib/money"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { FINZA_SUPPORT_EMAIL } from "@/lib/finzaSupportEmail"
+import {
+  pollSubscriptionPaymentVerify,
+  shouldConfirmPaystackSubscriptionViaVerify,
+  type SubscriptionVerifyToastType,
+} from "@/lib/serviceWorkspace/subscriptionPaymentVerifyPolling"
 
 const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
 
@@ -202,6 +207,25 @@ function wholeDaysUntil(end: Date | null): number | null {
   return Math.ceil(ms / (24 * 60 * 60 * 1000))
 }
 
+async function runSubscriptionVerifyPolling(params: {
+  reference: string
+  businessId: string
+  showToast: (message: string, type: SubscriptionVerifyToastType) => void
+  onActivated?: () => void
+  onIncomplete?: () => void
+}): Promise<void> {
+  const outcome = await pollSubscriptionPaymentVerify({
+    reference: params.reference,
+    businessId: params.businessId,
+  })
+  params.showToast(outcome.message, outcome.toastType)
+  if (outcome.kind === "activated") {
+    params.onActivated?.()
+  } else {
+    params.onIncomplete?.()
+  }
+}
+
 function SubscriptionCallbackHandler() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -218,56 +242,20 @@ function SubscriptionCallbackHandler() {
     }
     if (!businessId) return
     let alive = true
-    ;(async () => {
-      for (let i = 0; i < 15; i++) {
-        const r = await fetch(
-          `/api/payments/subscription/verify?reference=${encodeURIComponent(ref)}&business_id=${encodeURIComponent(businessId)}`,
-          { cache: "no-store" }
-        )
-        const j = await r.json()
+    void runSubscriptionVerifyPolling({
+      reference: ref,
+      businessId,
+      showToast: toast.showToast,
+      onActivated: () => {
         if (!alive) return
-        if (j.status === "success") {
-          const applied = j.activation_applied === true
-          const activationErr =
-            typeof j.activation_error === "string" && j.activation_error.trim()
-              ? j.activation_error.trim()
-              : ""
-          const activationMsg =
-            typeof j.activation_message === "string" ? j.activation_message : ""
-          const duplicateOrHandled =
-            !applied &&
-            !activationErr &&
-            /duplicate success|idempotent|already succeeded/i.test(activationMsg)
-
-          if (applied) {
-            toast.showToast("Payment confirmed. Your plan has been updated.", "success")
-          } else if (duplicateOrHandled) {
-            toast.showToast("Payment confirmed. Your plan is active.", "success")
-          } else if (activationErr || (!applied && activationMsg)) {
-            toast.showToast(
-              `Payment confirmed, but your plan could not be activated automatically. Contact support with reference: ${ref}`,
-              "error"
-            )
-          } else {
-            toast.showToast(
-              "Payment confirmed. Your plan will update shortly. Your billing period runs from this payment.",
-              "success"
-            )
-          }
-          router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
-          router.refresh()
-          return
-        }
-        if (j.status === "failed" || j.status === "abandoned") {
-          toast.showToast("Payment was not completed.", "error")
-          router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
-          return
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-      }
-      toast.showToast("Still processing — refresh this page shortly.", "info")
-      router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
-    })()
+        router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
+        router.refresh()
+      },
+      onIncomplete: () => {
+        if (!alive) return
+        router.replace(buildServiceRoute("/service/settings/subscription", businessId ?? undefined))
+      },
+    })
     return () => {
       alive = false
     }
@@ -550,17 +538,20 @@ function SubscriptionPaystackActions({
           return
         }
 
-        if (effectiveStatus === "success") {
+        if (shouldConfirmPaystackSubscriptionViaVerify(effectiveStatus)) {
           setMomoError(null)
           setMomoDetail(null)
           setMomoAttempted(false)
-          toast.showToast(
-            displayText ||
-              "Payment completed. Your plan will update when we confirm the transaction.",
-            "success"
-          )
           setShowMomo(false)
-          router.refresh()
+          if (displayText) {
+            toast.showToast(displayText, "success")
+          }
+          void runSubscriptionVerifyPolling({
+            reference,
+            businessId,
+            showToast: toast.showToast,
+            onActivated: () => router.refresh(),
+          })
           return
         }
 
