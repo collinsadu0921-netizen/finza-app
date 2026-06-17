@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
 // POST /api/customers - Create customer
 export async function POST(request: NextRequest) {
@@ -97,6 +98,12 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       )
     }
+
+    voidRecordBusinessActivationEvent(supabase, {
+      businessId: business.id,
+      eventName: "customer_created",
+      metadata: { customer_id: customer.id },
+    })
 
     return NextResponse.json({ customer }, { status: 201 })
   } catch (error: any) {

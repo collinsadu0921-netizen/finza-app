@@ -8,6 +8,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { ensureTabIndustryMode } from "@/lib/industryMode"
 import { useToast } from "@/components/ui/ToastProvider"
 import OnboardingAIAssistant from "@/components/onboarding/OnboardingAIAssistant"
+import { trackActivationEvent } from "@/lib/growth/trackActivationEventClient"
 
 type OnboardingStep =
   | "business_profile"
@@ -107,6 +108,8 @@ export default function OnboardingPage() {
       }
       setCurrentStep(stepToSet as OnboardingStep)
 
+      trackActivationEvent("onboarding_started", businessData.id)
+
       setLoading(false)
     } catch (err) {
       console.error("Error loading business:", err)
@@ -134,8 +137,9 @@ export default function OnboardingPage() {
 
   const handleStepComplete = async (nextStep: OnboardingStep) => {
     await updateOnboardingStep(nextStep)
-    
+
     if (nextStep === "complete") {
+      trackActivationEvent("onboarding_completed", businessId)
       // Redirect to correct dashboard based on industry
       if (business?.industry === "retail") {
         router.push("/pos")
@@ -158,6 +162,7 @@ export default function OnboardingPage() {
     }
     
     await updateOnboardingStep("complete")
+    trackActivationEvent("onboarding_completed", businessId)
     
     if (business?.industry === "retail") {
       router.push("/pos")

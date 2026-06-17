@@ -4,11 +4,11 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { resolveServiceBusinessSubscriptionFromUserMetadata } from "@/lib/auth/resolveServiceBusinessSubscription"
 import { sendServiceWelcomeNotificationsAfterProvision } from "@/lib/auth/sendServiceWelcomeNotification"
+import { parsePhoneOrWhatsApp } from "@/lib/growth/parsePhoneOrWhatsApp"
+import { SIGNUP_GOALS } from "@/lib/growth/signupGoals"
+import { signupAttributionFromUserMetadata } from "@/lib/growth/signupAttribution"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
-/**
- * JWT `user_metadata` on the session cookie can lag behind Auth DB after
- * `admin.updateUserById` in `/auth/callback`. Always read from Admin for provisioning.
- */
 async function readUserMetadataForProvisioning(
   userId: string,
   jwtMetadata: Record<string, unknown>
@@ -34,22 +34,31 @@ async function readUserMetadataForProvisioning(
 const BodySchema = z.object({
   name: z.string().trim().min(1).max(200),
   address_country: z.string().trim().min(1).max(120).nullable().optional(),
+  address_city: z.string().trim().max(120).nullable().optional(),
   default_currency: z.string().trim().min(1).max(16),
   start_date: z.string().trim().max(32).nullable().optional(),
+  phone_or_whatsapp: z.string().trim().min(8).max(40),
+  signup_goal: z.enum(SIGNUP_GOALS),
+  signup_source: z.string().trim().max(200).nullable().optional(),
+  signup_utm_source: z.string().trim().max(200).nullable().optional(),
+  signup_utm_medium: z.string().trim().max(200).nullable().optional(),
+  signup_utm_campaign: z.string().trim().max(200).nullable().optional(),
+  trial_contact_consent: z.literal(true),
 })
 
-/**
- * POST /api/auth/provision-service-business
- *
- * Idempotent first-time setup for public signups: creates a single **service**
- * industry business for the authenticated user. Ignores any workspace / industry
- * fields if ever added to the body — subscription fields are derived only from
- * Auth user_metadata on the server.
- *
- * Welcome / customer-success emails are sent after a **new** business is created
- * (including Google sign-in users who complete business-setup and POST here).
- * They are not sent when `alreadyExists: true`.
- */
+function coalesceAttribution(
+  body: z.infer<typeof BodySchema>,
+  meta: Record<string, unknown>
+) {
+  const fromMeta = signupAttributionFromUserMetadata(meta)
+  return {
+    signup_source: body.signup_source ?? fromMeta.signup_source,
+    signup_utm_source: body.signup_utm_source ?? fromMeta.signup_utm_source,
+    signup_utm_medium: body.signup_utm_medium ?? fromMeta.signup_utm_medium,
+    signup_utm_campaign: body.signup_utm_campaign ?? fromMeta.signup_utm_campaign,
+  }
+}
+
 export async function POST(request: NextRequest) {
   let json: unknown
   try {
@@ -94,26 +103,31 @@ export async function POST(request: NextRequest) {
   const { meta: provisionMeta, source: metadataSource } = await readUserMetadataForProvisioning(user.id, jwtMeta)
   const sub = resolveServiceBusinessSubscriptionFromUserMetadata(provisionMeta)
 
+  const body = parsed.data
+  const phones = parsePhoneOrWhatsApp(body.phone_or_whatsapp)
+  if (!phones) {
+    return NextResponse.json(
+      { error: "Please enter a valid phone or WhatsApp number (at least 8 digits)." },
+      { status: 400 }
+    )
+  }
+
+  const attribution = coalesceAttribution(body, provisionMeta)
+  const consentAt = new Date().toISOString()
+
   console.info(
     "[provision-service-business]",
     JSON.stringify({
       userId: user.id,
       metadataSource,
-      trial_intent: provisionMeta.trial_intent === true,
-      trial_workspace: typeof provisionMeta.trial_workspace === "string" ? provisionMeta.trial_workspace : null,
-      trial_plan: typeof provisionMeta.trial_plan === "string" ? provisionMeta.trial_plan : null,
-      signup_service_plan:
-        typeof provisionMeta.signup_service_plan === "string" ? provisionMeta.signup_service_plan : null,
-      signup_billing_cycle:
-        typeof provisionMeta.signup_billing_cycle === "string" ? provisionMeta.signup_billing_cycle : null,
+      signup_goal: body.signup_goal,
+      trial_contact_consent: true,
+      signup_source: attribution.signup_source,
       resolvedStatus: sub.service_subscription_status,
       resolvedTier: sub.service_subscription_tier,
-      trial_started_at_set: Boolean(sub.trial_started_at),
-      trial_ends_at_set: Boolean(sub.trial_ends_at),
     })
   )
 
-  const body = parsed.data
   const { data: business, error: businessError } = await supabase
     .from("businesses")
     .insert({
@@ -121,8 +135,18 @@ export async function POST(request: NextRequest) {
       name: body.name,
       industry: "service",
       address_country: body.address_country ?? null,
+      address_city: body.address_city ?? null,
       default_currency: body.default_currency,
       start_date: body.start_date || null,
+      phone: phones.phone,
+      whatsapp_phone: phones.whatsapp_phone,
+      signup_goal: body.signup_goal,
+      signup_source: attribution.signup_source,
+      signup_utm_source: attribution.signup_utm_source,
+      signup_utm_medium: attribution.signup_utm_medium,
+      signup_utm_campaign: attribution.signup_utm_campaign,
+      trial_contact_consent: true,
+      trial_contact_consent_at: consentAt,
       onboarding_step: "business_profile",
       ...sub,
     })
@@ -144,6 +168,16 @@ export async function POST(request: NextRequest) {
     console.error("[provision-service-business] business_users:", linkError)
     return NextResponse.json({ error: linkError.message || "Could not link user to business" }, { status: 500 })
   }
+
+  voidRecordBusinessActivationEvent(supabase, {
+    businessId: business.id as string,
+    eventName: "business_created",
+    metadata: {
+      signup_goal: body.signup_goal,
+      signup_source: attribution.signup_source,
+      service_subscription_status: sub.service_subscription_status,
+    },
+  })
 
   void sendServiceWelcomeNotificationsAfterProvision({
     businessId: business.id as string,

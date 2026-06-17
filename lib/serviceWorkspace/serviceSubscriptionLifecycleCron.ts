@@ -14,6 +14,7 @@ import {
   sendSubscriptionLifecycleNotification,
   type SendSubscriptionLifecycleNotificationResult,
 } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -221,7 +222,8 @@ type SendFn = typeof sendSubscriptionLifecycleNotification
 export async function executeServiceSubscriptionLifecycleCron(
   queries: SubscriptionLifecycleCronQueries,
   send: SendFn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  supabase?: SupabaseClient
 ): Promise<ServiceSubscriptionLifecycleCronSummary> {
   const summary: ServiceSubscriptionLifecycleCronSummary = {
     trialEnding3dChecked: 0,
@@ -305,6 +307,14 @@ export async function executeServiceSubscriptionLifecycleCron(
         continue
       }
 
+      if (supabase) {
+        voidRecordBusinessActivationEvent(supabase, {
+          businessId: row.id,
+          eventName: "trial_expired",
+          metadata: { trial_ends_at: row.trial_ends_at },
+        })
+      }
+
       const r = await safeSend(
         {
           businessId: row.id,
@@ -377,6 +387,7 @@ export async function runServiceSubscriptionLifecycleCron(
   return executeServiceSubscriptionLifecycleCron(
     queries,
     options?.send ?? sendSubscriptionLifecycleNotification,
-    options?.now ?? new Date()
+    options?.now ?? new Date(),
+    supabase
   )
 }

@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import {
+  listHubtelInvoiceSessionsNeedingRetry,
   retryPendingHubtelInvoiceVerifications,
   verifyTenantHubtelInvoiceByReference,
 } from "@/lib/tenantPayments/hubtelInvoiceDirectService"
@@ -33,45 +34,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
-    const { data: rows, error } = await supabase
-      .from("payment_provider_transactions")
-      .select(
-        `
-        id,
-        reference,
-        status,
-        amount_minor,
-        currency,
-        provider_transaction_id,
-        payment_id,
-        created_at,
-        updated_at,
-        last_event_at,
-        last_event_payload,
-        invoices ( id, invoice_number, customers ( name ) )
-      `
-      )
-      .eq("business_id", scope.businessId)
-      .eq("provider_type", "hubtel")
-      .eq("workspace", "service")
-      .in("status", ["pending_verification", "pending_accounting_setup", "pending", "initiated"])
-      .order("created_at", { ascending: false })
-      .limit(50)
+    const rows = await listHubtelInvoiceSessionsNeedingRetry(supabase, scope.businessId, 50)
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    const items = (rows ?? []).map((row) => {
+    const items = rows.map((row) => {
       const inv = row.invoices as
         | { invoice_number?: string; customers?: { name?: string } | null }
         | null
         | undefined
-      const last = (row.last_event_payload ?? {}) as Record<string, unknown>
+      const last = row.last_event_payload ?? {}
       return {
         id: row.id,
         clientReference: row.reference,
         status: row.status,
+        recoverableAmountMismatch: row.recoverableAmountMismatch,
         amount: typeof row.amount_minor === "number" ? row.amount_minor / 100 : null,
         currency: row.currency,
         checkoutId: row.provider_transaction_id,

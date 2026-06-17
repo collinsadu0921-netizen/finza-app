@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
+import Link from "next/link"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { isInternalAnnouncementAdminEmail } from "@/lib/internalAnnouncementsAdmin"
+import { isInternalOpsAdmin } from "@/lib/internalAnnouncementsAdmin"
 
 export default async function InternalLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient()
@@ -12,7 +13,7 @@ export default async function InternalLayout({ children }: { children: React.Rea
     redirect("/login?next=/internal/announcements")
   }
 
-  if (!isInternalAnnouncementAdminEmail(user.email)) {
+  if (!isInternalOpsAdmin(user)) {
     const sessionEmail = user.email?.trim() || null
     const allowlistConfigured = Boolean(process.env.INTERNAL_ANNOUNCEMENT_ADMIN_EMAILS?.trim())
     return (
@@ -47,9 +48,25 @@ export default async function InternalLayout({ children }: { children: React.Rea
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <header className="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Finza internal</span>
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Finza internal</span>
+          <nav className="flex gap-2 text-sm">
+            <Link
+              href="/internal/announcements"
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Announcements
+            </Link>
+            <Link
+              href="/internal/trial-conversion"
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Trial Conversion
+            </Link>
+          </nav>
+        </div>
       </header>
-      <div className="mx-auto max-w-4xl px-4 py-6">{children}</div>
+      <div className="mx-auto max-w-6xl px-4 py-6">{children}</div>
     </div>
   )
 }

@@ -32,6 +32,7 @@ type PendingItem = {
   id: string
   clientReference: string
   status: string
+  recoverableAmountMismatch?: boolean
   amount: number | null
   invoiceNumber: string | null
   customerName: string | null
@@ -359,8 +360,8 @@ function HubtelPendingVerificationPanel({ businessId }: { businessId: string | n
     <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50/50 p-5">
       <h2 className="text-lg font-bold text-gray-900">Hubtel pending verification</h2>
       <p className="mt-1 text-sm text-gray-600">
-        Payments Hubtel reported but Finza could not confirm via status check (common on Vercel without a static IP).
-        Retry verification or record payment manually after confirming with Hubtel.
+        Payments Hubtel reported but Finza could not confirm, or failed settlement due to fee/gross amount
+        mismatch. Retry verification after fixing status proxy configuration.
       </p>
       {statusProxyConfigured === false ? (
         <p className="mt-2 text-xs font-medium text-amber-900">
@@ -395,6 +396,11 @@ function HubtelPendingVerificationPanel({ businessId }: { businessId: string | n
                   {item.amount != null ? <p className="text-gray-600">Amount: {item.amount}</p> : null}
                   {item.lastVerificationError ? (
                     <p className="text-xs text-red-600 mt-1">{item.lastVerificationError}</p>
+                  ) : null}
+                  {item.recoverableAmountMismatch ? (
+                    <p className="text-xs text-amber-800 mt-1">
+                      Paid at Hubtel; settlement failed on gross fee mismatch. Safe to retry.
+                    </p>
                   ) : null}
                 </div>
                 <button

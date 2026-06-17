@@ -10,6 +10,13 @@ import {
 import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { buildOAuthRedirectToWithMarketingContext, signInWithGoogle } from "@/lib/auth/startGoogleAuth"
+import {
+  mergeSignupAttribution,
+  parseSignupAttributionFromSearchParams,
+  persistSignupAttributionToSession,
+  readSignupAttributionFromSession,
+  signupAttributionToUserMetadata,
+} from "@/lib/growth/signupAttribution"
 
 /**
  * Valid workspaces that support the trial flow in URL + metadata.
@@ -63,6 +70,13 @@ function SignupPageInner() {
     window.location.replace("/")
   }, [shouldBlockAndRedirect])
 
+  useEffect(() => {
+    const fromUrl = parseSignupAttributionFromSearchParams(searchParams)
+    const fromSession = readSignupAttributionFromSession()
+    const merged = mergeSignupAttribution(fromSession ?? fromUrl, fromUrl)
+    persistSignupAttributionToSession(merged)
+  }, [searchParams])
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [fullName, setFullName] = useState("")
@@ -79,6 +93,10 @@ function SignupPageInner() {
         workspace: trialWorkspace ?? rawWorkspace,
         billing_cycle: searchParams.get("billing_cycle") ?? undefined,
         cycle: searchParams.get("cycle") ?? undefined,
+        attribution: mergeSignupAttribution(
+          readSignupAttributionFromSession() ?? parseSignupAttributionFromSearchParams(searchParams),
+          parseSignupAttributionFromSearchParams(searchParams)
+        ),
       })
       const { error: oauthError } = await signInWithGoogle(redirectTo)
       if (oauthError) {
@@ -111,6 +129,12 @@ function SignupPageInner() {
         full_name: fullName,
         signup_intent: "business_owner",
         trial_intent: false,
+        ...signupAttributionToUserMetadata(
+          mergeSignupAttribution(
+            readSignupAttributionFromSession() ?? parseSignupAttributionFromSearchParams(searchParams),
+            parseSignupAttributionFromSearchParams(searchParams)
+          )
+        ),
       }
 
       if (hasTrial && trialWorkspace && trialTierForSignup) {

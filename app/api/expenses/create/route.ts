@@ -7,6 +7,7 @@ import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
 } from "@/lib/documents/incomingDocumentsService"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
 export async function POST(request: NextRequest) {
   try {
@@ -116,6 +117,12 @@ export async function POST(request: NextRequest) {
         console.warn("[expenses/create] incoming_document_id ignored: receipt_path does not match document")
       }
     }
+
+    voidRecordBusinessActivationEvent(supabase, {
+      businessId: business_id,
+      eventName: "expense_created",
+      metadata: { expense_id: expense.id },
+    })
 
     return NextResponse.json({
       success: true,

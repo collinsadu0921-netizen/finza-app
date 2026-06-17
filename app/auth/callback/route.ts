@@ -15,6 +15,10 @@ import {
   shouldApplyServiceMarketingMetadataFromUrl,
   urlIndicatesServiceMarketingContext,
 } from "@/lib/auth/callbackPostAuthRouting"
+import {
+  parseSignupAttributionFromSearchParams,
+  signupAttributionToUserMetadata,
+} from "@/lib/growth/signupAttribution"
 
 type CookieToSet = { name: string; value: string; options?: Record<string, unknown> }
 
@@ -109,12 +113,22 @@ export async function GET(request: NextRequest) {
 
   let effectiveMeta: Record<string, unknown> = rawMeta
 
+  const urlAttribution = parseSignupAttributionFromSearchParams(requestUrl.searchParams)
+  const attributionMeta = signupAttributionToUserMetadata(urlAttribution)
+  for (const [key, value] of Object.entries(attributionMeta)) {
+    if (!effectiveMeta[key]) {
+      effectiveMeta[key] = value
+    }
+  }
+
   const isAccountingFirm = existingSignupIntent === "accounting_firm"
   /** Service marketing trial CTA: `trial=1` + `workspace=service` — plan may be omitted (defaults to Essentials). */
   const isServiceTrialFromUrl = trialParam === "1" && workspaceParam === "service" && !isAccountingFirm
 
   const canApplyPlanOnlyFromUrl =
     !isAccountingFirm && shouldApplyServiceMarketingMetadataFromUrl(parsedPlan, existingSignupIntent)
+
+  let shouldPersistMetadata = Object.keys(attributionMeta).length > 0
 
   if (isServiceTrialFromUrl || (canApplyPlanOnlyFromUrl && parsedPlan !== null)) {
     if (isServiceTrialFromUrl) {
@@ -139,6 +153,10 @@ export async function GET(request: NextRequest) {
         effectiveMeta.signup_billing_cycle = parsedBillingCycle
       }
     }
+    shouldPersistMetadata = true
+  }
+
+  if (shouldPersistMetadata) {
     try {
       const admin = createSupabaseAdminClient()
       await admin.auth.admin.updateUserById(user.id, { user_metadata: effectiveMeta })

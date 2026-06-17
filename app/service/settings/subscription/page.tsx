@@ -26,6 +26,7 @@ import {
   shouldConfirmPaystackSubscriptionViaVerify,
   type SubscriptionVerifyToastType,
 } from "@/lib/serviceWorkspace/subscriptionPaymentVerifyPolling"
+import { trackActivationEvent } from "@/lib/growth/trackActivationEventClient"
 
 const BILLING_CYCLES_SET = new Set<string>(["monthly", "quarterly", "annual"])
 
@@ -876,6 +877,12 @@ function SubscriptionPageInner() {
       setCycle(billingCycle as BillingCycle)
     }
   }, [billingCycle])
+
+  useEffect(() => {
+    if (!loading && businessId) {
+      trackActivationEvent("pricing_viewed", businessId)
+    }
+  }, [loading, businessId])
 
   useEffect(() => {
     let alive = true

@@ -5,6 +5,7 @@ import { isBusinessBillingExempt } from "@/lib/serviceWorkspace/loadBusinessBill
 import type { BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
 type ActivateInput = {
   businessId: string
@@ -85,6 +86,12 @@ export async function activateServiceSubscription(
     .is("archived_at", null)
 
   if (error) return { ok: false, error: error.message || "Failed to activate subscription" }
+
+  voidRecordBusinessActivationEvent(supabase, {
+    businessId: input.businessId,
+    eventName: "subscription_started",
+    metadata: { tier: input.tier, cycle: input.cycle },
+  })
 
   const reactivateKey =
     input.subscriptionNotificationLifecycleKey?.trim() ||

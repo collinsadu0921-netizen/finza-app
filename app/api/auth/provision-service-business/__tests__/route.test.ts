@@ -39,6 +39,17 @@ function defaultAdminClient() {
   }
 }
 
+function validProvisionBody(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "New Co",
+    default_currency: "GHS",
+    phone_or_whatsapp: "0241234567",
+    signup_goal: "send_invoices",
+    trial_contact_consent: true,
+    ...overrides,
+  }
+}
+
 function makeSupabaseForNewBusiness() {
   let bizFrom = 0
   return {
@@ -83,6 +94,9 @@ function makeSupabaseForNewBusiness() {
         return {
           insert: jest.fn().mockResolvedValue({ error: null }),
         }
+      }
+      if (table === "business_activation_events") {
+        return { insert: jest.fn().mockResolvedValue({ error: null }) }
       }
       return {}
     }),
@@ -133,10 +147,7 @@ describe("POST /api/auth/provision-service-business", () => {
     const req = new NextRequest("http://localhost/api/auth/provision-service-business", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "New Co",
-        default_currency: "GHS",
-      }),
+      body: JSON.stringify(validProvisionBody()),
     })
 
     const res = await POST(req)
@@ -155,10 +166,7 @@ describe("POST /api/auth/provision-service-business", () => {
     const req = new NextRequest("http://localhost/api/auth/provision-service-business", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Ignored",
-        default_currency: "GHS",
-      }),
+      body: JSON.stringify(validProvisionBody({ name: "Ignored" })),
     })
 
     const res = await POST(req)
@@ -233,6 +241,9 @@ describe("POST /api/auth/provision-service-business", () => {
         if (table === "business_users") {
           return { insert: jest.fn().mockResolvedValue({ error: null }) }
         }
+        if (table === "business_activation_events") {
+          return { insert: jest.fn().mockResolvedValue({ error: null }) }
+        }
         return {}
       }),
     }
@@ -241,7 +252,7 @@ describe("POST /api/auth/provision-service-business", () => {
     const req = new NextRequest("http://localhost/api/auth/provision-service-business", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "New Co", default_currency: "GHS" }),
+      body: JSON.stringify(validProvisionBody({ name: "New Co" })),
     })
     const res = await POST(req)
     expect(res.status).toBe(200)
@@ -262,10 +273,7 @@ describe("POST /api/auth/provision-service-business", () => {
     const req = new NextRequest("http://localhost/api/auth/provision-service-business", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "New Co",
-        default_currency: "GHS",
-      }),
+      body: JSON.stringify(validProvisionBody()),
     })
 
     const res = await POST(req)

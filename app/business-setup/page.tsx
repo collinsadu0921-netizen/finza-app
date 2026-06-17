@@ -1,11 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { Suspense, useState, useEffect, useMemo } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import DateInput from "@/components/ui/DateInput"
 import { setSelectedBusinessId } from "@/lib/business"
+import { SIGNUP_GOALS, SIGNUP_GOAL_LABELS, type SignupGoal } from "@/lib/growth/signupGoals"
+import {
+  mergeSignupAttribution,
+  parseSignupAttributionFromSearchParams,
+  persistSignupAttributionToSession,
+  readSignupAttributionFromSession,
+  type SignupAttribution,
+} from "@/lib/growth/signupAttribution"
 
 const COUNTRY_CURRENCY_MAP: Record<string, string> = {
   Ghana: "GHS",
@@ -43,7 +51,6 @@ const labelClass = "block text-sm font-semibold text-gray-700 dark:text-gray-300
 const ORPHAN_PUBLIC_USER_EMAIL_MESSAGE =
   "A Finza profile already exists for this email from a previous deleted login. Please use another test email or ask an admin to clean up the orphan profile."
 
-/** Postgres unique_violation (e.g. public.users_email_key) from Supabase insert. */
 function isPublicUsersEmailUniqueViolation(err: unknown): boolean {
   const code =
     typeof err === "object" && err !== null && "code" in err
@@ -61,18 +68,50 @@ function isPublicUsersEmailUniqueViolation(err: unknown): boolean {
 }
 
 export default function BusinessSetupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-gray-500">Loading…</div>
+      }
+    >
+      <BusinessSetupPageInner />
+    </Suspense>
+  )
+}
+
+function BusinessSetupPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [name, setName] = useState("")
   const [country, setCountry] = useState("")
+  const [city, setCity] = useState("")
   const [currency, setCurrency] = useState("")
   const [startDate, setStartDate] = useState("")
+  const [phoneOrWhatsapp, setPhoneOrWhatsapp] = useState("")
+  const [signupGoal, setSignupGoal] = useState<SignupGoal>("send_invoices")
+  const [referralSource, setReferralSource] = useState("")
+  const [contactConsent, setContactConsent] = useState(false)
+  const [attribution, setAttribution] = useState<SignupAttribution>({
+    signup_source: null,
+    signup_utm_source: null,
+    signup_utm_medium: null,
+    signup_utm_campaign: null,
+  })
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
   const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
-    loadUser()
-  }, [])
+    void loadUser()
+    const fromUrl = parseSignupAttributionFromSearchParams(searchParams)
+    const fromSession = readSignupAttributionFromSession()
+    const merged = mergeSignupAttribution(fromSession ?? fromUrl, fromUrl)
+    setAttribution(merged)
+    persistSignupAttributionToSession(merged)
+    if (merged.signup_source && !referralSource) {
+      setReferralSource(merged.signup_source)
+    }
+  }, [searchParams])
 
   const loadUser = async () => {
     const { data: authData } = await supabase.auth.getUser()
@@ -126,14 +165,18 @@ export default function BusinessSetupPage() {
       currentUser = authData.user
     }
 
+    if (!contactConsent) {
+      setError("Please agree to Finza contacting you about onboarding, your trial, and account support.")
+      setSaving(false)
+      return
+    }
+
     try {
       await ensureUserRecord(currentUser)
     } catch (err: unknown) {
       if (isPublicUsersEmailUniqueViolation(err)) {
-        console.error("[business-setup] public.users insert failed (orphan email / unique constraint):", err)
         setError(ORPHAN_PUBLIC_USER_EMAIL_MESSAGE)
       } else {
-        console.error("[business-setup] ensureUserRecord failed:", err)
         const msg =
           err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err
             ? String((err as { message?: string }).message)
@@ -144,6 +187,8 @@ export default function BusinessSetupPage() {
       return
     }
 
+    const sourceTrimmed = referralSource.trim() || attribution.signup_source
+
     try {
       const res = await fetch("/api/auth/provision-service-business", {
         method: "POST",
@@ -151,8 +196,16 @@ export default function BusinessSetupPage() {
         body: JSON.stringify({
           name: name.trim(),
           address_country: country || null,
+          address_city: city.trim() || null,
           default_currency: currency,
           start_date: startDate || null,
+          phone_or_whatsapp: phoneOrWhatsapp.trim(),
+          signup_goal: signupGoal,
+          signup_source: sourceTrimmed || null,
+          signup_utm_source: attribution.signup_utm_source,
+          signup_utm_medium: attribution.signup_utm_medium,
+          signup_utm_campaign: attribution.signup_utm_campaign,
+          trial_contact_consent: true,
         }),
       })
 
@@ -188,7 +241,17 @@ export default function BusinessSetupPage() {
     }
   }
 
-  const canSubmit = name.trim() && country && currency && !saving
+  const canSubmit = useMemo(
+    () =>
+      name.trim() &&
+      country &&
+      currency &&
+      phoneOrWhatsapp.trim().length >= 8 &&
+      signupGoal &&
+      contactConsent &&
+      !saving,
+    [name, country, currency, phoneOrWhatsapp, signupGoal, contactConsent, saving]
+  )
 
   return (
     <ProtectedLayout>
@@ -207,20 +270,13 @@ export default function BusinessSetupPage() {
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Set up your business</h1>
             <p className="text-gray-500 dark:text-gray-400 text-sm">
-              Finza Service — add your business name and location. You can invite your team and refine details later.
+              Finza Service — tell us about your business so we can tailor your trial and onboarding.
             </p>
           </div>
 
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-8 space-y-5">
             {error && (
               <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400 text-red-700 dark:text-red-400 px-4 py-3 rounded-r text-sm flex items-start gap-2">
-                <svg className="w-4 h-4 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                    clipRule="evenodd"
-                  />
-                </svg>
                 {error}
               </div>
             )}
@@ -239,6 +295,40 @@ export default function BusinessSetupPage() {
 
             <div>
               <label className={labelClass}>
+                Phone or WhatsApp <span className="text-red-500">*</span>
+              </label>
+              <input
+                className={inputClass}
+                placeholder="e.g. 024 123 4567"
+                value={phoneOrWhatsapp}
+                onChange={(e) => setPhoneOrWhatsapp(e.target.value)}
+                inputMode="tel"
+                autoComplete="tel"
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Used for account support and trial onboarding — not sold to third parties.
+              </p>
+            </div>
+
+            <div>
+              <label className={labelClass}>
+                What do you want to do first? <span className="text-red-500">*</span>
+              </label>
+              <select
+                className={inputClass}
+                value={signupGoal}
+                onChange={(e) => setSignupGoal(e.target.value as SignupGoal)}
+              >
+                {SIGNUP_GOALS.map((g) => (
+                  <option key={g} value={g}>
+                    {SIGNUP_GOAL_LABELS[g]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>
                 Country <span className="text-red-500">*</span>
               </label>
               <select className={inputClass} onChange={(e) => handleCountryChange(e.target.value)} value={country}>
@@ -249,6 +339,18 @@ export default function BusinessSetupPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>
+                City <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                className={inputClass}
+                placeholder="e.g. Accra"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+              />
             </div>
 
             <div>
@@ -267,11 +369,18 @@ export default function BusinessSetupPage() {
                 <option value="GBP">GBP — British Pound (£)</option>
                 <option value="EUR">EUR — Euro (€)</option>
               </select>
-              {country && currency && (
-                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  Auto-selected based on your country. You can change this anytime in settings.
-                </p>
-              )}
+            </div>
+
+            <div>
+              <label className={labelClass}>
+                How did you hear about us? <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                className={inputClass}
+                placeholder="e.g. friend, Instagram, Google"
+                value={referralSource}
+                onChange={(e) => setReferralSource(e.target.value)}
+              />
             </div>
 
             <div>
@@ -285,38 +394,27 @@ export default function BusinessSetupPage() {
               />
             </div>
 
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={contactConsent}
+                onChange={(e) => setContactConsent(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-600 dark:text-gray-400 leading-snug">
+                I agree that Finza may contact me about onboarding, my trial, and account support.
+              </span>
+            </label>
+
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={!canSubmit}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-150 flex items-center justify-center gap-2 mt-2"
             >
-              {saving ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  Setting up…
-                </>
-              ) : (
-                <>
-                  Continue
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
-                </>
-              )}
+              {saving ? "Setting up…" : "Continue"}
             </button>
           </div>
-
-          <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6">
-            You can update all of this later in Business Profile settings.
-          </p>
         </div>
       </div>
     </ProtectedLayout>

@@ -14,6 +14,7 @@ import {
   fetchGhanaEvatLevyScheduleMetadataMap,
 } from "@/lib/tax/ghanaTaxScheduleMetadata"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
 export async function POST(request: NextRequest) {
   try {
@@ -513,6 +514,12 @@ export async function POST(request: NextRequest) {
       oldValues: null,
       newValues: invoice,
       request,
+    })
+
+    voidRecordBusinessActivationEvent(supabase, {
+      businessId: business_id,
+      eventName: "invoice_created",
+      metadata: { invoice_id: invoice.id, status: invoice.status },
     })
 
     // Return success response with invoice ID and full invoice object

@@ -22,7 +22,6 @@ import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoice
 import {
   checkHubtelTransactionStatus,
   createHubtelCheckout,
-  hubtelAmountsMatch,
   hubtelStatusProxyConfigured,
   isHubtelStatusCheckUnavailableError,
   type HubtelCredentials,
@@ -30,6 +29,12 @@ import {
 } from "./hubtelClient"
 import { generateHubtelClientReference } from "./hubtelReferences"
 import { logHubtelVerifyOutcome } from "./hubtelStatusCheckLog"
+import {
+  evaluateHubtelSettlementAmount,
+  isRecoverableAmountMismatchFailure,
+  logHubtelSettlementDecision,
+  resolveHubtelSettlementAmount,
+} from "./hubtelSettlementAmount"
 import { resolveTenantProviderConfig } from "./resolveProvider"
 import type { ResolvedHubtelConfig } from "./types"
 
@@ -365,6 +370,33 @@ export async function initiateTenantHubtelInvoicePayment(
   }
 }
 
+async function canRetryFailedAmountMismatch(
+  supabase: SupabaseClient,
+  txn: {
+    status: string
+    payment_id: string | null
+    reference: string
+    last_event_payload?: Record<string, unknown> | null
+  }
+): Promise<boolean> {
+  if (
+    !isRecoverableAmountMismatchFailure({
+      status: txn.status,
+      payment_id: txn.payment_id,
+      last_event_payload: txn.last_event_payload,
+    })
+  ) {
+    return false
+  }
+  const { data: existing } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("reference", txn.reference)
+    .is("deleted_at", null)
+    .maybeSingle()
+  return !existing?.id
+}
+
 async function ensureHubtelInvoicePaymentRow(
   supabase: SupabaseClient,
   txn: {
@@ -387,14 +419,12 @@ async function ensureHubtelInvoicePaymentRow(
     return { paymentId: existing.id, inserted: false }
   }
 
-  const gross =
-    statusData.grossAmount != null && statusData.grossAmount > 0
-      ? statusData.grossAmount
-      : typeof txn.amount_minor === "number"
-        ? txn.amount_minor / 100
-        : 0
+  const settlementAmount = resolveHubtelSettlementAmount(statusData)
+  const amount =
+    settlementAmount ??
+    (typeof txn.amount_minor === "number" ? txn.amount_minor / 100 : Number(txn.amount_minor ?? 0) / 100)
 
-  if (gross <= 0) {
+  if (amount <= 0) {
     throw new Error("Invalid Hubtel payment amount")
   }
 
@@ -427,7 +457,7 @@ async function ensureHubtelInvoicePaymentRow(
     .insert({
       business_id: txn.business_id,
       invoice_id: txn.invoice_id,
-      amount: gross,
+      amount,
       date: new Date().toISOString().split("T")[0],
       method: "momo",
       reference: txn.reference,
@@ -509,7 +539,14 @@ export async function reconcileVerifiedHubtelInvoicePayment(
     return { applied: false, paymentId: txn.payment_id }
   }
 
-  if (statusData.grossAmount == null || !hubtelAmountsMatch(expectedAmount, statusData.grossAmount)) {
+  const evaluation = evaluateHubtelSettlementAmount(expectedAmount, statusData)
+  logHubtelSettlementDecision({
+    ...evaluation,
+    clientReference: txn.reference,
+    verificationOutcome: evaluation.matches ? "amount_accepted" : "amount_mismatch",
+  })
+
+  if (!evaluation.matches) {
     await supabase
       .from("payment_provider_transactions")
       .update({
@@ -517,6 +554,11 @@ export async function reconcileVerifiedHubtelInvoicePayment(
         last_event_payload: {
           hubtelStatus: statusData.raw,
           verificationError: "amount_mismatch",
+          grossAmount: evaluation.grossAmount,
+          charges: evaluation.charges,
+          amountAfterCharges: evaluation.amountAfterCharges,
+          settlementAmount: evaluation.settlementAmount,
+          expectedAmount: evaluation.expectedAmount,
         } as unknown as Record<string, unknown>,
         last_event_at: new Date().toISOString(),
       })
@@ -561,6 +603,11 @@ export async function reconcileVerifiedHubtelInvoicePayment(
     }
   }
 
+  const promoteStatuses: string[] = [...OPEN_TXN_STATUSES, "pending_verification"]
+  if (txn.status === "failed") {
+    promoteStatuses.push("failed")
+  }
+
   const { data: promoted, error: promoteErr } = await supabase
     .from("payment_provider_transactions")
     .update({
@@ -571,11 +618,13 @@ export async function reconcileVerifiedHubtelInvoicePayment(
         hubtelStatus: statusData.raw,
         charges: statusData.charges,
         amountAfterCharges: statusData.amountAfterCharges,
+        grossAmount: statusData.grossAmount,
+        settlementAmount: evaluation.settlementAmount,
       } as unknown as Record<string, unknown>,
       last_event_at: new Date().toISOString(),
     })
     .eq("id", txn.id)
-    .in("status", [...OPEN_TXN_STATUSES, "pending_verification"])
+    .in("status", promoteStatuses)
     .select("id")
     .maybeSingle()
 
@@ -623,7 +672,7 @@ export async function verifyTenantHubtelInvoiceByReference(
   const { data: txn, error: txnErr } = await supabase
     .from("payment_provider_transactions")
     .select(
-      "id, business_id, invoice_id, payment_id, provider_transaction_id, status, amount_minor, reference"
+      "id, business_id, invoice_id, payment_id, provider_transaction_id, status, amount_minor, reference, last_event_payload"
     )
     .eq("provider_type", PROVIDER_TYPE)
     .eq("reference", reference)
@@ -652,7 +701,10 @@ export async function verifyTenantHubtelInvoiceByReference(
   }
 
   if (txn.status === "failed") {
-    return { ok: true, status: "failed", applied: false }
+    const recoverable = await canRetryFailedAmountMismatch(supabase, txn)
+    if (!recoverable) {
+      return { ok: true, status: "failed", applied: false }
+    }
   }
 
   let creds: HubtelCredentials
@@ -772,7 +824,7 @@ export type RetryPendingHubtelInvoiceResult = {
   error?: string
 }
 
-/** Retry Hubtel status verification for sessions stuck in pending_verification / pending_accounting_setup. */
+/** Retry Hubtel status verification for pending sessions and recoverable amount_mismatch failures. */
 export async function retryPendingHubtelInvoiceVerifications(
   supabase: SupabaseClient,
   businessId: string,
@@ -795,9 +847,9 @@ export async function retryPendingHubtelInvoiceVerifications(
     ]
   }
 
-  const { data: rows, error } = await supabase
+  const { data: pendingRows, error: pendingErr } = await supabase
     .from("payment_provider_transactions")
-    .select("reference")
+    .select("reference, status, payment_id, last_event_payload")
     .eq("business_id", businessId)
     .eq("provider_type", PROVIDER_TYPE)
     .eq("workspace", WORKSPACE)
@@ -805,14 +857,44 @@ export async function retryPendingHubtelInvoiceVerifications(
     .order("created_at", { ascending: true })
     .limit(limit)
 
-  if (error) {
-    throw new Error(error.message)
+  if (pendingErr) {
+    throw new Error(pendingErr.message)
+  }
+
+  const { data: failedRows, error: failedErr } = await supabase
+    .from("payment_provider_transactions")
+    .select("reference, status, payment_id, last_event_payload")
+    .eq("business_id", businessId)
+    .eq("provider_type", PROVIDER_TYPE)
+    .eq("workspace", WORKSPACE)
+    .eq("status", "failed")
+    .is("payment_id", null)
+    .order("updated_at", { ascending: true })
+    .limit(limit)
+
+  if (failedErr) {
+    throw new Error(failedErr.message)
+  }
+
+  const refs = new Set<string>()
+  for (const row of pendingRows ?? []) {
+    if (row.reference?.trim()) refs.add(row.reference.trim())
+  }
+  for (const row of failedRows ?? []) {
+    if (
+      row.reference?.trim() &&
+      isRecoverableAmountMismatchFailure({
+        status: row.status,
+        payment_id: row.payment_id,
+        last_event_payload: row.last_event_payload as Record<string, unknown> | null,
+      })
+    ) {
+      refs.add(row.reference.trim())
+    }
   }
 
   const results: RetryPendingHubtelInvoiceResult[] = []
-  for (const row of rows ?? []) {
-    const ref = row.reference?.trim()
-    if (!ref) continue
+  for (const ref of Array.from(refs).slice(0, limit)) {
     const result = await verifyTenantHubtelInvoiceByReference(supabase, ref)
     results.push({
       clientReference: ref,
@@ -824,6 +906,94 @@ export async function retryPendingHubtelInvoiceVerifications(
     })
   }
   return results
+}
+
+export async function listHubtelInvoiceSessionsNeedingRetry(
+  supabase: SupabaseClient,
+  businessId: string,
+  limit = 50
+): Promise<
+  Array<{
+    id: string
+    reference: string
+    status: string
+    amount_minor: number | null
+    currency: string | null
+    provider_transaction_id: string | null
+    payment_id: string | null
+    created_at: string
+    updated_at: string
+    last_event_at: string | null
+    last_event_payload: Record<string, unknown> | null
+    recoverableAmountMismatch: boolean
+    invoices: unknown
+  }>
+> {
+  const select = `
+        id,
+        reference,
+        status,
+        amount_minor,
+        currency,
+        provider_transaction_id,
+        payment_id,
+        created_at,
+        updated_at,
+        last_event_at,
+        last_event_payload,
+        invoices ( id, invoice_number, customers ( name ) )
+      `
+
+  const { data: pendingRows, error: pendingErr } = await supabase
+    .from("payment_provider_transactions")
+    .select(select)
+    .eq("business_id", businessId)
+    .eq("provider_type", "hubtel")
+    .eq("workspace", WORKSPACE)
+    .in("status", ["pending_verification", "pending_accounting_setup", "pending", "initiated"])
+    .order("created_at", { ascending: false })
+    .limit(limit)
+
+  if (pendingErr) {
+    throw new Error(pendingErr.message)
+  }
+
+  const { data: failedRows, error: failedErr } = await supabase
+    .from("payment_provider_transactions")
+    .select(select)
+    .eq("business_id", businessId)
+    .eq("provider_type", "hubtel")
+    .eq("workspace", WORKSPACE)
+    .eq("status", "failed")
+    .is("payment_id", null)
+    .order("updated_at", { ascending: false })
+    .limit(limit)
+
+  if (failedErr) {
+    throw new Error(failedErr.message)
+  }
+
+  const recoverableFailed = (failedRows ?? []).filter((row) =>
+    isRecoverableAmountMismatchFailure({
+      status: row.status,
+      payment_id: row.payment_id,
+      last_event_payload: row.last_event_payload as Record<string, unknown> | null,
+    })
+  )
+
+  const pending = (pendingRows ?? []).map((row) => ({
+    ...row,
+    last_event_payload: (row.last_event_payload ?? null) as Record<string, unknown> | null,
+    recoverableAmountMismatch: false,
+  }))
+
+  const failed = recoverableFailed.map((row) => ({
+    ...row,
+    last_event_payload: (row.last_event_payload ?? null) as Record<string, unknown> | null,
+    recoverableAmountMismatch: true,
+  }))
+
+  return [...failed, ...pending].slice(0, limit)
 }
 
 export type RecordHubtelCallbackResult = {

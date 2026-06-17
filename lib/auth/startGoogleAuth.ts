@@ -3,17 +3,21 @@
 import { supabase } from "@/lib/supabaseClient"
 import { getPublicAppUrl } from "@/lib/auth/publicAppUrl"
 import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
+import {
+  type SignupAttribution,
+  parseSignupAttributionFromSearchParams,
+  persistSignupAttributionToSession,
+  signupAttributionToUserMetadata,
+} from "@/lib/growth/signupAttribution"
 
 /** Build `/auth/callback` with optional marketing params preserved through Google OAuth. */
 export function buildOAuthRedirectToWithMarketingContext(opts: {
   plan?: string | null
   trial?: string | null
-  /** Only "service" is forwarded (public Finza Service signup). */
   workspace?: string | null
-  /** Canonical marketing param; also accepts {@link opts.cycle} as alias. */
   billing_cycle?: string | null
-  /** Alias some marketing sites use instead of `billing_cycle`. */
   cycle?: string | null
+  attribution?: SignupAttribution | null
 }): string {
   const base = getPublicAppUrl().replace(/\/$/, "")
   const u = new URL("/auth/callback", base)
@@ -27,6 +31,11 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   if (parsed) {
     u.searchParams.set("billing_cycle", parsed)
   }
+  const attr = opts.attribution
+  if (attr?.signup_utm_source) u.searchParams.set("utm_source", attr.signup_utm_source)
+  if (attr?.signup_utm_medium) u.searchParams.set("utm_medium", attr.signup_utm_medium)
+  if (attr?.signup_utm_campaign) u.searchParams.set("utm_campaign", attr.signup_utm_campaign)
+  if (attr?.signup_source) u.searchParams.set("ref", attr.signup_source)
   return u.toString()
 }
 

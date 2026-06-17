@@ -10,6 +10,7 @@ import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/misma
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 
 export async function POST(request: NextRequest) {
   try {
@@ -327,7 +328,13 @@ export async function POST(request: NextRequest) {
       description: `Payment of ${payment.amount} ${payment.method} added to invoice ${invoice_id}`,
     })
 
-    return NextResponse.json({ 
+    voidRecordBusinessActivationEvent(supabase, {
+      businessId: business_id,
+      eventName: "payment_recorded",
+      metadata: { payment_id: payment.id, invoice_id },
+    })
+
+    return NextResponse.json({
       success: true,
       payment,
       message: "Payment added successfully"
