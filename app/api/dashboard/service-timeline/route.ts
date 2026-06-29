@@ -1,8 +1,20 @@
 /**
  * GET /api/dashboard/service-timeline?business_id=...&periods=6
  *
- * Read-only. Returns ledger-derived revenue/expense/profit per period for chart.
- * periods default 6. Uses getProfitAndLossReport (ledger movement) per period.
+ * Read-only. Returns ledger-derived revenue/expense/profit per accounting period for chart.
+ *
+ * Query flow (post consolidation):
+ *   1. Auth + checkAccountingAuthority
+ *   2. One RPC: get_service_dashboard_timeline (replaces N× getProfitAndLossReport)
+ *
+ * Previous flow (removed): accounting_periods query + up to 24 parallel P&L RPCs.
+ *
+ * Response shape (unchanged for ServiceDashboardCockpit / FinancialFlowChart):
+ *   { timeline: [{ period_id, period_start, period_end, revenue, expenses, netProfit }] }
+ *
+ * Params:
+ *   - business_id (required)
+ *   - periods (optional, default 6, max 24) — number of accounting periods
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -10,56 +22,22 @@ import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import {
-  getProfitAndLossReport,
-  pnlTotalsFromReport,
-} from "@/lib/accounting/reports/getProfitAndLossReport"
-import type { SupabaseClient } from "@supabase/supabase-js"
 
-/** Bounded parallel P&L fetches — fewer round-trips than sequential, avoids 12-at-once load. */
-const TIMELINE_PNL_CONCURRENCY = 4
+const DEFAULT_PERIODS = 6
+const MAX_PERIODS = 24
 
 function devServiceTimelineLog(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
   console.info(`[service-timeline] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
 }
 
-async function getPnLTotals(
-  supabase: SupabaseClient,
-  businessId: string,
-  periodStart: string
-): Promise<{ revenue: number; expenses: number; netProfit: number } | null> {
-  const { data } = await getProfitAndLossReport(supabase, {
-    businessId,
-    period_start: periodStart,
-  })
-  if (!data) return null
-  return pnlTotalsFromReport(data)
-}
-
-/**
- * Run async work on items in original index order; at most `concurrency` mappers run at once.
- * Results array aligns with `items` indices (preserves output order for downstream iteration).
- */
-async function mapOrderedWithConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length)
-  let nextIndex = 0
-  const limit = Math.max(1, Math.min(concurrency, items.length))
-
-  async function worker() {
-    while (true) {
-      const i = nextIndex++
-      if (i >= items.length) break
-      results[i] = await mapper(items[i], i)
-    }
-  }
-
-  await Promise.all(Array.from({ length: limit }, () => worker()))
-  return results
+type TimelineRpcRow = {
+  period_id: string | null
+  period_start: string
+  period_end: string
+  revenue: number | string
+  expenses: number | string
+  net_profit: number | string
 }
 
 export async function GET(request: NextRequest) {
@@ -99,54 +77,39 @@ export async function GET(request: NextRequest) {
     }
     devServiceTimelineLog("auth/access", tAuth)
 
-    const periodsParam = Math.min(24, Math.max(1, parseInt(searchParams.get("periods") ?? "6", 10) || 6))
+    const periodsRaw = parseInt(searchParams.get("periods") ?? String(DEFAULT_PERIODS), 10)
+    const periodsParam = Math.min(
+      MAX_PERIODS,
+      Math.max(1, Number.isFinite(periodsRaw) ? periodsRaw : DEFAULT_PERIODS)
+    )
 
-    const tPeriods = performance.now()
-    const { data: periodRows } = await supabase
-      .from("accounting_periods")
-      .select("id, period_start, period_end")
-      .eq("business_id", businessId)
-      .order("period_start", { ascending: false })
-      .limit(periodsParam)
-    devServiceTimelineLog("accounting_periods query", tPeriods)
+    const tRpc = performance.now()
+    const { data: rows, error: rpcError } = await supabase.rpc("get_service_dashboard_timeline", {
+      p_business_id: businessId,
+      p_start_date: null,
+      p_end_date: null,
+      p_granularity: "accounting_period",
+      p_periods_limit: periodsParam,
+    })
+    devServiceTimelineLog("get_service_dashboard_timeline RPC", tRpc)
 
-    const timeline: Array<{
-      period_id: string
-      period_start: string
-      period_end: string
-      revenue: number
-      expenses: number
-      netProfit: number
-    }> = []
-
-    if (periodRows?.length) {
-      const orderedRows = [...periodRows].reverse()
-      const tPnLLoop = performance.now()
-      const rowResults = await mapOrderedWithConcurrency(
-        orderedRows,
-        TIMELINE_PNL_CONCURRENCY,
-        async (row) => {
-          const totals = await getPnLTotals(supabase, businessId, row.period_start)
-          return { row, totals }
-        }
+    if (rpcError) {
+      console.error("get_service_dashboard_timeline RPC error:", rpcError)
+      devServiceTimelineLog("total route", routeT0)
+      return NextResponse.json(
+        { error: "Could not load dashboard timeline" },
+        { status: 500 }
       )
-      devServiceTimelineLog("P&L loop total", tPnLLoop)
-
-      const tAsm = performance.now()
-      for (const { row, totals } of rowResults) {
-        if (totals) {
-          timeline.push({
-            period_id: row.id,
-            period_start: row.period_start,
-            period_end: row.period_end,
-            revenue: totals.revenue,
-            expenses: totals.expenses,
-            netProfit: totals.netProfit,
-          })
-        }
-      }
-      devServiceTimelineLog("response assembly", tAsm)
     }
+
+    const timeline = ((rows ?? []) as TimelineRpcRow[]).map((row) => ({
+      period_id: row.period_id ?? undefined,
+      period_start: row.period_start,
+      period_end: row.period_end,
+      revenue: Number(row.revenue) || 0,
+      expenses: Number(row.expenses) || 0,
+      netProfit: Number(row.net_profit) || 0,
+    }))
 
     devServiceTimelineLog("total route", routeT0)
     return NextResponse.json({ timeline })

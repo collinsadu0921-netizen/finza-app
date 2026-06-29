@@ -5,9 +5,13 @@ import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 const BILL_ID_IN_CHUNK = 150
+const DEFAULT_PAGE = 1
+const DEFAULT_LIMIT = 50
+const MAX_LIMIT = 100
 
 /**
  * Loads non-deleted bill_payments summed by bill_id in chunks (avoids oversized `.in(...)` URLs).
+ * Scoped to the current page of bill IDs only.
  */
 async function totalPaidByBillId(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -74,20 +78,18 @@ export async function GET(request: NextRequest) {
     const endDate = searchParams.get("end_date")
     const search = searchParams.get("search")
 
-    const limitRaw = searchParams.get("limit")
-    const offsetRaw = searchParams.get("offset")
-    let limitParsed: number | null = null
-    let offsetParsed = 0
-    if (limitRaw !== null && limitRaw.trim() !== "") {
-      limitParsed = Math.min(Math.max(1, parseInt(limitRaw, 10) || 0), 5000)
-    }
-    if (offsetRaw !== null && offsetRaw.trim() !== "") {
-      offsetParsed = Math.max(0, parseInt(offsetRaw, 10) || 0)
-    }
+    const page = Math.max(
+      DEFAULT_PAGE,
+      Number.parseInt(searchParams.get("page") || String(DEFAULT_PAGE), 10) || DEFAULT_PAGE
+    )
+    const limitRaw = Number.parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT
+    const limit = Math.min(MAX_LIMIT, Math.max(1, limitRaw))
+    const from = (page - 1) * limit
+    const to = from + limit - 1
 
     let query = supabase
       .from("bills")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("business_id", business.id)
       .is("deleted_at", null)
       .order("issue_date", { ascending: false })
@@ -112,11 +114,9 @@ export async function GET(request: NextRequest) {
       query = query.or(`bill_number.ilike.%${search}%,supplier_name.ilike.%${search}%`)
     }
 
-    if (limitParsed !== null) {
-      query = query.range(offsetParsed, offsetParsed + limitParsed - 1)
-    }
+    query = query.range(from, to)
 
-    const { data: bills, error } = await query
+    const { data: bills, error, count } = await query
 
     if (error) {
       console.error("Error fetching bills:", error)
@@ -158,14 +158,25 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    const total = count ?? 0
+    const hasMore = from + billsWithBalances.length < total
+
     if (process.env.NODE_ENV !== "production") {
       const elapsed = Date.now() - routeStartedAt
       console.debug(
-        `[bills/list] ${elapsed}ms · bills=${billsWithBalances.length} · bill_ids=${billIds.length}`
+        `[bills/list] ${elapsed}ms · page=${page} · limit=${limit} · bills=${billsWithBalances.length} · total=${total}`
       )
     }
 
-    return NextResponse.json({ bills: billsWithBalances })
+    return NextResponse.json({
+      bills: billsWithBalances,
+      pagination: {
+        page,
+        limit,
+        total,
+        hasMore,
+      },
+    })
   } catch (error: unknown) {
     console.error("Error in bills list:", error)
     const msg = error instanceof Error ? error.message : "Internal server error"

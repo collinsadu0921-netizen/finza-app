@@ -22,6 +22,7 @@ jest.mock("@/lib/auditLog", () => ({
 }))
 jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
   enforceServiceWorkspaceAccess: jest.fn().mockResolvedValue(null),
+  enforceServiceWorkspaceWriteAccess: jest.fn().mockResolvedValue(null),
 }))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
@@ -45,6 +46,72 @@ function makePostRequest(body: object, params: Record<string, string> = {}) {
   })
 }
 
+function buildBusinessChain(citRateCode = "standard_25") {
+  return {
+    select: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    maybeSingle: jest.fn().mockResolvedValue({
+      data: { cit_rate_code: citRateCode },
+      error: null,
+    }),
+  }
+}
+
+function buildCitProvisionsChain(options: {
+  listData?: any[]
+  provisionBusinessId?: string | null
+  provisionAmount?: number | null
+  duplicateProvision?: any | null
+  insertResult?: any | null
+  insertError?: any | null
+  onInsert?: (data: any) => void
+} = {}) {
+  const eqCalls: Array<[string, unknown]> = []
+  const insertResult = options.insertResult ?? {
+    id: "prov-001",
+    business_id: "biz-001",
+    period_label: "Q1 2026",
+    provision_type: "quarterly",
+    chargeable_income: 100000,
+    cit_rate: 0.25,
+    cit_amount: 25000,
+    status: "draft",
+    notes: null,
+    created_at: "2026-03-01T00:00:00Z",
+  }
+  const chain: any = {
+    select: jest.fn().mockReturnThis(),
+    eq: jest.fn((column: string, value: unknown) => {
+      eqCalls.push([column, value])
+      return chain
+    }),
+    order: jest.fn().mockResolvedValue({ data: options.listData ?? [], error: null }),
+    maybeSingle: jest.fn(() => {
+      if (eqCalls.some(([column]) => column === "id")) {
+        return Promise.resolve({
+          data: options.provisionBusinessId === null
+            ? null
+            : {
+                business_id: options.provisionBusinessId ?? "biz-001",
+                cit_amount: options.provisionAmount ?? 25000,
+              },
+          error: null,
+        })
+      }
+      return Promise.resolve({ data: options.duplicateProvision ?? null, error: null })
+    }),
+    insert: jest.fn((data: any) => {
+      options.onInsert?.(data)
+      return chain
+    }),
+    single: jest.fn().mockResolvedValue({
+      data: options.insertError ? null : insertResult,
+      error: options.insertError ?? null,
+    }),
+  }
+  return chain
+}
+
 function buildMockSupabase(overrides: Record<string, any> = {}) {
   const defaultInsertChain = {
     insert: jest.fn().mockReturnThis(),
@@ -66,16 +133,6 @@ function buildMockSupabase(overrides: Record<string, any> = {}) {
     }),
   }
 
-  const defaultSelectChain = {
-    select: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    order: jest.fn().mockResolvedValue({ data: [], error: null }),
-    maybeSingle: jest.fn().mockResolvedValue({
-      data: { business_id: "biz-001" },
-      error: null,
-    }),
-  }
-
   const mock: any = {
     auth: {
       getUser: jest.fn().mockResolvedValue({
@@ -85,7 +142,10 @@ function buildMockSupabase(overrides: Record<string, any> = {}) {
     },
     from: jest.fn((table: string) => {
       if (table === "cit_provisions") {
-        return overrides.cit_provisions ?? defaultSelectChain
+        return overrides.cit_provisions ?? buildCitProvisionsChain()
+      }
+      if (table === "businesses") {
+        return overrides.businesses ?? buildBusinessChain()
       }
       if (table === "journal_entry_lines") {
         return { select: jest.fn().mockReturnThis(), eq: jest.fn().mockReturnThis(), gte: jest.fn().mockReturnThis(), lte: jest.fn().mockResolvedValue({ data: [], error: null }) }
@@ -323,6 +383,7 @@ describe("E. POST /api/cit — create provision", () => {
   })
 
   it("creates a draft provision with correct CIT amount", async () => {
+    let capturedInsertData: any = null
     const createdProvision = {
       id: "prov-001",
       business_id: "biz-001",
@@ -335,11 +396,12 @@ describe("E. POST /api/cit — create provision", () => {
       notes: null,
     }
     const mockSupabase = buildMockSupabase({
-      cit_provisions: {
-        insert: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        single: jest.fn().mockResolvedValue({ data: createdProvision, error: null }),
-      },
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
+          capturedInsertData = data
+        },
+        insertResult: createdProvision,
+      }),
     })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
@@ -355,31 +417,26 @@ describe("E. POST /api/cit — create provision", () => {
     expect(json.success).toBe(true)
     expect(json.provision.cit_amount).toBe(25000)
     expect(json.provision.status).toBe("draft")
+    expect(capturedInsertData).toMatchObject({
+      fiscal_year: 2026,
+      quarter: 1,
+      period_start: "2026-01-01",
+      period_end: "2026-03-31",
+      due_date: "2026-03-31",
+      profit_before_tax: 100000,
+    })
   })
 
   it("inserts AMT note into provision notes when AMT overrides standard CIT", async () => {
     let capturedInsertData: any = null
-    const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn((table: string) => {
-        if (table === "cit_provisions") {
-          return {
-            insert: jest.fn((data: any) => {
-              capturedInsertData = data
-              return {
-                select: jest.fn().mockReturnThis(),
-                single: jest.fn().mockResolvedValue({
-                  data: { ...data, id: "prov-002" },
-                  error: null,
-                }),
-              }
-            }),
-          }
-        }
-        return {}
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
+          capturedInsertData = data
+        },
+        insertResult: { id: "prov-002", status: "draft" },
       }),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    }
+    })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
     // Low-profit: standard CIT = 2,500, AMT = 5,000 → AMT applies
@@ -399,27 +456,14 @@ describe("E. POST /api/cit — create provision", () => {
 
   it("does not add AMT note when standard CIT is higher", async () => {
     let capturedInsertData: any = null
-    const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn((table: string) => {
-        if (table === "cit_provisions") {
-          return {
-            insert: jest.fn((data: any) => {
-              capturedInsertData = data
-              return {
-                select: jest.fn().mockReturnThis(),
-                single: jest.fn().mockResolvedValue({
-                  data: { ...data, id: "prov-003" },
-                  error: null,
-                }),
-              }
-            }),
-          }
-        }
-        return {}
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
+          capturedInsertData = data
+        },
+        insertResult: { id: "prov-003", status: "draft" },
       }),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    }
+    })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
     // High-profit: standard CIT = 25,000, AMT = 500 → standard applies
@@ -439,15 +483,11 @@ describe("E. POST /api/cit — create provision", () => {
   it("calls post_cit_provision_to_ledger RPC when auto_post=true and citAmount > 0", async () => {
     const mockRpc = jest.fn().mockResolvedValue({ data: "je-auto", error: null })
     const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        single: jest.fn().mockResolvedValue({
-          data: { id: "prov-auto", cit_amount: 25000, status: "draft" },
-          error: null,
+      ...buildMockSupabase({
+        cit_provisions: buildCitProvisionsChain({
+          insertResult: { id: "prov-auto", cit_amount: 25000, status: "draft" },
         }),
-      })),
+      }),
       rpc: mockRpc,
     }
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
@@ -469,15 +509,12 @@ describe("E. POST /api/cit — create provision", () => {
   it("does NOT call post RPC when auto_post=true but citAmount is 0 (exempt)", async () => {
     const mockRpc = jest.fn().mockResolvedValue({ data: null, error: null })
     const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        single: jest.fn().mockResolvedValue({
-          data: { id: "prov-exempt", cit_amount: 0, status: "draft" },
-          error: null,
+      ...buildMockSupabase({
+        businesses: buildBusinessChain("exempt"),
+        cit_provisions: buildCitProvisionsChain({
+          insertResult: { id: "prov-exempt", cit_amount: 0, status: "draft" },
         }),
-      })),
+      }),
       rpc: mockRpc,
     }
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
@@ -529,6 +566,27 @@ describe("F. POST /api/cit?action=post — post to ledger", () => {
     expect(json.journal_entry_id).toBe("je-001")
   })
 
+  it("returns 400 and does not call the post RPC when cit_amount is zero", async () => {
+    const mockRpc = jest.fn().mockResolvedValue({ data: "je-zero", error: null })
+    const mockSupabase = {
+      ...buildMockSupabase({
+        cit_provisions: buildCitProvisionsChain({ provisionAmount: 0 }),
+      }),
+      rpc: mockRpc,
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const req = makePostRequest({ provision_id: "prov-zero" }, { action: "post" })
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toMatch(/No CIT payable/)
+    expect(mockRpc).not.toHaveBeenCalledWith(
+      "post_cit_provision_to_ledger",
+      expect.anything()
+    )
+  })
+
   it("returns 500 when RPC returns an error", async () => {
     const mockRpc = jest.fn().mockResolvedValue({
       data: null,
@@ -556,15 +614,11 @@ describe("H. Edge cases", () => {
       return Promise.resolve({ data: null, error: null })
     })
     const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        single: jest.fn().mockResolvedValue({
-          data: { id: "prov-warn", cit_amount: 25000, status: "draft" },
-          error: null,
+      ...buildMockSupabase({
+        cit_provisions: buildCitProvisionsChain({
+          insertResult: { id: "prov-warn", cit_amount: 25000, status: "draft" },
         }),
-      })),
+      }),
       rpc: mockRpc,
     }
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
@@ -604,19 +658,14 @@ describe("H. Edge cases", () => {
 
   it("provision_type defaults to 'quarterly' when not provided", async () => {
     let capturedData: any = null
-    const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn((data: any) => {
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
           capturedData = data
-          return {
-            select: jest.fn().mockReturnThis(),
-            single: jest.fn().mockResolvedValue({ data: { ...data, id: "prov-q" }, error: null }),
-          }
-        }),
-      })),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    }
+        },
+        insertResult: { id: "prov-q", status: "draft" },
+      }),
+    })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
     const req = makePostRequest({
@@ -629,21 +678,17 @@ describe("H. Edge cases", () => {
     expect(capturedData.provision_type).toBe("quarterly")
   })
 
-  it("cit_rate defaults to 0.25 (standard Ghana CIT) when not provided", async () => {
+  it("cit_rate is derived from the business profile when client does not provide it", async () => {
     let capturedData: any = null
-    const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn((data: any) => {
+    const mockSupabase = buildMockSupabase({
+      businesses: buildBusinessChain("hotel_22"),
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
           capturedData = data
-          return {
-            select: jest.fn().mockReturnThis(),
-            single: jest.fn().mockResolvedValue({ data: { ...data, id: "prov-r" }, error: null }),
-          }
-        }),
-      })),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    }
+        },
+        insertResult: { id: "prov-r", status: "draft" },
+      }),
+    })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
     const req = makePostRequest({
@@ -653,25 +698,46 @@ describe("H. Edge cases", () => {
       // no cit_rate supplied
     })
     await POST(req)
+    expect(capturedData.cit_rate).toBe(0.22)
+    expect(capturedData.cit_amount).toBe(22000)
+  })
+
+  it("ignores client-supplied cit_rate and uses businesses.cit_rate_code", async () => {
+    let capturedData: any = null
+    const mockSupabase = buildMockSupabase({
+      businesses: buildBusinessChain("standard_25"),
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
+          capturedData = data
+        },
+        insertResult: { id: "prov-server-rate", status: "draft" },
+      }),
+    })
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    await POST(
+      makePostRequest({
+        business_id: "biz-001",
+        period_label: "Q1 2026",
+        chargeable_income: 100000,
+        cit_rate: 0,
+      })
+    )
+
     expect(capturedData.cit_rate).toBe(0.25)
     expect(capturedData.cit_amount).toBe(25000)
   })
 
   it("existing notes are preserved when AMT note is appended", async () => {
     let capturedData: any = null
-    const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn((data: any) => {
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: buildCitProvisionsChain({
+        onInsert: (data) => {
           capturedData = data
-          return {
-            select: jest.fn().mockReturnThis(),
-            single: jest.fn().mockResolvedValue({ data: { ...data, id: "prov-n" }, error: null }),
-          }
-        }),
-      })),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    }
+        },
+        insertResult: { id: "prov-n", status: "draft" },
+      }),
+    })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
     // Trigger AMT (standard = 2,500 < AMT 5,000) with an existing note
@@ -690,15 +756,11 @@ describe("H. Edge cases", () => {
   })
 
   it("DB insert failure on create returns 500", async () => {
-    const mockSupabase = {
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
-      from: jest.fn(() => ({
-        insert: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        single: jest.fn().mockResolvedValue({ data: null, error: { message: "duplicate key value" } }),
-      })),
-      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
-    }
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: buildCitProvisionsChain({
+        insertError: { message: "connection timeout" },
+      }),
+    })
     mockCreateSupabase.mockResolvedValue(mockSupabase as any)
 
     const req = makePostRequest({
@@ -709,7 +771,34 @@ describe("H. Edge cases", () => {
     const res = await POST(req)
     expect(res.status).toBe(500)
     const json = await res.json()
-    expect(json.error).toMatch(/duplicate key/)
+    expect(json.error).toMatch(/connection timeout/)
+  })
+
+  it("returns 409 and the existing provision when a period duplicate exists", async () => {
+    const duplicate = {
+      id: "existing-prov",
+      business_id: "biz-001",
+      provision_type: "quarterly",
+      period_label: "Q1 2026",
+      period_start: "2026-01-01",
+      period_end: "2026-03-31",
+    }
+    const mockSupabase = buildMockSupabase({
+      cit_provisions: buildCitProvisionsChain({ duplicateProvision: duplicate }),
+    })
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const res = await POST(
+      makePostRequest({
+        business_id: "biz-001",
+        period_label: "Q1 2026",
+        chargeable_income: 100000,
+      })
+    )
+    expect(res.status).toBe(409)
+    const json = await res.json()
+    expect(json.error).toMatch(/already exists/)
+    expect(json.provision.id).toBe("existing-prov")
   })
 })
 
@@ -753,6 +842,37 @@ describe("G. POST /api/cit?action=pay — record payment", () => {
     const json = await res.json()
     expect(json.success).toBe(true)
     expect(json.journal_entry_id).toBe("je-pay-001")
+  })
+
+  it("returns 400 and does not call the payment RPC when cit_amount is zero", async () => {
+    const mockRpc = jest.fn().mockResolvedValue({ data: "je-pay-zero", error: null })
+    const mockSupabase = {
+      ...buildMockSupabase({
+        cit_provisions: buildCitProvisionsChain({ provisionAmount: 0 }),
+      }),
+      rpc: mockRpc,
+    }
+    mockCreateSupabase.mockResolvedValue(mockSupabase as any)
+
+    const res = await POST(
+      makePostRequest(
+        {
+          business_id: "biz-001",
+          provision_id: "prov-zero",
+          payment_account_code: "1010",
+          payment_date: "2026-03-31",
+        },
+        { action: "pay" }
+      )
+    )
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toMatch(/No CIT payable/)
+    expect(mockRpc).not.toHaveBeenCalledWith(
+      "post_cit_payment_to_ledger",
+      expect.anything()
+    )
   })
 
   it("defaults payment_account_code to '1010' when not provided", async () => {

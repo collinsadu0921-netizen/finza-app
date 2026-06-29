@@ -2,6 +2,103 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 
+const INVOICE_SELECT = `
+        id,
+        invoice_number,
+        customer_id,
+        subtotal,
+        vat,
+        total,
+        currency_code,
+        currency_symbol,
+        status,
+        issue_date,
+        due_date,
+        tax_lines,
+        customers (
+          id,
+          name,
+          email
+        )
+      `
+
+type OverduePageRpcResult = {
+  total_count: number
+  invoice_ids: string[]
+}
+
+/**
+ * Overdue invoices must be paginated in the database.
+ * Loading all past-due invoices into Node to filter by outstanding balance
+ * does not scale (thousands of invoices per business). Operational outstanding
+ * uses payments + applied credit notes; get_ar_balances_by_invoice is period-
+ * scoped ledger AR and is not suitable for this list filter.
+ */
+async function fetchOverdueInvoicesPage(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  params: {
+    businessId: string
+    page: number
+    limit: number
+    customerId: string | null
+    startDate: string | null
+    endDate: string | null
+    search: string | null
+  }
+): Promise<{ invoices: unknown[]; totalCount: number }> {
+  const from = (params.page - 1) * params.limit
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "get_operational_overdue_invoices_page",
+    {
+      p_business_id: params.businessId,
+      p_limit: params.limit,
+      p_offset: from,
+      p_customer_id: params.customerId || null,
+      p_start_date: params.startDate || null,
+      p_end_date: params.endDate || null,
+      p_search: params.search || null,
+    }
+  )
+
+  if (rpcError) {
+    throw new Error(rpcError.message)
+  }
+
+  const pageResult = (rpcData ?? {
+    total_count: 0,
+    invoice_ids: [],
+  }) as OverduePageRpcResult
+
+  const invoiceIds = Array.isArray(pageResult.invoice_ids)
+    ? pageResult.invoice_ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : []
+
+  const totalCount = Number(pageResult.total_count) || 0
+
+  if (invoiceIds.length === 0) {
+    return { invoices: [], totalCount }
+  }
+
+  const { data: invoiceRows, error: invoiceError } = await supabase
+    .from("invoices")
+    .select(INVOICE_SELECT)
+    .eq("business_id", params.businessId)
+    .is("deleted_at", null)
+    .in("id", invoiceIds)
+
+  if (invoiceError) {
+    throw new Error(invoiceError.message)
+  }
+
+  const byId = new Map((invoiceRows ?? []).map((row) => [row.id as string, row]))
+  const ordered = invoiceIds
+    .map((id) => byId.get(id))
+    .filter((row): row is NonNullable<typeof row> => row != null)
+
+  return { invoices: ordered, totalCount }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
@@ -34,50 +131,36 @@ export async function GET(request: NextRequest) {
     const from = (page - 1) * limit
     const to = from + limit - 1
 
+    if (status === "overdue") {
+      const { invoices, totalCount } = await fetchOverdueInvoicesPage(supabase, {
+        businessId: business.id,
+        page,
+        limit,
+        customerId,
+        startDate,
+        endDate,
+        search,
+      })
+
+      return NextResponse.json({
+        invoices,
+        pagination: {
+          page,
+          pageSize: limit,
+          totalCount,
+          totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+        },
+      })
+    }
+
     let query = supabase
       .from("invoices")
-      .select(
-        `
-        id,
-        invoice_number,
-        customer_id,
-        subtotal,
-        vat,
-        total,
-        currency_code,
-        currency_symbol,
-        status,
-        issue_date,
-        due_date,
-        tax_lines,
-        customers (
-          id,
-          name,
-          email
-        )
-      `,
-        { count: "exact" }
-      )
+      .select(INVOICE_SELECT, { count: "exact" })
       .eq("business_id", business.id)
       .is("deleted_at", null)
       .order("issue_date", { ascending: false })
 
-    // Handle status filter
-    // Special case: "overdue" filter requires calculation based on FINANCIAL STATE (payments/credit notes) and due_date
-    // ACCOUNTING RULES:
-    // - Outstanding amount = invoice.total - sum(payments) - sum(credit_notes)
-    // - Overdue = outstanding_amount > 0 AND due_date < today
-    // - Paid invoices (outstanding_amount = 0) must NEVER appear, regardless of status
-    // - Financial state (outstanding_amount) must override document status
-    if (status === "overdue") {
-      // For overdue, we need to filter invoices that have outstanding balance > 0 AND due_date < today
-      // Do NOT filter by status - use financial state calculation instead
-      // First, get all invoices with due_date (we'll filter by outstanding amount in memory)
-      const today = new Date().toISOString().split("T")[0]
-      query = query
-        .not("due_date", "is", null)
-        .lt("due_date", today)
-    } else if (status) {
+    if (status) {
       query = query.eq("status", status)
     }
 
@@ -94,7 +177,6 @@ export async function GET(request: NextRequest) {
     }
 
     if (search) {
-      // First, search for customers that match the search term
       const { data: matchingCustomers } = await supabase
         .from("customers")
         .select("id")
@@ -102,15 +184,13 @@ export async function GET(request: NextRequest) {
         .ilike("name", `%${search}%`)
         .is("deleted_at", null)
 
-      const matchingCustomerIds = matchingCustomers?.map((c: any) => c.id) || []
+      const matchingCustomerIds = matchingCustomers?.map((c: { id: string }) => c.id) || []
 
-      // Build search conditions: invoice_number, notes, or customer_id in matching customers
       const searchConditions = [
         `invoice_number.ilike.%${search}%`,
         `notes.ilike.%${search}%`,
       ]
 
-      // If we found matching customers, add customer_id condition
       if (matchingCustomerIds.length > 0) {
         searchConditions.push(`customer_id.in.(${matchingCustomerIds.join(",")})`)
       }
@@ -118,12 +198,9 @@ export async function GET(request: NextRequest) {
       query = query.or(searchConditions.join(","))
     }
 
-    // For non-overdue statuses, paginate in SQL.
-    if (status !== "overdue") {
-      query = query.range(from, to)
-    }
+    query = query.range(from, to)
 
-    let { data: invoices, error, count } = await query
+    const { data: invoices, error, count } = await query
 
     if (error) {
       console.error("Error fetching invoices:", error)
@@ -133,94 +210,9 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // If filtering for overdue, calculate outstanding amounts from payments and credit notes
-    if (status === "overdue" && invoices && invoices.length > 0) {
-      const invoiceIds = invoices.map((inv: any) => inv.id)
-      
-      // Get all payments for these invoices
-      const { data: payments } = await supabase
-        .from("payments")
-        .select("invoice_id, amount")
-        .in("invoice_id", invoiceIds)
-        .is("deleted_at", null)
-
-      // Get all applied credit notes for these invoices
-      const { data: creditNotes } = await supabase
-        .from("credit_notes")
-        .select("invoice_id, total")
-        .in("invoice_id", invoiceIds)
-        .eq("status", "applied")
-        .is("deleted_at", null)
-
-      // Calculate outstanding amount for each invoice
-      const invoicePaymentsMap: Record<string, number> = {}
-      payments?.forEach((payment: any) => {
-        if (payment.invoice_id) {
-          invoicePaymentsMap[payment.invoice_id] = 
-            (invoicePaymentsMap[payment.invoice_id] || 0) + Number(payment.amount || 0)
-        }
-      })
-
-      const invoiceCreditNotesMap: Record<string, number> = {}
-      creditNotes?.forEach((cn: any) => {
-        if (cn.invoice_id) {
-          invoiceCreditNotesMap[cn.invoice_id] = 
-            (invoiceCreditNotesMap[cn.invoice_id] || 0) + Number(cn.total || 0)
-        }
-      })
-
-      // Filter to only invoices that are OVERDUE: outstanding_amount > 0 AND due_date < today
-      // Paid invoices (outstanding_amount = 0) must NEVER appear, regardless of status
-      // Financial state (outstanding_amount) must override document status
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      
-      invoices = invoices.filter((inv: any) => {
-        // Rule: Exclude draft invoices (not yet issued)
-        if (inv.status === "draft") {
-          return false
-        }
-        
-        // Calculate outstanding amount from financial state (payments + credit notes)
-        const totalPaid = invoicePaymentsMap[inv.id] || 0
-        const totalCredits = invoiceCreditNotesMap[inv.id] || 0
-        const outstandingAmount = Math.max(0, Number(inv.total || 0) - totalPaid - totalCredits)
-        
-        // Rule: If outstanding_amount = 0, invoice is PAID and must be excluded
-        if (outstandingAmount <= 0) {
-          return false // Exclude fully paid invoices
-        }
-        
-        // Rule: Overdue = outstanding_amount > 0 AND due_date < today
-        if (!inv.due_date) {
-          return false // Exclude invoices without due date
-        }
-        
-        const dueDate = new Date(inv.due_date)
-        dueDate.setHours(0, 0, 0, 0)
-        
-        return today > dueDate // Only include if past due date
-      })
-    }
-
-    const rows = invoices || []
-    if (status === "overdue") {
-      const totalCount = rows.length
-      const paged = rows.slice(from, to + 1)
-      return NextResponse.json({
-        invoices: paged,
-        pagination: {
-          page,
-          pageSize: limit,
-          totalCount,
-          totalPages: Math.max(1, Math.ceil(totalCount / limit)),
-        },
-      })
-    }
-
     const totalCount = count ?? 0
     return NextResponse.json({
-      invoices: rows,
+      invoices: invoices || [],
       pagination: {
         page,
         pageSize: limit,
@@ -228,11 +220,9 @@ export async function GET(request: NextRequest) {
         totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       },
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in invoice list:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    )
+    const message = error instanceof Error ? error.message : "Internal server error"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

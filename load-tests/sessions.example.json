@@ -1,0 +1,12 @@
+[
+  {
+    "label": "load-user-1",
+    "businessId": "00000000-0000-0000-0000-000000000001",
+    "cookie": "sb-your-project-ref-auth-token=base64-json-cookie-value; Path=/; HttpOnly"
+  },
+  {
+    "label": "load-user-2",
+    "businessId": "00000000-0000-0000-0000-000000000001",
+    "cookie": "sb-your-project-ref-auth-token=base64-json-cookie-value; Path=/; HttpOnly"
+  }
+]

@@ -93,6 +93,7 @@ describe("GET /api/invoices/list", () => {
     mockCreateSupabase.mockResolvedValue({
       auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
       from,
+      rpc: jest.fn(),
     } as any)
     mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
 
@@ -104,5 +105,61 @@ describe("GET /api/invoices/list", () => {
     const body = await res.json()
     expect(body.invoices).toHaveLength(1)
     expect(body.pagination.totalCount).toBe(1)
+  })
+
+  it("overdue status uses paginated RPC and returns at most limit invoices", async () => {
+    const overdueIds = Array.from({ length: 25 }, (_, i) => `inv-overdue-${i}`)
+    const invoiceRows = overdueIds.map((id, i) => ({
+      id,
+      invoice_number: `INV-O-${i}`,
+      total: 50,
+    }))
+
+    const rpc = jest.fn().mockResolvedValue({
+      data: { total_count: 100, invoice_ids: overdueIds },
+      error: null,
+    })
+
+    const from = jest.fn((table: string) => {
+      if (table === "invoices") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          is: jest.fn().mockReturnThis(),
+          in: jest.fn().mockResolvedValue({ data: invoiceRows, error: null }),
+        }
+      }
+      return { select: jest.fn().mockReturnThis() }
+    })
+
+    mockCreateSupabase.mockResolvedValue({
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
+      from,
+      rpc,
+    } as any)
+    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+
+    const req = new NextRequest(
+      "http://localhost/api/invoices/list?business_id=biz-a&status=overdue&page=1&limit=25"
+    )
+    const res = await GET(req)
+    expect(res.status).toBe(200)
+
+    expect(rpc).toHaveBeenCalledWith(
+      "get_operational_overdue_invoices_page",
+      expect.objectContaining({
+        p_business_id: "biz-a",
+        p_limit: 25,
+        p_offset: 0,
+      })
+    )
+
+    const body = await res.json()
+    expect(body.invoices).toHaveLength(25)
+    expect(body.pagination.totalCount).toBe(100)
+    expect(body.pagination.pageSize).toBe(25)
+
+    const invoicesFrom = from.mock.calls.filter(([table]) => table === "invoices")
+    expect(invoicesFrom.length).toBe(1)
   })
 })

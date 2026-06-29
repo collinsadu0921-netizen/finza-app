@@ -3,6 +3,7 @@ node_modules/
 .env
 .env.local
 .env.*
+!.env.staging.example
 .vercel/
 out/
 dist/
@@ -12,3 +13,9 @@ coverage/
 
 # Playwright — saved Supabase session (never commit)
 e2e/.auth/
+
+# k6 load tests — real session cookies (never commit)
+load-tests/sessions.json
+load-tests/sessions.*.json
+!load-tests/sessions.example.json
+load-tests/results/

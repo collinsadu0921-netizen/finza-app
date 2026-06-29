@@ -158,6 +158,8 @@ export default function BillsPage() {
       setLoading(true)
       const params = new URLSearchParams()
       params.append("business_id", businessId)
+      params.append("page", "1")
+      params.append("limit", "50")
       if (filters.supplier_name) params.append("supplier_name", filters.supplier_name)
       if (filters.status !== "all") params.append("status", filters.status)
       if (filters.start_date) params.append("start_date", filters.start_date)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { Fragment, useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -10,35 +10,15 @@ import TierGate from "@/components/service/TierGate"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
-
-function getQuarterDateRange(year: number, quarter: number): { start: string; end: string } {
-  const quarterBounds: Record<number, [number, number]> = {
-    1: [1, 3],   // Jan – Mar
-    2: [4, 6],   // Apr – Jun
-    3: [7, 9],   // Jul – Sep
-    4: [10, 12], // Oct – Dec
-  }
-  const [startMonth, endMonth] = quarterBounds[quarter] ?? [1, 12]
-  const start = `${year}-${String(startMonth).padStart(2, "0")}-01`
-  const endDay = new Date(year, endMonth, 0).getDate()
-  const end   = `${year}-${String(endMonth).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`
-  return { start, end }
-}
-
-function parsePeriodLabel(
-  label: string,
-  fallbackYear: number,
-  fallbackQ: number
-): { year: number; quarter: number } {
-  const t = label.trim()
-  const m = t.match(/^Q([1-4])\s+(\d{4})$/i)
-  if (m) return { quarter: Number(m[1]), year: Number(m[2]) }
-  const fy = t.match(/^FY\s+(\d{4})$/i)
-  if (fy) return { quarter: 1, year: Number(fy[1]) }
-  const yOnly = t.match(/^(\d{4})$/)
-  if (yOnly) return { quarter: 1, year: Number(yOnly[1]) }
-  return { year: fallbackYear, quarter: fallbackQ }
-}
+import {
+  GHANA_CIT_RATE_OPTIONS,
+  buildGhanaCitPeriod,
+  calculateGhanaCitAmount,
+  parseGhanaCitPeriodLabel,
+  resolveGhanaCitRate,
+  type GhanaCitProvisionType,
+  type GhanaCitRateCode,
+} from "@/lib/tax/ghanaCit"
 
 /** Used for auto-fetch: quarterly needs Q# YYYY; annual/final needs FY YYYY (or plain YYYY if legacy). */
 function periodLabelIsCompleteForFetch(
@@ -68,29 +48,62 @@ function buildFinancialYearOptions(fromYear: number, toYear: number): { value: s
   return out
 }
 
-// Ghana CIT rate codes → numeric rate + calculation basis
-const CIT_RATES: Record<string, { rate: number; label: string; basis: "profit" | "turnover" }> = {
-  standard_25:   { rate: 0.25, label: "25% – Standard Company",         basis: "profit" },
-  hotel_22:      { rate: 0.22, label: "22% – Hotel Industry",           basis: "profit" },
-  bank_20:       { rate: 0.20, label: "20% – Bank / Financial",         basis: "profit" },
-  export_8:      { rate: 0.08, label: "8% – Non-Traditional Exports",   basis: "profit" },
-  agro_1:        { rate: 0.01, label: "1% – Agro-processing",           basis: "profit" },
-  mining_35:     { rate: 0.35, label: "35% – Mining / Petroleum",       basis: "profit" },
-  presumptive_3: { rate: 0.03, label: "3% – Presumptive / Sole Trader", basis: "turnover" },
-  exempt:        { rate: 0.00, label: "0% – Exempt",                    basis: "profit" },
-}
-
 type CITProvision = {
   id: string
   period_label: string
-  provision_type: "quarterly" | "annual" | "final"
+  provision_type: GhanaCitProvisionType
   chargeable_income: number
   cit_rate: number
   cit_amount: number
+  add_backs_total: number
+  deductions_total: number
+  gross_revenue: number
   status: "draft" | "posted" | "paid"
   journal_entry_id: string | null
+  fiscal_year: number | null
+  quarter: number | null
+  period_start: string | null
+  period_end: string | null
+  due_date: string | null
+  profit_before_tax: number | null
   notes: string | null
   created_at: string
+}
+
+type CITAdjustment = {
+  id: string
+  adjustment_type: "add_back" | "deduction"
+  category: string
+  amount: number
+  notes: string | null
+  account_id: string | null
+  accounts?: { id: string; code: string; name: string } | null
+}
+
+const ADD_BACK_CATEGORIES = [
+  "Non-deductible expense",
+  "Personal/private expense",
+  "Penalty or fine",
+  "Capital expense expensed",
+  "Unsupported expense",
+  "Other add-back",
+]
+
+const DEDUCTION_CATEGORIES = [
+  "Capital allowance",
+  "Approved deduction",
+  "Loss relief",
+  "Tax credit / relief",
+  "Other deduction",
+]
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "Not set"
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
 }
 
 export default function CITPage() {
@@ -100,9 +113,19 @@ export default function CITPage() {
 
   const [businessId, setBusinessId] = useState("")
   const [currencyCode, setCurrencyCode] = useState("")
-  const [citRateCode, setCitRateCode] = useState("standard_25")
+  const [citRateCode, setCitRateCode] = useState<GhanaCitRateCode>("standard_25")
   const [loading, setLoading] = useState(true)
   const [provisions, setProvisions] = useState<CITProvision[]>([])
+  const [expandedProvisionId, setExpandedProvisionId] = useState<string | null>(null)
+  const [adjustmentsByProvision, setAdjustmentsByProvision] = useState<Record<string, CITAdjustment[]>>({})
+  const [adjustmentsLoading, setAdjustmentsLoading] = useState<string | null>(null)
+  const [adjustmentSaving, setAdjustmentSaving] = useState(false)
+  const [adjustmentForm, setAdjustmentForm] = useState({
+    adjustment_type: "add_back" as "add_back" | "deduction",
+    category: ADD_BACK_CATEGORIES[0],
+    amount: "",
+    notes: "",
+  })
 
   // P&L summary
   const [plLoading, setPlLoading] = useState(false)
@@ -113,9 +136,8 @@ export default function CITPage() {
   // New provision form
   const [showForm, setShowForm] = useState(false)
   const [periodLabel, setPeriodLabel] = useState("")
-  const [provType, setProvType] = useState<"quarterly" | "annual" | "final">("quarterly")
+  const [provType, setProvType] = useState<GhanaCitProvisionType>("quarterly")
   const [chargeableIncome, setChargeableIncome] = useState("")
-  const [citRate, setCitRate] = useState(0.25)
   const [formNotes, setFormNotes] = useState("")
   const [autoPost, setAutoPost] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -131,8 +153,8 @@ export default function CITPage() {
   const currentYear = new Date().getFullYear()
   const currentQ = Math.ceil((new Date().getMonth() + 1) / 3)
 
-  const rateInfo = CIT_RATES[citRateCode] ?? CIT_RATES.standard_25
-  const isPresumptive = citRateCode === "presumptive_3"
+  const rateInfo = resolveGhanaCitRate(citRateCode)
+  const isPresumptive = rateInfo.code === "presumptive_3"
 
   useEffect(() => { loadData() }, [])
 
@@ -152,9 +174,8 @@ export default function CITPage() {
       const profileRes = await fetch(`/api/business/profile?business_id=${business.id}`)
       if (profileRes.ok) {
         const profileData = await profileRes.json()
-        const rateCode = profileData.business?.cit_rate_code || "standard_25"
-        setCitRateCode(rateCode)
-        setCitRate(CIT_RATES[rateCode]?.rate ?? 0.25)
+        const resolvedRate = resolveGhanaCitRate(profileData.business?.cit_rate_code)
+        setCitRateCode(resolvedRate.code)
       }
 
       const res = await fetch(`/api/cit?business_id=${business.id}`)
@@ -166,6 +187,101 @@ export default function CITPage() {
     }
   }
 
+  const replaceProvision = (updatedProvision: CITProvision) => {
+    setProvisions((current) => current.map((p) => (p.id === updatedProvision.id ? updatedProvision : p)))
+  }
+
+  const loadAdjustments = async (provisionId: string) => {
+    setAdjustmentsLoading(provisionId)
+    try {
+      const res = await fetch(`/api/cit/adjustments?provision_id=${encodeURIComponent(provisionId)}`)
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Failed to load CIT adjustments", "error")
+        return
+      }
+      setAdjustmentsByProvision((current) => ({
+        ...current,
+        [provisionId]: data.adjustments ?? [],
+      }))
+    } finally {
+      setAdjustmentsLoading(null)
+    }
+  }
+
+  const toggleAdjustments = async (provisionId: string) => {
+    const next = expandedProvisionId === provisionId ? null : provisionId
+    setExpandedProvisionId(next)
+    if (next && !adjustmentsByProvision[next]) {
+      await loadAdjustments(next)
+    }
+  }
+
+  const handleAdjustmentTypeChange = (value: "add_back" | "deduction") => {
+    setAdjustmentForm({
+      adjustment_type: value,
+      category: value === "add_back" ? ADD_BACK_CATEGORIES[0] : DEDUCTION_CATEGORIES[0],
+      amount: "",
+      notes: "",
+    })
+  }
+
+  const handleAddAdjustment = async (provision: CITProvision) => {
+    if (!adjustmentForm.amount || Number(adjustmentForm.amount) <= 0) {
+      toast.showToast("Adjustment amount must be greater than zero", "warning")
+      return
+    }
+    setAdjustmentSaving(true)
+    try {
+      const res = await fetch("/api/cit/adjustments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provision_id: provision.id,
+          adjustment_type: adjustmentForm.adjustment_type,
+          category: adjustmentForm.category,
+          amount: Number(adjustmentForm.amount),
+          notes: adjustmentForm.notes.trim() || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Failed to save CIT adjustment", "error")
+        return
+      }
+      if (data.provision) replaceProvision(data.provision)
+      setAdjustmentForm({
+        adjustment_type: "add_back",
+        category: ADD_BACK_CATEGORIES[0],
+        amount: "",
+        notes: "",
+      })
+      await loadAdjustments(provision.id)
+      toast.showToast("CIT adjustment saved", "success")
+    } finally {
+      setAdjustmentSaving(false)
+    }
+  }
+
+  const handleDeleteAdjustment = async (provision: CITProvision, adjustmentId: string) => {
+    setAdjustmentSaving(true)
+    try {
+      const res = await fetch(`/api/cit/adjustments/${encodeURIComponent(adjustmentId)}`, {
+        method: "DELETE",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Failed to delete CIT adjustment", "error")
+        return
+      }
+      if (data.provision) replaceProvision(data.provision)
+      await loadAdjustments(provision.id)
+      toast.showToast("CIT adjustment deleted", "success")
+    } finally {
+      setAdjustmentSaving(false)
+    }
+  }
+
   const fetchPL = useCallback(async () => {
     if (!businessId) return
     setPlLoading(true)
@@ -173,17 +289,14 @@ export default function CITPage() {
     try {
       let startDate: string
       let endDate: string
-      if (provType === "quarterly") {
-        const { year, quarter } = parsePeriodLabel(periodLabel, currentYear, currentQ)
-        const range = getQuarterDateRange(year, quarter)
-        startDate = range.start
-        endDate   = range.end
-      } else {
-        // annual / final → full calendar year
-        const { year } = parsePeriodLabel(periodLabel, currentYear, currentQ)
-        startDate = `${year}-01-01`
-        endDate   = `${year}-12-31`
-      }
+      const period = buildGhanaCitPeriod({
+        provisionType: provType,
+        periodLabel,
+        fallbackYear: currentYear,
+        fallbackQuarter: currentQ,
+      })
+      startDate = period.periodStart
+      endDate = period.periodEnd
       const res = await fetch(
         `/api/accounting/reports/profit-and-loss?business_id=${encodeURIComponent(businessId)}&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`
       )
@@ -267,15 +380,20 @@ export default function CITPage() {
         ]
       : fyOptions
 
-  const isExempt = citRateCode === "exempt"
-  // AMT = 0.5% of gross revenue; doesn't apply to presumptive (already turnover-based) or exempt
+  const isExempt = rateInfo.code === "exempt"
+  // AMT = 0.5% of gross revenue; doesn't apply to presumptive (already turnover-based) or exempt.
   const amtApplicable = !isPresumptive && !isExempt
-  const standardCit   = Math.round(Math.max(0, Number(chargeableIncome) || 0) * citRate * 100) / 100
-  const amtAmount     = amtApplicable && Number(grossRevenue) > 0
-    ? Math.round(Number(grossRevenue) * 0.005 * 100) / 100
-    : 0
-  const amtApplies    = amtApplicable && amtAmount > standardCit
-  const citAmount     = amtApplicable ? Math.max(standardCit, amtAmount) : standardCit
+  const {
+    standardCit,
+    minimumTaxAmount: amtAmount,
+    minimumTaxApplies: amtApplies,
+    citAmount,
+  } = calculateGhanaCitAmount({
+    chargeableIncome: Number(chargeableIncome) || 0,
+    grossRevenue: Number(grossRevenue) || 0,
+    rate: rateInfo,
+  })
+  const noCitPayable = citAmount <= 0
   const handleCreate = async () => {
     if (!periodLabel.trim()) {
       toast.showToast("Please choose a period", "warning")
@@ -295,8 +413,8 @@ export default function CITPage() {
           period_label:      periodLabel.trim(),
           provision_type:    provType,
           chargeable_income: Number(chargeableIncome),
-          cit_rate:          citRate,
           gross_revenue:     Number(grossRevenue) || 0,
+          profit_before_tax:  isPresumptive ? null : Number(chargeableIncome),
           notes:             formNotes || null,
           auto_post:         autoPost,
         }),
@@ -389,7 +507,7 @@ export default function CITPage() {
 
   const totalPosted = provisions.filter(p => p.status !== "draft").reduce((s, p) => s + p.cit_amount, 0)
   const totalPaid   = provisions.filter(p => p.status === "paid").reduce((s, p) => s + p.cit_amount, 0)
-  const activeRate  = CIT_RATES[citRateCode] ?? CIT_RATES.standard_25
+  const activeRate = rateInfo
 
   return (
     <TierGate minTier="business">
@@ -418,7 +536,7 @@ export default function CITPage() {
               </div>
               {!readOnly && (
               <button
-                onClick={() => { setCitRate(rateInfo.rate); setShowForm(true) }}
+                onClick={() => setShowForm(true)}
                 className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2.5 rounded-lg hover:from-blue-700 hover:to-indigo-700 font-medium shadow-lg transition-all flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -506,51 +624,236 @@ export default function CITPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {provisions.map(prov => (
-                    <tr key={prov.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                  {provisions.map(prov => {
+                    const adjustments = adjustmentsByProvision[prov.id] ?? []
+                    const provisionProfitBeforeTax = Number(prov.profit_before_tax ?? prov.chargeable_income ?? 0)
+                    const provisionAddBacks = Number(prov.add_backs_total ?? 0)
+                    const provisionDeductions = Number(prov.deductions_total ?? 0)
+                    const provisionChargeableIncome = Number(prov.chargeable_income ?? 0)
+                    const provisionCitAmount = Number(prov.cit_amount ?? 0)
+                    const provisionReadOnly = readOnly || prov.status !== "draft"
+                    return (
+                    <Fragment key={prov.id}>
+                    <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                       <td className="px-4 py-3">
                         <p className="font-medium text-sm text-gray-900 dark:text-white">{prov.period_label}</p>
-                        <p className="text-xs text-gray-400">{new Date(prov.created_at).toLocaleDateString("en-GB")}</p>
+                        <p className="text-xs text-gray-400">
+                          {prov.period_start && prov.period_end
+                            ? `${formatDate(prov.period_start)} - ${formatDate(prov.period_end)}`
+                            : new Date(prov.created_at).toLocaleDateString("en-GB")}
+                        </p>
+                        {prov.due_date && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400">
+                            Due {formatDate(prov.due_date)}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 capitalize">{prov.provision_type}</td>
                       <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-white">
-                        {formatMoney(Number(prov.chargeable_income), currencyCode || null)}
+                        {formatMoney(provisionChargeableIncome, currencyCode || null)}
+                        {(provisionAddBacks > 0 || provisionDeductions > 0) && (
+                          <p className="text-[11px] text-gray-400">
+                            Adjusted from {formatMoney(provisionProfitBeforeTax, currencyCode || null)}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-gray-400">
                         {(prov.cit_rate * 100).toFixed(0)}%
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-bold text-blue-600 dark:text-blue-400">
-                        {formatMoney(Number(prov.cit_amount), currencyCode || null)}
+                        {formatMoney(provisionCitAmount, currencyCode || null)}
                       </td>
                       <td className="px-4 py-3">{statusBadge(prov.status)}</td>
-                      <td className="px-4 py-3">
-                        {!readOnly && prov.status === "draft" && (
+                      <td className="px-4 py-3 space-y-2">
+                        <button
+                          onClick={() => toggleAdjustments(prov.id)}
+                          className="block text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                        >
+                          {expandedProvisionId === prov.id ? "Hide adjustments" : "Adjustments"}
+                        </button>
+                        {provisionCitAmount <= 0 && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                            No CIT payable
+                          </span>
+                        )}
+                        {!readOnly && provisionCitAmount > 0 && prov.status === "draft" && (
                           <button
                             onClick={() => handlePost(prov.id)}
                             disabled={posting === prov.id}
-                            className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-all"
+                            className="block text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-all"
                           >
                             {posting === prov.id ? "Posting…" : "Post to Ledger"}
                           </button>
                         )}
-                        {!readOnly && prov.status === "posted" && (
+                        {!readOnly && provisionCitAmount > 0 && prov.status === "posted" && (
                           <button
                             onClick={() => {
                               setPayingProvision(prov)
                               setPayDate(new Date().toISOString().split("T")[0])
                               setPayRef("")
                             }}
-                            className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 font-medium transition-all"
+                            className="block text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 font-medium transition-all"
                           >
                             Mark Paid
                           </button>
                         )}
-                        {prov.status === "paid" && (
+                        {provisionCitAmount > 0 && prov.status === "paid" && (
                           <span className="text-xs text-green-600 dark:text-green-400 font-medium">✓ Paid to GRA</span>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    {expandedProvisionId === prov.id && (
+                      <tr>
+                        <td colSpan={7} className="bg-slate-50 dark:bg-slate-900/40 px-6 py-5">
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                                  Structured CIT Adjustments
+                                </h3>
+                                {adjustmentsLoading === prov.id && (
+                                  <span className="text-xs text-gray-500">Loading...</span>
+                                )}
+                              </div>
+                              {provisionReadOnly && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                                  Adjustments are read-only after posting/payment. Reverse or create a new provision if a correction is needed.
+                                </div>
+                              )}
+                              {adjustments.length === 0 ? (
+                                <p className="text-xs text-gray-500 dark:text-gray-400">No adjustments recorded.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {adjustments.map((adj) => (
+                                    <div
+                                      key={adj.id}
+                                      className="rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-700 dark:bg-gray-800"
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                          <p className="font-semibold text-gray-900 dark:text-white">
+                                            {adj.adjustment_type === "add_back" ? "Add-back" : "Deduction"} · {adj.category}
+                                          </p>
+                                          {adj.notes && (
+                                            <p className="mt-1 text-gray-500 dark:text-gray-400">{adj.notes}</p>
+                                          )}
+                                        </div>
+                                        <div className="text-right">
+                                          <p className={adj.adjustment_type === "add_back" ? "font-bold text-blue-600" : "font-bold text-green-600"}>
+                                            {adj.adjustment_type === "add_back" ? "+" : "-"}
+                                            {formatMoney(Number(adj.amount), currencyCode || null)}
+                                          </p>
+                                          {!provisionReadOnly && (
+                                            <button
+                                              onClick={() => handleDeleteAdjustment(prov, adj.id)}
+                                              disabled={adjustmentSaving}
+                                              className="mt-1 text-[11px] text-red-600 hover:underline disabled:opacity-50"
+                                            >
+                                              Delete
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {!provisionReadOnly && (
+                                <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+                                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    Add Adjustment
+                                  </h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <NativeSelect
+                                      value={adjustmentForm.adjustment_type}
+                                      onChange={(e) => handleAdjustmentTypeChange(e.target.value as "add_back" | "deduction")}
+                                      size="sm"
+                                    >
+                                      <option value="add_back">Add-back</option>
+                                      <option value="deduction">Deduction</option>
+                                    </NativeSelect>
+                                    <NativeSelect
+                                      value={adjustmentForm.category}
+                                      onChange={(e) => setAdjustmentForm((current) => ({ ...current, category: e.target.value }))}
+                                      size="sm"
+                                    >
+                                      {(adjustmentForm.adjustment_type === "add_back" ? ADD_BACK_CATEGORIES : DEDUCTION_CATEGORIES).map((category) => (
+                                        <option key={category} value={category}>{category}</option>
+                                      ))}
+                                    </NativeSelect>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={adjustmentForm.amount}
+                                      onChange={(e) => setAdjustmentForm((current) => ({ ...current, amount: e.target.value }))}
+                                      placeholder="Amount"
+                                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={adjustmentForm.notes}
+                                      onChange={(e) => setAdjustmentForm((current) => ({ ...current, notes: e.target.value }))}
+                                      placeholder="Optional notes"
+                                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                                    />
+                                  </div>
+                                  <button
+                                    onClick={() => handleAddAdjustment(prov)}
+                                    disabled={adjustmentSaving}
+                                    className="mt-3 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                  >
+                                    {adjustmentSaving ? "Saving..." : "Save Adjustment"}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm dark:border-gray-700 dark:bg-gray-800">
+                              <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Calculation Summary</h3>
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-gray-600 dark:text-gray-300">
+                                  <span>Profit before tax</span>
+                                  <span>{formatMoney(provisionProfitBeforeTax, currencyCode || null)}</span>
+                                </div>
+                                <div className="flex justify-between text-blue-600 dark:text-blue-400">
+                                  <span>Add-backs total</span>
+                                  <span>{formatMoney(provisionAddBacks, currencyCode || null)}</span>
+                                </div>
+                                <div className="flex justify-between text-green-600 dark:text-green-400">
+                                  <span>Deductions total</span>
+                                  <span>{formatMoney(provisionDeductions, currencyCode || null)}</span>
+                                </div>
+                                <div className="border-t border-gray-200 pt-2 flex justify-between font-semibold text-gray-900 dark:border-gray-700 dark:text-white">
+                                  <span>Chargeable income</span>
+                                  <span>{formatMoney(provisionChargeableIncome, currencyCode || null)}</span>
+                                </div>
+                                <div className="flex justify-between text-gray-600 dark:text-gray-300">
+                                  <span>CIT rate</span>
+                                  <span>{(Number(prov.cit_rate) * 100).toFixed(0)}%</span>
+                                </div>
+                                <div className="flex justify-between text-gray-600 dark:text-gray-300">
+                                  <span>Gross revenue for AMT</span>
+                                  <span>{formatMoney(Number(prov.gross_revenue ?? 0), currencyCode || null)}</span>
+                                </div>
+                                <div className="border-t border-gray-200 pt-2 flex justify-between text-base font-bold text-blue-600 dark:border-gray-700 dark:text-blue-400">
+                                  <span>CIT amount</span>
+                                  <span>{formatMoney(provisionCitAmount, currencyCode || null)}</span>
+                                </div>
+                                {provisionCitAmount <= 0 && (
+                                  <p className="rounded-lg bg-green-50 p-2 text-xs text-green-700 dark:bg-green-900/20 dark:text-green-300">
+                                    No CIT payable for this period.
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -588,7 +891,7 @@ export default function CITPage() {
                       value={
                         /^FY\s+\d{4}$/i.test(periodLabel.trim())
                           ? periodLabel.trim().replace(/^fy\s+/i, "FY ")
-                          : `FY ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
+                          : `FY ${parseGhanaCitPeriodLabel(periodLabel, currentYear, currentQ).year}`
                       }
                       onChange={(e) => setPeriodLabel(e.target.value)}
                       size="sm"
@@ -606,8 +909,8 @@ export default function CITPage() {
                   <NativeSelect
                     value={provType}
                     onChange={(e) => {
-                      const next = e.target.value as "quarterly" | "annual" | "final"
-                      const { year } = parsePeriodLabel(periodLabel, currentYear, currentQ)
+                      const next = e.target.value as GhanaCitProvisionType
+                      const { year } = parseGhanaCitPeriodLabel(periodLabel, currentYear, currentQ)
                       setProvType(next)
                       if (next === "quarterly") {
                         const q = year === currentYear ? currentQ : 1
@@ -637,7 +940,7 @@ export default function CITPage() {
                   <p className="text-xs text-blue-700/90 dark:text-blue-400/90 mt-1">
                     Pulls {provType === "quarterly"
                       ? (periodLabel.trim() || `Q${currentQ} ${currentYear}`)
-                      : `full year ${parsePeriodLabel(periodLabel, currentYear, currentQ).year}`
+                      : `full year ${parseGhanaCitPeriodLabel(periodLabel, currentYear, currentQ).year}`
                     } {isPresumptive ? "gross revenue" : "profit before tax"}
                     {netProfit != null && ` → ${formatMoney(netProfit, currencyCode || null)}`}
                   </p>
@@ -706,42 +1009,57 @@ export default function CITPage() {
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">CIT Rate</label>
                 <NativeSelect
                   value={citRateCode}
-                  onChange={e => {
-                    setCitRateCode(e.target.value)
-                    setCitRate(CIT_RATES[e.target.value]?.rate ?? 0.25)
-                  }}
+                  onChange={() => undefined}
+                  disabled
                   size="sm"
                 >
-                  {Object.entries(CIT_RATES).map(([code, info]) => (
-                    <option key={code} value={code}>{info.label}</option>
+                  {GHANA_CIT_RATE_OPTIONS.map((info) => (
+                    <option key={info.code} value={info.code}>{info.label}</option>
                   ))}
                 </NativeSelect>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Rate is derived from Business Profile tax settings and enforced again on the server.
+                </p>
               </div>
 
               {/* CIT Preview */}
-              <div className={`rounded-lg p-4 ${amtApplies ? "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700" : "bg-gray-50 dark:bg-gray-700"}`}>
+              <div className={`rounded-lg p-4 ${
+                noCitPayable
+                  ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700"
+                  : amtApplies
+                    ? "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700"
+                    : "bg-gray-50 dark:bg-gray-700"
+              }`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {amtApplies ? "Minimum Tax (AMT)" : "Computed CIT"}
+                      {noCitPayable ? "No CIT payable for this period." : amtApplies ? "Minimum Tax (AMT)" : "Computed CIT"}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {amtApplies
+                      {noCitPayable
+                        ? "No provision or payment journal entry is required."
+                        : amtApplies
                         ? `0.5% × ${formatMoney(Number(grossRevenue) || 0, currencyCode || null)} gross revenue`
-                        : `${formatMoney(Number(chargeableIncome) || 0, currencyCode || null)} × ${(citRate * 100).toFixed(0)}%`}
+                        : `${formatMoney(Number(chargeableIncome) || 0, currencyCode || null)} × ${(rateInfo.rate * 100).toFixed(0)}%`}
                     </p>
                   </div>
-                  <p className={`text-2xl font-bold ${amtApplies ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"}`}>
+                  <p className={`text-2xl font-bold ${
+                    noCitPayable
+                      ? "text-green-600 dark:text-green-400"
+                      : amtApplies
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-blue-600 dark:text-blue-400"
+                  }`}>
                     {formatMoney(citAmount, currencyCode || null)}
                   </p>
                 </div>
-                {amtApplies && (
+                {!noCitPayable && amtApplies && (
                   <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-700 flex justify-between text-xs text-amber-700 dark:text-amber-400">
-                    <span>Standard CIT ({(citRate * 100).toFixed(0)}% × chargeable income)</span>
+                    <span>Standard CIT ({(rateInfo.rate * 100).toFixed(0)}% × chargeable income)</span>
                     <span>{formatMoney(standardCit, currencyCode || null)}</span>
                   </div>
                 )}
-                {amtApplicable && !amtApplies && amtAmount > 0 && (
+                {!noCitPayable && amtApplicable && !amtApplies && amtAmount > 0 && (
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                     AMT floor: {formatMoney(amtAmount, currencyCode || null)} — standard CIT is higher ✓
                   </p>
@@ -759,6 +1077,7 @@ export default function CITPage() {
                 />
               </div>
 
+              {!noCitPayable && (
               <label className="flex items-center gap-3 cursor-pointer">
                 <button
                   type="button"
@@ -771,6 +1090,7 @@ export default function CITPage() {
                 </button>
                 <span className="text-sm text-gray-700 dark:text-gray-300">Post to ledger immediately</span>
               </label>
+              )}
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -794,7 +1114,9 @@ export default function CITPage() {
                     Saving…
                   </>
                 ) : (
-                  `Create Provision · ${formatMoney(citAmount, currencyCode || null)}`
+                  noCitPayable
+                    ? "Save No CIT Payable"
+                    : `Create Provision · ${formatMoney(citAmount, currencyCode || null)}`
                 )}
               </button>
             </div>

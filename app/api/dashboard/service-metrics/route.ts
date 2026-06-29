@@ -2,8 +2,16 @@
  * GET /api/dashboard/service-metrics?business_id=...
  *
  * Read-only. Returns ledger-derived metrics for Service workspace dashboard.
- * P&L metrics use getProfitAndLossReport (ledger movement); positions use cumulative ledger as-of today.
- * Optional: period_id, period_start (defaults to current period).
+ *
+ * Query flow (post consolidation):
+ *   1. Auth + checkAccountingAuthority
+ *   2. resolvePnLMovementRange (period_id / period_start params — lightweight)
+ *   3. getBusinessToday (position as-of date)
+ *   4. Optional previous period range when previous_period_start param set
+ *   5. One RPC: get_service_dashboard_metrics
+ *
+ * Previous flow: parallel P&L + balance sheet, then cash RPC, then optional
+ * second P&L + balance sheet for previous period comparison.
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -12,15 +20,8 @@ export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { getBusinessToday } from "@/lib/accounting/businessDate"
-import {
-  getFinancialOverviewPositions,
-} from "@/lib/accounting/reports/cumulativeBalanceSheet"
-import {
-  getProfitAndLossReport,
-  pnlTotalsFromReport,
-  type PnLReportResponse,
-} from "@/lib/accounting/reports/getProfitAndLossReport"
-const CASH_CODES = ["1000", "1010", "1020", "1030"] as const
+import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
+import { getCurrencyName, getCurrencySymbol } from "@/lib/currency"
 
 function devServiceMetricsLog(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
@@ -35,6 +36,32 @@ type PreviousPeriodPayload = {
   accountsReceivable: number | null
   accountsPayable: number | null
   cashBalance: number | null
+}
+
+type DashboardMetricsRpcResult = {
+  currency_code?: string
+  revenue?: number | string
+  expenses?: number | string
+  net_profit?: number | string
+  cash_collected?: number | string
+  cash_balance?: number | string
+  accounts_receivable?: number | string
+  accounts_payable?: number | string
+  previous_revenue?: number | string
+  previous_expenses?: number | string
+  previous_net_profit?: number | string
+  previous_cash_collected?: number | string
+  previous_cash_balance?: number | string
+  previous_accounts_receivable?: number | string
+  previous_accounts_payable?: number | string
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function num(v: unknown): number {
+  return roundMoney(Number(v) || 0)
 }
 
 export async function GET(request: NextRequest) {
@@ -77,156 +104,106 @@ export async function GET(request: NextRequest) {
     const periodId = searchParams.get("period_id") ?? undefined
     const periodStart = searchParams.get("period_start") ?? undefined
 
-    const pnlPromise = (async () => {
-      const t0 = performance.now()
-      const r = await getProfitAndLossReport(supabase, {
-        businessId,
-        period_id: periodId,
-        period_start: periodStart,
-      })
-      devServiceMetricsLog("Profit & Loss calculation", t0)
-      return r
-    })()
+    const tPeriod = performance.now()
+    const { range, error: rangeError } = await resolvePnLMovementRange(supabase, {
+      businessId,
+      period_id: periodId,
+      period_start: periodStart,
+    })
+    devServiceMetricsLog("period resolution", tPeriod)
 
-    const positionAsOfPromise = (async () => {
-      const t0 = performance.now()
-      const asOf = await getBusinessToday(supabase, businessId)
-      const r = await getFinancialOverviewPositions(supabase, businessId, asOf)
-      devServiceMetricsLog("Financial overview (cumulative as-of today)", t0)
-      return { ...r, asOf }
-    })()
-
-    const [pnlOut, positionsOut] = await Promise.all([pnlPromise, positionAsOfPromise])
-
-    if (pnlOut.error || !pnlOut.data) {
+    if (rangeError || !range) {
       return finish(
         NextResponse.json(
-          { error: pnlOut.error ?? "Could not resolve period or fetch P&L" },
+          { error: rangeError ?? "Could not resolve period or fetch P&L" },
           { status: 500 }
         )
       )
     }
 
-    const pnl = pnlOut.data
-
-    if (positionsOut.error || !positionsOut.data) {
-      return finish(
-        NextResponse.json(
-          { error: positionsOut.error || "Could not fetch balance sheet positions" },
-          { status: 500 }
-        )
-      )
-    }
-
-    const positions = positionsOut.data
-    const positionAsOfDate = positionsOut.asOf
-
-    const { revenue, expenses, netProfit } = pnlTotalsFromReport(pnl)
-    const cashBalance = positions.cashBalance
-    const ar = positions.accountsReceivable
-    const ap = positions.accountsPayable
+    const tPositionDate = performance.now()
+    const positionAsOfDate = await getBusinessToday(supabase, businessId)
+    devServiceMetricsLog("business today", tPositionDate)
 
     const prevStartRaw = searchParams.get("previous_period_start")
     const prevStart = prevStartRaw?.trim() ? prevStartRaw : null
 
-    const cashCollectedPromise = (async () => {
-      const tCash = performance.now()
-      let cashCollected = 0
-      const pnlPeriodStart = (pnl.period as Record<string, unknown>)?.period_start as string | undefined
-      const pnlPeriodEnd = (pnl.period as Record<string, unknown>)?.period_end as string | undefined
+    let compareStart: string | null = null
+    let compareEnd: string | null = null
 
-      if (pnlPeriodStart && pnlPeriodEnd) {
-        const { data: cashAccounts } = await supabase
-          .from("accounts")
-          .select("id")
-          .eq("business_id", businessId)
-          .in("code", [...CASH_CODES])
-
-        const cashAccountIds = (cashAccounts ?? []).map((a: { id: string }) => a.id)
-
-        if (cashAccountIds.length > 0) {
-          const { data: cashLines } = await supabase
-            .from("journal_entry_lines")
-            .select("debit, journal_entries!inner(date, business_id)")
-            .in("account_id", cashAccountIds)
-            .gte("journal_entries.date", pnlPeriodStart)
-            .lte("journal_entries.date", pnlPeriodEnd)
-            .eq("journal_entries.business_id", businessId)
-
-          cashCollected = Math.round(
-            (cashLines ?? []).reduce(
-              (s: number, l: Record<string, unknown>) => s + (Number(l.debit) || 0),
-              0
-            ) * 100
-          ) / 100
-        }
-      }
-      devServiceMetricsLog("cash/journal aggregation", tCash)
-      return cashCollected
-    })()
-
-    const previousPeriodPromise = (async (): Promise<PreviousPeriodPayload | null> => {
-      if (!prevStart) return null
-      const tPrev = performance.now()
-      const pnlPrevRes = await getProfitAndLossReport(supabase, {
+    if (prevStart) {
+      const tPrevPeriod = performance.now()
+      const prevRangeOut = await resolvePnLMovementRange(supabase, {
         businessId,
         period_start: prevStart,
       })
-      devServiceMetricsLog("previous period P&L", tPrev)
-
-      const pnlPrev = pnlPrevRes.data
-      if (!pnlPrev) return null
-
-      const prevEnd = (pnlPrev.period as Record<string, unknown>)?.period_end as string | undefined
-      let prevPositions: {
-        cashBalance: number
-        accountsReceivable: number
-        accountsPayable: number
-      } | null = null
-      if (prevEnd) {
-        const posRes = await getFinancialOverviewPositions(supabase, businessId, prevEnd)
-        if (posRes.data) prevPositions = posRes.data
+      devServiceMetricsLog("previous period resolution", tPrevPeriod)
+      if (prevRangeOut.range) {
+        compareStart = prevRangeOut.range.movementStart
+        compareEnd = prevRangeOut.range.movementEnd
       }
+    }
 
-      const { revenue: revPrev, expenses: expPrev, netProfit: netProfitPrev } =
-        pnlTotalsFromReport(pnlPrev)
-
-      return {
-        revenue: revPrev,
-        expenses: expPrev,
-        netProfit: netProfitPrev,
-        cashCollected: 0,
-        accountsReceivable: prevPositions?.accountsReceivable ?? null,
-        accountsPayable: prevPositions?.accountsPayable ?? null,
-        cashBalance: prevPositions?.cashBalance ?? null,
+    const tRpc = performance.now()
+    const { data: metricsRaw, error: rpcError } = await supabase.rpc(
+      "get_service_dashboard_metrics",
+      {
+        p_business_id: businessId,
+        p_start_date: range.movementStart,
+        p_end_date: range.movementEnd,
+        p_position_as_of_date: positionAsOfDate,
+        p_compare_start_date: compareStart,
+        p_compare_end_date: compareEnd,
       }
-    })()
+    )
+    devServiceMetricsLog("get_service_dashboard_metrics RPC", tRpc)
 
-    const tAsm = performance.now()
-    const [cashCollected, previousPeriod] = await Promise.all([
-      cashCollectedPromise,
-      previousPeriodPromise,
-    ])
+    if (rpcError) {
+      console.error("get_service_dashboard_metrics RPC error:", rpcError)
+      return finish(
+        NextResponse.json({ error: "Could not load dashboard metrics" }, { status: 500 })
+      )
+    }
+
+    const metrics = (metricsRaw ?? {}) as DashboardMetricsRpcResult
+    const currencyCode = String(metrics.currency_code ?? "GHS")
+    const currency = {
+      code: currencyCode,
+      symbol: getCurrencySymbol(currencyCode) || currencyCode,
+      name: getCurrencyName(currencyCode) || currencyCode,
+    }
 
     const payload = {
-      period: pnl.period,
-      currency: pnl.currency,
-      revenue,
-      expenses,
-      netProfit,
-      cashCollected,
-      accountsReceivable: ar,
-      accountsPayable: ap,
-      cashBalance,
+      period: {
+        period_id: range.period.period_id,
+        period_start: range.movementStart,
+        period_end: range.movementEnd,
+        resolution_reason: range.period.resolution_reason,
+      },
+      currency,
+      revenue: num(metrics.revenue),
+      expenses: num(metrics.expenses),
+      netProfit: num(metrics.net_profit),
+      cashCollected: num(metrics.cash_collected),
+      accountsReceivable: num(metrics.accounts_receivable),
+      accountsPayable: num(metrics.accounts_payable),
+      cashBalance: num(metrics.cash_balance),
       positionBalancesAsOfToday: true,
       positionAsOfDate,
       previousPeriod: null as PreviousPeriodPayload | null,
     }
-    if (previousPeriod) {
-      payload.previousPeriod = previousPeriod
-    }
 
-    devServiceMetricsLog("final response assembly", tAsm)
+    if (compareStart && compareEnd && metrics.previous_revenue !== undefined) {
+      payload.previousPeriod = {
+        revenue: num(metrics.previous_revenue),
+        expenses: num(metrics.previous_expenses),
+        netProfit: num(metrics.previous_net_profit),
+        cashCollected: num(metrics.previous_cash_collected),
+        accountsReceivable: num(metrics.previous_accounts_receivable),
+        accountsPayable: num(metrics.previous_accounts_payable),
+        cashBalance: num(metrics.previous_cash_balance),
+      }
+    }
 
     return finish(NextResponse.json(payload))
   } catch (err) {
