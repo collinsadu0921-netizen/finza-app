@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
 
 type ActivityType = "invoice" | "expense" | "payment" | "customer" | "email"
 
@@ -58,7 +59,7 @@ function resendOutboundDescription(eventType: string): string {
 }
 
 function devServiceActivityLog(label: string, startedAt: number) {
-  if (process.env.NODE_ENV === "production") return
+  if (process.env.NODE_ENV === "production" && !isRouteDiagnosticsEnabled()) return
   console.info(`[service-activity] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
 }
 
@@ -204,7 +205,9 @@ async function buildJournalActivityItems(
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
+  let diag = createRouteDiag("dashboard.service-activity")
   const finish = (res: NextResponse) => {
+    diag.finish(res.status)
     devServiceActivityLog("total route", routeT0)
     return res
   }
@@ -228,11 +231,15 @@ export async function GET(request: NextRequest) {
       return finish(NextResponse.json({ error: "Missing business_id" }, { status: 400 }))
     }
 
+    diag = createRouteDiag("dashboard.service-activity", businessId)
+
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
+      diag.fail(403, "forbidden")
       devServiceActivityLog("auth/business/access resolution", tAuth)
       return finish(NextResponse.json({ error: "Forbidden" }, { status: 403 }))
     }
+    diag.step("auth", { ms_auth: Math.round((performance.now() - tAuth) * 10) / 10 })
     devServiceActivityLog("auth/business/access resolution", tAuth)
 
     const limit = Math.min(20, Math.max(1, parseInt(searchParams.get("limit") ?? "10", 10) || 10))
@@ -286,6 +293,7 @@ export async function GET(request: NextRequest) {
 
     if (journalError) {
       console.error("[service-activity] journal_entries:", journalError.message)
+      diag.fail(500, "journal_query_failed", { error_message: journalError.message })
       return finish(NextResponse.json({ error: journalError.message }, { status: 500 }))
     }
     if (resendError) {
@@ -322,9 +330,15 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => activityTimestampMs(b.timestamp) - activityTimestampMs(a.timestamp))
       .slice(0, limit)
 
+    diag.step("merge", {
+      journal_rows: (entries ?? []).length,
+      item_count: merged.length,
+      limit,
+    })
     return finish(NextResponse.json({ items: merged }))
   } catch (err) {
     console.error("service-activity error:", err)
+    diag.fail(500, err instanceof Error ? err.message : "Server error")
     return finish(NextResponse.json({ error: "Server error" }, { status: 500 }))
   }
 }

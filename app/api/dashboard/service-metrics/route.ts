@@ -22,9 +22,10 @@ import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { getBusinessToday } from "@/lib/accounting/businessDate"
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
 import { getCurrencyName, getCurrencySymbol } from "@/lib/currency"
+import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
 
 function devServiceMetricsLog(label: string, startedAt: number) {
-  if (process.env.NODE_ENV === "production") return
+  if (process.env.NODE_ENV === "production" && !isRouteDiagnosticsEnabled()) return
   console.info(`[service-metrics] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
 }
 
@@ -66,7 +67,10 @@ function num(v: unknown): number {
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
-  const finish = (res: NextResponse) => {
+  let diag = createRouteDiag("dashboard.service-metrics")
+  const finish = (res: NextResponse, businessId?: string | null) => {
+    if (businessId && !diag) diag = createRouteDiag("dashboard.service-metrics", businessId)
+    diag?.finish(res.status)
     devServiceMetricsLog("total route", routeT0)
     return res
   }
@@ -80,6 +84,7 @@ export async function GET(request: NextRequest) {
 
     if (!user) {
       devServiceMetricsLog("auth/business/access resolution", tAuth)
+      diag.fail(401, "Unauthorized")
       return finish(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
     }
 
@@ -87,18 +92,24 @@ export async function GET(request: NextRequest) {
     const businessId = searchParams.get("business_id")
     if (!businessId) {
       devServiceMetricsLog("auth/business/access resolution", tAuth)
+      diag.fail(400, "missing business_id")
       return finish(
         NextResponse.json({ error: "Missing required parameter: business_id" }, { status: 400 })
       )
     }
 
+    diag = createRouteDiag("dashboard.service-metrics", businessId)
+
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
       devServiceMetricsLog("auth/business/access resolution", tAuth)
+      diag.fail(403, "forbidden")
       return finish(
-        NextResponse.json({ error: "You do not have access to this business" }, { status: 403 })
+        NextResponse.json({ error: "You do not have access to this business" }, { status: 403 }),
+        businessId
       )
     }
+    diag.step("auth", { ms_auth: Math.round((performance.now() - tAuth) * 10) / 10 })
     devServiceMetricsLog("auth/business/access resolution", tAuth)
 
     const periodId = searchParams.get("period_id") ?? undefined
@@ -113,13 +124,20 @@ export async function GET(request: NextRequest) {
     devServiceMetricsLog("period resolution", tPeriod)
 
     if (rangeError || !range) {
+      diag.fail(500, rangeError ?? "period_resolution_failed")
       return finish(
         NextResponse.json(
           { error: rangeError ?? "Could not resolve period or fetch P&L" },
           { status: 500 }
-        )
+        ),
+        businessId
       )
     }
+    diag.step("period_resolution", {
+      period_start: range.movementStart,
+      period_end: range.movementEnd,
+      ms_period: Math.round((performance.now() - tPeriod) * 10) / 10,
+    })
 
     const tPositionDate = performance.now()
     const positionAsOfDate = await getBusinessToday(supabase, businessId)
@@ -160,10 +178,21 @@ export async function GET(request: NextRequest) {
 
     if (rpcError) {
       console.error("get_service_dashboard_metrics RPC error:", rpcError)
+      diag.fail(500, "rpc_error", {
+        rpc: "get_service_dashboard_metrics",
+        error_code: rpcError.code ?? null,
+        error_message: rpcError.message ?? "unknown",
+        ms_rpc: Math.round((performance.now() - tRpc) * 10) / 10,
+      })
       return finish(
-        NextResponse.json({ error: "Could not load dashboard metrics" }, { status: 500 })
+        NextResponse.json({ error: "Could not load dashboard metrics" }, { status: 500 }),
+        businessId
       )
     }
+    diag.step("rpc", {
+      rpc: "get_service_dashboard_metrics",
+      ms_rpc: Math.round((performance.now() - tRpc) * 10) / 10,
+    })
 
     const metrics = (metricsRaw ?? {}) as DashboardMetricsRpcResult
     const currencyCode = String(metrics.currency_code ?? "GHS")
@@ -205,9 +234,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return finish(NextResponse.json(payload))
+    return finish(NextResponse.json(payload), businessId)
   } catch (err) {
     console.error("Dashboard service-metrics error:", err)
+    diag.fail(
+      500,
+      err instanceof Error ? err.message : "Server error"
+    )
     return finish(
       NextResponse.json(
         { error: err instanceof Error ? err.message : "Server error" },

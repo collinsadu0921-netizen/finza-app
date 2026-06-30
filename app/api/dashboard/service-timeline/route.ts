@@ -22,12 +22,13 @@ import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
+import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
 
 const DEFAULT_PERIODS = 6
 const MAX_PERIODS = 24
 
 function devServiceTimelineLog(label: string, startedAt: number) {
-  if (process.env.NODE_ENV === "production") return
+  if (process.env.NODE_ENV === "production" && !isRouteDiagnosticsEnabled()) return
   console.info(`[service-timeline] ${label}: ${(performance.now() - startedAt).toFixed(1)}ms`)
 }
 
@@ -42,6 +43,7 @@ type TimelineRpcRow = {
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
+  let diag = createRouteDiag("dashboard.service-timeline")
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
@@ -66,8 +68,11 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    diag = createRouteDiag("dashboard.service-timeline", businessId)
+
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
+      diag.fail(403, "forbidden")
       devServiceTimelineLog("auth/access", tAuth)
       devServiceTimelineLog("total route", routeT0)
       return NextResponse.json(
@@ -75,6 +80,7 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+    diag.step("auth", { ms_auth: Math.round((performance.now() - tAuth) * 10) / 10 })
     devServiceTimelineLog("auth/access", tAuth)
 
     const periodsRaw = parseInt(searchParams.get("periods") ?? String(DEFAULT_PERIODS), 10)
@@ -95,6 +101,13 @@ export async function GET(request: NextRequest) {
 
     if (rpcError) {
       console.error("get_service_dashboard_timeline RPC error:", rpcError)
+      diag.fail(500, "rpc_error", {
+        rpc: "get_service_dashboard_timeline",
+        error_code: rpcError.code ?? null,
+        error_message: rpcError.message ?? "unknown",
+        periods: periodsParam,
+        ms_rpc: Math.round((performance.now() - tRpc) * 10) / 10,
+      })
       devServiceTimelineLog("total route", routeT0)
       return NextResponse.json(
         { error: "Could not load dashboard timeline" },
@@ -111,10 +124,18 @@ export async function GET(request: NextRequest) {
       netProfit: Number(row.net_profit) || 0,
     }))
 
+    diag.step("rpc", {
+      rpc: "get_service_dashboard_timeline",
+      periods: periodsParam,
+      row_count: timeline.length,
+      ms_rpc: Math.round((performance.now() - tRpc) * 10) / 10,
+    })
+    diag.finish(200)
     devServiceTimelineLog("total route", routeT0)
     return NextResponse.json({ timeline })
   } catch (err) {
     devServiceTimelineLog("total route", routeT0)
+    diag.fail(500, err instanceof Error ? err.message : "Server error")
     console.error("Dashboard service-timeline error:", err)
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Server error" },

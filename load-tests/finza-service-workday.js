@@ -18,6 +18,7 @@
  */
 
 import http from "k6/http"
+import encoding from "k6/encoding"
 import { check, group, sleep } from "k6"
 import { SharedArray } from "k6/data"
 
@@ -51,6 +52,23 @@ const SESSIONS_PATH = __ENV.SESSIONS_JSON || "./sessions.example.json"
 /** Per-request soft limit for check() warnings (ms). Scenario thresholds are primary. */
 const SOFT_P95_MS = Number(__ENV.SOFT_P95_MS || "10000")
 
+/** Log route/status/content-type/body preview when res.json() fails (no cookies/tokens). */
+const DEBUG_JSON_FAILURE =
+  String(__ENV.DEBUG_JSON_FAILURE || "").trim() === "1" ||
+  String(__ENV.DEBUG_JSON_FAILURE || "").toLowerCase() === "true"
+
+/** Vercel Deployment Protection bypass (Preview only). Never logged. */
+const VERCEL_AUTOMATION_BYPASS_SECRET = String(
+  __ENV.VERCEL_AUTOMATION_BYPASS_SECRET || ""
+).trim()
+const VERCEL_BYPASS_ENABLED = VERCEL_AUTOMATION_BYPASS_SECRET.length > 0
+
+/** Staging Supabase project ref (for optional sb-* SSR cookie synthesis from JWT). */
+const STAGING_SUPABASE_REF = String(__ENV.STAGING_SUPABASE_REF || "adonhhtooawkeemdqqeo").trim()
+
+/** Minimum authorization token length (real Supabase JWTs are much longer). */
+const MIN_AUTH_TOKEN_LEN = 80
+
 const PLACEHOLDER_COOKIE_MARKERS = [
   "your-project-ref",
   "base64-json-cookie-value",
@@ -70,14 +88,174 @@ function isExampleSessionsPath(path) {
   )
 }
 
+/** Cookie header sent on requests — session.cookie is passed through unchanged. */
+function rawCookieHeader(session) {
+  if (Array.isArray(session.cookies) && session.cookies.length > 0) {
+    return session.cookies
+      .map((c) => {
+        const name = String(c.name || "").trim()
+        const value = String(c.value ?? "")
+        if (!name) return ""
+        return `${name}=${value}`
+      })
+      .filter(Boolean)
+      .join("; ")
+  }
+  return String(session.cookie ?? "")
+}
+
+/** Parse `authorization=Bearer <token>` from a Cookie header value. Never logged. */
+function bearerAuthorizationFromCookie(cookie) {
+  if (!cookie) return null
+  const parts = String(cookie).split(";")
+  for (const part of parts) {
+    const trimmed = part.trim()
+    const eq = trimmed.indexOf("=")
+    if (eq < 0) continue
+    const name = trimmed.slice(0, eq).trim()
+    if (name.toLowerCase() !== "authorization") continue
+    let value = trimmed.slice(eq + 1).trim()
+    try {
+      value = decodeURIComponent(value)
+    } catch {
+      // keep raw value
+    }
+    if (!value) return null
+    if (/^bearer\s+/i.test(value)) return value
+    return `Bearer ${value}`
+  }
+  return null
+}
+
+function resolveAuthorizationHeader(session, cookieHeader) {
+  const fromField = String(session.authorization || "").trim()
+  if (fromField) {
+    let value = fromField
+    try {
+      value = decodeURIComponent(value)
+    } catch {
+      // keep raw
+    }
+    return /^bearer\s+/i.test(value) ? value : `Bearer ${value}`
+  }
+  return bearerAuthorizationFromCookie(cookieHeader || rawCookieHeader(session))
+}
+
+function authorizationTokenValue(session, cookieHeader) {
+  const bearer = resolveAuthorizationHeader(session, cookieHeader)
+  if (!bearer) return ""
+  return bearer.replace(/^Bearer\s+/i, "").trim()
+}
+
+function hasSupabaseSsrAuthCookie(cookieHeader) {
+  return /sb-[a-z0-9]+-auth-token(\.\d+)?=/i.test(String(cookieHeader || ""))
+}
+
+function toBase64UrlJson(obj) {
+  return `base64-${encoding.b64encode(JSON.stringify(obj), "rawurl")}`
+}
+
+function jwtPayload(token) {
+  const parts = String(token).split(".")
+  if (parts.length < 2) return null
+  try {
+    return JSON.parse(encoding.b64decode(parts[1], "rawurl", "s"))
+  } catch {
+    return null
+  }
+}
+
+function supabaseSessionFromAccessToken(token) {
+  const claims = jwtPayload(token)
+  const expiresAt =
+    typeof claims?.exp === "number"
+      ? claims.exp
+      : Math.floor(Date.now() / 1000) + 3600
+  const user = claims
+    ? {
+        id: claims.sub,
+        aud: claims.aud,
+        role: claims.role,
+        email: claims.email,
+        phone: claims.phone || "",
+        app_metadata: claims.app_metadata || {},
+        user_metadata: claims.user_metadata || {},
+        created_at: claims.iat
+          ? new Date(claims.iat * 1000).toISOString()
+          : new Date().toISOString(),
+      }
+    : undefined
+  return {
+    access_token: token,
+    refresh_token: token,
+    expires_in: Math.max(0, expiresAt - Math.floor(Date.now() / 1000)),
+    expires_at: expiresAt,
+    token_type: "bearer",
+    ...(user ? { user } : {}),
+  }
+}
+
+/**
+ * Finza API routes use @supabase/ssr cookie storage (sb-<ref>-auth-token).
+ * If the browser only sends authorization=<JWT>, synthesize the SSR cookie for k6.
+ * Original authorization= entry in Cookie is preserved.
+ */
+function augmentCookieForSupabaseSsr(session, cookieHeader) {
+  if (hasSupabaseSsrAuthCookie(cookieHeader)) return cookieHeader
+  const token = authorizationTokenValue(session, cookieHeader)
+  if (!token || !token.startsWith("eyJ")) return cookieHeader
+  const chunk = `sb-${STAGING_SUPABASE_REF}-auth-token=${toBase64UrlJson(
+    supabaseSessionFromAccessToken(token)
+  )}`
+  return cookieHeader ? `${cookieHeader}; ${chunk}` : chunk
+}
+
+function validateSessionAuth(session, index) {
+  const label = session.label || `sessions[${index}]`
+  const cookieHeader = rawCookieHeader(session)
+
+  if (!cookieHeader && !String(session.authorization || "").trim()) {
+    throw new Error(
+      `${label}: missing auth. Paste browser cURL Cookie header into session.cookie ` +
+        `(authorization=Bearer … or authorization=<token>), or use ` +
+        `node scripts/k6-import-curl-session.mjs --curl-file=...`
+    )
+  }
+
+  const bearer = resolveAuthorizationHeader(session, cookieHeader)
+  if (!bearer && !hasSupabaseSsrAuthCookie(cookieHeader)) {
+    throw new Error(
+      `${label}: no usable auth. Need authorization=… cookie, Authorization header, ` +
+        `or sb-${STAGING_SUPABASE_REF}-auth-token in session.cookie.`
+    )
+  }
+
+  const tokenLen = authorizationTokenValue(session, cookieHeader).length
+  if (
+    tokenLen > 0 &&
+    tokenLen < MIN_AUTH_TOKEN_LEN &&
+    !hasSupabaseSsrAuthCookie(cookieHeader)
+  ) {
+    throw new Error(
+      `${label}: authorization token looks truncated (${tokenLen} chars). ` +
+        `Recapture full Cookie from DevTools → Network → Copy as cURL. ` +
+        `Real Supabase JWTs are typically 200+ characters and start with eyJ.`
+    )
+  }
+
+  return { cookieHeader, authMode: "authorization-cookie", tokenLen }
+}
+
 function isPlaceholderSession(entry, index) {
   const label = entry.label || `sessions[${index}]`
-  const cookie = String(entry.cookie || "").trim()
+  const rawCookie = rawCookieHeader(entry)
+  const authField = String(entry.authorization || "").trim()
+  const cookie = rawCookie || authField
   const businessId = String(entry.businessId || "").trim()
 
   if (!cookie) {
     throw new Error(
-      `${label}: cookie is empty. Use real staging cookies in ./sessions.staging.json ` +
+      `${label}: cookie/cookies missing. Use real staging cookies in ./sessions.staging.json ` +
         `(paths relative to load-tests/finza-service-workday.js).`
     )
   }
@@ -97,7 +275,7 @@ function isPlaceholderSession(entry, index) {
     }
   }
 
-  if (!cookie.includes("=")) {
+  if (rawCookie && !rawCookie.includes("=")) {
     return true
   }
 
@@ -123,6 +301,7 @@ function validateSessionsFile(path, entries) {
           `running with sessions.example.json is not a valid smoke test.`
       )
     }
+    validateSessionAuth(entries[i], i)
   }
 }
 
@@ -270,6 +449,18 @@ export function setup() {
               : 500
     }`
   )
+  console.log(
+    `[finza-k6]   Vercel bypass:    ${VERCEL_BYPASS_ENABLED ? "enabled" : "disabled"}`
+  )
+  console.log("[finza-k6]   auth mode:        authorization-cookie")
+  const rawCookie = rawCookieHeader(sessions[0])
+  const tokenLen = authorizationTokenValue(sessions[0], rawCookie).length
+  console.log(
+    `[finza-k6]   auth token chars: ${tokenLen || "(sb cookie / header only)"}`
+  )
+  console.log(
+    `[finza-k6]   sb SSR cookie:    ${hasSupabaseSsrAuthCookie(rawCookie) ? "present" : "synthesized-if-JWT"}`
+  )
   console.log("[finza-k6] ── starting traffic ──")
   return { scenario: selectedScenario, sessions: sessions.length }
 }
@@ -281,13 +472,72 @@ function sessionForVu(vu) {
 }
 
 function authHeaders(session) {
+  const rawCookie = rawCookieHeader(session)
+  const cookieHeader = augmentCookieForSupabaseSsr(session, rawCookie)
+  const headers = {
+    Cookie: cookieHeader,
+    Accept: "application/json",
+  }
+  const bearerAuth = resolveAuthorizationHeader(session, rawCookie)
+  if (bearerAuth) {
+    headers.Authorization = bearerAuth
+  }
+  if (session.headers && typeof session.headers === "object") {
+    for (const key of Object.keys(session.headers)) {
+      const lower = key.toLowerCase()
+      if (lower === "cookie" || lower === "authorization" || lower === "x-vercel-protection-bypass") {
+        continue
+      }
+      headers[key] = String(session.headers[key])
+    }
+  }
+  if (VERCEL_BYPASS_ENABLED) {
+    headers["x-vercel-protection-bypass"] = VERCEL_AUTOMATION_BYPASS_SECRET
+  }
   return {
-    headers: {
-      Cookie: session.cookie,
-      Accept: "application/json",
-    },
+    headers,
     tags: { business_id: session.businessId },
   }
+}
+
+function redactBodyPreview(body) {
+  if (body == null) return ""
+  let text = String(body)
+  if (VERCEL_BYPASS_ENABLED) {
+    text = text.split(VERCEL_AUTOMATION_BYPASS_SECRET).join("[REDACTED]")
+  }
+  text = text.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+  text = text.replace(/(Cookie:\s*)[^\n]*/gi, "$1[REDACTED]")
+  text = text.replace(/(Authorization:\s*)[^\n]*/gi, "$1[REDACTED]")
+  text = text.replace(/(sb-[a-z0-9]+-auth-token(?:\.\d+)?=)[^;\s]*/gi, "$1[REDACTED]")
+  text = text.replace(/(authorization=)[^;\s]*/gi, "$1[REDACTED]")
+  text = text.replace(/(auth-token=)[^;\s]*/gi, "$1[REDACTED]")
+  text = text.replace(/(access_token["']?\s*:\s*["'])[^"']+/gi, "$1[REDACTED]")
+  text = text.replace(/(refresh_token["']?\s*:\s*["'])[^"']+/gi, "$1[REDACTED]")
+  text = text.replace(
+    /(x-vercel-protection-bypass["']?\s*[:=]\s*["']?)[^"'\s;]+/gi,
+    "$1[REDACTED]"
+  )
+  return text.slice(0, 300)
+}
+
+function logJsonParseFailure(name, res) {
+  if (!DEBUG_JSON_FAILURE) return
+  const contentType =
+    res.headers["Content-Type"] || res.headers["content-type"] || "(none)"
+  console.log(
+    `[finza-k6] JSON_PARSE_FAIL route=${name} status=${res.status} content-type=${contentType} body_preview=${JSON.stringify(redactBodyPreview(res.body))}`
+  )
+}
+
+function logNon200Response(name, res) {
+  if (!DEBUG_JSON_FAILURE) return
+  const contentType =
+    res.headers["Content-Type"] || res.headers["content-type"] || "(none)"
+  const preview = JSON.stringify(redactBodyPreview(res.body))
+  console.log(
+    `[finza-k6] HTTP_FAIL route=${name} status=${res.status} content-type=${contentType} body_preview=${preview}`
+  )
 }
 
 function getJson(name, url, session, fieldChecks) {
@@ -296,17 +546,22 @@ function getJson(name, url, session, fieldChecks) {
     tags: { name },
   })
 
+  if (res.status !== 200) {
+    logNon200Response(name, res)
+  }
+
   const ok = check(res, {
     [`${name} status 200`]: (r) => r.status === 200,
     [`${name} has body`]: (r) => r.body && r.body.length > 0,
     [`${name} under soft limit`]: (r) => r.timings.duration < SOFT_P95_MS,
   })
 
-  if (ok && fieldChecks && res.status === 200) {
+  if (fieldChecks && res.status === 200) {
     try {
       const body = res.json()
       check(body, fieldChecks)
     } catch {
+      logJsonParseFailure(name, res)
       check(null, { [`${name} valid json`]: () => false })
     }
   }

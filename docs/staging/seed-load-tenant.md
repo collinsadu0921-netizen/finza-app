@@ -1,10 +1,45 @@
-# Staging load tenant seed (Phase 2)
+# Staging load tenant seed
 
-**Staging Supabase only.** Fake data for load-test smoke — not production.
+**Staging Supabase only** (`adonhhtooawkeemdqqeo`). Fake data for load-test smoke — not production.
 
-Phase 1 (customers + periods) is handled by [`scripts/seed-staging-load-tenant.mjs`](../../scripts/seed-staging-load-tenant.mjs).
+| Phase | Script | Purpose |
+|-------|--------|---------|
+| **1** | [`scripts/seed-staging-load-tenant.mjs`](../../scripts/seed-staging-load-tenant.mjs) | Customers + accounting periods |
+| **1.5** | [`scripts/seed-staging-accounting-setup.mjs`](../../scripts/seed-staging-accounting-setup.mjs) | COA sync + control mappings (AR/AP/CASH/BANK) |
+| **2** | [`scripts/seed-staging-load-tenant-phase2.mjs`](../../scripts/seed-staging-load-tenant-phase2.mjs) | Invoices, payments, bills, expenses (ledger triggers) |
 
-Phase 2 (invoices, payments, journal lines, bills) requires ledger-aware inserts. Prefer **onboarding + Finza UI/API** for the first ~50 rows, then batched SQL for bulk.
+Phase 2 requires Phase 1.5. Phase 1 alone creates periods but **does not** populate `chart_of_accounts` / `chart_of_accounts_control_map`; posting invoices without Phase 1.5 fails with `Missing control account mapping: AR`.
+
+---
+
+## Required order
+
+```text
+Phase 1 customers + periods
+Phase 1.5 accounting foundation
+Phase 2 invoices/payments/bills/expenses/journal-trigger data
+SQL smoke
+sessions.staging.json
+k6 smoke
+workday_50 only if smoke passes
+```
+
+### Commands (staging terminal)
+
+```powershell
+$env:ALLOW_STAGING_LOAD_SEED = "true"
+
+# Phase 1
+node scripts/seed-staging-load-tenant.mjs --apply --business-id=<uuid>
+
+# Phase 1.5 (required before Phase 2)
+node scripts/seed-staging-accounting-setup.mjs --apply --business-id=<uuid>
+
+# Phase 2
+node scripts/seed-staging-load-tenant-phase2.mjs --apply --business-id=<uuid>
+```
+
+Phase 1.5 calls `ensure_accounting_initialized_system` (service_role RPC). It is idempotent and preserves existing accounting periods from Phase 1.
 
 ---
 
@@ -14,12 +49,12 @@ Phase 2 (invoices, payments, journal lines, bills) requires ledger-aware inserts
 |--------|------:|-------|
 | Businesses | 1 | Service industry, accounting initialized |
 | Users | 1+ | Owner via staging signup |
-| Customers | 50 | Script or SQL |
-| Invoices | 500 | Batched SQL or API |
+| Customers | 50 | Phase 1 script |
+| Invoices | 500 | Phase 2 script |
 | Payments | 200 | Linked to invoices |
 | Expenses | 200 | With ledger posting |
 | Bills | 100 | Open/paid mix |
-| Accounting periods | 12 | Monthly |
+| Accounting periods | 12 | Phase 1 script |
 | Journal lines | Enough for dashboard RPCs | Via posting triggers |
 
 Do **not** seed 5,000 invoices until k6 smoke passes on this smaller dataset.
@@ -31,29 +66,29 @@ Do **not** seed 5,000 invoices until k6 smoke passes on this smaller dataset.
 - Staging migrations **497–501** applied
 - [`docs/staging/setup.md`](./setup.md) complete
 - `STAGING_LOAD_BUSINESS_ID` set (from onboarding or script output)
-- `ALLOW_STAGING_LOAD_SEED=true` only when running seed script
+- `ALLOW_STAGING_LOAD_SEED=true` only when running seed scripts
+- `NEXT_PUBLIC_SUPABASE_URL` must resolve to staging ref `adonhhtooawkeemdqqeo`
 
 ---
 
-## Recommended order
+## Phase 1.5 verification
 
-1. **Onboard** one service business on staging UI (Professional tier if testing bills/payroll).
-2. Complete **accounting bootstrap** (chart of accounts + periods).
-3. Run **Phase 1 script** for customers + extra periods:
-   ```powershell
-   $env:ALLOW_STAGING_LOAD_SEED = "true"
-   node scripts/seed-staging-load-tenant.mjs --apply --business-id=<uuid>
-   ```
-4. Create **50–100 invoices** via Finza UI or API (validates posting paths).
-5. Use **SQL batches** below for bulk fake data (500 invoices, etc.).
+After Phase 1.5, for the load-test `business_id`:
+
+- `accounts` count ≥ 1
+- `chart_of_accounts` count ≥ 1
+- `chart_of_accounts_control_map` contains `AR`, `AP`, `CASH`, `BANK`
+- `accounting_periods` count ≥ 1 (Phase 1 periods unchanged)
+
+Dry-run: `node scripts/seed-staging-accounting-setup.mjs --dry-run --business-id=<uuid>`
 
 ---
 
-## SQL batch outline (Supabase SQL editor — staging only)
+## SQL batch outline (optional manual bulk — staging only)
 
-Replace `:business_id` with your staging load-test business UUID. Run in batches of 200–500 rows.
+Replace `:business_id` with your staging load-test business UUID. Prefer Phase 2 script for ledger-aware inserts.
 
-### Customers (if not using script)
+### Customers (if not using Phase 1 script)
 
 ```sql
 INSERT INTO customers (business_id, name, email, created_at)
@@ -66,52 +101,15 @@ FROM generate_series(1, 50) g
 ON CONFLICT DO NOTHING;
 ```
 
-### Accounting periods (12 months)
-
-```sql
-INSERT INTO accounting_periods (business_id, period_start, period_end, status)
-SELECT
-  :business_id::uuid,
-  (date_trunc('month', CURRENT_DATE) - (n || ' months')::interval)::date,
-  ((date_trunc('month', CURRENT_DATE) - (n || ' months')::interval) + interval '1 month - 1 day')::date,
-  CASE WHEN n = 0 THEN 'open' ELSE 'closed' END
-FROM generate_series(0, 11) n
-ON CONFLICT DO NOTHING;
-```
-
-### Invoices (draft first — finalize via app for ledger)
-
-Bulk finalized invoices require `post_invoice_to_ledger` triggers and valid COA. For smoke:
-
-- Create **sent** invoices with `issue_date`, `due_date`, `total`, `customer_id`, `status = 'sent'`.
-- Prefer Finza **Finalize/Send** flow for first 20 rows to confirm posting.
-
-### Overdue subset
+### Overdue subset (Phase 2 script)
 
 Ensure some invoices have `due_date < CURRENT_DATE` and partial/no payments so `get_operational_overdue_invoices_page` returns rows.
-
-### Bills
-
-```sql
-INSERT INTO bills (business_id, vendor_name, bill_number, total, status, due_date, issue_date)
-SELECT
-  :business_id::uuid,
-  'Staging Vendor ' || g,
-  'STG-BILL-' || lpad(g::text, 5, '0'),
-  (random() * 500 + 50)::numeric(12,2),
-  CASE WHEN g % 3 = 0 THEN 'paid' WHEN g % 3 = 1 THEN 'open' ELSE 'overdue' END,
-  CURRENT_DATE + ((g % 30) - 15),
-  CURRENT_DATE - (g % 60)
-FROM generate_series(1, 100) g;
-```
-
-Adjust columns to match current `bills` schema before running.
 
 ---
 
 ## Cleanup
 
-Delete the fake tenant by `business_id` on staging only, or drop/recreate staging project between campaigns.
+Delete the fake tenant by `business_id` on staging only, or drop/recreate staging project between campaigns. Posted journal entries are immutable; prefer idempotent rerun over delete.
 
 ---
 
@@ -120,3 +118,4 @@ Delete the fake tenant by `business_id` on staging only, or drop/recreate stagin
 1. Run SQL smoke from [`setup.md`](./setup.md).
 2. Update `load-tests/sessions.staging.json` with staging `businessId`.
 3. k6 smoke against staging URL only.
+4. `workday_50` load profile only if smoke passes.

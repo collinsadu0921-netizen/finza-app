@@ -6,6 +6,7 @@ import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { createRouteDiag } from "@/lib/server/routeDiagnostics"
 
 /**
  * GET /api/accounting/reports/profit-and-loss
@@ -14,13 +15,16 @@ import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingCont
  * Query: business_id (required), period_id | period_start | as_of_date | start_date, end_date (optional).
  */
 export async function GET(request: NextRequest) {
+  let diag = createRouteDiag("reports.profit-and-loss")
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
     if (!user) {
+      diag.fail(401, "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -46,27 +50,37 @@ export async function GET(request: NextRequest) {
       )
     }
     const businessId = resolved.businessId
+    diag = createRouteDiag("reports.profit-and-loss", businessId)
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
+      diag.fail(403, "forbidden")
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can view profit & loss." },
         { status: 403 }
       )
     }
+    diag.step("auth", { ms_auth: Math.round((performance.now() - tAuth) * 10) / 10 })
 
-    if (!canUserInitializeAccounting(auth.authority_source)) {
-      const { ready } = await checkAccountingReadiness(supabase, businessId)
-      if (!ready) {
+    const tReady = performance.now()
+    const { ready } = await checkAccountingReadiness(supabase, businessId)
+    if (!ready) {
+      if (canUserInitializeAccounting(auth.authority_source)) {
+        await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+      } else {
+        diag.fail(403, "accounting_not_ready")
         return NextResponse.json(
           { error: "ACCOUNTING_NOT_READY", business_id: businessId, authority_source: auth.authority_source },
           { status: 403 }
         )
       }
-    } else {
-      await supabase.rpc("create_system_accounts", { p_business_id: businessId })
     }
+    diag.step("readiness", {
+      ready,
+      ms_readiness: Math.round((performance.now() - tReady) * 10) / 10,
+    })
 
+    const tReport = performance.now()
     const { data, error } = await getProfitAndLossReport(supabase, {
       businessId,
       period_id: searchParams.get("period_id") ?? undefined,
@@ -77,18 +91,29 @@ export async function GET(request: NextRequest) {
     })
 
     if (error) {
+      diag.fail(500, error, {
+        rpc: "get_profit_and_loss_movement",
+        ms_report: Math.round((performance.now() - tReport) * 10) / 10,
+      })
       return NextResponse.json({ error }, { status: 500 })
     }
     if (!data) {
+      diag.fail(500, "period_unresolved")
       return NextResponse.json(
         { error: "Accounting period could not be resolved" },
         { status: 500 }
       )
     }
 
+    diag.step("report", {
+      rpc: "get_profit_and_loss_movement",
+      ms_report: Math.round((performance.now() - tReport) * 10) / 10,
+    })
+    diag.finish(200)
     return NextResponse.json(data)
   } catch (err: unknown) {
     console.error("Error in profit & loss:", err)
+    diag.fail(500, err instanceof Error ? err.message : "Internal server error")
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500 }
