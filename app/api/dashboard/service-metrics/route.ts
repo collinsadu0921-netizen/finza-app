@@ -23,6 +23,16 @@ import { getBusinessToday } from "@/lib/accounting/businessDate"
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
 import { getCurrencyName, getCurrencySymbol } from "@/lib/currency"
 import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
+import {
+  classifySupabaseError,
+  logSupabaseRpcFailure,
+} from "@/lib/server/logSupabaseRpcError"
+import {
+  dashboardMetricsCacheKey,
+  getCachedDashboardMetrics,
+  isDashboardMetricsCacheEnabled,
+  setCachedDashboardMetrics,
+} from "@/lib/server/dashboardMetricsCache"
 
 function devServiceMetricsLog(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production" && !isRouteDiagnosticsEnabled()) return
@@ -141,6 +151,10 @@ export async function GET(request: NextRequest) {
 
     const tPositionDate = performance.now()
     const positionAsOfDate = await getBusinessToday(supabase, businessId)
+    diag.step("business_today", {
+      position_as_of_date: positionAsOfDate,
+      ms_business_today: Math.round((performance.now() - tPositionDate) * 10) / 10,
+    })
     devServiceMetricsLog("business today", tPositionDate)
 
     const prevStartRaw = searchParams.get("previous_period_start")
@@ -162,6 +176,21 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const cacheKey = dashboardMetricsCacheKey({
+      businessId,
+      start: range.movementStart,
+      end: range.movementEnd,
+      positionAsOf: positionAsOfDate,
+      compareStart,
+      compareEnd,
+    })
+
+    const cached = getCachedDashboardMetrics(cacheKey)
+    if (cached) {
+      diag.step("cache_hit", { cache_enabled: isDashboardMetricsCacheEnabled() })
+      return finish(NextResponse.json(cached), businessId)
+    }
+
     const tRpc = performance.now()
     const { data: metricsRaw, error: rpcError } = await supabase.rpc(
       "get_service_dashboard_metrics",
@@ -174,15 +203,30 @@ export async function GET(request: NextRequest) {
         p_compare_end_date: compareEnd,
       }
     )
+    const msRpc = Math.round((performance.now() - tRpc) * 10) / 10
     devServiceMetricsLog("get_service_dashboard_metrics RPC", tRpc)
 
     if (rpcError) {
-      console.error("get_service_dashboard_metrics RPC error:", rpcError)
+      const errorClass = classifySupabaseError(rpcError)
+      logSupabaseRpcFailure(
+        "dashboard.service-metrics",
+        "get_service_dashboard_metrics",
+        businessId,
+        rpcError,
+        msRpc,
+        {
+          error_class: errorClass,
+          period_start: range.movementStart,
+          period_end: range.movementEnd,
+          position_as_of_date: positionAsOfDate,
+        }
+      )
       diag.fail(500, "rpc_error", {
         rpc: "get_service_dashboard_metrics",
+        error_class: errorClass,
         error_code: rpcError.code ?? null,
         error_message: rpcError.message ?? "unknown",
-        ms_rpc: Math.round((performance.now() - tRpc) * 10) / 10,
+        ms_rpc: msRpc,
       })
       return finish(
         NextResponse.json({ error: "Could not load dashboard metrics" }, { status: 500 }),
@@ -191,7 +235,7 @@ export async function GET(request: NextRequest) {
     }
     diag.step("rpc", {
       rpc: "get_service_dashboard_metrics",
-      ms_rpc: Math.round((performance.now() - tRpc) * 10) / 10,
+      ms_rpc: msRpc,
     })
 
     const metrics = (metricsRaw ?? {}) as DashboardMetricsRpcResult
@@ -234,6 +278,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    setCachedDashboardMetrics(cacheKey, payload)
     return finish(NextResponse.json(payload), businessId)
   } catch (err) {
     console.error("Dashboard service-metrics error:", err)
