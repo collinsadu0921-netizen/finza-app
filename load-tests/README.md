@@ -7,7 +7,7 @@ Repeatable API load tests for the **service workspace** — used to verify P0 sc
 ## Prerequisites
 
 1. [k6 installed](https://grafana.com/docs/k6/latest/set-up/install-k6/) — on Windows often at `C:\Program Files\k6\k6.exe` (may not be on PATH)
-2. Staging app deployed with migrations **497–501** applied — see `docs/staging/setup.md` and `docs/scalability/p0-migration-readiness.md`
+2. Staging app deployed with migrations **497–506** applied — see `docs/staging/setup.md` and `docs/scalability/p0-migration-readiness.md`
 3. Heavy tenant seeded — see `docs/scalability/load-test-seed-plan.md`
 4. Session file copied from `sessions.example.json` → `sessions.staging.json` (gitignored)
 
@@ -71,6 +71,8 @@ Replace `workday_50` with `workday_100`, `workday_200`, or `stress_500` as neede
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SCENARIO` | No | `smoke` | One of: `smoke`, `workday_50`, `workday_100`, `workday_200`, `stress_500` |
+| `ROUTE_FILTER` | No | `all` | Isolate routes: `all`, `business_profile`, `dashboard_metrics`, `dashboard`, `reports`, `lists`, `invoices`, `bills`, `payroll` |
+| `WORKDAY_SKIP_REPORTS` | No | — | When `1`, skip `reports_pnl` in workday scenarios (not smoke; not when `ROUTE_FILTER=reports`) |
 | `BASE_URL` | **Yes** | — | Finza app origin, no trailing slash |
 | `SESSIONS_JSON` | Yes (real runs) | `./sessions.example.json` | Path relative to this script file |
 | `SOFT_P95_MS` | No | `10000` | Per-request check warning threshold (ms) |

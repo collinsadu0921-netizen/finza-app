@@ -10,6 +10,7 @@ import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; position?: string | null }): boolean {
   const employmentType = String(staff.employment_type || "").toLowerCase()
@@ -18,54 +19,78 @@ function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; po
 }
 
 export async function GET(request: NextRequest) {
+  let diag = createRouteDiag("payroll_runs")
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
     if (!user) {
+      diag.fail(401, "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const business = await getCurrentBusiness(supabase, user.id)
+    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+
     if (!business) {
+      diag.fail(404, "business_not_found")
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
+    diag = createRouteDiag("payroll_runs", business.id)
+
+    const tTier = performance.now()
     const tierDenied = await enforceServiceIndustryMinTier(
       supabase,
       user.id,
       business.id,
       "professional"
     )
-    if (tierDenied) return tierDenied
+    diag.step("entitlement", { ms_entitlement: timedStepMs(tTier) })
+    if (tierDenied) {
+      diag.fail(tierDenied.status, "tier_denied")
+      return tierDenied
+    }
 
+    const tPerm = performance.now()
     const { allowed: canView } = await requirePermission(
       supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW
     )
+    diag.step("permission", { ms_permission: timedStepMs(tPerm), allowed: canView })
     if (!canView) {
+      diag.fail(403, "forbidden")
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
+    const tQuery = performance.now()
     const { data: runs, error } = await supabase
       .from("payroll_runs")
       .select("*")
       .eq("business_id", business.id)
       .is("deleted_at", null)
       .order("payroll_month", { ascending: false })
+    diag.step("payroll_runs_query", {
+      ms_query: timedStepMs(tQuery),
+      row_count: (runs ?? []).length,
+    })
 
     if (error) {
       console.error("Error fetching payroll runs:", error)
+      diag.fail(500, error.message, supabaseErrorDiag(error))
       return NextResponse.json(
         { error: error.message },
         { status: 500 }
       )
     }
 
+    diag.finish(200)
     return NextResponse.json({ runs: runs || [] })
   } catch (error: any) {
     console.error("Error in payroll runs list:", error)
+    diag.fail(500, error.message || "Internal server error")
     return NextResponse.json(
       { error: error.message || "Internal server error" },
       { status: 500 }

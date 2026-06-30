@@ -43,7 +43,7 @@ type TimelineRpcRow = {
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
-  let diag = createRouteDiag("dashboard.service-timeline")
+  let diag = createRouteDiag("dashboard_timeline")
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    diag = createRouteDiag("dashboard.service-timeline", businessId)
+    diag = createRouteDiag("dashboard_timeline", businessId)
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {

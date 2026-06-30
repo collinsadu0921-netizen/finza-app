@@ -5,6 +5,7 @@ import { getUserRole } from "@/lib/userRoles"
 import { canEditBusinessWideSensitiveSettings } from "@/lib/retail/retailSensitiveSettingsEditors"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 /** Trim; empty / whitespace-only becomes "". */
 function normStr(v: unknown): string {
@@ -42,15 +43,29 @@ async function getBusinessForProfile(
 }
 
 export async function GET(request: NextRequest) {
+  let diag = createRouteDiag("business_profile")
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
+    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
 
     const preferredId = request.nextUrl.searchParams.get("business_id")?.trim() ?? null
+    if (preferredId) {
+      diag = createRouteDiag("business_profile", preferredId)
+    }
+
+    const tProfile = performance.now()
     const business = await getBusinessForProfile(supabase, user?.id || "", preferredId)
+    diag.step("profile_lookup", {
+      ms_profile: timedStepMs(tProfile),
+      found: Boolean(business),
+    })
+
     if (!business) {
+      diag.fail(404, "business_not_found")
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
@@ -63,6 +78,7 @@ export async function GET(request: NextRequest) {
     const displayTrading = rowTrading || (rowName ? rowName : null)
 
     // Return all business profile fields
+    diag.finish(200, { business_id: business.id })
     return NextResponse.json({
       business: {
         id: business.id,
@@ -91,6 +107,7 @@ export async function GET(request: NextRequest) {
     })
   } catch (error: any) {
     console.error("Error fetching business profile:", error)
+    diag.fail(500, error.message || "Internal server error")
     return NextResponse.json(
       { error: error.message || "Internal server error" },
       { status: 500 }

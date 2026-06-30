@@ -5,6 +5,8 @@
  * Never pass secrets, cookies, tokens, or raw session material in `fields`.
  */
 
+import type { SupabaseErrorLike } from "@/lib/server/logSupabaseRpcError"
+
 export function isRouteDiagnosticsEnabled(): boolean {
   const v = process.env.FINZA_ROUTE_DIAG?.trim().toLowerCase()
   return v === "1" || v === "true" || v === "yes"
@@ -14,6 +16,21 @@ export type RouteDiagFields = Record<
   string,
   string | number | boolean | null | undefined
 >
+
+export function timedStepMs(startedAt: number): number {
+  return Math.round((performance.now() - startedAt) * 10) / 10
+}
+
+export function supabaseErrorDiag(
+  error: SupabaseErrorLike | null | undefined
+): RouteDiagFields {
+  return {
+    error_code: error?.code ?? null,
+    error_message: error?.message ?? null,
+    error_details: error?.details ?? null,
+    error_hint: error?.hint ?? null,
+  }
+}
 
 export function logRouteDiag(route: string, fields: RouteDiagFields): void {
   if (!isRouteDiagnosticsEnabled()) return

@@ -76,9 +76,9 @@ function num(v: unknown): number {
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
-  let diag = createRouteDiag("dashboard.service-metrics")
+  let diag = createRouteDiag("dashboard_metrics")
   const finish = (res: NextResponse, businessId?: string | null) => {
-    if (businessId && !diag) diag = createRouteDiag("dashboard.service-metrics", businessId)
+    if (businessId && !diag) diag = createRouteDiag("dashboard_metrics", businessId)
     diag?.finish(res.status)
     devServiceMetricsLog("total route", routeT0)
     return res
@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    diag = createRouteDiag("dashboard.service-metrics", businessId)
+    diag = createRouteDiag("dashboard_metrics", businessId)
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
@@ -205,7 +205,7 @@ export async function GET(request: NextRequest) {
         if (rpcError) {
           const errorClass = classifySupabaseError(rpcError)
           logSupabaseRpcFailure(
-            "dashboard.service-metrics",
+            "dashboard_metrics",
             "get_service_dashboard_metrics",
             businessId,
             rpcError,

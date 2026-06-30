@@ -6,7 +6,7 @@ import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
-import { createRouteDiag } from "@/lib/server/routeDiagnostics"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 /**
  * GET /api/accounting/reports/profit-and-loss
@@ -15,7 +15,7 @@ import { createRouteDiag } from "@/lib/server/routeDiagnostics"
  * Query: business_id (required), period_id | period_start | as_of_date | start_date, end_date (optional).
  */
 export async function GET(request: NextRequest) {
-  let diag = createRouteDiag("reports.profit-and-loss")
+  let diag = createRouteDiag("reports_pnl")
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       )
     }
     const businessId = resolved.businessId
-    diag = createRouteDiag("reports.profit-and-loss", businessId)
+    diag = createRouteDiag("reports_pnl", businessId)
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
@@ -66,7 +66,14 @@ export async function GET(request: NextRequest) {
     const { ready } = await checkAccountingReadiness(supabase, businessId)
     if (!ready) {
       if (canUserInitializeAccounting(auth.authority_source)) {
-        await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+        const tBootstrap = performance.now()
+        const { error: bootstrapError } = await supabase.rpc("create_system_accounts", {
+          p_business_id: businessId,
+        })
+        diag.step("bootstrap_accounts", {
+          ms_bootstrap: timedStepMs(tBootstrap),
+          ...(bootstrapError ? supabaseErrorDiag(bootstrapError) : {}),
+        })
       } else {
         diag.fail(403, "accounting_not_ready")
         return NextResponse.json(
@@ -77,7 +84,7 @@ export async function GET(request: NextRequest) {
     }
     diag.step("readiness", {
       ready,
-      ms_readiness: Math.round((performance.now() - tReady) * 10) / 10,
+      ms_readiness: timedStepMs(tReady),
     })
 
     const tReport = performance.now()

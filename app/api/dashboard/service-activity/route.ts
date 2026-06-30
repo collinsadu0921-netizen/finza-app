@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
+import { createRouteDiag, isRouteDiagnosticsEnabled, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 type ActivityType = "invoice" | "expense" | "payment" | "customer" | "email"
 
@@ -205,7 +205,7 @@ async function buildJournalActivityItems(
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
-  let diag = createRouteDiag("dashboard.service-activity")
+  let diag = createRouteDiag("dashboard_activity")
   const finish = (res: NextResponse) => {
     diag.finish(res.status)
     devServiceActivityLog("total route", routeT0)
@@ -231,7 +231,7 @@ export async function GET(request: NextRequest) {
       return finish(NextResponse.json({ error: "Missing business_id" }, { status: 400 }))
     }
 
-    diag = createRouteDiag("dashboard.service-activity", businessId)
+    diag = createRouteDiag("dashboard_activity", businessId)
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
@@ -264,7 +264,13 @@ export async function GET(request: NextRequest) {
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
           .limit(journalFetchLimit)
+        const ms = timedStepMs(t0)
         devServiceActivityLog("query: journal_entries", t0)
+        diag.step("journal_entries_query", {
+          ms_query: ms,
+          row_count: (r.data ?? []).length,
+          ...(r.error ? supabaseErrorDiag(r.error) : {}),
+        })
         return r
       })(),
       (async () => {
@@ -275,7 +281,13 @@ export async function GET(request: NextRequest) {
           .eq("business_id", businessId)
           .order("received_at", { ascending: false })
           .limit(limit)
+        const ms = timedStepMs(t0)
         devServiceActivityLog("query: resend_email_events", t0)
+        diag.step("resend_email_events_query", {
+          ms_query: ms,
+          row_count: (r.data ?? []).length,
+          ...(r.error ? supabaseErrorDiag(r.error) : {}),
+        })
         return r
       })(),
       (async () => {
@@ -286,14 +298,20 @@ export async function GET(request: NextRequest) {
           .eq("business_id", businessId)
           .order("received_at", { ascending: false })
           .limit(limit)
+        const ms = timedStepMs(t0)
         devServiceActivityLog("query: inbound_email_messages", t0)
+        diag.step("inbound_email_messages_query", {
+          ms_query: ms,
+          row_count: (r.data ?? []).length,
+          ...(r.error ? supabaseErrorDiag(r.error) : {}),
+        })
         return r
       })(),
     ])
 
     if (journalError) {
       console.error("[service-activity] journal_entries:", journalError.message)
-      diag.fail(500, "journal_query_failed", { error_message: journalError.message })
+      diag.fail(500, "journal_query_failed", supabaseErrorDiag(journalError))
       return finish(NextResponse.json({ error: journalError.message }, { status: 500 }))
     }
     if (resendError) {
@@ -305,6 +323,10 @@ export async function GET(request: NextRequest) {
 
     const tJournalBuild = performance.now()
     const journalItems = await buildJournalActivityItems(supabase, (entries ?? []) as Record<string, unknown>[])
+    diag.step("build_journal_items", {
+      ms_build: timedStepMs(tJournalBuild),
+      item_count: journalItems.length,
+    })
     devServiceActivityLog("buildJournalActivityItems", tJournalBuild)
 
     const resendItems: ActivityFeedItem[] = (resendRows ?? []).map((r) => ({

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 const BILL_ID_IN_CHUNK = 150
 const DEFAULT_PAGE = 1
@@ -42,34 +43,51 @@ async function totalPaidByBillId(
 }
 
 export async function GET(request: NextRequest) {
-  const routeStartedAt = Date.now()
+  const { searchParams } = new URL(request.url)
+  const routeName =
+    searchParams.has("page") || searchParams.has("limit")
+      ? "bills_list_paginated"
+      : "bills_list_default_bounded"
+  let diag = createRouteDiag(routeName)
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
     if (!user) {
+      diag.fail(401, "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { searchParams } = new URL(request.url)
     const scope = await resolveBusinessScopeForUser(
       supabase,
       user.id,
       searchParams.get("business_id") ?? searchParams.get("businessId")
     )
+    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+
     if (!scope.ok) {
+      diag.fail(scope.status, scope.error)
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
+    const tTier = performance.now()
     const tierDenied = await enforceServiceIndustryMinTier(
       supabase,
       user.id,
       scope.businessId,
       "professional"
     )
-    if (tierDenied) return tierDenied
+    diag.step("entitlement", { ms_entitlement: timedStepMs(tTier) })
+    if (tierDenied) {
+      diag.fail(tierDenied.status, "tier_denied")
+      return tierDenied
+    }
+
+    diag = createRouteDiag(routeName, scope.businessId)
 
     const business = { id: scope.businessId }
     const supplierName = searchParams.get("supplier_name")
@@ -116,10 +134,19 @@ export async function GET(request: NextRequest) {
 
     query = query.range(from, to)
 
+    const tBills = performance.now()
     const { data: bills, error, count } = await query
+    diag.step("bills_query", {
+      ms_query: timedStepMs(tBills),
+      row_count: (bills ?? []).length,
+      total_count: count ?? 0,
+      page,
+      limit,
+    })
 
     if (error) {
       console.error("Error fetching bills:", error)
+      diag.fail(500, error.message, supabaseErrorDiag(error))
       return NextResponse.json(
         { error: error.message },
         { status: 500 }
@@ -131,15 +158,17 @@ export async function GET(request: NextRequest) {
 
     let paidByBill: Map<string, number>
     try {
+      const tPayments = performance.now()
       paidByBill = await totalPaidByBillId(supabase, billIds)
+      diag.step("bill_payments_query", {
+        ms_query: timedStepMs(tPayments),
+        bill_ids: billIds.length,
+      })
     } catch (payErr) {
       console.error("Error fetching bill payments for list:", payErr)
-      return NextResponse.json(
-        {
-          error: payErr instanceof Error ? payErr.message : "Failed to load bill payments",
-        },
-        { status: 500 }
-      )
+      const message = payErr instanceof Error ? payErr.message : "Failed to load bill payments"
+      diag.fail(500, message)
+      return NextResponse.json({ error: message }, { status: 500 })
     }
 
     const billsWithBalances = billRows.map((bill) => {
@@ -161,13 +190,7 @@ export async function GET(request: NextRequest) {
     const total = count ?? 0
     const hasMore = from + billsWithBalances.length < total
 
-    if (process.env.NODE_ENV !== "production") {
-      const elapsed = Date.now() - routeStartedAt
-      console.debug(
-        `[bills/list] ${elapsed}ms · page=${page} · limit=${limit} · bills=${billsWithBalances.length} · total=${total}`
-      )
-    }
-
+    diag.finish(200, { row_count: billsWithBalances.length, total })
     return NextResponse.json({
       bills: billsWithBalances,
       pagination: {
@@ -180,6 +203,7 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     console.error("Error in bills list:", error)
     const msg = error instanceof Error ? error.message : "Internal server error"
+    diag.fail(500, msg)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 const INVOICE_SELECT = `
         id,
@@ -100,27 +101,37 @@ async function fetchOverdueInvoicesPage(
 }
 
 export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  const status = searchParams.get("status")
+  const routeName = status === "overdue" ? "invoices_overdue" : "invoices_list"
+  let diag = createRouteDiag(routeName)
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
     if (!user) {
+      diag.fail(401, "Unauthorized")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { searchParams } = new URL(request.url)
     const scope = await resolveBusinessScopeForUser(
       supabase,
       user.id,
       searchParams.get("business_id") ?? searchParams.get("businessId")
     )
+    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+
     if (!scope.ok) {
+      diag.fail(scope.status, scope.error)
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
+    diag = createRouteDiag(routeName, scope.businessId)
+
     const business = { id: scope.businessId }
-    const status = searchParams.get("status")
     const customerId = searchParams.get("customer_id")
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
@@ -132,6 +143,7 @@ export async function GET(request: NextRequest) {
     const to = from + limit - 1
 
     if (status === "overdue") {
+      const tOverdue = performance.now()
       const { invoices, totalCount } = await fetchOverdueInvoicesPage(supabase, {
         businessId: business.id,
         page,
@@ -141,7 +153,14 @@ export async function GET(request: NextRequest) {
         endDate,
         search,
       })
+      diag.step("overdue_rpc", {
+        rpc: "get_operational_overdue_invoices_page",
+        ms_rpc: timedStepMs(tOverdue),
+        row_count: invoices.length,
+        total_count: totalCount,
+      })
 
+      diag.finish(200, { page, limit })
       return NextResponse.json({
         invoices,
         pagination: {
@@ -177,12 +196,17 @@ export async function GET(request: NextRequest) {
     }
 
     if (search) {
+      const tSearch = performance.now()
       const { data: matchingCustomers } = await supabase
         .from("customers")
         .select("id")
         .eq("business_id", business.id)
         .ilike("name", `%${search}%`)
         .is("deleted_at", null)
+      diag.step("customer_search", {
+        ms_query: timedStepMs(tSearch),
+        row_count: matchingCustomers?.length ?? 0,
+      })
 
       const matchingCustomerIds = matchingCustomers?.map((c: { id: string }) => c.id) || []
 
@@ -200,10 +224,17 @@ export async function GET(request: NextRequest) {
 
     query = query.range(from, to)
 
+    const tList = performance.now()
     const { data: invoices, error, count } = await query
+    diag.step("invoices_query", {
+      ms_query: timedStepMs(tList),
+      row_count: (invoices ?? []).length,
+      total_count: count ?? 0,
+    })
 
     if (error) {
       console.error("Error fetching invoices:", error)
+      diag.fail(500, error.message, supabaseErrorDiag(error))
       return NextResponse.json(
         { error: error.message },
         { status: 500 }
@@ -211,6 +242,7 @@ export async function GET(request: NextRequest) {
     }
 
     const totalCount = count ?? 0
+    diag.finish(200, { page, limit })
     return NextResponse.json({
       invoices: invoices || [],
       pagination: {
@@ -223,6 +255,7 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     console.error("Error in invoice list:", error)
     const message = error instanceof Error ? error.message : "Internal server error"
+    diag.fail(500, message)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

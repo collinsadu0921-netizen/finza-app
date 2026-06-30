@@ -57,6 +57,68 @@ const DEBUG_JSON_FAILURE =
   String(__ENV.DEBUG_JSON_FAILURE || "").trim() === "1" ||
   String(__ENV.DEBUG_JSON_FAILURE || "").toLowerCase() === "true"
 
+/**
+ * Isolate route groups under load (default: all). Does not affect auth validation.
+ * Examples: all | business_profile | dashboard_metrics | dashboard | reports | lists |
+ *           invoices | bills | payroll
+ */
+const ROUTE_FILTER = String(__ENV.ROUTE_FILTER || "all").trim().toLowerCase()
+
+const ALLOWED_ROUTE_FILTERS = new Set([
+  "all",
+  "business_profile",
+  "dashboard_metrics",
+  "dashboard",
+  "reports",
+  "lists",
+  "invoices",
+  "bills",
+  "payroll",
+])
+
+if (!ALLOWED_ROUTE_FILTERS.has(ROUTE_FILTER)) {
+  throw new Error(
+    `Invalid ROUTE_FILTER="${ROUTE_FILTER}". Allowed: ${[...ALLOWED_ROUTE_FILTERS].join(", ")}`
+  )
+}
+
+/** When 1, skip reports_pnl in workday scenarios (not when ROUTE_FILTER=reports). */
+const WORKDAY_SKIP_REPORTS =
+  String(__ENV.WORKDAY_SKIP_REPORTS || "").trim() === "1" ||
+  String(__ENV.WORKDAY_SKIP_REPORTS || "").toLowerCase() === "true"
+
+const ROUTE_FILTER_GROUPS = {
+  business_profile: new Set(["business_profile"]),
+  dashboard_metrics: new Set(["dashboard_metrics"]),
+  dashboard: new Set(["dashboard_metrics", "dashboard_timeline", "dashboard_activity"]),
+  reports: new Set(["reports_pnl"]),
+  lists: new Set([
+    "invoices_list",
+    "invoices_overdue",
+    "bills_list_paginated",
+    "bills_list_default_bounded",
+    "payroll_runs",
+  ]),
+  invoices: new Set(["invoices_list", "invoices_overdue"]),
+  bills: new Set(["bills_list_paginated", "bills_list_default_bounded"]),
+  payroll: new Set(["payroll_runs"]),
+}
+
+function shouldRunRoute(routeName) {
+  if (ROUTE_FILTER === "all") return true
+  const group = ROUTE_FILTER_GROUPS[ROUTE_FILTER]
+  if (!group) return false
+  return group.has(routeName)
+}
+
+function shouldRunReportsPnl() {
+  if (ROUTE_FILTER === "reports") return true
+  if (ROUTE_FILTER !== "all") return false
+  if (selectedScenario === "smoke") return true
+  if (WORKDAY_SKIP_REPORTS) return false
+  return true
+}
+
 /** Vercel Deployment Protection bypass (Preview only). Never logged. */
 const VERCEL_AUTOMATION_BYPASS_SECRET = String(
   __ENV.VERCEL_AUTOMATION_BYPASS_SECRET || ""
@@ -452,6 +514,10 @@ export function setup() {
   console.log(
     `[finza-k6]   Vercel bypass:    ${VERCEL_BYPASS_ENABLED ? "enabled" : "disabled"}`
   )
+  console.log(`[finza-k6]   ROUTE_FILTER:     ${ROUTE_FILTER}`)
+  console.log(
+    `[finza-k6]   skip reports:     ${WORKDAY_SKIP_REPORTS && selectedScenario !== "smoke" && ROUTE_FILTER === "all" ? "yes (WORKDAY_SKIP_REPORTS)" : "no"}`
+  )
   console.log("[finza-k6]   auth mode:        authorization-cookie")
   const rawCookie = rawCookieHeader(sessions[0])
   const tokenLen = authorizationTokenValue(sessions[0], rawCookie).length
@@ -575,111 +641,142 @@ export function workdayFlow() {
   const session = sessionForVu(__VU)
   const bid = session.businessId
 
-  group("business_session", function () {
-    getJson(
-      "business_profile",
-      `${BASE_URL}/api/business/profile?business_id=${bid}`,
-      session,
-      {
-        "profile has business.id": (b) => b && b.business && b.business.id === bid,
-      }
-    )
-  })
-
-  group("dashboard", function () {
-    getJson(
-      "dashboard_metrics",
-      `${BASE_URL}/api/dashboard/service-metrics?business_id=${bid}`,
-      session,
-      {
-        "metrics has revenue": (b) => typeof b.revenue === "number",
-        "metrics has cashCollected": (b) => typeof b.cashCollected === "number",
-        "metrics has period": (b) => b.period != null,
-      }
-    )
-
-    getJson(
-      "dashboard_timeline",
-      `${BASE_URL}/api/dashboard/service-timeline?business_id=${bid}&periods=6`,
-      session,
-      {
-        "timeline is array": (b) => Array.isArray(b.timeline),
-      }
-    )
-
-    getJson(
-      "dashboard_activity",
-      `${BASE_URL}/api/dashboard/service-activity?business_id=${bid}&limit=10`,
-      session,
-      {
-        "activity has items": (b) => Array.isArray(b.items),
-      }
-    )
-  })
-
-  group("invoices", function () {
-    getJson(
-      "invoices_list",
-      `${BASE_URL}/api/invoices/list?business_id=${bid}&page=1&limit=25`,
-      session,
-      {
-        "invoices array": (b) => Array.isArray(b.invoices),
-        "invoices pagination": (b) => b.pagination && typeof b.pagination.totalCount === "number",
-        "invoices page size bounded": (b) => (b.invoices || []).length <= 25,
-      }
-    )
-
-    getJson(
-      "invoices_overdue",
-      `${BASE_URL}/api/invoices/list?business_id=${bid}&status=overdue&page=1&limit=25`,
-      session,
-      {
-        "overdue array": (b) => Array.isArray(b.invoices),
-        "overdue bounded": (b) => (b.invoices || []).length <= 25,
-        "overdue pagination": (b) => b.pagination && b.pagination.pageSize === 25,
-      }
-    )
-  })
-
-  group("bills", function () {
-    getJson(
-      "bills_list_paginated",
-      `${BASE_URL}/api/bills/list?business_id=${bid}&page=1&limit=50`,
-      session,
-      {
-        "bills array": (b) => Array.isArray(b.bills),
-        "bills pagination limit 50": (b) =>
-          b.pagination && b.pagination.limit === 50 && (b.bills || []).length <= 50,
-      }
-    )
-
-    getJson(
-      "bills_list_default_bounded",
-      `${BASE_URL}/api/bills/list?business_id=${bid}`,
-      session,
-      {
-        "bills default pagination": (b) => b.pagination && b.pagination.limit <= 100,
-        "bills default bounded": (b) => (b.bills || []).length <= 100,
-      }
-    )
-  })
-
-  group("payroll", function () {
-    getJson("payroll_runs", `${BASE_URL}/api/payroll/runs`, session, {
-      "payroll runs array": (b) => Array.isArray(b.runs),
+  if (shouldRunRoute("business_profile")) {
+    group("business_session", function () {
+      getJson(
+        "business_profile",
+        `${BASE_URL}/api/business/profile?business_id=${bid}`,
+        session,
+        {
+          "profile has business.id": (b) => b && b.business && b.business.id === bid,
+        }
+      )
     })
-  })
+  }
 
-  group("reports", function () {
-    getJson(
-      "reports_pnl",
-      `${BASE_URL}/api/accounting/reports/profit-and-loss?business_id=${bid}`,
-      session,
-      {
-        "pnl has sections or period": (b) => b.sections != null || b.period != null,
+  if (
+    shouldRunRoute("dashboard_metrics") ||
+    shouldRunRoute("dashboard_timeline") ||
+    shouldRunRoute("dashboard_activity")
+  ) {
+    group("dashboard", function () {
+      if (shouldRunRoute("dashboard_metrics")) {
+        getJson(
+          "dashboard_metrics",
+          `${BASE_URL}/api/dashboard/service-metrics?business_id=${bid}`,
+          session,
+          {
+            "metrics has revenue": (b) => typeof b.revenue === "number",
+            "metrics has cashCollected": (b) => typeof b.cashCollected === "number",
+            "metrics has period": (b) => b.period != null,
+          }
+        )
       }
-    )
-  })
+
+      if (shouldRunRoute("dashboard_timeline")) {
+        getJson(
+          "dashboard_timeline",
+          `${BASE_URL}/api/dashboard/service-timeline?business_id=${bid}&periods=6`,
+          session,
+          {
+            "timeline is array": (b) => Array.isArray(b.timeline),
+          }
+        )
+      }
+
+      if (shouldRunRoute("dashboard_activity")) {
+        getJson(
+          "dashboard_activity",
+          `${BASE_URL}/api/dashboard/service-activity?business_id=${bid}&limit=10`,
+          session,
+          {
+            "activity has items": (b) => Array.isArray(b.items),
+          }
+        )
+      }
+    })
+  }
+
+  if (shouldRunRoute("invoices_list") || shouldRunRoute("invoices_overdue")) {
+    group("invoices", function () {
+      if (shouldRunRoute("invoices_list")) {
+        getJson(
+          "invoices_list",
+          `${BASE_URL}/api/invoices/list?business_id=${bid}&page=1&limit=25`,
+          session,
+          {
+            "invoices array": (b) => Array.isArray(b.invoices),
+            "invoices pagination": (b) =>
+              b.pagination && typeof b.pagination.totalCount === "number",
+            "invoices page size bounded": (b) => (b.invoices || []).length <= 25,
+          }
+        )
+      }
+
+      if (shouldRunRoute("invoices_overdue")) {
+        getJson(
+          "invoices_overdue",
+          `${BASE_URL}/api/invoices/list?business_id=${bid}&status=overdue&page=1&limit=25`,
+          session,
+          {
+            "overdue array": (b) => Array.isArray(b.invoices),
+            "overdue bounded": (b) => (b.invoices || []).length <= 25,
+            "overdue pagination": (b) => b.pagination && b.pagination.pageSize === 25,
+          }
+        )
+      }
+    })
+  }
+
+  if (shouldRunRoute("bills_list_paginated") || shouldRunRoute("bills_list_default_bounded")) {
+    group("bills", function () {
+      if (shouldRunRoute("bills_list_paginated")) {
+        getJson(
+          "bills_list_paginated",
+          `${BASE_URL}/api/bills/list?business_id=${bid}&page=1&limit=50`,
+          session,
+          {
+            "bills array": (b) => Array.isArray(b.bills),
+            "bills pagination limit 50": (b) =>
+              b.pagination && b.pagination.limit === 50 && (b.bills || []).length <= 50,
+          }
+        )
+      }
+
+      if (shouldRunRoute("bills_list_default_bounded")) {
+        getJson(
+          "bills_list_default_bounded",
+          `${BASE_URL}/api/bills/list?business_id=${bid}`,
+          session,
+          {
+            "bills default pagination": (b) => b.pagination && b.pagination.limit <= 100,
+            "bills default bounded": (b) => (b.bills || []).length <= 100,
+          }
+        )
+      }
+    })
+  }
+
+  if (shouldRunRoute("payroll_runs")) {
+    group("payroll", function () {
+      getJson("payroll_runs", `${BASE_URL}/api/payroll/runs`, session, {
+        "payroll runs array": (b) => Array.isArray(b.runs),
+      })
+    })
+  }
+
+  if (shouldRunReportsPnl()) {
+    group("reports", function () {
+      getJson(
+        "reports_pnl",
+        `${BASE_URL}/api/accounting/reports/profit-and-loss?business_id=${bid}`,
+        session,
+        {
+          "pnl has sections or period": (b) => b.sections != null || b.period != null,
+        }
+      )
+    })
+  }
 
   if (selectedScenario !== "smoke") {
     sleep(1 + Math.random() * 3)
