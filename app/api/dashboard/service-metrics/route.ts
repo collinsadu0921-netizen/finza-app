@@ -29,9 +29,8 @@ import {
 } from "@/lib/server/logSupabaseRpcError"
 import {
   dashboardMetricsCacheKey,
-  getCachedDashboardMetrics,
   isDashboardMetricsCacheEnabled,
-  setCachedDashboardMetrics,
+  loadOrComputeDashboardMetrics,
 } from "@/lib/server/dashboardMetricsCache"
 
 function devServiceMetricsLog(label: string, startedAt: number) {
@@ -185,102 +184,118 @@ export async function GET(request: NextRequest) {
       compareEnd,
     })
 
-    const cached = getCachedDashboardMetrics(cacheKey)
-    if (cached) {
-      diag.step("cache_hit", { cache_enabled: isDashboardMetricsCacheEnabled() })
-      return finish(NextResponse.json(cached), businessId)
-    }
+    const tPayload = performance.now()
+    const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
+      await loadOrComputeDashboardMetrics(cacheKey, async () => {
+        const tRpc = performance.now()
+        const { data: metricsRaw, error: rpcError } = await supabase.rpc(
+          "get_service_dashboard_metrics",
+          {
+            p_business_id: businessId,
+            p_start_date: range.movementStart,
+            p_end_date: range.movementEnd,
+            p_position_as_of_date: positionAsOfDate,
+            p_compare_start_date: compareStart,
+            p_compare_end_date: compareEnd,
+          }
+        )
+        const msRpc = Math.round((performance.now() - tRpc) * 10) / 10
+        devServiceMetricsLog("get_service_dashboard_metrics RPC", tRpc)
 
-    const tRpc = performance.now()
-    const { data: metricsRaw, error: rpcError } = await supabase.rpc(
-      "get_service_dashboard_metrics",
-      {
-        p_business_id: businessId,
-        p_start_date: range.movementStart,
-        p_end_date: range.movementEnd,
-        p_position_as_of_date: positionAsOfDate,
-        p_compare_start_date: compareStart,
-        p_compare_end_date: compareEnd,
-      }
-    )
-    const msRpc = Math.round((performance.now() - tRpc) * 10) / 10
-    devServiceMetricsLog("get_service_dashboard_metrics RPC", tRpc)
-
-    if (rpcError) {
-      const errorClass = classifySupabaseError(rpcError)
-      logSupabaseRpcFailure(
-        "dashboard.service-metrics",
-        "get_service_dashboard_metrics",
-        businessId,
-        rpcError,
-        msRpc,
-        {
-          error_class: errorClass,
-          period_start: range.movementStart,
-          period_end: range.movementEnd,
-          position_as_of_date: positionAsOfDate,
+        if (rpcError) {
+          const errorClass = classifySupabaseError(rpcError)
+          logSupabaseRpcFailure(
+            "dashboard.service-metrics",
+            "get_service_dashboard_metrics",
+            businessId,
+            rpcError,
+            msRpc,
+            {
+              error_class: errorClass,
+              period_start: range.movementStart,
+              period_end: range.movementEnd,
+              position_as_of_date: positionAsOfDate,
+              cache_enabled: isDashboardMetricsCacheEnabled(),
+            }
+          )
+          const err = new Error(rpcError.message ?? "rpc_error") as Error & {
+            status?: number
+            rpcMeta?: Record<string, unknown>
+          }
+          err.status = 500
+          err.rpcMeta = {
+            error_class: errorClass,
+            error_code: rpcError.code ?? null,
+            ms_rpc: msRpc,
+          }
+          throw err
         }
-      )
-      diag.fail(500, "rpc_error", {
-        rpc: "get_service_dashboard_metrics",
-        error_class: errorClass,
-        error_code: rpcError.code ?? null,
-        error_message: rpcError.message ?? "unknown",
-        ms_rpc: msRpc,
+
+        const metrics = (metricsRaw ?? {}) as DashboardMetricsRpcResult
+        const currencyCode = String(metrics.currency_code ?? "GHS")
+        const currency = {
+          code: currencyCode,
+          symbol: getCurrencySymbol(currencyCode) || currencyCode,
+          name: getCurrencyName(currencyCode) || currencyCode,
+        }
+
+        const built = {
+          period: {
+            period_id: range.period.period_id,
+            period_start: range.movementStart,
+            period_end: range.movementEnd,
+            resolution_reason: range.period.resolution_reason,
+          },
+          currency,
+          revenue: num(metrics.revenue),
+          expenses: num(metrics.expenses),
+          netProfit: num(metrics.net_profit),
+          cashCollected: num(metrics.cash_collected),
+          accountsReceivable: num(metrics.accounts_receivable),
+          accountsPayable: num(metrics.accounts_payable),
+          cashBalance: num(metrics.cash_balance),
+          positionBalancesAsOfToday: true,
+          positionAsOfDate,
+          previousPeriod: null as PreviousPeriodPayload | null,
+        }
+
+        if (compareStart && compareEnd && metrics.previous_revenue !== undefined) {
+          built.previousPeriod = {
+            revenue: num(metrics.previous_revenue),
+            expenses: num(metrics.previous_expenses),
+            netProfit: num(metrics.previous_net_profit),
+            cashCollected: num(metrics.previous_cash_collected),
+            accountsReceivable: num(metrics.previous_accounts_receivable),
+            accountsPayable: num(metrics.previous_accounts_payable),
+            cashBalance: num(metrics.previous_cash_balance),
+          }
+        }
+
+        return built
       })
-      return finish(
-        NextResponse.json({ error: "Could not load dashboard metrics" }, { status: 500 }),
-        businessId
-      )
-    }
-    diag.step("rpc", {
-      rpc: "get_service_dashboard_metrics",
-      ms_rpc: msRpc,
+
+    diag.step("cache", {
+      cache_enabled: cacheEnabled,
+      cache_source: cacheSource,
+      ms_payload: Math.round((performance.now() - tPayload) * 10) / 10,
     })
 
-    const metrics = (metricsRaw ?? {}) as DashboardMetricsRpcResult
-    const currencyCode = String(metrics.currency_code ?? "GHS")
-    const currency = {
-      code: currencyCode,
-      symbol: getCurrencySymbol(currencyCode) || currencyCode,
-      name: getCurrencyName(currencyCode) || currencyCode,
+    if (cacheSource !== "cache_hit") {
+      diag.step("rpc", {
+        rpc: "get_service_dashboard_metrics",
+        cache_source: cacheSource,
+      })
     }
 
-    const payload = {
-      period: {
-        period_id: range.period.period_id,
-        period_start: range.movementStart,
-        period_end: range.movementEnd,
-        resolution_reason: range.period.resolution_reason,
-      },
-      currency,
-      revenue: num(metrics.revenue),
-      expenses: num(metrics.expenses),
-      netProfit: num(metrics.net_profit),
-      cashCollected: num(metrics.cash_collected),
-      accountsReceivable: num(metrics.accounts_receivable),
-      accountsPayable: num(metrics.accounts_payable),
-      cashBalance: num(metrics.cash_balance),
-      positionBalancesAsOfToday: true,
-      positionAsOfDate,
-      previousPeriod: null as PreviousPeriodPayload | null,
-    }
-
-    if (compareStart && compareEnd && metrics.previous_revenue !== undefined) {
-      payload.previousPeriod = {
-        revenue: num(metrics.previous_revenue),
-        expenses: num(metrics.previous_expenses),
-        netProfit: num(metrics.previous_net_profit),
-        cashCollected: num(metrics.previous_cash_collected),
-        accountsReceivable: num(metrics.previous_accounts_receivable),
-        accountsPayable: num(metrics.previous_accounts_payable),
-        cashBalance: num(metrics.previous_cash_balance),
-      }
-    }
-
-    setCachedDashboardMetrics(cacheKey, payload)
     return finish(NextResponse.json(payload), businessId)
   } catch (err) {
+    const rpcMeta = (err as { rpcMeta?: Record<string, unknown> }).rpcMeta
+    if (rpcMeta) {
+      diag.fail(500, "rpc_error", rpcMeta)
+      return finish(
+        NextResponse.json({ error: "Could not load dashboard metrics" }, { status: 500 })
+      )
+    }
     console.error("Dashboard service-metrics error:", err)
     diag.fail(
       500,

@@ -1,12 +1,15 @@
 /**
  * Optional in-process cache for dashboard metrics (staging/load-test only).
  * Enable: FINZA_DASHBOARD_METRICS_CACHE_TTL_SEC=30 on preview/staging.
- * Disabled when unset or 0.
+ *
+ * Serverless note: cache is per function instance — use loadOrComputeDashboardMetrics
+ * singleflight so concurrent requests on one instance share one RPC.
  */
 
 type CacheEntry = { expiresAt: number; payload: unknown }
 
 const store = new Map<string, CacheEntry>()
+const inflight = new Map<string, Promise<unknown>>()
 
 function ttlMs(): number {
   const sec = Number(process.env.FINZA_DASHBOARD_METRICS_CACHE_TTL_SEC ?? 0)
@@ -30,6 +33,10 @@ export function dashboardMetricsCacheKey(parts: {
     parts.compareStart ?? "",
     parts.compareEnd ?? "",
   ].join("|")
+}
+
+export function isDashboardMetricsCacheEnabled(): boolean {
+  return ttlMs() > 0
 }
 
 export function getCachedDashboardMetrics(key: string): unknown | null {
@@ -56,6 +63,42 @@ export function setCachedDashboardMetrics(key: string, payload: unknown): void {
   }
 }
 
-export function isDashboardMetricsCacheEnabled(): boolean {
-  return ttlMs() > 0
+export type DashboardMetricsCacheResult<T> = {
+  value: T
+  source: "cache_hit" | "cache_miss" | "cache_coalesce"
+  cache_enabled: boolean
+}
+
+/**
+ * Returns cached payload or runs compute once per key per instance (singleflight).
+ */
+export async function loadOrComputeDashboardMetrics<T>(
+  key: string,
+  compute: () => Promise<T>
+): Promise<DashboardMetricsCacheResult<T>> {
+  const cacheEnabled = isDashboardMetricsCacheEnabled()
+
+  const cached = getCachedDashboardMetrics(key)
+  if (cached) {
+    return { value: cached as T, source: "cache_hit", cache_enabled: cacheEnabled }
+  }
+
+  const pending = inflight.get(key)
+  if (pending) {
+    const value = (await pending) as T
+    return { value, source: "cache_coalesce", cache_enabled: cacheEnabled }
+  }
+
+  const promise = compute()
+    .then((value) => {
+      setCachedDashboardMetrics(key, value)
+      return value
+    })
+    .finally(() => {
+      inflight.delete(key)
+    })
+
+  inflight.set(key, promise)
+  const value = await promise
+  return { value, source: "cache_miss", cache_enabled: cacheEnabled }
 }
