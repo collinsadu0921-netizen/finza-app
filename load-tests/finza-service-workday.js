@@ -59,7 +59,8 @@ const DEBUG_JSON_FAILURE =
 
 /**
  * Isolate route groups under load (default: all). Does not affect auth validation.
- * Examples: all | business_profile | dashboard_metrics | dashboard | reports | lists |
+ * Examples: all | business_profile | dashboard_metrics | dashboard_timeline |
+ *           dashboard_activity | dashboard | reports | lists |
  *           invoices | bills | payroll
  */
 const ROUTE_FILTER = String(__ENV.ROUTE_FILTER || "all").trim().toLowerCase()
@@ -68,6 +69,8 @@ const ALLOWED_ROUTE_FILTERS = new Set([
   "all",
   "business_profile",
   "dashboard_metrics",
+  "dashboard_timeline",
+  "dashboard_activity",
   "dashboard",
   "reports",
   "lists",
@@ -90,6 +93,8 @@ const WORKDAY_SKIP_REPORTS =
 const ROUTE_FILTER_GROUPS = {
   business_profile: new Set(["business_profile"]),
   dashboard_metrics: new Set(["dashboard_metrics"]),
+  dashboard_timeline: new Set(["dashboard_timeline"]),
+  dashboard_activity: new Set(["dashboard_activity"]),
   dashboard: new Set(["dashboard_metrics", "dashboard_timeline", "dashboard_activity"]),
   reports: new Set(["reports_pnl"]),
   lists: new Set([

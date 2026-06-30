@@ -71,7 +71,7 @@ Replace `workday_50` with `workday_100`, `workday_200`, or `stress_500` as neede
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SCENARIO` | No | `smoke` | One of: `smoke`, `workday_50`, `workday_100`, `workday_200`, `stress_500` |
-| `ROUTE_FILTER` | No | `all` | Isolate routes: `all`, `business_profile`, `dashboard_metrics`, `dashboard`, `reports`, `lists`, `invoices`, `bills`, `payroll` |
+| `ROUTE_FILTER` | No | `all` | Isolate routes: `all`, `business_profile`, `dashboard_metrics`, `dashboard_timeline`, `dashboard_activity`, `dashboard`, `reports`, `lists`, `invoices`, `bills`, `payroll` |
 | `WORKDAY_SKIP_REPORTS` | No | — | When `1`, skip `reports_pnl` in workday scenarios (not smoke; not when `ROUTE_FILTER=reports`) |
 | `BASE_URL` | **Yes** | — | Finza app origin, no trailing slash |
 | `SESSIONS_JSON` | Yes (real runs) | `./sessions.example.json` | Path relative to this script file |
@@ -123,6 +123,42 @@ Replace `workday_50` with `workday_100`, `workday_200`, or `stress_500` as neede
 | Bills (regression) | `GET /api/bills/list?business_id=` (must stay bounded) |
 | Payroll | `GET /api/payroll/runs` |
 | Reports | `GET /api/accounting/reports/profit-and-loss?business_id=` |
+
+## Route isolation (`ROUTE_FILTER`)
+
+Use after smoke passes to find which route group saturates the DB under 50 VUs. Auth/session validation is unchanged; checks and status-code assertions are not weakened.
+
+| `ROUTE_FILTER` | k6 route tag(s) | Use when |
+|----------------|-----------------|----------|
+| `dashboard_metrics` | `dashboard_metrics` | Isolate consolidated KPI RPC |
+| `dashboard_timeline` | `dashboard_timeline` | Isolate ledger timeline RPC |
+| `dashboard_activity` | `dashboard_activity` | Isolate activity feed queries |
+| `dashboard` | all three above | Combined dashboard pressure (full cockpit load) |
+
+**Interpretation:**
+
+- If `dashboard_metrics` passes alone but `dashboard` fails → timeline and/or activity contribute; run `dashboard_timeline` and `dashboard_activity` separately.
+- If a single-route filter fails → that route is the direct bottleneck.
+- If each single route passes but `dashboard` fails → combined DB pool / query contention; consider read-model work (`docs/staging/workday50-read-model-plan.md`).
+
+```powershell
+# Timeline only @ 50 VUs (~9 min)
+$env:SCENARIO = "workday_50"
+$env:ROUTE_FILTER = "dashboard_timeline"
+& "C:\Program Files\k6\k6.exe" run `
+  -e BASE_URL="https://YOUR-STAGING-PREVIEW.vercel.app" `
+  -e SESSIONS_JSON="./sessions.staging.json" `
+  load-tests/finza-service-workday.js
+
+# Activity only @ 50 VUs
+$env:ROUTE_FILTER = "dashboard_activity"
+& "C:\Program Files\k6\k6.exe" run `
+  -e BASE_URL="https://YOUR-STAGING-PREVIEW.vercel.app" `
+  -e SESSIONS_JSON="./sessions.staging.json" `
+  load-tests/finza-service-workday.js
+```
+
+Do **not** run `workday_100` or `workday_200` until `workday_50` passes for the target route group.
 
 ## Local validation (no staging traffic)
 
