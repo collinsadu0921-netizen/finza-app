@@ -22,7 +22,7 @@ import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { getBusinessToday } from "@/lib/accounting/businessDate"
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
 import { getCurrencyName, getCurrencySymbol } from "@/lib/currency"
-import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
+import { createRouteDiag, isRouteDiagnosticsEnabled, type RouteDiagFields } from "@/lib/server/routeDiagnostics"
 import {
   classifySupabaseError,
   logSupabaseRpcFailure,
@@ -220,7 +220,7 @@ export async function GET(request: NextRequest) {
           )
           const err = new Error(rpcError.message ?? "rpc_error") as Error & {
             status?: number
-            rpcMeta?: Record<string, unknown>
+            rpcMeta?: RouteDiagFields
           }
           err.status = 500
           err.rpcMeta = {
@@ -289,7 +289,7 @@ export async function GET(request: NextRequest) {
 
     return finish(NextResponse.json(payload), businessId)
   } catch (err) {
-    const rpcMeta = (err as { rpcMeta?: Record<string, unknown> }).rpcMeta
+    const rpcMeta = (err as { rpcMeta?: RouteDiagFields }).rpcMeta
     if (rpcMeta) {
       diag.fail(500, "rpc_error", rpcMeta)
       return finish(
