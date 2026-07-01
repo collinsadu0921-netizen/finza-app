@@ -40,7 +40,8 @@ export type DashboardClusterCacheResult<T> = {
 
 export async function loadOrComputeDashboardClusterCache<T>(
   key: string,
-  compute: () => Promise<T>
+  compute: () => Promise<T>,
+  options?: { shouldStore?: (value: T) => boolean }
 ): Promise<DashboardClusterCacheResult<T>> {
   const cacheEnabled = isDashboardClusterCacheEnabled()
   const ms = ttlMs()
@@ -61,7 +62,8 @@ export async function loadOrComputeDashboardClusterCache<T>(
 
   const promise = compute()
     .then((value) => {
-      if (ms > 0) {
+      const allowStore = options?.shouldStore ? options.shouldStore(value) : true
+      if (ms > 0 && allowStore) {
         store.set(key, { expiresAt: Date.now() + ms, payload: value })
         if (store.size > 200) {
           const now = Date.now()

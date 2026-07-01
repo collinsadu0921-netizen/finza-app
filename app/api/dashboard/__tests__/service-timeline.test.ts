@@ -1,5 +1,5 @@
 /**
- * GET /api/dashboard/service-timeline — summary-first timeline with circuit breaker.
+ * GET /api/dashboard/service-timeline — summary-first timeline with 509 first-load refresh.
  */
 
 import { GET } from "../service-timeline/route"
@@ -43,15 +43,35 @@ const timelineRows = [
 
 function mockTimelineRpc(options: {
   freshRows?: unknown[]
-  staleRows?: unknown[]
+  staleRows?: unknown[] | ((call: number) => unknown[])
+  blockingRefreshCount?: number
   tryRefresh?: { refreshed: boolean; lock_held: boolean; period_count: number }
 }) {
+  let freshCalls = 0
+  let staleCalls = 0
   return jest.fn().mockImplementation((name: string) => {
     if (name === "get_service_dashboard_timeline_from_summary") {
+      freshCalls += 1
+      if (options.freshRows && freshCalls === 1) {
+        return Promise.resolve({ data: options.freshRows, error: null })
+      }
+      if (freshCalls > 1 && options.blockingRefreshCount) {
+        return Promise.resolve({ data: timelineRows, error: null })
+      }
       return Promise.resolve({ data: options.freshRows ?? [], error: null })
     }
     if (name === "get_service_dashboard_timeline_stale_summary") {
+      staleCalls += 1
+      if (typeof options.staleRows === "function") {
+        return Promise.resolve({ data: (options.staleRows as (n: number) => unknown[])(staleCalls), error: null })
+      }
       return Promise.resolve({ data: options.staleRows ?? [], error: null })
+    }
+    if (name === "refresh_service_dashboard_period_summaries") {
+      return Promise.resolve({
+        data: options.blockingRefreshCount ?? 0,
+        error: null,
+      })
     }
     if (name === "try_refresh_service_dashboard_period_summaries") {
       return Promise.resolve({
@@ -65,6 +85,7 @@ function mockTimelineRpc(options: {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  delete process.env.FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC
   mockCheckAuth.mockResolvedValue({ authorized: true } as any)
 })
 
@@ -81,7 +102,7 @@ describe("GET /api/dashboard/service-timeline", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns fresh summary when enough rows exist", async () => {
+  it("returns fresh summary when rows exist", async () => {
     const freshRows = Array.from({ length: 6 }, (_, i) => ({
       period_id: `period-${i + 1}`,
       period_start: `2026-0${i + 1}-01`,
@@ -108,8 +129,8 @@ describe("GET /api/dashboard/service-timeline", () => {
     expect(body.timeline).toHaveLength(6)
   })
 
-  it("returns stale summary without live scan when refresh lock held", async () => {
-    const staleRows = Array.from({ length: 6 }, (_, i) => ({
+  it("returns stale summary on lock held without live scan", async () => {
+    const staleRowData = Array.from({ length: 6 }, (_, i) => ({
       period_id: `period-${i + 1}`,
       period_start: `2026-0${i + 1}-01`,
       period_end: `2026-0${i + 1}-28`,
@@ -117,25 +138,10 @@ describe("GET /api/dashboard/service-timeline", () => {
       expenses: 20,
       net_profit: 30,
     }))
-    let staleCalls = 0
-    const rpc = jest.fn().mockImplementation((name: string) => {
-      if (name === "get_service_dashboard_timeline_from_summary") {
-        return Promise.resolve({ data: [], error: null })
-      }
-      if (name === "get_service_dashboard_timeline_stale_summary") {
-        staleCalls += 1
-        return Promise.resolve({
-          data: staleCalls >= 2 ? staleRows : [],
-          error: null,
-        })
-      }
-      if (name === "try_refresh_service_dashboard_period_summaries") {
-        return Promise.resolve({
-          data: { refreshed: false, lock_held: true, period_count: 0 },
-          error: null,
-        })
-      }
-      return Promise.resolve({ data: null, error: { message: `unexpected ${name}` } })
+    const rpc = mockTimelineRpc({
+      staleRows: (n: number) => (n >= 3 ? staleRowData : []),
+      blockingRefreshCount: 0,
+      tryRefresh: { refreshed: false, lock_held: true, period_count: 0 },
     })
     mockCreateSupabase.mockResolvedValue({
       auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
@@ -151,27 +157,8 @@ describe("GET /api/dashboard/service-timeline", () => {
     expect(body.timeline).toHaveLength(6)
   })
 
-  it("cold start refreshes summary and returns rows", async () => {
-    let freshCalls = 0
-    const rpc = jest.fn().mockImplementation((name: string) => {
-      if (name === "get_service_dashboard_timeline_from_summary") {
-        freshCalls += 1
-        return Promise.resolve({
-          data: freshCalls > 1 ? timelineRows : [],
-          error: null,
-        })
-      }
-      if (name === "get_service_dashboard_timeline_stale_summary") {
-        return Promise.resolve({ data: [], error: null })
-      }
-      if (name === "try_refresh_service_dashboard_period_summaries") {
-        return Promise.resolve({
-          data: { refreshed: true, lock_held: false, period_count: 2 },
-          error: null,
-        })
-      }
-      return Promise.resolve({ data: null, error: null })
-    })
+  it("cold start runs blocking refresh and returns rows", async () => {
+    const rpc = mockTimelineRpc({ blockingRefreshCount: 2 })
     mockCreateSupabase.mockResolvedValue({
       auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
       rpc,
@@ -181,7 +168,7 @@ describe("GET /api/dashboard/service-timeline", () => {
       new NextRequest("http://localhost/api/dashboard/service-timeline?business_id=biz-a&periods=2")
     )
     expect(res.status).toBe(200)
-    expect(rpc).toHaveBeenCalledWith("try_refresh_service_dashboard_period_summaries", {
+    expect(rpc).toHaveBeenCalledWith("refresh_service_dashboard_period_summaries", {
       p_business_id: "biz-a",
       p_periods_limit: 2,
     })

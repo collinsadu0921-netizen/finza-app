@@ -13,7 +13,7 @@ import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { loadOrComputeDashboardClusterCache, loadOrComputeDashboardActivityCache } from "@/lib/server/dashboardClusterCache"
 import { loadServiceDashboardActivityFeed } from "@/lib/server/serviceDashboardActivityLoader"
 import { loadServiceDashboardMetrics } from "@/lib/server/serviceDashboardMetricsLoader"
-import { loadServiceDashboardTimeline } from "@/lib/server/serviceDashboardTimeline"
+import { loadServiceDashboardTimeline, shouldCacheDashboardClusterPayload } from "@/lib/server/serviceDashboardTimeline"
 import { createRouteDiag, isRouteDiagnosticsEnabled, type RouteDiagFields } from "@/lib/server/routeDiagnostics"
 
 const DEFAULT_PERIODS = 12
@@ -30,6 +30,8 @@ export type ServiceDashboardClusterPayload = {
   timeline: Awaited<ReturnType<typeof loadServiceDashboardTimeline>>["timeline"]
   metrics: Awaited<ReturnType<typeof loadServiceDashboardMetrics>>
   activity: { items: Awaited<ReturnType<typeof loadServiceDashboardActivityFeed>>["items"] }
+  timelineSource?: string
+  timelineCacheable?: boolean
 }
 
 async function loadDashboardCluster(
@@ -44,12 +46,13 @@ async function loadDashboardCluster(
   diag: ReturnType<typeof createRouteDiag>
 ): Promise<ServiceDashboardClusterPayload> {
   const tTimeline = performance.now()
-  const { timeline, source: timelineSource } = await loadServiceDashboardTimeline(
+  const timelineResult = await loadServiceDashboardTimeline(
     supabase,
     businessId,
     options.periodsParam,
     diag
   )
+  const { timeline, source: timelineSource } = timelineResult
   devClusterLog(`timeline (${timelineSource})`, tTimeline)
 
   let previousPeriodStart = options.previousPeriodStart
@@ -81,7 +84,13 @@ async function loadDashboardCluster(
   devClusterLog(`activity (${activityCacheSource})`, tActivity)
   diag.step("activity_cache", { source: activityCacheSource })
 
-  return { timeline, metrics, activity }
+  return {
+    timeline,
+    metrics,
+    activity,
+    timelineSource,
+    timelineCacheable: timelineResult.cacheable,
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -138,13 +147,16 @@ export async function GET(request: NextRequest) {
 
     try {
       const { value, source: cacheSource, cache_enabled } =
-        await loadOrComputeDashboardClusterCache(cacheKey, () =>
-          loadDashboardCluster(
-            supabase,
-            businessId,
-            { periodsParam, activityLimit, periodStart, previousPeriodStart },
-            diag
-          )
+        await loadOrComputeDashboardClusterCache(
+          cacheKey,
+          () =>
+            loadDashboardCluster(
+              supabase,
+              businessId,
+              { periodsParam, activityLimit, periodStart, previousPeriodStart },
+              diag
+            ),
+          { shouldStore: shouldCacheDashboardClusterPayload }
         )
 
       diag.step("cache", { cache_source: cacheSource, cache_enabled })

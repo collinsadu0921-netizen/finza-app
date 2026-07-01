@@ -1,7 +1,7 @@
 /**
  * GET /api/dashboard/service-timeline?business_id=...&periods=6
  *
- * Summary-first timeline with circuit breaker (508). No live ledger scan fallback.
+ * Summary-first timeline with circuit breaker (508/509). Controlled live fallback on first load only.
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -10,7 +10,10 @@ export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { loadOrComputeDashboardClusterCache } from "@/lib/server/dashboardClusterCache"
-import { loadServiceDashboardTimeline } from "@/lib/server/serviceDashboardTimeline"
+import {
+  isTimelineResultCacheable,
+  loadServiceDashboardTimeline,
+} from "@/lib/server/serviceDashboardTimeline"
 import { createRouteDiag, isRouteDiagnosticsEnabled } from "@/lib/server/routeDiagnostics"
 
 const DEFAULT_PERIODS = 6
@@ -68,14 +71,17 @@ export async function GET(request: NextRequest) {
     const cacheKey = `timeline|${businessId}|${periodsParam}`
 
     const { value, source: cacheSource, cache_enabled } =
-      await loadOrComputeDashboardClusterCache(cacheKey, () =>
-        loadServiceDashboardTimeline(supabase, businessId, periodsParam, diag)
+      await loadOrComputeDashboardClusterCache(
+        cacheKey,
+        () => loadServiceDashboardTimeline(supabase, businessId, periodsParam, diag),
+        { shouldStore: isTimelineResultCacheable }
       )
 
     diag.step("cache", {
       cache_source: cacheSource,
       cache_enabled,
       timeline_source: value.source,
+      timeline_cacheable: value.cacheable,
     })
     diag.finish(200)
     devServiceTimelineLog("total route", routeT0)
