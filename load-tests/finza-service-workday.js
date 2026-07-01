@@ -124,6 +124,118 @@ function shouldRunReportsPnl() {
   return true
 }
 
+/** Primary business id for all route calls — never derived from a prior profile response in-VU. */
+function resolveBusinessId(session) {
+  const bid = String(session.businessId ?? session.business_id ?? "").trim()
+  if (!bid) {
+    throw new Error("Session missing businessId (required for all isolated route calls)")
+  }
+  return bid
+}
+
+/** Isolated filters skip business_profile in the workload but still need the same auth context. */
+function needsBusinessContextSetup() {
+  if (ROUTE_FILTER === "all" || ROUTE_FILTER === "business_profile") return false
+  return Boolean(ROUTE_FILTER_GROUPS[ROUTE_FILTER])
+}
+
+function buildRequestOptions(session, routeName, extraTags) {
+  const auth = authHeaders(session)
+  return {
+    headers: auth.headers,
+    tags: {
+      ...auth.tags,
+      name: routeName,
+      ...(extraTags || {}),
+    },
+  }
+}
+
+function probeRouteOrThrow(session, routeName, url, fieldCheck) {
+  const res = http.get(url, buildRequestOptions(session, `setup_${routeName}`))
+  if (res.status === 401) {
+    throw new Error(
+      `Setup probe ${routeName} returned 401 Unauthorized. ` +
+        `Refresh load-tests/sessions.staging.json from a 200 JSON cURL on BASE_URL before load test.`
+    )
+  }
+  if (res.status !== 200) {
+    throw new Error(`Setup probe ${routeName} returned status ${res.status} (expected 200)`)
+  }
+  if (fieldCheck) {
+    try {
+      const body = res.json()
+      if (!fieldCheck(body)) {
+        throw new Error(`Setup probe ${routeName} response failed field validation`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`Setup probe ${routeName} invalid JSON or validation: ${msg}`)
+    }
+  }
+}
+
+function runBusinessContextSetup(session) {
+  const bid = resolveBusinessId(session)
+  probeRouteOrThrow(
+    session,
+    "business_profile",
+    `${BASE_URL}/api/business/profile?business_id=${encodeURIComponent(bid)}`,
+    (b) => Boolean(b && b.business && b.business.id)
+  )
+  return bid
+}
+
+function probeIsolatedRouteFilter(session, bid) {
+  if (ROUTE_FILTER === "dashboard_metrics") {
+    probeRouteOrThrow(
+      session,
+      "dashboard_metrics",
+      `${BASE_URL}/api/dashboard/service-metrics?business_id=${encodeURIComponent(bid)}`,
+      (b) => typeof b.revenue === "number"
+    )
+    return
+  }
+  if (ROUTE_FILTER === "dashboard_timeline") {
+    probeRouteOrThrow(
+      session,
+      "dashboard_timeline",
+      `${BASE_URL}/api/dashboard/service-timeline?business_id=${encodeURIComponent(bid)}&periods=6`,
+      (b) => Array.isArray(b.timeline)
+    )
+    return
+  }
+  if (ROUTE_FILTER === "dashboard_activity") {
+    probeRouteOrThrow(
+      session,
+      "dashboard_activity",
+      `${BASE_URL}/api/dashboard/service-activity?business_id=${encodeURIComponent(bid)}&limit=10`,
+      (b) => Array.isArray(b.items)
+    )
+    return
+  }
+  if (ROUTE_FILTER === "dashboard") {
+    probeRouteOrThrow(
+      session,
+      "dashboard_metrics",
+      `${BASE_URL}/api/dashboard/service-metrics?business_id=${encodeURIComponent(bid)}`,
+      (b) => typeof b.revenue === "number"
+    )
+    probeRouteOrThrow(
+      session,
+      "dashboard_timeline",
+      `${BASE_URL}/api/dashboard/service-timeline?business_id=${encodeURIComponent(bid)}&periods=6`,
+      (b) => Array.isArray(b.timeline)
+    )
+    probeRouteOrThrow(
+      session,
+      "dashboard_activity",
+      `${BASE_URL}/api/dashboard/service-activity?business_id=${encodeURIComponent(bid)}&limit=10`,
+      (b) => Array.isArray(b.items)
+    )
+  }
+}
+
 /** Vercel Deployment Protection bypass (Preview only). Never logged. */
 const VERCEL_AUTOMATION_BYPASS_SECRET = String(
   __ENV.VERCEL_AUTOMATION_BYPASS_SECRET || ""
@@ -532,14 +644,38 @@ export function setup() {
   console.log(
     `[finza-k6]   sb SSR cookie:    ${hasSupabaseSsrAuthCookie(rawCookie) ? "present" : "synthesized-if-JWT"}`
   )
+
+  let setupBusinessId = null
+  if (needsBusinessContextSetup() && sessions.length > 0) {
+    const session = sessions[0]
+    setupBusinessId = runBusinessContextSetup(session)
+    console.log(`[finza-k6]   setup business_id: ${setupBusinessId}`)
+    probeIsolatedRouteFilter(session, setupBusinessId)
+    console.log("[finza-k6]   setup probes:     passed")
+  }
+
   console.log("[finza-k6] ── starting traffic ──")
-  return { scenario: selectedScenario, sessions: sessions.length }
+  return { scenario: selectedScenario, sessions: sessions.length, setupBusinessId }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function sessionForVu(vu) {
   return sessions[(vu - 1) % sessions.length]
+}
+
+function accessTokenFromSbCookie(cookieHeader) {
+  const match = String(cookieHeader || "").match(/sb-[a-z0-9]+-auth-token(?:\.\d+)?=([^;\s]+)/i)
+  if (!match) return ""
+  const raw = match[1]
+  if (!raw.startsWith("base64-")) return ""
+  try {
+    const sessionJson = JSON.parse(encoding.b64decode(raw.slice(7), "rawurl", "s"))
+    const token = String(sessionJson.access_token || "").trim()
+    return token.startsWith("eyJ") ? token : ""
+  } catch {
+    return ""
+  }
 }
 
 function authHeaders(session) {
@@ -549,7 +685,11 @@ function authHeaders(session) {
     Cookie: cookieHeader,
     Accept: "application/json",
   }
-  const bearerAuth = resolveAuthorizationHeader(session, rawCookie)
+  let bearerAuth = resolveAuthorizationHeader(session, rawCookie)
+  if (!bearerAuth) {
+    const token = accessTokenFromSbCookie(cookieHeader)
+    if (token) bearerAuth = `Bearer ${token}`
+  }
   if (bearerAuth) {
     headers.Authorization = bearerAuth
   }
@@ -612,10 +752,7 @@ function logNon200Response(name, res) {
 }
 
 function getJson(name, url, session, fieldChecks) {
-  const res = http.get(url, {
-    ...authHeaders(session),
-    tags: { name },
-  })
+  const res = http.get(url, buildRequestOptions(session, name))
 
   if (res.status !== 200) {
     logNon200Response(name, res)
@@ -644,13 +781,13 @@ function getJson(name, url, session, fieldChecks) {
 
 export function workdayFlow() {
   const session = sessionForVu(__VU)
-  const bid = session.businessId
+  const bid = resolveBusinessId(session)
 
   if (shouldRunRoute("business_profile")) {
     group("business_session", function () {
       getJson(
         "business_profile",
-        `${BASE_URL}/api/business/profile?business_id=${bid}`,
+        `${BASE_URL}/api/business/profile?business_id=${encodeURIComponent(bid)}`,
         session,
         {
           "profile has business.id": (b) => b && b.business && b.business.id === bid,
@@ -668,7 +805,7 @@ export function workdayFlow() {
       if (shouldRunRoute("dashboard_metrics")) {
         getJson(
           "dashboard_metrics",
-          `${BASE_URL}/api/dashboard/service-metrics?business_id=${bid}`,
+          `${BASE_URL}/api/dashboard/service-metrics?business_id=${encodeURIComponent(bid)}`,
           session,
           {
             "metrics has revenue": (b) => typeof b.revenue === "number",
@@ -681,7 +818,7 @@ export function workdayFlow() {
       if (shouldRunRoute("dashboard_timeline")) {
         getJson(
           "dashboard_timeline",
-          `${BASE_URL}/api/dashboard/service-timeline?business_id=${bid}&periods=6`,
+          `${BASE_URL}/api/dashboard/service-timeline?business_id=${encodeURIComponent(bid)}&periods=6`,
           session,
           {
             "timeline is array": (b) => Array.isArray(b.timeline),
@@ -692,7 +829,7 @@ export function workdayFlow() {
       if (shouldRunRoute("dashboard_activity")) {
         getJson(
           "dashboard_activity",
-          `${BASE_URL}/api/dashboard/service-activity?business_id=${bid}&limit=10`,
+          `${BASE_URL}/api/dashboard/service-activity?business_id=${encodeURIComponent(bid)}&limit=10`,
           session,
           {
             "activity has items": (b) => Array.isArray(b.items),
@@ -707,7 +844,7 @@ export function workdayFlow() {
       if (shouldRunRoute("invoices_list")) {
         getJson(
           "invoices_list",
-          `${BASE_URL}/api/invoices/list?business_id=${bid}&page=1&limit=25`,
+          `${BASE_URL}/api/invoices/list?business_id=${encodeURIComponent(bid)}&page=1&limit=25`,
           session,
           {
             "invoices array": (b) => Array.isArray(b.invoices),
@@ -721,7 +858,7 @@ export function workdayFlow() {
       if (shouldRunRoute("invoices_overdue")) {
         getJson(
           "invoices_overdue",
-          `${BASE_URL}/api/invoices/list?business_id=${bid}&status=overdue&page=1&limit=25`,
+          `${BASE_URL}/api/invoices/list?business_id=${encodeURIComponent(bid)}&status=overdue&page=1&limit=25`,
           session,
           {
             "overdue array": (b) => Array.isArray(b.invoices),
@@ -738,7 +875,7 @@ export function workdayFlow() {
       if (shouldRunRoute("bills_list_paginated")) {
         getJson(
           "bills_list_paginated",
-          `${BASE_URL}/api/bills/list?business_id=${bid}&page=1&limit=50`,
+          `${BASE_URL}/api/bills/list?business_id=${encodeURIComponent(bid)}&page=1&limit=50`,
           session,
           {
             "bills array": (b) => Array.isArray(b.bills),
@@ -751,7 +888,7 @@ export function workdayFlow() {
       if (shouldRunRoute("bills_list_default_bounded")) {
         getJson(
           "bills_list_default_bounded",
-          `${BASE_URL}/api/bills/list?business_id=${bid}`,
+          `${BASE_URL}/api/bills/list?business_id=${encodeURIComponent(bid)}`,
           session,
           {
             "bills default pagination": (b) => b.pagination && b.pagination.limit <= 100,
@@ -774,7 +911,7 @@ export function workdayFlow() {
     group("reports", function () {
       getJson(
         "reports_pnl",
-        `${BASE_URL}/api/accounting/reports/profit-and-loss?business_id=${bid}`,
+        `${BASE_URL}/api/accounting/reports/profit-and-loss?business_id=${encodeURIComponent(bid)}`,
         session,
         {
           "pnl has sections or period": (b) => b.sections != null || b.period != null,

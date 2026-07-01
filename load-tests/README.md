@@ -160,6 +160,15 @@ $env:ROUTE_FILTER = "dashboard_activity"
 
 Do **not** run `workday_100` or `workday_200` until `workday_50` passes for the target route group.
 
+### Isolated route setup (not counted in workload)
+
+When `ROUTE_FILTER` is not `all` or `business_profile`, k6 `setup()` runs once before VUs start:
+
+1. `GET /api/business/profile?business_id=<session.businessId>` — validates auth + business context (tag: `setup_business_profile`)
+2. A probe for the isolated route(s) — e.g. `setup_dashboard_activity` for `ROUTE_FILTER=dashboard_activity`
+
+If either returns **401**, the harness aborts before load with a clear message to refresh `sessions.staging.json`. Isolated workload iterations use the same `authHeaders(session)` and `session.businessId` as the `all` flow.
+
 ## Local validation (no staging traffic)
 
 Confirm the harness fails safely with placeholder data:
