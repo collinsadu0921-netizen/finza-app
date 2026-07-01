@@ -95,7 +95,7 @@ const ROUTE_FILTER_GROUPS = {
   dashboard_metrics: new Set(["dashboard_metrics"]),
   dashboard_timeline: new Set(["dashboard_timeline"]),
   dashboard_activity: new Set(["dashboard_activity"]),
-  dashboard: new Set(["dashboard_metrics", "dashboard_timeline", "dashboard_activity"]),
+  dashboard: new Set(["dashboard_cluster"]),
   reports: new Set(["reports_pnl"]),
   lists: new Set([
     "invoices_list",
@@ -217,21 +217,12 @@ function probeIsolatedRouteFilter(session, bid) {
   if (ROUTE_FILTER === "dashboard") {
     probeRouteOrThrow(
       session,
-      "dashboard_metrics",
-      `${BASE_URL}/api/dashboard/service-metrics?business_id=${encodeURIComponent(bid)}`,
-      (b) => typeof b.revenue === "number"
-    )
-    probeRouteOrThrow(
-      session,
-      "dashboard_timeline",
-      `${BASE_URL}/api/dashboard/service-timeline?business_id=${encodeURIComponent(bid)}&periods=6`,
-      (b) => Array.isArray(b.timeline)
-    )
-    probeRouteOrThrow(
-      session,
-      "dashboard_activity",
-      `${BASE_URL}/api/dashboard/service-activity?business_id=${encodeURIComponent(bid)}&limit=10`,
-      (b) => Array.isArray(b.items)
+      "dashboard_cluster",
+      `${BASE_URL}/api/dashboard/service-cluster?business_id=${encodeURIComponent(bid)}&periods=6&activity_limit=10`,
+      (b) =>
+        Array.isArray(b.timeline) &&
+        typeof b.metrics?.revenue === "number" &&
+        Array.isArray(b.activity?.items)
     )
   }
 }
@@ -571,6 +562,7 @@ const scenarioDefinitions = {
 
 const defaultThresholds = {
   http_req_failed: ["rate<0.01"],
+  "http_req_duration{name:dashboard_cluster}": ["p(95)<20000"],
   "http_req_duration{name:dashboard_metrics}": ["p(95)<8000"],
   "http_req_duration{name:dashboard_timeline}": ["p(95)<15000"],
   "http_req_duration{name:invoices_overdue}": ["p(95)<5000"],
@@ -797,11 +789,26 @@ export function workdayFlow() {
   }
 
   if (
+    shouldRunRoute("dashboard_cluster") ||
     shouldRunRoute("dashboard_metrics") ||
     shouldRunRoute("dashboard_timeline") ||
     shouldRunRoute("dashboard_activity")
   ) {
     group("dashboard", function () {
+      if (ROUTE_FILTER === "all" || ROUTE_FILTER === "dashboard") {
+        getJson(
+          "dashboard_cluster",
+          `${BASE_URL}/api/dashboard/service-cluster?business_id=${encodeURIComponent(bid)}&periods=6&activity_limit=10`,
+          session,
+          {
+            "cluster has timeline": (b) => Array.isArray(b.timeline),
+            "cluster has metrics revenue": (b) => typeof b.metrics?.revenue === "number",
+            "cluster has activity items": (b) => Array.isArray(b.activity?.items),
+          }
+        )
+        return
+      }
+
       if (shouldRunRoute("dashboard_metrics")) {
         getJson(
           "dashboard_metrics",

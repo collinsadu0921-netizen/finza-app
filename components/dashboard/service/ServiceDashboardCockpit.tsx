@@ -124,6 +124,43 @@ const QUICK_ACTIONS = [
   { label: "View Reports", href: "/service/reports/profit-and-loss", icon: "reports" as const },
 ]
 
+async function fetchDashboardCluster(
+  businessId: string,
+  options: { periodStart?: string | null; previousPeriodStart?: string | null },
+  signal?: AbortSignal
+): Promise<{
+  timeline: TimelineItem[]
+  metrics: Metrics
+  activity: { items: ActivityItem[] }
+} | null> {
+  const params = new URLSearchParams({
+    business_id: businessId,
+    periods: "12",
+    activity_limit: "10",
+  })
+  if (options.periodStart) {
+    params.set("period_start", options.periodStart)
+    if (options.previousPeriodStart) {
+      params.set("previous_period_start", options.previousPeriodStart)
+    }
+  }
+  const res = await fetch(`/api/dashboard/service-cluster?${params.toString()}`, {
+    signal,
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    let errMessage = `Request failed (${res.status})`
+    try {
+      const body = await res.json()
+      errMessage = body?.error ?? body?.message ?? errMessage
+    } catch {
+      /* ignore */
+    }
+    throw new Error(errMessage)
+  }
+  return res.json()
+}
+
 async function fetchTimelineData(
   businessId: string,
   signal?: AbortSignal
@@ -275,95 +312,145 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     }
 
     try {
-      const needsTimelineBeforeMetrics =
-        selectedPeriodStart != null && selectedPeriodStart !== ""
+      if (SERVICE_ANALYTICS_V2) {
+        const needsTimelineBeforeMetrics =
+          selectedPeriodStart != null && selectedPeriodStart !== ""
 
-      if (needsTimelineBeforeMetrics) {
-        const tl = await runTimed("timeline fetch", () => fetchTimelineData(businessId, signal))
-        if (!isLatest()) return
+        if (needsTimelineBeforeMetrics) {
+          const tl = await runTimed("timeline fetch", () => fetchTimelineData(businessId, signal))
+          if (!isLatest()) return
 
-        setTimeline(tl)
-        setLoadingTimeline(false)
+          setTimeline(tl)
+          setLoadingTimeline(false)
 
-        const params = new URLSearchParams({ business_id: businessId })
-        params.set("period_start", selectedPeriodStart!)
-        const idx = tl.findIndex((t) => t.period_start === selectedPeriodStart)
-        if (idx > 0) {
-          params.set("previous_period_start", tl[idx - 1].period_start)
+          const params = new URLSearchParams({ business_id: businessId })
+          params.set("period_start", selectedPeriodStart!)
+          const idx = tl.findIndex((t) => t.period_start === selectedPeriodStart)
+          if (idx > 0) {
+            params.set("previous_period_start", tl[idx - 1].period_start)
+          }
+
+          const [metricsSettled, activitySettled, overdueSettled] = await Promise.allSettled([
+            runTimed("service-metrics fetch", () => fetchMetricsPayload(params, signal)),
+            runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
+            runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
+          ])
+
+          if (!isLatest()) return
+
+          setLoadingMetrics(false)
+          if (metricsSettled.status === "fulfilled") {
+            applyMetricsResult(metricsSettled.value)
+          } else if (!isAbortOrCancelled(metricsSettled.reason)) {
+            setMetrics(null)
+            setMetricsError(
+              metricsSettled.reason instanceof Error
+                ? metricsSettled.reason.message
+                : "Failed to load metrics"
+            )
+          }
+
+          setLoadingActivity(false)
+          if (activitySettled.status === "fulfilled") {
+            setActivityItems(activitySettled.value)
+          } else if (!isAbortOrCancelled(activitySettled.reason)) {
+            setActivityItems([])
+          }
+
+          setLoadingOverdue(false)
+          if (overdueSettled.status === "fulfilled") {
+            setOverdueCount(overdueSettled.value)
+          } else if (!isAbortOrCancelled(overdueSettled.reason)) {
+            setOverdueCount(null)
+          }
+        } else {
+          const baseParams = new URLSearchParams({ business_id: businessId })
+          const [timelineSettled, metricsSettled, activitySettled, overdueSettled] =
+            await Promise.allSettled([
+              runTimed("timeline fetch", () => fetchTimelineData(businessId, signal)),
+              runTimed("service-metrics fetch", () => fetchMetricsPayload(baseParams, signal)),
+              runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
+              runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
+            ])
+
+          if (!isLatest()) return
+
+          setLoadingTimeline(false)
+          if (timelineSettled.status === "fulfilled") {
+            setTimeline(timelineSettled.value)
+          } else if (!isAbortOrCancelled(timelineSettled.reason)) {
+            setTimeline([])
+          }
+
+          setLoadingMetrics(false)
+          if (metricsSettled.status === "fulfilled") {
+            applyMetricsResult(metricsSettled.value)
+          } else if (!isAbortOrCancelled(metricsSettled.reason)) {
+            setMetrics(null)
+            setMetricsError(
+              metricsSettled.reason instanceof Error
+                ? metricsSettled.reason.message
+                : "Failed to load metrics"
+            )
+          }
+
+          setLoadingActivity(false)
+          if (activitySettled.status === "fulfilled") {
+            setActivityItems(activitySettled.value)
+          } else if (!isAbortOrCancelled(activitySettled.reason)) {
+            setActivityItems([])
+          }
+
+          setLoadingOverdue(false)
+          if (overdueSettled.status === "fulfilled") {
+            setOverdueCount(overdueSettled.value)
+          } else if (!isAbortOrCancelled(overdueSettled.reason)) {
+            setOverdueCount(null)
+          }
         }
-
-        const [metricsSettled, activitySettled, overdueSettled] = await Promise.allSettled([
-          runTimed("service-metrics fetch", () => fetchMetricsPayload(params, signal)),
-          runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
+      } else {
+        const [clusterSettled, overdueSettled] = await Promise.allSettled([
+          runTimed("service-cluster fetch", () =>
+            fetchDashboardCluster(
+              businessId,
+              {
+                periodStart:
+                  selectedPeriodStart != null && selectedPeriodStart !== ""
+                    ? selectedPeriodStart
+                    : undefined,
+              },
+              signal
+            )
+          ),
           runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
         ])
 
         if (!isLatest()) return
 
-        setLoadingMetrics(false)
-        if (metricsSettled.status === "fulfilled") {
-          applyMetricsResult(metricsSettled.value)
-        } else if (!isAbortOrCancelled(metricsSettled.reason)) {
-          setMetrics(null)
-          setMetricsError(
-            metricsSettled.reason instanceof Error
-              ? metricsSettled.reason.message
-              : "Failed to load metrics"
-          )
-        }
-
-        setLoadingActivity(false)
-        if (activitySettled.status === "fulfilled") {
-          setActivityItems(activitySettled.value)
-        } else if (!isAbortOrCancelled(activitySettled.reason)) {
-          setActivityItems([])
-        }
-
-        setLoadingOverdue(false)
-        if (overdueSettled.status === "fulfilled") {
-          setOverdueCount(overdueSettled.value)
-        } else if (!isAbortOrCancelled(overdueSettled.reason)) {
-          setOverdueCount(null)
-        }
-      } else {
-        const baseParams = new URLSearchParams({ business_id: businessId })
-        const [timelineSettled, metricsSettled, activitySettled, overdueSettled] =
-          await Promise.allSettled([
-            runTimed("timeline fetch", () => fetchTimelineData(businessId, signal)),
-            runTimed("service-metrics fetch", () => fetchMetricsPayload(baseParams, signal)),
-            runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
-            runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
-          ])
-
-        if (!isLatest()) return
-
         setLoadingTimeline(false)
-        if (timelineSettled.status === "fulfilled") {
-          setTimeline(timelineSettled.value)
-        } else if (!isAbortOrCancelled(timelineSettled.reason)) {
-          setTimeline([])
-        }
-
         setLoadingMetrics(false)
-        if (metricsSettled.status === "fulfilled") {
-          applyMetricsResult(metricsSettled.value)
-        } else if (!isAbortOrCancelled(metricsSettled.reason)) {
+        setLoadingActivity(false)
+        setLoadingOverdue(false)
+
+        if (clusterSettled.status === "fulfilled" && clusterSettled.value) {
+          setTimeline(clusterSettled.value.timeline)
+          setMetrics(clusterSettled.value.metrics)
+          setMetricsError(null)
+          setActivityItems(clusterSettled.value.activity.items ?? [])
+        } else if (
+          clusterSettled.status === "rejected" &&
+          !isAbortOrCancelled(clusterSettled.reason)
+        ) {
           setMetrics(null)
+          setTimeline([])
+          setActivityItems([])
           setMetricsError(
-            metricsSettled.reason instanceof Error
-              ? metricsSettled.reason.message
-              : "Failed to load metrics"
+            clusterSettled.reason instanceof Error
+              ? clusterSettled.reason.message
+              : "Failed to load dashboard"
           )
         }
 
-        setLoadingActivity(false)
-        if (activitySettled.status === "fulfilled") {
-          setActivityItems(activitySettled.value)
-        } else if (!isAbortOrCancelled(activitySettled.reason)) {
-          setActivityItems([])
-        }
-
-        setLoadingOverdue(false)
         if (overdueSettled.status === "fulfilled") {
           setOverdueCount(overdueSettled.value)
         } else if (!isAbortOrCancelled(overdueSettled.reason)) {
