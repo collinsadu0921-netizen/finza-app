@@ -7,7 +7,7 @@ Repeatable API load tests for the **service workspace** — used to verify P0 sc
 ## Prerequisites
 
 1. [k6 installed](https://grafana.com/docs/k6/latest/set-up/install-k6/) — on Windows often at `C:\Program Files\k6\k6.exe` (may not be on PATH)
-2. Staging app deployed with migrations **497–506** applied — see `docs/staging/setup.md` and `docs/scalability/p0-migration-readiness.md`
+2. Staging app deployed with migrations **497–507** applied — see `docs/staging/setup.md` and `docs/scalability/p0-migration-readiness.md`
 3. Heavy tenant seeded — see `docs/scalability/load-test-seed-plan.md`
 4. Session file copied from `sessions.example.json` → `sessions.staging.json` (gitignored)
 
