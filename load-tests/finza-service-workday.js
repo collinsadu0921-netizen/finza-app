@@ -2,7 +2,8 @@
  * Finza service-workday load test (k6)
  *
  * Simulates Ghana SME service workspace API traffic during a workday.
- * Exactly ONE scenario runs per invocation — set SCENARIO (never rely on CLI --scenario).
+ * Exactly ONE logical scenario runs per invocation — set SCENARIO (never rely on CLI --scenario).
+ * Exception: workday_50_plus_reports_5 exports two concurrent k6 scenarios (operational + reports).
  *
  * Paths in SESSIONS_JSON are relative to this file (load-tests/), e.g.:
  *   -e SESSIONS_JSON=./sessions.staging.json
@@ -24,7 +25,14 @@ import { SharedArray } from "k6/data"
 
 // ── Scenario selection (exactly one per run) ────────────────────────────────
 
-const ALLOWED_SCENARIOS = ["smoke", "workday_50", "workday_100", "workday_200", "stress_500"]
+const ALLOWED_SCENARIOS = [
+  "smoke",
+  "workday_50",
+  "workday_50_plus_reports_5",
+  "workday_100",
+  "workday_200",
+  "stress_500",
+]
 
 const selectedScenario = (__ENV.SCENARIO || "smoke").trim()
 
@@ -110,7 +118,55 @@ function parseWorkdayReportsEveryN() {
 
 const WORKDAY_REPORTS_EVERY_N = parseWorkdayReportsEveryN()
 
+const MIXED_SCENARIO = selectedScenario === "workday_50_plus_reports_5"
+
+/** Concurrent reports VUs for workday_50_plus_reports_5 (separate journey). */
+const REPORTS_VUS = parsePositiveIntEnv("REPORTS_VUS", 5)
+
+/** Seconds between report views in the reports journey (random uniform in range). */
+const REPORTS_SLEEP_MIN_SEC = parsePositiveNumberEnv("REPORTS_SLEEP_MIN_SEC", 20)
+const REPORTS_SLEEP_MAX_SEC = parsePositiveNumberEnv("REPORTS_SLEEP_MAX_SEC", 60)
+
+if (REPORTS_SLEEP_MAX_SEC < REPORTS_SLEEP_MIN_SEC) {
+  throw new Error(
+    `REPORTS_SLEEP_MAX_SEC (${REPORTS_SLEEP_MAX_SEC}) must be >= REPORTS_SLEEP_MIN_SEC (${REPORTS_SLEEP_MIN_SEC})`
+  )
+}
+
+if (MIXED_SCENARIO && ROUTE_FILTER !== "all") {
+  throw new Error(
+    `SCENARIO=workday_50_plus_reports_5 requires ROUTE_FILTER=all (got "${ROUTE_FILTER}"). ` +
+      `Use SCENARIO=workday_50 with ROUTE_FILTER=reports for reports isolation.`
+  )
+}
+
+function parsePositiveIntEnv(name, defaultValue) {
+  const raw = String(__ENV[name] ?? "").trim()
+  if (!raw) return defaultValue
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+    throw new Error(`Invalid ${name}="${raw}". Use a positive integer.`)
+  }
+  return n
+}
+
+function parsePositiveNumberEnv(name, defaultValue) {
+  const raw = String(__ENV[name] ?? "").trim()
+  if (!raw) return defaultValue
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`Invalid ${name}="${raw}". Use a non-negative number.`)
+  }
+  return n
+}
+
 function describeReportsWorkload() {
+  if (MIXED_SCENARIO) {
+    return (
+      `separate journey — operational VUs exclude reports; ` +
+      `${REPORTS_VUS} report VU(s) with ${REPORTS_SLEEP_MIN_SEC}–${REPORTS_SLEEP_MAX_SEC}s sleep`
+    )
+  }
   if (ROUTE_FILTER === "reports") return "isolation — every iteration"
   if (ROUTE_FILTER !== "all") return "n/a (ROUTE_FILTER does not include reports)"
   if (selectedScenario === "smoke") return "smoke — every iteration"
@@ -541,6 +597,20 @@ const sessions = new SharedArray("sessions", function () {
 
 // ── Scenario definitions (only selectedScenario is exported in options) ───────
 
+const WORKDAY_50_STAGES = [
+  { duration: "2m", target: 50 },
+  { duration: "5m", target: 50 },
+  { duration: "2m", target: 0 },
+]
+
+function reportsJourneyStages(vus) {
+  return [
+    { duration: "2m", target: vus },
+    { duration: "5m", target: vus },
+    { duration: "2m", target: 0 },
+  ]
+}
+
 const scenarioDefinitions = {
   smoke: {
     executor: "shared-iterations",
@@ -552,13 +622,25 @@ const scenarioDefinitions = {
   workday_50: {
     executor: "ramping-vus",
     startVUs: 0,
-    stages: [
-      { duration: "2m", target: 50 },
-      { duration: "5m", target: 50 },
-      { duration: "2m", target: 0 },
-    ],
+    stages: WORKDAY_50_STAGES,
     gracefulRampDown: "30s",
     exec: "workdayFlow",
+  },
+  workday_50_plus_reports_5: {
+    operational: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: WORKDAY_50_STAGES,
+      gracefulRampDown: "30s",
+      exec: "operationalWorkdayFlow",
+    },
+    reports: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: reportsJourneyStages(REPORTS_VUS),
+      gracefulRampDown: "30s",
+      exec: "reportsJourney",
+    },
   },
   workday_100: {
     executor: "ramping-vus",
@@ -614,6 +696,12 @@ const thresholdsByScenario = {
     ...defaultThresholds,
     http_req_duration: ["p(95)<2000"],
   },
+  workday_50_plus_reports_5: {
+    ...defaultThresholds,
+    http_req_failed: ["rate<0.01"],
+    // No global http_req_duration — operational and report journeys have different
+    // latency profiles; judge health via per-route thresholds below.
+  },
   workday_100: {
     ...defaultThresholds,
     http_req_duration: ["p(95)<3000"],
@@ -629,11 +717,21 @@ const thresholdsByScenario = {
   },
 }
 
-export const options = {
-  scenarios: {
-    [selectedScenario]: scenarioDefinitions[selectedScenario],
-  },
-  thresholds: thresholdsByScenario[selectedScenario] || defaultThresholds,
+export const options = buildK6Options()
+
+function buildK6Options() {
+  if (MIXED_SCENARIO) {
+    return {
+      scenarios: scenarioDefinitions.workday_50_plus_reports_5,
+      thresholds: thresholdsByScenario.workday_50_plus_reports_5,
+    }
+  }
+  return {
+    scenarios: {
+      [selectedScenario]: scenarioDefinitions[selectedScenario],
+    },
+    thresholds: thresholdsByScenario[selectedScenario] || defaultThresholds,
+  }
 }
 
 export function setup() {
@@ -648,13 +746,22 @@ export function setup() {
         ? 1
         : selectedScenario === "workday_50"
           ? 50
-          : selectedScenario === "workday_100"
-            ? 100
-            : selectedScenario === "workday_200"
-              ? 200
-              : 500
+          : selectedScenario === "workday_50_plus_reports_5"
+            ? `50 operational + ${REPORTS_VUS} reports`
+            : selectedScenario === "workday_100"
+              ? 100
+              : selectedScenario === "workday_200"
+                ? 200
+                : 500
     }`
   )
+  if (MIXED_SCENARIO) {
+    console.log("[finza-k6]   operational VUs:  50 (workday journey, no reports_pnl)")
+    console.log(`[finza-k6]   reports VUs:      ${REPORTS_VUS} (separate journey)`)
+    console.log(
+      `[finza-k6]   reports sleep:    ${REPORTS_SLEEP_MIN_SEC}–${REPORTS_SLEEP_MAX_SEC}s between views`
+    )
+  }
   console.log(
     `[finza-k6]   Vercel bypass:    ${VERCEL_BYPASS_ENABLED ? "enabled" : "disabled"}`
   )
@@ -810,7 +917,7 @@ function getJson(name, url, session, fieldChecks) {
 
 // ── Main flow ───────────────────────────────────────────────────────────────
 
-export function workdayFlow() {
+function runWorkdayFlow({ skipReports = false } = {}) {
   const session = sessionForVu(__VU)
   const bid = resolveBusinessId(session)
 
@@ -953,7 +1060,7 @@ export function workdayFlow() {
     })
   }
 
-  if (shouldRunReportsPnl()) {
+  if (!skipReports && shouldRunReportsPnl()) {
     group("reports", function () {
       getJson(
         "reports_pnl",
@@ -966,7 +1073,44 @@ export function workdayFlow() {
     })
   }
 
-  if (selectedScenario !== "smoke") {
+  if (selectedScenario !== "smoke" && !MIXED_SCENARIO) {
     sleep(1 + Math.random() * 3)
   }
+}
+
+export function workdayFlow() {
+  runWorkdayFlow()
+}
+
+/** Operational journey for workday_50_plus_reports_5 — same routes as workday_50 all, no reports. */
+export function operationalWorkdayFlow() {
+  runWorkdayFlow({ skipReports: true })
+  sleep(1 + Math.random() * 3)
+}
+
+/** Reports-only journey with paced sleeps — separate concurrent users, not inside workday loop. */
+export function reportsJourney() {
+  const session = sessionForVu(__VU)
+  const bid = resolveBusinessId(session)
+
+  // Desync report VUs so they do not burst in lockstep after ramp-up.
+  if (__ITER === 0) {
+    sleep(Math.random() * Math.min(10, REPORTS_SLEEP_MIN_SEC))
+  }
+
+  group("reports", function () {
+    getJson(
+      "reports_pnl",
+      `${BASE_URL}/api/accounting/reports/profit-and-loss?business_id=${encodeURIComponent(bid)}`,
+      session,
+      {
+        "pnl has sections or period": (b) => b.sections != null || b.period != null,
+      }
+    )
+  })
+
+  sleep(
+    REPORTS_SLEEP_MIN_SEC +
+      Math.random() * Math.max(0, REPORTS_SLEEP_MAX_SEC - REPORTS_SLEEP_MIN_SEC)
+  )
 }

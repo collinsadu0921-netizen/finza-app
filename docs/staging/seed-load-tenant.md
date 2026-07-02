@@ -118,4 +118,4 @@ Delete the fake tenant by `business_id` on staging only, or drop/recreate stagin
 1. Run SQL smoke from [`setup.md`](./setup.md).
 2. Update `load-tests/sessions.staging.json` with staging `businessId`.
 3. k6 smoke against staging URL only.
-4. `workday_50` operational gate: `ROUTE_FILTER=all` + `WORKDAY_SKIP_REPORTS=1` (see `load-tests/README.md` for reports isolation and sampled full runs).
+4. `workday_50` operational gate: `WORKDAY_SKIP_REPORTS=1` (proven). Realistic mixed gate: `SCENARIO=workday_50_plus_reports_5` (see `load-tests/README.md`).
