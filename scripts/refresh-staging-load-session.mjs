@@ -132,8 +132,28 @@ function buildSessionFile(sessionPayload, existingCookie) {
   ]
 }
 
+function resolveProbeBusinessId(session) {
+  const fromSession = String(session?.businessId ?? session?.business_id ?? "").trim()
+  if (fromSession) return fromSession
+  return LOAD_BUSINESS_ID
+}
+
+/** Redacted JWT exp check — never logs token values. */
+function sessionAuthExpired(session) {
+  const bearer = String(session?.authorization ?? "").replace(/^Bearer\s+/i, "").trim()
+  if (!bearer.startsWith("eyJ")) return true
+  try {
+    const payload = JSON.parse(Buffer.from(bearer.split(".")[1], "base64url").toString("utf8"))
+    if (typeof payload.exp !== "number") return true
+    return Date.now() >= payload.exp * 1000
+  } catch {
+    return true
+  }
+}
+
 function writeMetricsCurl(session) {
-  const apiUrl = `${PREVIEW_BASE.replace(/\/$/, "")}/api/dashboard/service-metrics?business_id=${encodeURIComponent(LOAD_BUSINESS_ID)}`
+  const businessId = resolveProbeBusinessId(session)
+  const apiUrl = `${PREVIEW_BASE.replace(/\/$/, "")}/api/dashboard/service-metrics?business_id=${encodeURIComponent(businessId)}`
   const lines = [
     `curl '${apiUrl}' \\`,
     `  -H 'accept: application/json' \\`,
@@ -145,6 +165,14 @@ function writeMetricsCurl(session) {
 }
 
 async function probeEndpoints(session) {
+  if (sessionAuthExpired(session)) {
+    fail(
+      "Session JWT is missing or expired. Run without --probe to mint a fresh session: " +
+        "node scripts/refresh-staging-load-session.mjs"
+    )
+  }
+
+  const businessId = resolveProbeBusinessId(session)
   const base = PREVIEW_BASE.replace(/\/$/, "")
   const headers = {
     Cookie: session.cookie,
@@ -152,8 +180,8 @@ async function probeEndpoints(session) {
     Authorization: session.authorization,
   }
   const urls = [
-    `${base}/api/business/profile?business_id=${encodeURIComponent(LOAD_BUSINESS_ID)}`,
-    `${base}/api/dashboard/service-cluster?business_id=${encodeURIComponent(LOAD_BUSINESS_ID)}&periods=6&activity_limit=10`,
+    `${base}/api/business/profile?business_id=${encodeURIComponent(businessId)}`,
+    `${base}/api/dashboard/service-cluster?business_id=${encodeURIComponent(businessId)}&periods=6&activity_limit=10`,
   ]
   for (const url of urls) {
     const res = await fetch(url, { headers })
