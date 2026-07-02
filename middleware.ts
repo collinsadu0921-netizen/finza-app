@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { createServerClient } from "@supabase/ssr"
+import {
+  resolveAuthenticatedApiUser,
+} from "@/lib/server/resolveAuthenticatedApiUser"
 
 /**
  * Accounting workspace middleware.
@@ -104,23 +107,30 @@ export async function middleware(request: NextRequest) {
     // refresh and writes updated cookies back through the setAll callback.
     const supabase = createSupabaseForMiddleware(response, request)
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const isApiRoute = pathname.startsWith("/api/")
 
-    if (!user) {
-      // API routes: return 401 so clients can detect unauthenticated state.
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (isApiRoute) {
+      // API: session-first — avoids duplicate Auth server getUser() pressure under load.
+      const cookieHeader = request.headers.get("cookie")
+      const auth = await resolveAuthenticatedApiUser(supabase, { cookieHeader })
+      if (!auth.ok) {
+        return NextResponse.json(
+          { error: auth.error, auth_failure_stage: auth.authFailureStage },
+          { status: auth.status }
+        )
       }
-      // Page routes: redirect to login, preserving the intended destination.
-      const loginUrl = new URL("/login", request.url)
-      loginUrl.searchParams.set("next", pathname)
-      return NextResponse.redirect(loginUrl)
+    } else {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        const loginUrl = new URL("/login", request.url)
+        loginUrl.searchParams.set("next", pathname)
+        return NextResponse.redirect(loginUrl)
+      }
     }
 
-    // User is authenticated — return the response with injected headers and
-    // any refreshed session cookies.
     return response
   }
 
