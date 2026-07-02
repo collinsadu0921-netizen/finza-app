@@ -90,6 +90,49 @@ const WORKDAY_SKIP_REPORTS =
   String(__ENV.WORKDAY_SKIP_REPORTS || "").trim() === "1" ||
   String(__ENV.WORKDAY_SKIP_REPORTS || "").toLowerCase() === "true"
 
+/**
+ * Sample reports_pnl in ROUTE_FILTER=all workday runs (not smoke, not ROUTE_FILTER=reports).
+ * Unset = every iteration (backward compatible). 0 = skip. N>=2 = run when __ITER % N === 0 per VU.
+ */
+const WORKDAY_REPORTS_EVERY_N_RAW = String(__ENV.WORKDAY_REPORTS_EVERY_N ?? "").trim()
+
+function parseWorkdayReportsEveryN() {
+  if (!WORKDAY_REPORTS_EVERY_N_RAW) return null
+  const n = Number(WORKDAY_REPORTS_EVERY_N_RAW)
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    throw new Error(
+      `Invalid WORKDAY_REPORTS_EVERY_N="${WORKDAY_REPORTS_EVERY_N_RAW}". ` +
+        `Use 0 to skip, 1 for every iteration, or an integer N>=2 for deterministic sampling.`
+    )
+  }
+  return n
+}
+
+const WORKDAY_REPORTS_EVERY_N = parseWorkdayReportsEveryN()
+
+function describeReportsWorkload() {
+  if (ROUTE_FILTER === "reports") return "isolation — every iteration"
+  if (ROUTE_FILTER !== "all") return "n/a (ROUTE_FILTER does not include reports)"
+  if (selectedScenario === "smoke") return "smoke — every iteration"
+  if (WORKDAY_SKIP_REPORTS) return "skipped (WORKDAY_SKIP_REPORTS=1)"
+  if (WORKDAY_REPORTS_EVERY_N === 0) return "skipped (WORKDAY_REPORTS_EVERY_N=0)"
+  if (WORKDAY_REPORTS_EVERY_N === null) {
+    return "every iteration (default; set WORKDAY_REPORTS_EVERY_N or WORKDAY_SKIP_REPORTS for realistic mix)"
+  }
+  if (WORKDAY_REPORTS_EVERY_N === 1) return "every iteration (WORKDAY_REPORTS_EVERY_N=1)"
+  return `sampled — reports when __ITER % ${WORKDAY_REPORTS_EVERY_N} === 0 (per VU)`
+}
+
+function shouldRunReportsPnl() {
+  if (ROUTE_FILTER === "reports") return true
+  if (ROUTE_FILTER !== "all") return false
+  if (selectedScenario === "smoke") return true
+  if (WORKDAY_SKIP_REPORTS) return false
+  if (WORKDAY_REPORTS_EVERY_N === 0) return false
+  if (WORKDAY_REPORTS_EVERY_N === null || WORKDAY_REPORTS_EVERY_N === 1) return true
+  return __ITER % WORKDAY_REPORTS_EVERY_N === 0
+}
+
 const ROUTE_FILTER_GROUPS = {
   business_profile: new Set(["business_profile"]),
   dashboard_metrics: new Set(["dashboard_metrics"]),
@@ -114,14 +157,6 @@ function shouldRunRoute(routeName) {
   const group = ROUTE_FILTER_GROUPS[ROUTE_FILTER]
   if (!group) return false
   return group.has(routeName)
-}
-
-function shouldRunReportsPnl() {
-  if (ROUTE_FILTER === "reports") return true
-  if (ROUTE_FILTER !== "all") return false
-  if (selectedScenario === "smoke") return true
-  if (WORKDAY_SKIP_REPORTS) return false
-  return true
 }
 
 /** Primary business id for all route calls — never derived from a prior profile response in-VU. */
@@ -625,8 +660,12 @@ export function setup() {
   )
   console.log(`[finza-k6]   ROUTE_FILTER:     ${ROUTE_FILTER}`)
   console.log(
-    `[finza-k6]   skip reports:     ${WORKDAY_SKIP_REPORTS && selectedScenario !== "smoke" && ROUTE_FILTER === "all" ? "yes (WORKDAY_SKIP_REPORTS)" : "no"}`
+    `[finza-k6]   WORKDAY_SKIP_REPORTS: ${WORKDAY_SKIP_REPORTS ? "1" : "unset"}`
   )
+  console.log(
+    `[finza-k6]   WORKDAY_REPORTS_EVERY_N: ${WORKDAY_REPORTS_EVERY_N === null ? "unset" : String(WORKDAY_REPORTS_EVERY_N)}`
+  )
+  console.log(`[finza-k6]   reports_pnl mode: ${describeReportsWorkload()}`)
   console.log("[finza-k6]   auth mode:        authorization-cookie")
   const rawCookie = rawCookieHeader(sessions[0])
   const tokenLen = authorizationTokenValue(sessions[0], rawCookie).length

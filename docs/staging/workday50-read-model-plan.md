@@ -191,5 +191,5 @@ Never rely on Vercel in-memory cache as the **only** coalescing layer — it is 
 ## Related artifacts
 
 - Migration 506: `supabase/migrations/506_stabilize_workday50_hot_paths.sql`
-- k6 isolation: `ROUTE_FILTER`, `WORKDAY_SKIP_REPORTS` in `load-tests/finza-service-workday.js`
+- k6 isolation: `ROUTE_FILTER`, `WORKDAY_SKIP_REPORTS`, `WORKDAY_REPORTS_EVERY_N` in `load-tests/finza-service-workday.js`
 - Route diagnostics: `FINZA_ROUTE_DIAG=1` on staging preview
