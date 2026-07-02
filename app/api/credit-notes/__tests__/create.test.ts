@@ -16,6 +16,19 @@ import type { TaxResult } from '@/lib/taxEngine/types'
 
 // Mock modules
 jest.mock('@/lib/supabaseServer')
+jest.mock('@/lib/business', () => ({
+  getCurrentBusiness: jest.fn(() =>
+    Promise.resolve({ id: 'test-business', address_country: 'GH' })
+  ),
+}))
+jest.mock('@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite', () => ({
+  enforceServiceIndustryFinancialWrite: jest.fn(() => Promise.resolve(null)),
+}))
+jest.mock('@/lib/accounting/reconciliation/engine-impl', () => ({
+  createReconciliationEngine: jest.fn(() => ({
+    reconcileInvoice: jest.fn(() => Promise.resolve({ status: 'OK' })),
+  })),
+}))
 jest.mock('@/lib/payments/eligibility', () => ({
   normalizeCountry: jest.fn((country: string) => 'GH'),
 }))
@@ -76,11 +89,45 @@ jest.mock('@/lib/taxEngine/serialize', () => ({
   })),
 }))
 
+function mockInvoiceFromQuery(invoiceRow: Record<string, unknown>) {
+  return {
+    select: jest.fn(() => ({
+      eq: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          is: jest.fn(() => ({
+            single: jest.fn(() => Promise.resolve({ data: invoiceRow, error: null })),
+          })),
+        })),
+      })),
+    })),
+  }
+}
+
 describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
   let mockSupabase: any
+  let creditNotesInsert: jest.Mock
 
   beforeEach(() => {
     jest.clearAllMocks()
+
+    creditNotesInsert = jest.fn(() => ({
+      select: jest.fn(() => ({
+        single: jest.fn(() => Promise.resolve({
+          data: {
+            id: 'new-credit-note-id',
+            subtotal: 100.00,
+            total_tax: 21.90,
+            total: 121.90,
+            tax_lines: {
+              lines: [],
+              meta: {},
+              pricing_mode: 'inclusive',
+            },
+          },
+          error: null,
+        })),
+      })),
+    }))
 
     // Setup Supabase mock
     mockSupabase = {
@@ -89,22 +136,13 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
       },
       from: jest.fn((table: string) => {
         if (table === 'invoices') {
-          return {
-            select: jest.fn(() => ({
-              eq: jest.fn(() => ({
-                single: jest.fn(() => Promise.resolve({
-                  data: { id: 'test-invoice-id', total: 200.00, customer_id: 'test-customer' },
-                  error: null,
-                })),
-                is: jest.fn(() => ({
-                  single: jest.fn(() => Promise.resolve({
-                    data: { id: 'test-invoice-id', total: 200.00, customer_id: 'test-customer' },
-                    error: null,
-                  })),
-                })),
-              })),
-            })),
-          }
+          return mockInvoiceFromQuery({
+            id: 'test-invoice-id',
+            total: 200.0,
+            subtotal: 200.0,
+            total_tax: 0,
+            customer_id: 'test-customer',
+          })
         }
         if (table === 'businesses') {
           return {
@@ -136,24 +174,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
                 })),
               })),
             })),
-            insert: jest.fn(() => ({
-              select: jest.fn(() => ({
-                single: jest.fn(() => Promise.resolve({
-                  data: {
-                    id: 'new-credit-note-id',
-                    subtotal: 100.00,
-                    total_tax: 21.90,
-                    total: 121.90,
-                    tax_lines: {
-                      lines: [],
-                      meta: {},
-                      pricing_mode: 'inclusive',
-                    },
-                  },
-                  error: null,
-                })),
-              })),
-            })),
+            insert: creditNotesInsert,
             delete: jest.fn(() => ({
               eq: jest.fn(() => Promise.resolve({ data: null, error: null })),
             })),
@@ -199,10 +220,9 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     // Verify credit note insert was called
     expect(mockSupabase.from).toHaveBeenCalledWith('credit_notes')
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    expect(insertCall).toHaveBeenCalled()
+    expect(creditNotesInsert).toHaveBeenCalled()
 
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify canonical values match TaxResult exactly (rounded to 2dp)
     expect(creditNoteData.subtotal).toBe(100.00) // result.base_amount
@@ -226,8 +246,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify tax_lines is stored
     expect(creditNoteData.tax_lines).toBeDefined()
@@ -253,8 +272,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify legacy columns match tax_lines (derived, not calculated)
     expect(creditNoteData.nhil).toBe(2.50) // From tax_lines.lines
@@ -281,8 +299,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify effective date is credit note date
     expect(creditNoteData.tax_engine_effective_from).toBe(creditNoteDate)
@@ -307,8 +324,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify COVID is included in legacy columns
     expect(creditNoteData.covid).toBe(1.00)
@@ -338,8 +354,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify COVID is zero in legacy columns
     expect(creditNoteData.covid).toBe(0)
@@ -372,8 +387,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
 
     await POST(request)
 
-    const insertCall = mockSupabase.from('credit_notes').insert as jest.Mock
-    const creditNoteData = insertCall.mock.calls[0][0]
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
     
     // Verify: subtotal + total_tax = total (exact match from TaxResult)
     const calculatedTotal = creditNoteData.subtotal + creditNoteData.total_tax
@@ -382,5 +396,195 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
     // Verify legacy columns sum matches total_tax
     const legacyTaxSum = creditNoteData.nhil + creditNoteData.getfund + creditNoteData.covid + creditNoteData.vat
     expect(legacyTaxSum).toBeCloseTo(creditNoteData.total_tax, 2)
+  })
+})
+
+function buildCreditCapMockSupabase(options: {
+  invoiceTotal: number
+  appliedCredits: Array<{ total: number }>
+}) {
+  const invoiceRow = {
+    id: 'test-invoice-id',
+    total: options.invoiceTotal,
+    subtotal: options.invoiceTotal,
+    total_tax: 0,
+    customer_id: 'test-customer',
+  }
+
+  const creditNotesInsert = jest.fn(() => ({
+    select: jest.fn(() => ({
+      single: jest.fn(() => Promise.resolve({
+        data: { id: 'new-credit-note-id', total: 121.90 },
+        error: null,
+      })),
+    })),
+  }))
+
+  const mock = {
+    auth: {
+      getUser: jest.fn(() => Promise.resolve({ data: { user: { id: 'test-user' } }, error: null })),
+    },
+    from: jest.fn((table: string) => {
+      if (table === 'invoices') {
+        return mockInvoiceFromQuery(invoiceRow)
+      }
+      if (table === 'businesses') {
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({
+              single: jest.fn(() => Promise.resolve({
+                data: { id: 'test-business', address_country: 'GH' },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === 'credit_notes') {
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                is: jest.fn(() =>
+                  Promise.resolve({ data: options.appliedCredits, error: null })
+                ),
+              })),
+            })),
+          })),
+          insert: creditNotesInsert,
+        }
+      }
+      if (table === 'credit_note_items') {
+        return {
+          insert: jest.fn(() => Promise.resolve({ data: null, error: null })),
+        }
+      }
+      return {} as any
+    }),
+    rpc: jest.fn((fn: string) => {
+      if (fn === 'generate_credit_note_number') {
+        return Promise.resolve({ data: 'CN-001', error: null })
+      }
+      if (fn === 'generate_public_token') {
+        return Promise.resolve({ data: 'mock-token', error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    }),
+    creditNotesInsert,
+  }
+
+  return mock
+}
+
+describe('POST /api/credit-notes/create - credit capacity', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it('rejects when invoice is fully credited', async () => {
+    const mockSupabase = buildCreditCapMockSupabase({
+      invoiceTotal: 1000,
+      appliedCredits: [{ total: 1000 }],
+    })
+    require('@/lib/supabaseServer').createSupabaseServerClient = jest.fn(() =>
+      Promise.resolve(mockSupabase)
+    )
+
+    const request = new NextRequest('http://localhost/api/credit-notes/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 100, discount_amount: 0 }],
+        apply_taxes: false,
+      }),
+    })
+
+    const response = await POST(request)
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.error).toContain('fully credited')
+    expect(mockSupabase.creditNotesInsert).not.toHaveBeenCalled()
+  })
+
+  it('rejects when credit note exceeds remaining creditable amount', async () => {
+    const mockSupabase = buildCreditCapMockSupabase({
+      invoiceTotal: 1000,
+      appliedCredits: [{ total: 300 }],
+    })
+    require('@/lib/supabaseServer').createSupabaseServerClient = jest.fn(() =>
+      Promise.resolve(mockSupabase)
+    )
+
+    const request = new NextRequest('http://localhost/api/credit-notes/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 800, discount_amount: 0 }],
+        apply_taxes: false,
+      }),
+    })
+
+    const response = await POST(request)
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.error).toContain('Remaining creditable amount')
+    expect(body.error).toContain('700.00')
+  })
+
+  it('allows credit note within remaining creditable amount after prior applied credit', async () => {
+    const mockSupabase = buildCreditCapMockSupabase({
+      invoiceTotal: 1000,
+      appliedCredits: [{ total: 300 }],
+    })
+    require('@/lib/supabaseServer').createSupabaseServerClient = jest.fn(() =>
+      Promise.resolve(mockSupabase)
+    )
+
+    const request = new NextRequest('http://localhost/api/credit-notes/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 700, discount_amount: 0 }],
+        apply_taxes: false,
+      }),
+    })
+
+    const response = await POST(request)
+
+    expect(response.status).toBe(201)
+    expect(mockSupabase.creditNotesInsert).toHaveBeenCalled()
+  })
+
+  it('does not count draft credit notes toward capacity', async () => {
+    const mockSupabase = buildCreditCapMockSupabase({
+      invoiceTotal: 1000,
+      appliedCredits: [],
+    })
+    require('@/lib/supabaseServer').createSupabaseServerClient = jest.fn(() =>
+      Promise.resolve(mockSupabase)
+    )
+
+    const request = new NextRequest('http://localhost/api/credit-notes/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 1000, discount_amount: 0 }],
+        apply_taxes: false,
+      }),
+    })
+
+    const response = await POST(request)
+
+    expect(response.status).toBe(201)
   })
 })

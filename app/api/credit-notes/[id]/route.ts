@@ -5,6 +5,10 @@ import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/re
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { performServiceJobReversal } from "@/lib/service/jobReversal"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  computeInvoiceCreditCapacity,
+  formatCreditCapacityExceededError,
+} from "@/lib/creditNotes/invoiceCreditCapacity"
 
 export async function GET(
   request: NextRequest,
@@ -213,53 +217,50 @@ export async function PUT(
         .eq("id", creditNoteId)
         .single()
 
-      // Invoice gross: invoice.total if present and > 0, else subtotal + total_tax (2 dp). Safe numeric parsing.
-      const rawTotal = safeNumber(invoice.total)
-      const derivedGross = Math.round((safeNumber(invoice.subtotal) + safeNumber(invoice.total_tax)) * 100) / 100
-      const invoiceGross = rawTotal > 0 ? rawTotal : derivedGross
+      const otherAppliedTotals = (existingCredits ?? [])
+        .filter((c: { id: string }) => c.id !== creditNoteId)
+        .map((c: { total?: unknown }) => Number(c.total))
 
-      // STEP 2 — Hard guard: invoice total must be valid
-      if (invoiceGross <= 0 || !Number.isFinite(invoiceGross)) {
+      const capacity = computeInvoiceCreditCapacity(
+        existingCreditNote.invoice_id,
+        invoice,
+        otherAppliedTotals
+      )
+
+      if (capacity.invoiceGross <= 0 || !Number.isFinite(capacity.invoiceGross)) {
         return NextResponse.json(
           { error: "Invoice total is invalid or zero — cannot apply credit note" },
           { status: 400 }
         )
       }
 
-      const totalCredits = (existingCredits ?? [])
-        .filter((c: { id: string }) => c.id !== creditNoteId)
-        .reduce((sum, c) => sum + safeNumber(c.total), 0)
-
-      // Remaining creditable amount in cents to avoid floating-point drift; then convert back
-      const invoiceCents = Math.round(invoiceGross * 100)
-      const creditsCents = Math.round(totalCredits * 100)
-      const remainingCreditableCents = Math.max(0, invoiceCents - creditsCents)
-      const remainingCreditable = remainingCreditableCents / 100
       const creditAmount = safeNumber(creditNote?.total)
       const creditRounded = Math.round(creditAmount * 100) / 100
 
       if (process.env.NODE_ENV === "development") {
         console.log("CN APPLY CREDIT CAP VALIDATION", {
-          invoiceGross,
-          totalCredits,
-          remainingCreditable,
+          invoiceGross: capacity.invoiceGross,
+          totalCredits: capacity.appliedCreditsTotal,
+          remainingCreditable: capacity.remainingCreditable,
           creditRounded,
         })
       }
 
       // Reject only when credit exceeds remaining creditable amount by more than rounding tolerance (0.01)
       const TOLERANCE = 0.01
-      if (creditNote && creditRounded > remainingCreditable + TOLERANCE) {
+      if (creditNote && creditRounded > capacity.remainingCreditable + TOLERANCE) {
         const logCtx = {
-          invoice_total: invoiceGross,
-          total_credits: totalCredits,
-          calculated_remaining_creditable: remainingCreditable,
+          invoice_total: capacity.invoiceGross,
+          total_credits: capacity.appliedCreditsTotal,
+          calculated_remaining_creditable: capacity.remainingCreditable,
           credit_note_amount: creditAmount,
           invoice_id: existingCreditNote.invoice_id,
         }
         console.warn("[credit-notes/apply] Credit note exceeds invoice credit cap", logCtx)
         return NextResponse.json(
-          { error: "Credit note amount exceeds remaining creditable amount on invoice" },
+          {
+            error: formatCreditCapacityExceededError(creditRounded, capacity.remainingCreditable),
+          },
           { status: 400 }
         )
       }
@@ -267,9 +268,9 @@ export async function PUT(
       // Defensive log on success (can be removed or downgraded in production)
       if (creditNote && process.env.NODE_ENV !== "production") {
         console.info("[credit-notes/apply] Credit cap check passed", {
-          invoice_total: invoiceGross,
-          total_credits: totalCredits,
-          calculated_remaining_creditable: remainingCreditable,
+          invoice_total: capacity.invoiceGross,
+          total_credits: capacity.appliedCreditsTotal,
+          calculated_remaining_creditable: capacity.remainingCreditable,
           credit_note_amount: creditAmount,
         })
       }

@@ -9,6 +9,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems, deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import type { InvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
 
 type InvoiceItem = {
   id: string
@@ -61,8 +62,7 @@ function CreateCreditNoteContent() {
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
   const [invoice, setInvoice] = useState<any>(null)
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([])
-  const [creditNotes, setCreditNotes] = useState<Array<{ total?: number; status?: string }>>([])
+  const [creditCapacity, setCreditCapacity] = useState<InvoiceCreditCapacity | null>(null)
   const [jurisdiction, setJurisdiction] = useState<string>("GH")
   const [items, setItems] = useState<LineItem[]>([])
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
@@ -169,11 +169,21 @@ function CreateCreditNoteContent() {
 
       const data = await response.json()
       setInvoice(data.invoice)
-      setInvoiceItems(data.items || [])
-      setCreditNotes(data.creditNotes ?? [])
 
-      // Prefill items from invoice
-      if (data.items && data.items.length > 0) {
+      const capacityRes = await fetch(`/api/invoices/${invoiceIdToLoad}/credit-capacity`)
+      if (!capacityRes.ok) {
+        throw new Error("Failed to load credit capacity for this invoice")
+      }
+      const capacity: InvoiceCreditCapacity = await capacityRes.json()
+      setCreditCapacity(capacity)
+
+      // Prefill full invoice lines only when no applied credits exist yet.
+      if (
+        capacity.appliedCreditsTotal === 0 &&
+        capacity.remainingCreditable > 0.01 &&
+        data.items &&
+        data.items.length > 0
+      ) {
         setItems(
           data.items.map((item: InvoiceItem) => ({
             id: Date.now().toString() + Math.random(),
@@ -186,6 +196,8 @@ function CreateCreditNoteContent() {
             discount_amount: item.discount_amount || 0,
           }))
         )
+      } else {
+        setItems([])
       }
 
       setApplyTaxes(data.invoice.apply_taxes !== false)
@@ -294,33 +306,18 @@ function CreateCreditNoteContent() {
       return
     }
 
-    // Check if credit note would exceed invoice credit cap.
-    // Accounting rule: paid invoices may still be credited; cap is invoice gross minus already-applied credits.
-    const rawTotal = Number(invoice?.total || 0)
-    const derivedGross = Math.round((Number(invoice?.subtotal || 0) + Number(invoice?.total_tax || 0)) * 100) / 100
-    const invoiceGross = rawTotal > 0 ? rawTotal : derivedGross
-    const creditsGross =
-      Math.round(
-        creditNotes
-          .filter((cn) => cn.status === "applied")
-          .reduce((sum, cn) => sum + Number(cn.total || 0), 0) * 100
-      ) / 100
-    const remainingCreditableRounded = Math.round(Math.max(0, invoiceGross - creditsGross) * 100) / 100
+    if (creditCapacity?.isFullyCredited) {
+      setError("This invoice has already been fully credited.")
+      return
+    }
+
+    const remainingCreditableRounded = creditCapacity?.remainingCreditable ?? 0
     const creditTotalRounded = Math.round(taxResult.grandTotal * 100) / 100
 
-    // Temporary: verify remaining balance inputs (remove after verification)
-    console.log("[credit-note credit-cap validation]", {
-      invoiceGross,
-      creditsGross,
-      remainingCreditableRounded,
-      creditTotalRounded,
-    })
-
     if (creditTotalRounded > remainingCreditableRounded) {
-      const hint = remainingCreditableRounded === 0 && invoiceGross === 0
-        ? " Invoice total may be missing or zero; check the invoice."
-        : ""
-      setError(`Credit note amount (₵${creditTotalRounded.toFixed(2)}) cannot exceed remaining creditable amount on this invoice (₵${remainingCreditableRounded.toFixed(2)}).${hint}`)
+      setError(
+        `Credit note amount (₵${creditTotalRounded.toFixed(2)}) exceeds remaining creditable amount. Remaining creditable amount: ₵${remainingCreditableRounded.toFixed(2)}.`
+      )
       return
     }
 
@@ -446,6 +443,32 @@ function CreateCreditNoteContent() {
     )
   }
 
+  if (creditCapacity?.isFullyCredited) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto">
+        <h1 className="text-2xl font-bold mb-2">Create Credit Note</h1>
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mt-4">
+          <p className="text-amber-900 dark:text-amber-100 font-medium">
+            This invoice has already been fully credited.
+          </p>
+          <p className="text-sm text-amber-800 dark:text-amber-200 mt-2">
+            Invoice total: ₵{creditCapacity.invoiceGross.toFixed(2)} · Already credited: ₵
+            {creditCapacity.appliedCreditsTotal.toFixed(2)} · Remaining creditable amount: ₵0.00
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => router.push(`/service/invoices/${invoice?.id ?? invoiceId}/view`)}
+          className="mt-6 text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          ← Back to Invoice
+        </button>
+      </div>
+    )
+  }
+
+  const currencyLabel = invoice?.currency_symbol?.trim() || "₵"
+
   return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -470,6 +493,27 @@ function CreateCreditNoteContent() {
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400 text-red-700 dark:text-red-400 px-4 py-3 rounded mb-6">
               {error}
+            </div>
+          )}
+
+          {creditCapacity && (
+            <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-900 dark:text-blue-100">
+              <p className="font-semibold">
+                Remaining creditable amount: {currencyLabel}
+                {creditCapacity.remainingCreditable.toFixed(2)}
+              </p>
+              <p className="mt-1 text-blue-800 dark:text-blue-200">
+                Already credited: {currencyLabel}
+                {creditCapacity.appliedCreditsTotal.toFixed(2)} · Invoice total: {currencyLabel}
+                {creditCapacity.invoiceGross.toFixed(2)}
+              </p>
+              {creditCapacity.appliedCreditsTotal > 0 && (
+                <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
+                  Prior credits are applied to this invoice. Add line items for the amount you want to credit
+                  (up to the remaining creditable amount). Draft or issued credit notes do not reduce this
+                  balance until applied.
+                </p>
+              )}
             </div>
           )}
 
@@ -535,7 +579,10 @@ function CreateCreditNoteContent() {
               </div>
 
               {items.length === 0 ? (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-8">No items added yet</p>
+                <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+                  No items added yet. Use Add Item to enter credit lines (up to the remaining creditable
+                  amount).
+                </p>
               ) : (
                 <div className="space-y-4">
                   {items.map((item) => (

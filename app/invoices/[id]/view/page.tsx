@@ -26,6 +26,7 @@ import { downloadInvoicePdfDocument } from "@/lib/invoices/downloadInvoicePdfCli
 import { PrepareEvatDraftCard } from "@/components/invoices/PrepareEvatDraftCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
 
 type Invoice = {
   id: string
@@ -400,6 +401,12 @@ Thank you.`
     .filter((cn) => cn.status === "applied")
     .reduce((sum, cn) => sum + Number(cn.total), 0)
   const remainingBalance = Number(invoice.total || 0) - totalPaid - totalCredits
+
+  const creditCapacity = computeInvoiceCreditCapacity(
+    invoice.id,
+    invoice,
+    creditNotes.filter((cn) => cn.status === "applied").map((cn) => Number(cn.total))
+  )
 
   const lineItemsGross = items.reduce((s, item) => s + Number(item.qty) * Number(item.unit_price), 0)
   const lineItemsDiscountTotal = items.reduce((s, item) => s + Number(item.discount_amount || 0), 0)
@@ -842,13 +849,23 @@ Thank you.`
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Management</h3>
                 <div className="space-y-2">
-                  {!readOnly && (
+                  {!readOnly && !creditCapacity.isFullyCredited && (
                   <button
                     onClick={() => router.push(`/service/credit-notes/create?invoiceId=${invoice.id}`)}
                     className="w-full text-left px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded transition-colors"
                   >
                     Issue Credit Note
+                    {creditCapacity.appliedCreditsTotal > 0 && (
+                      <span className="block text-xs text-slate-400 mt-0.5">
+                        Remaining creditable: {formatMoney(creditCapacity.remainingCreditable, invoice.currency_code)}
+                      </span>
+                    )}
                   </button>
+                  )}
+                  {!readOnly && creditCapacity.isFullyCredited && (
+                    <p className="px-3 py-2 text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded">
+                      This invoice has already been fully credited. No further credit notes can be issued.
+                    </p>
                   )}
                   {!readOnly && invoice.status === "draft" && (
                     <button

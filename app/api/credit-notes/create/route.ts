@@ -9,6 +9,11 @@ import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engi
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  computeInvoiceCreditCapacity,
+  formatCreditCapacityExceededError,
+  formatFullyCreditedError,
+} from "@/lib/creditNotes/invoiceCreditCapacity"
 
 export async function POST(request: NextRequest) {
   try {
@@ -205,21 +210,26 @@ export async function POST(request: NextRequest) {
       .eq("status", "applied")
       .is("deleted_at", null)
 
-    const rawTotal = Number(invoice.total || 0)
-    const derivedGross = Math.round((Number(invoice.subtotal || 0) + Number(invoice.total_tax || 0)) * 100) / 100
-    const invoiceGross = rawTotal > 0 ? rawTotal : derivedGross
-    const creditsGross =
-      (existingCredits ?? []).reduce((sum: number, c: any) => sum + Number(c.total), 0)
-    const remainingCreditCapacity = invoiceGross - creditsGross
-    const remainingCreditCapacityRounded = Math.round(Math.max(0, remainingCreditCapacity) * 100) / 100
+    const capacity = computeInvoiceCreditCapacity(
+      invoice_id,
+      invoice,
+      (existingCredits ?? []).map((c: { total?: unknown }) => Number(c.total))
+    )
     const creditTotalRounded = Math.round(creditNoteTotal * 100) / 100
 
-    if (creditTotalRounded > remainingCreditCapacityRounded) {
-      const hint = remainingCreditCapacityRounded === 0 && invoiceGross === 0
-        ? " Invoice total may be missing or zero; check the invoice."
-        : ""
+    if (capacity.isFullyCredited) {
+      return NextResponse.json({ error: formatFullyCreditedError() }, { status: 400 })
+    }
+
+    if (creditTotalRounded > capacity.remainingCreditable) {
+      const hint =
+        capacity.remainingCreditable === 0 && capacity.invoiceGross === 0
+          ? " Invoice total may be missing or zero; check the invoice."
+          : ""
       return NextResponse.json(
-        { error: `Credit note amount (₵${creditTotalRounded.toFixed(2)}) cannot exceed remaining creditable amount on this invoice (₵${remainingCreditCapacityRounded.toFixed(2)}).${hint}` },
+        {
+          error: `${formatCreditCapacityExceededError(creditTotalRounded, capacity.remainingCreditable)}${hint}`,
+        },
         { status: 400 }
       )
     }
