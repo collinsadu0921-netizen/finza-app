@@ -11,7 +11,11 @@ import {
   isDashboardMetricsCacheEnabled,
   loadOrComputeDashboardMetrics,
 } from "@/lib/server/dashboardMetricsCache"
-import { fetchFreshDashboardPeriodPnl } from "@/lib/server/dashboardPeriodSummaryRead"
+import {
+  dashboardPnlSourceForDiag,
+  fetchFreshDashboardPeriodPnl,
+  isDashboardPnlSummaryFastPathEnabled,
+} from "@/lib/server/dashboardPeriodSummaryRead"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
 import type { RouteDiagFields } from "@/lib/server/routeDiagnostics"
 import type { createRouteDiag } from "@/lib/server/routeDiagnostics"
@@ -258,21 +262,23 @@ export async function loadServiceDashboardMetrics(
     compareEnd,
   })
 
-  let pnlReadSource: "summary_snapshot" | "live_rpc" = "live_rpc"
+  let usedSummaryFastPath = false
 
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
-      const snapshotPayload = await buildMetricsFromSummarySnapshot(
-        supabase,
-        businessId,
-        range,
-        positionAsOfDate,
-        compareStart,
-        compareEnd
-      )
-      if (snapshotPayload) {
-        pnlReadSource = "summary_snapshot"
-        return snapshotPayload
+      if (isDashboardPnlSummaryFastPathEnabled()) {
+        const snapshotPayload = await buildMetricsFromSummarySnapshot(
+          supabase,
+          businessId,
+          range,
+          positionAsOfDate,
+          compareStart,
+          compareEnd
+        )
+        if (snapshotPayload) {
+          usedSummaryFastPath = true
+          return snapshotPayload
+        }
       }
 
       const tRpc = performance.now()
@@ -362,7 +368,7 @@ export async function loadServiceDashboardMetrics(
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
     cache_source: cacheSource,
-    pnl_read_source: pnlReadSource,
+    dashboard_pnl_source: dashboardPnlSourceForDiag(usedSummaryFastPath),
   })
 
   return payload
