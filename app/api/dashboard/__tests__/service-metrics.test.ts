@@ -54,6 +54,34 @@ const metricsPayload = {
   accounts_payable: 800,
 }
 
+const operationalPayload = {
+  unpaid_total: 900,
+  unpaid_count: 4,
+  overdue_total: 250,
+  overdue_count: 2,
+}
+
+function mockDashboardRpc(rpcImpl?: jest.Mock) {
+  const rpc =
+    rpcImpl ??
+    jest.fn().mockImplementation((name: string) => {
+      if (name === "get_service_dashboard_metrics") {
+        return Promise.resolve({ data: metricsPayload, error: null })
+      }
+      if (name === "get_operational_unpaid_invoices_total") {
+        return Promise.resolve({ data: operationalPayload, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    })
+  mockCreateSupabase.mockResolvedValue({
+    auth: {
+      getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
+    },
+    rpc,
+  } as any)
+  return rpc
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockCheckAuth.mockResolvedValue({ authorized: true } as any)
@@ -74,20 +102,13 @@ describe("GET /api/dashboard/service-metrics", () => {
   })
 
   it("returns required dashboard fields via get_service_dashboard_metrics RPC", async () => {
-    const rpc = jest.fn().mockResolvedValue({ data: metricsPayload, error: null })
-    mockCreateSupabase.mockResolvedValue({
-      auth: {
-        getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
-      },
-      rpc,
-    } as any)
+    const rpc = mockDashboardRpc()
 
     const res = await GET(
       new NextRequest("http://localhost/api/dashboard/service-metrics?business_id=biz-a")
     )
     expect(res.status).toBe(200)
 
-    expect(rpc).toHaveBeenCalledTimes(1)
     expect(rpc).toHaveBeenCalledWith("get_service_dashboard_metrics", {
       p_business_id: "biz-a",
       p_start_date: "2026-06-01",
@@ -95,6 +116,9 @@ describe("GET /api/dashboard/service-metrics", () => {
       p_position_as_of_date: "2026-06-22",
       p_compare_start_date: null,
       p_compare_end_date: null,
+    })
+    expect(rpc).toHaveBeenCalledWith("get_operational_unpaid_invoices_total", {
+      p_business_id: "biz-a",
     })
 
     const body = await res.json()
@@ -108,6 +132,10 @@ describe("GET /api/dashboard/service-metrics", () => {
       cashBalance: 5000,
       positionBalancesAsOfToday: true,
       positionAsOfDate: "2026-06-22",
+      unpaidInvoicesTotal: 900,
+      unpaidInvoicesCount: 4,
+      overdueInvoicesTotal: 250,
+      overdueInvoicesCount: 2,
     })
     expect(body.period).toMatchObject({
       period_id: "period-current",
@@ -119,7 +147,7 @@ describe("GET /api/dashboard/service-metrics", () => {
   })
 
   it("does not call get_cash_collected_total or fetch journal_entry_lines directly", async () => {
-    const rpc = jest.fn().mockResolvedValue({ data: metricsPayload, error: null })
+    const rpc = mockDashboardRpc()
     const from = jest.fn()
     mockCreateSupabase.mockResolvedValue({
       auth: {
@@ -154,25 +182,29 @@ describe("GET /api/dashboard/service-metrics", () => {
         error: "",
       })
 
-    const rpc = jest.fn().mockResolvedValue({
-      data: {
-        ...metricsPayload,
-        previous_revenue: 8000,
-        previous_expenses: 3000,
-        previous_net_profit: 5000,
-        previous_cash_collected: 0,
-        previous_cash_balance: 4500,
-        previous_accounts_receivable: 900,
-        previous_accounts_payable: 700,
-      },
-      error: null,
-    })
-    mockCreateSupabase.mockResolvedValue({
-      auth: {
-        getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
-      },
-      rpc,
-    } as any)
+    const rpc = mockDashboardRpc(
+      jest.fn().mockImplementation((name: string) => {
+        if (name === "get_service_dashboard_metrics") {
+          return Promise.resolve({
+            data: {
+              ...metricsPayload,
+              previous_revenue: 8000,
+              previous_expenses: 3000,
+              previous_net_profit: 5000,
+              previous_cash_collected: 0,
+              previous_cash_balance: 4500,
+              previous_accounts_receivable: 900,
+              previous_accounts_payable: 700,
+            },
+            error: null,
+          })
+        }
+        if (name === "get_operational_unpaid_invoices_total") {
+          return Promise.resolve({ data: operationalPayload, error: null })
+        }
+        return Promise.resolve({ data: null, error: null })
+      })
+    )
 
     const res = await GET(
       new NextRequest(
@@ -202,25 +234,37 @@ describe("GET /api/dashboard/service-metrics", () => {
   })
 
   it("returns zero metrics when RPC returns zeros", async () => {
-    const rpc = jest.fn().mockResolvedValue({
-      data: {
-        currency_code: "GHS",
-        revenue: 0,
-        expenses: 0,
-        net_profit: 0,
-        cash_collected: 0,
-        cash_balance: 0,
-        accounts_receivable: 0,
-        accounts_payable: 0,
-      },
-      error: null,
-    })
-    mockCreateSupabase.mockResolvedValue({
-      auth: {
-        getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
-      },
-      rpc,
-    } as any)
+    const rpc = mockDashboardRpc(
+      jest.fn().mockImplementation((name: string) => {
+        if (name === "get_service_dashboard_metrics") {
+          return Promise.resolve({
+            data: {
+              currency_code: "GHS",
+              revenue: 0,
+              expenses: 0,
+              net_profit: 0,
+              cash_collected: 0,
+              cash_balance: 0,
+              accounts_receivable: 0,
+              accounts_payable: 0,
+            },
+            error: null,
+          })
+        }
+        if (name === "get_operational_unpaid_invoices_total") {
+          return Promise.resolve({
+            data: {
+              unpaid_total: 0,
+              unpaid_count: 0,
+              overdue_total: 0,
+              overdue_count: 0,
+            },
+            error: null,
+          })
+        }
+        return Promise.resolve({ data: null, error: null })
+      })
+    )
 
     const res = await GET(
       new NextRequest("http://localhost/api/dashboard/service-metrics?business_id=biz-a")
@@ -229,6 +273,28 @@ describe("GET /api/dashboard/service-metrics", () => {
     expect(body.revenue).toBe(0)
     expect(body.netProfit).toBe(0)
     expect(body.cashCollected).toBe(0)
+  })
+
+  it("returns zero operational totals when operational RPC fails softly is not used on live path", async () => {
+    const rpc = mockDashboardRpc(
+      jest.fn().mockImplementation((name: string) => {
+        if (name === "get_service_dashboard_metrics") {
+          return Promise.resolve({ data: metricsPayload, error: null })
+        }
+        if (name === "get_operational_unpaid_invoices_total") {
+          return Promise.resolve({ data: null, error: { message: "function does not exist" } })
+        }
+        return Promise.resolve({ data: null, error: null })
+      })
+    )
+
+    const res = await GET(
+      new NextRequest("http://localhost/api/dashboard/service-metrics?business_id=biz-a")
+    )
+    expect(res.status).toBe(500)
+    expect(rpc).toHaveBeenCalledWith("get_operational_unpaid_invoices_total", {
+      p_business_id: "biz-a",
+    })
   })
 
   it("returns 500 when consolidated RPC fails", async () => {

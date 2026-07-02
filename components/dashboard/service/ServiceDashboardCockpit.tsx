@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
-import { supabase } from "@/lib/supabaseClient"
 import CollectionsFollowUpSection from "./CollectionsFollowUpSection"
 import DashboardHeader from "./DashboardHeader"
 import QuickActionsBar from "./QuickActionsBar"
@@ -38,6 +37,10 @@ type Metrics = {
   /** When true, cash/AR/AP are balance-sheet as-of today while period above is P&L only. */
   positionBalancesAsOfToday?: boolean
   positionAsOfDate?: string | null
+  unpaidInvoicesTotal?: number
+  unpaidInvoicesCount?: number
+  overdueInvoicesTotal?: number
+  overdueInvoicesCount?: number
   previousPeriod?: {
     revenue: number
     expenses: number
@@ -224,30 +227,13 @@ async function fetchActivityItems(
   return actJson.items ?? []
 }
 
-async function fetchOverdueInvoiceCount(businessId: string): Promise<number | null> {
-  try {
-    const today = new Date().toISOString().split("T")[0]
-    const { count } = await supabase
-      .from("invoices")
-      .select("id", { count: "exact", head: true })
-      .eq("business_id", businessId)
-      .in("status", ["sent", "overdue", "partial"])
-      .lt("due_date", today)
-    return count ?? 0
-  } catch {
-    return null
-  }
-}
-
 export default function ServiceDashboardCockpit({ business, headerLead }: ServiceDashboardCockpitProps) {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
-  const [overdueCount, setOverdueCount] = useState<number | null>(null)
   const [loadingMetrics, setLoadingMetrics] = useState(true)
   const [loadingTimeline, setLoadingTimeline] = useState(true)
   const [loadingActivity, setLoadingActivity] = useState(true)
-  const [loadingOverdue, setLoadingOverdue] = useState(true)
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null)
   const [metricsError, setMetricsError] = useState<string | null>(null)
 
@@ -270,7 +256,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       setLoadingMetrics(false)
       setLoadingTimeline(false)
       setLoadingActivity(false)
-      setLoadingOverdue(false)
       return
     }
 
@@ -287,7 +272,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     setLoadingMetrics(true)
     setLoadingTimeline(true)
     setLoadingActivity(true)
-    setLoadingOverdue(true)
     setMetricsError(null)
 
     const runTimed = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
@@ -330,10 +314,9 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
             params.set("previous_period_start", tl[idx - 1].period_start)
           }
 
-          const [metricsSettled, activitySettled, overdueSettled] = await Promise.allSettled([
+          const [metricsSettled, activitySettled] = await Promise.allSettled([
             runTimed("service-metrics fetch", () => fetchMetricsPayload(params, signal)),
             runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
-            runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
           ])
 
           if (!isLatest()) return
@@ -356,21 +339,13 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           } else if (!isAbortOrCancelled(activitySettled.reason)) {
             setActivityItems([])
           }
-
-          setLoadingOverdue(false)
-          if (overdueSettled.status === "fulfilled") {
-            setOverdueCount(overdueSettled.value)
-          } else if (!isAbortOrCancelled(overdueSettled.reason)) {
-            setOverdueCount(null)
-          }
         } else {
           const baseParams = new URLSearchParams({ business_id: businessId })
-          const [timelineSettled, metricsSettled, activitySettled, overdueSettled] =
+          const [timelineSettled, metricsSettled, activitySettled] =
             await Promise.allSettled([
               runTimed("timeline fetch", () => fetchTimelineData(businessId, signal)),
               runTimed("service-metrics fetch", () => fetchMetricsPayload(baseParams, signal)),
               runTimed("activity fetch", () => fetchActivityItems(businessId, signal)),
-              runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
             ])
 
           if (!isLatest()) return
@@ -400,16 +375,9 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           } else if (!isAbortOrCancelled(activitySettled.reason)) {
             setActivityItems([])
           }
-
-          setLoadingOverdue(false)
-          if (overdueSettled.status === "fulfilled") {
-            setOverdueCount(overdueSettled.value)
-          } else if (!isAbortOrCancelled(overdueSettled.reason)) {
-            setOverdueCount(null)
-          }
         }
       } else {
-        const [clusterSettled, overdueSettled] = await Promise.allSettled([
+        const [clusterSettled] = await Promise.allSettled([
           runTimed("service-cluster fetch", () =>
             fetchDashboardCluster(
               businessId,
@@ -422,7 +390,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
               signal
             )
           ),
-          runTimed("overdue count query", () => fetchOverdueInvoiceCount(businessId)),
         ])
 
         if (!isLatest()) return
@@ -430,7 +397,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
         setLoadingTimeline(false)
         setLoadingMetrics(false)
         setLoadingActivity(false)
-        setLoadingOverdue(false)
 
         if (clusterSettled.status === "fulfilled" && clusterSettled.value) {
           setTimeline(clusterSettled.value.timeline)
@@ -450,12 +416,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
               : "Failed to load dashboard"
           )
         }
-
-        if (overdueSettled.status === "fulfilled") {
-          setOverdueCount(overdueSettled.value)
-        } else if (!isAbortOrCancelled(overdueSettled.reason)) {
-          setOverdueCount(null)
-        }
       }
     } catch (e) {
       if (!isLatest()) return
@@ -463,12 +423,10 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       setMetrics(null)
       setTimeline([])
       setActivityItems([])
-      setOverdueCount(null)
       setMetricsError(e instanceof Error ? e.message : "Network or unexpected error")
       setLoadingTimeline(false)
       setLoadingMetrics(false)
       setLoadingActivity(false)
-      setLoadingOverdue(false)
     } finally {
       if (loadGenerationRef.current === gen) {
         devServiceDashboardLog("total cockpit load", tCockpit)
@@ -476,8 +434,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     }
   }, [business?.id, selectedPeriodStart])
 
-  const anyLoading =
-    loadingMetrics || loadingTimeline || loadingActivity || loadingOverdue
+  const anyLoading = loadingMetrics || loadingTimeline || loadingActivity
 
   useEffect(() => {
     load()
@@ -609,10 +566,12 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
             cashBalance={metrics.cashBalance ?? 0}
             accountsReceivable={metrics.accountsReceivable ?? 0}
             currentLiabilities={metrics.accountsPayable ?? 0}
+            unpaidInvoicesTotal={metrics.unpaidInvoicesTotal ?? 0}
+            unpaidInvoicesCount={metrics.unpaidInvoicesCount ?? 0}
+            overdueInvoicesTotal={metrics.overdueInvoicesTotal ?? 0}
+            overdueInvoicesCount={metrics.overdueInvoicesCount ?? 0}
             currencyCode={currencyCode}
             positionAsOfPrefix={positionAsOfPrefix}
-            overdueCount={overdueCount}
-            loadingOverdue={loadingOverdue}
           />
         ) : null}
       </div>
@@ -635,9 +594,9 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       ) : metrics ? (
         <CollectionsFollowUpSection
           cashCollected={metrics.cashCollected ?? 0}
-          overdueCount={overdueCount}
+          overdueCount={metrics.overdueInvoicesCount ?? 0}
+          overdueTotal={metrics.overdueInvoicesTotal ?? 0}
           currencyCode={currencyCode}
-          loadingOverdue={loadingOverdue}
           cashReportHref={`/service/payments?business_id=${encodeURIComponent(business.id)}`}
           overdueReportHref={`/service/invoices?business_id=${encodeURIComponent(business.id)}&status=overdue`}
         />

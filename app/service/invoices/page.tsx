@@ -19,6 +19,7 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { buildServiceRoute } from "@/lib/service/routes"
+import { CUSTOMER_APPROVAL_LABELS, type CustomerApprovalStatus } from "@/lib/invoices/customerApproval"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
@@ -44,6 +45,7 @@ type Invoice = {
   currency_code?: string | null
   currency_symbol?: string | null
   status: "draft" | "sent" | "partially_paid" | "partial" | "paid" | "overdue" | "cancelled"
+  customer_approval_status?: CustomerApprovalStatus | string | null
   issue_date: string | null
   due_date: string | null
   /** Present for CSV/Excel export VAT breakdown; optional when older rows lack JSON. */
@@ -89,6 +91,22 @@ function statusForListBadge(invoice: Invoice): string {
   const s = invoice.status
   if (s === "partial") return "partially_paid"
   return s
+}
+
+function ApprovalBadge({ status }: { status: string | null | undefined }) {
+  const key = (status || "not_requested") as CustomerApprovalStatus
+  const label = CUSTOMER_APPROVAL_LABELS[key] ?? "Not requested"
+  const styles: Record<CustomerApprovalStatus, string> = {
+    not_requested: "bg-slate-100 text-slate-600",
+    pending_approval: "bg-amber-50 text-amber-700",
+    approved: "bg-emerald-50 text-emerald-700",
+    rejected: "bg-red-50 text-red-700",
+  }
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${styles[key] ?? styles.not_requested}`}>
+      {label}
+    </span>
+  )
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -185,6 +203,9 @@ function InvoicesPageContent() {
   const [totalInvoices, setTotalInvoices] = useState(0)
 
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get("status") || "all")
+  const [approvalFilter, setApprovalFilter] = useState<string>(
+    () => searchParams.get("approval_status") || "all"
+  )
   const [customerFilter, setCustomerFilter] = useState("all")
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
@@ -241,6 +262,7 @@ function InvoicesPageContent() {
       // Server cannot read client workspace; pass explicit scope so the list matches totals for the selected business.
       params.append("business_id", bid)
       if (statusFilter !== "all") params.append("status", statusFilter)
+      if (approvalFilter !== "all") params.append("approval_status", approvalFilter)
       if (customerFilter !== "all") params.append("customer_id", customerFilter)
       if (startDate) params.append("start_date", startDate)
       if (endDate) params.append("end_date", endDate)
@@ -249,7 +271,7 @@ function InvoicesPageContent() {
       params.append("limit", String(PAGE_SIZE))
       return params
     },
-    [statusFilter, customerFilter, startDate, endDate, searchQuery, page]
+    [statusFilter, approvalFilter, customerFilter, startDate, endDate, searchQuery, page]
   )
 
   const fetchInvoiceList = useCallback(
@@ -303,6 +325,7 @@ function InvoicesPageContent() {
 
       const filtersActive = hasActiveInvoiceListFilters({
         statusFilter,
+        approvalFilter,
         customerFilter,
         startDate,
         endDate,
@@ -354,6 +377,7 @@ function InvoicesPageContent() {
     [
       fetchInvoiceList,
       statusFilter,
+      approvalFilter,
       customerFilter,
       startDate,
       endDate,
@@ -511,7 +535,7 @@ function InvoicesPageContent() {
       return
     }
     void reloadInvoicesOnly()
-  }, [businessId, statusFilter, customerFilter, startDate, endDate, searchQuery, page, reloadInvoicesOnly])
+  }, [businessId, statusFilter, approvalFilter, customerFilter, startDate, endDate, searchQuery, page, reloadInvoicesOnly])
 
   useEffect(() => {
     if (!businessId) return
@@ -519,11 +543,12 @@ function InvoicesPageContent() {
       businessId,
       page,
       statusFilter,
+      approvalFilter,
       preserveSearch: searchParamsString,
     })
     if (!invoiceListHrefNeedsUpdate(listPathname, searchParamsString, targetHref)) return
     router.replace(targetHref, { scroll: false })
-  }, [businessId, page, statusFilter, searchParamsString, listPathname, router])
+  }, [businessId, page, statusFilter, approvalFilter, searchParamsString, listPathname, router])
 
   const fetchPaymentTotals = async (ids: string[]) => {
     if (!ids.length) return { payments: {} as Record<string, number>, creditNotes: {} as Record<string, number> }
@@ -684,6 +709,7 @@ function InvoicesPageContent() {
   const clearFilters = () => {
     setPage(1)
     setStatusFilter("all")
+    setApprovalFilter("all")
     setCustomerFilter("all")
     setStartDate("")
     setEndDate("")
@@ -692,6 +718,7 @@ function InvoicesPageContent() {
   }
   const hasFilters = hasActiveInvoiceListFilters({
     statusFilter,
+    approvalFilter,
     customerFilter,
     startDate,
     endDate,
@@ -785,7 +812,7 @@ function InvoicesPageContent() {
 
         {/* Filters */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4" data-tour="service-invoices-filters">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             {/* Search */}
             <div className="sm:col-span-2 lg:col-span-1 relative">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
@@ -814,6 +841,22 @@ function InvoicesPageContent() {
                 { value: "paid", label: "Paid" },
                 { value: "overdue", label: "Overdue" },
                 { value: "cancelled", label: "Cancelled" },
+              ]}
+            />
+
+            {/* Customer approval */}
+            <MenuSelect
+              value={approvalFilter}
+              onValueChange={(v) => {
+                setPage(1)
+                setApprovalFilter(v)
+              }}
+              options={[
+                { value: "all", label: "All approval statuses" },
+                { value: "not_requested", label: "Not requested" },
+                { value: "pending_approval", label: "Pending approval" },
+                { value: "approved", label: "Approved" },
+                { value: "rejected", label: "Rejected" },
               ]}
             />
 
@@ -889,6 +932,7 @@ function InvoicesPageContent() {
                     <th className="px-5 py-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Customer</th>
                     <th className="px-5 py-3.5 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Amount</th>
                     <th className="px-5 py-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="px-5 py-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Approval</th>
                     <th className="px-5 py-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Issued</th>
                     <th className="px-5 py-3.5 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Due</th>
                     <th className="px-5 py-3.5 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Actions</th>
@@ -929,6 +973,9 @@ function InvoicesPageContent() {
                         </td>
                         <td className="px-5 py-4">
                           <StatusBadge status={statusForListBadge(invoice)} />
+                        </td>
+                        <td className="px-5 py-4">
+                          <ApprovalBadge status={invoice.customer_approval_status} />
                         </td>
                         <td className="px-5 py-4">
                           <span className="text-sm text-slate-500">{fmt(invoice.issue_date)}</span>

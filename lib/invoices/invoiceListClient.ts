@@ -14,6 +14,7 @@ export type InvoiceListUrlSyncInput = {
   businessId: string
   page: number
   statusFilter?: string
+  approvalFilter?: string
   /** Existing query string (no leading `?`) to preserve unrelated params. */
   preserveSearch?: string
 }
@@ -34,6 +35,11 @@ export function buildInvoiceListHref(
     params.set("status", input.statusFilter)
   } else {
     params.delete("status")
+  }
+  if (input.approvalFilter && input.approvalFilter !== "all") {
+    params.set("approval_status", input.approvalFilter)
+  } else {
+    params.delete("approval_status")
   }
   if (input.page > 1) {
     params.set("page", String(input.page))
@@ -102,6 +108,7 @@ export function shouldResetInvoiceListPage(
 
 export function hasActiveInvoiceListFilters(input: {
   statusFilter: string
+  approvalFilter: string
   customerFilter: string
   startDate: string
   endDate: string
@@ -109,6 +116,7 @@ export function hasActiveInvoiceListFilters(input: {
 }): boolean {
   return (
     input.statusFilter !== "all" ||
+    input.approvalFilter !== "all" ||
     input.customerFilter !== "all" ||
     Boolean(input.startDate) ||
     Boolean(input.endDate) ||

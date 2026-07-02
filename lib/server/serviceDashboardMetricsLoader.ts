@@ -18,6 +18,11 @@ import {
   isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
+import {
+  EMPTY_OPERATIONAL_UNPAID_INVOICES,
+  loadOperationalUnpaidInvoicesSummary,
+  type OperationalUnpaidInvoicesSummary,
+} from "@/lib/server/operationalUnpaidInvoicesLoader"
 import type { RouteDiagFields } from "@/lib/server/routeDiagnostics"
 import type { createRouteDiag } from "@/lib/server/routeDiagnostics"
 
@@ -70,6 +75,11 @@ export type ServiceDashboardMetricsPayload = {
   positionBalancesAsOfToday: boolean
   positionAsOfDate: string
   previousPeriod: PreviousPeriodPayload | null
+  /** Operational outstanding across unpaid invoices (not ledger AR). */
+  unpaidInvoicesTotal: number
+  unpaidInvoicesCount: number
+  overdueInvoicesTotal: number
+  overdueInvoicesCount: number
 }
 
 function roundMoney(n: number): number {
@@ -78,6 +88,20 @@ function roundMoney(n: number): number {
 
 function num(v: unknown): number {
   return roundMoney(Number(v) || 0)
+}
+
+function withOperationalUnpaidFields(
+  payload: Omit<
+    ServiceDashboardMetricsPayload,
+    keyof OperationalUnpaidInvoicesSummary
+  >,
+  summary: OperationalUnpaidInvoicesSummary
+): ServiceDashboardMetricsPayload {
+  return { ...payload, ...summary }
+}
+
+function emptyOperationalFields(): OperationalUnpaidInvoicesSummary {
+  return { ...EMPTY_OPERATIONAL_UNPAID_INVOICES }
 }
 
 export type ServiceDashboardMetricsParams = {
@@ -231,25 +255,28 @@ async function buildMetricsFromSummarySnapshot(
     }),
   ])
 
-  return {
-    period: {
-      period_id: range.period.period_id,
-      period_start: range.movementStart,
-      period_end: range.movementEnd,
-      resolution_reason: range.period.resolution_reason,
+  return withOperationalUnpaidFields(
+    {
+      period: {
+        period_id: range.period.period_id,
+        period_start: range.movementStart,
+        period_end: range.movementEnd,
+        resolution_reason: range.period.resolution_reason,
+      },
+      currency,
+      revenue: num(freshPnl.revenue),
+      expenses: num(freshPnl.expenses),
+      netProfit: num(freshPnl.net_profit),
+      cashCollected,
+      accountsReceivable: num(positions.accounts_receivable),
+      accountsPayable: num(positions.accounts_payable),
+      cashBalance: num(positions.cash_balance),
+      positionBalancesAsOfToday: true,
+      positionAsOfDate,
+      previousPeriod,
     },
-    currency,
-    revenue: num(freshPnl.revenue),
-    expenses: num(freshPnl.expenses),
-    netProfit: num(freshPnl.net_profit),
-    cashCollected,
-    accountsReceivable: num(positions.accounts_receivable),
-    accountsPayable: num(positions.accounts_payable),
-    cashBalance: num(positions.cash_balance),
-    positionBalancesAsOfToday: true,
-    positionAsOfDate,
-    previousPeriod,
-  }
+    emptyOperationalFields()
+  )
 }
 
 async function buildDegradedMetricsPayload(
@@ -262,25 +289,28 @@ async function buildDegradedMetricsPayload(
   const periodStart = range?.movementStart ?? positionAsOfDate
   const periodEnd = range?.movementEnd ?? positionAsOfDate
 
-  return {
-    period: {
-      period_id: range?.period.period_id,
-      period_start: periodStart,
-      period_end: periodEnd,
-      resolution_reason: range?.period.resolution_reason ?? "degraded",
+  return withOperationalUnpaidFields(
+    {
+      period: {
+        period_id: range?.period.period_id,
+        period_start: periodStart,
+        period_end: periodEnd,
+        resolution_reason: range?.period.resolution_reason ?? "degraded",
+      },
+      currency,
+      revenue: 0,
+      expenses: 0,
+      netProfit: 0,
+      cashCollected: 0,
+      accountsReceivable: 0,
+      accountsPayable: 0,
+      cashBalance: 0,
+      positionBalancesAsOfToday: true,
+      positionAsOfDate,
+      previousPeriod: null,
     },
-    currency,
-    revenue: 0,
-    expenses: 0,
-    netProfit: 0,
-    cashCollected: 0,
-    accountsReceivable: 0,
-    accountsPayable: 0,
-    cashBalance: 0,
-    positionBalancesAsOfToday: true,
-    positionAsOfDate,
-    previousPeriod: null,
-  }
+    emptyOperationalFields()
+  )
 }
 
 export async function loadServiceDashboardMetrics(
@@ -421,25 +451,28 @@ export async function loadServiceDashboardMetrics(
         name: getCurrencyName(currencyCode) || currencyCode,
       }
 
-      const built: ServiceDashboardMetricsPayload = {
-        period: {
-          period_id: range.period.period_id,
-          period_start: range.movementStart,
-          period_end: range.movementEnd,
-          resolution_reason: range.period.resolution_reason,
+      const built = withOperationalUnpaidFields(
+        {
+          period: {
+            period_id: range.period.period_id,
+            period_start: range.movementStart,
+            period_end: range.movementEnd,
+            resolution_reason: range.period.resolution_reason,
+          },
+          currency,
+          revenue: num(metrics.revenue),
+          expenses: num(metrics.expenses),
+          netProfit: num(metrics.net_profit),
+          cashCollected: num(metrics.cash_collected),
+          accountsReceivable: num(metrics.accounts_receivable),
+          accountsPayable: num(metrics.accounts_payable),
+          cashBalance: num(metrics.cash_balance),
+          positionBalancesAsOfToday: true,
+          positionAsOfDate,
+          previousPeriod: null,
         },
-        currency,
-        revenue: num(metrics.revenue),
-        expenses: num(metrics.expenses),
-        netProfit: num(metrics.net_profit),
-        cashCollected: num(metrics.cash_collected),
-        accountsReceivable: num(metrics.accounts_receivable),
-        accountsPayable: num(metrics.accounts_payable),
-        cashBalance: num(metrics.cash_balance),
-        positionBalancesAsOfToday: true,
-        positionAsOfDate,
-        previousPeriod: null,
-      }
+        emptyOperationalFields()
+      )
 
       if (compareStart && compareEnd && metrics.previous_revenue !== undefined) {
         built.previousPeriod = {
@@ -476,5 +509,13 @@ export async function loadServiceDashboardMetrics(
     ...(summaryOnly ? { refresh_skipped: true } : {}),
   })
 
-  return payload
+  const operationalSummary = await loadOperationalUnpaidInvoicesSummary(supabase, businessId, {
+    softFail: summaryOnly,
+  })
+  diag.step("operational_unpaid_invoices", {
+    unpaid_count: operationalSummary.unpaidInvoicesCount,
+    overdue_count: operationalSummary.overdueInvoicesCount,
+  })
+
+  return withOperationalUnpaidFields(payload, operationalSummary)
 }

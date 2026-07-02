@@ -5,6 +5,7 @@ import {
   loadOrComputeOperationalListCache,
 } from "@/lib/server/operationalListCache"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
+import { isCustomerApprovalStatus } from "@/lib/invoices/customerApproval"
 
 const INVOICE_SELECT = `
         id,
@@ -16,6 +17,7 @@ const INVOICE_SELECT = `
         currency_code,
         currency_symbol,
         status,
+        customer_approval_status,
         issue_date,
         due_date,
         tax_lines,
@@ -44,6 +46,7 @@ function overdueCacheKey(params: {
   startDate: string | null
   endDate: string | null
   search: string | null
+  approvalStatus: string | null
 }): string {
   return [
     "invoices_overdue",
@@ -54,6 +57,7 @@ function overdueCacheKey(params: {
     params.startDate ?? "",
     params.endDate ?? "",
     params.search ?? "",
+    params.approvalStatus ?? "",
   ].join("|")
 }
 
@@ -72,6 +76,7 @@ async function buildOverdueListPayload(
     startDate: string | null
     endDate: string | null
     search: string | null
+    approvalStatus: string | null
   },
   diag: ReturnType<typeof createRouteDiag>
 ): Promise<OverdueListPayload> {
@@ -103,6 +108,7 @@ async function fetchOverdueInvoicesPage(
     startDate: string | null
     endDate: string | null
     search: string | null
+    approvalStatus: string | null
   },
   diag: ReturnType<typeof createRouteDiag>
 ): Promise<{ invoices: unknown[]; totalCount: number }> {
@@ -119,6 +125,7 @@ async function fetchOverdueInvoicesPage(
       p_start_date: params.startDate || null,
       p_end_date: params.endDate || null,
       p_search: params.search || null,
+      p_customer_approval_status: params.approvalStatus || null,
     }
   )
 
@@ -217,6 +224,13 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
     const search = searchParams.get("search")
+    const approvalStatusRaw = searchParams.get("approval_status")
+    const approvalStatus =
+      approvalStatusRaw && isCustomerApprovalStatus(approvalStatusRaw) ? approvalStatusRaw : null
+    if (approvalStatusRaw && !approvalStatus) {
+      diag.fail(400, "invalid approval_status")
+      return NextResponse.json({ error: "Invalid approval_status filter" }, { status: 400 })
+    }
     const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1)
     const limitRaw = Number.parseInt(searchParams.get("limit") || "25", 10) || 25
     const limit = Math.min(100, Math.max(1, limitRaw))
@@ -232,6 +246,7 @@ export async function GET(request: NextRequest) {
         startDate,
         endDate,
         search,
+        approvalStatus,
       }
       const cacheKey = overdueCacheKey(overdueParams)
       const tOverdue = performance.now()
@@ -260,6 +275,10 @@ export async function GET(request: NextRequest) {
 
     if (status) {
       query = query.eq("status", status)
+    }
+
+    if (approvalStatus) {
+      query = query.eq("customer_approval_status", approvalStatus)
     }
 
     if (customerId) {

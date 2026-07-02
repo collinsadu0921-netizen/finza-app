@@ -28,7 +28,7 @@ function buildSupabase(invoices: unknown[] = []) {
     eq: jest.fn().mockReturnThis(),
     is: jest.fn().mockReturnThis(),
     order: jest.fn().mockReturnThis(),
-    range: jest.fn().mockReturnThis(),
+    range: jest.fn().mockResolvedValue({ data: invoices, error: null, count: invoices.length }),
     or: jest.fn().mockReturnThis(),
     gte: jest.fn().mockReturnThis(),
     lte: jest.fn().mockReturnThis(),
@@ -107,6 +107,51 @@ describe("GET /api/invoices/list", () => {
     expect(body.pagination.totalCount).toBe(1)
   })
 
+  it("applies approval_status filter on standard list query", async () => {
+    const rows = [{ id: "inv-1", invoice_number: "INV-1", customer_approval_status: "approved" }]
+    const eq = jest.fn().mockReturnThis()
+    const from = jest.fn((table: string) => {
+      if (table === "invoices") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq,
+          is: jest.fn().mockReturnThis(),
+          order: jest.fn().mockReturnThis(),
+          range: jest.fn().mockResolvedValue({ data: rows, error: null, count: 1 }),
+          or: jest.fn().mockReturnThis(),
+          gte: jest.fn().mockReturnThis(),
+          lte: jest.fn().mockReturnThis(),
+        }
+      }
+      return { select: jest.fn().mockReturnThis() }
+    })
+    mockCreateSupabase.mockResolvedValue({
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
+      from,
+      rpc: jest.fn(),
+    } as any)
+    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+
+    const req = new NextRequest(
+      "http://localhost/api/invoices/list?business_id=biz-a&status=sent&approval_status=approved"
+    )
+    const res = await GET(req)
+    expect(res.status).toBe(200)
+    expect(eq).toHaveBeenCalledWith("status", "sent")
+    expect(eq).toHaveBeenCalledWith("customer_approval_status", "approved")
+  })
+
+  it("returns 400 for invalid approval_status", async () => {
+    mockCreateSupabase.mockResolvedValue(buildSupabase() as any)
+    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+
+    const req = new NextRequest(
+      "http://localhost/api/invoices/list?business_id=biz-a&approval_status=invalid"
+    )
+    const res = await GET(req)
+    expect(res.status).toBe(400)
+  })
+
   it("overdue status uses paginated RPC and returns at most limit invoices", async () => {
     const overdueIds = Array.from({ length: 25 }, (_, i) => `inv-overdue-${i}`)
     const invoiceRows = overdueIds.map((id, i) => ({
@@ -151,6 +196,7 @@ describe("GET /api/invoices/list", () => {
         p_business_id: "biz-a",
         p_limit: 25,
         p_offset: 0,
+        p_customer_approval_status: null,
       })
     )
 

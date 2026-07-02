@@ -27,6 +27,7 @@ import { PrepareEvatDraftCard } from "@/components/invoices/PrepareEvatDraftCard
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
+import CustomerApprovalSection from "@/components/invoices/CustomerApprovalSection"
 
 type Invoice = {
   id: string
@@ -48,6 +49,12 @@ type Invoice = {
   total: number
   apply_taxes: boolean
   status: string
+  customer_approval_status?: string | null
+  customer_approval_note?: string | null
+  customer_approval_method?: string | null
+  customer_approved_at?: string | null
+  customer_rejected_at?: string | null
+  customer_approval_requested_at?: string | null
   public_token: string | null
   sent_at: string | null
   sent_via_method: string | null
@@ -838,6 +845,12 @@ Thank you.`
                   )}
                 </dl>
               </div>
+
+              <CustomerApprovalSection
+                invoice={invoice}
+                readOnly={readOnly}
+                onUpdated={loadInvoice}
+              />
 
               <PrepareEvatDraftCard
                 invoiceId={invoiceId}

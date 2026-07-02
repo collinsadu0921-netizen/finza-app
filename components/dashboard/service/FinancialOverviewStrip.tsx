@@ -7,11 +7,14 @@ export type FinancialOverviewStripProps = {
   accountsReceivable: number
   /** Ledger current liabilities total (same source as metrics.accountsPayable). */
   currentLiabilities: number
+  /** Operational outstanding across unpaid invoices (not ledger AR). */
+  unpaidInvoicesTotal: number
+  unpaidInvoicesCount: number
+  overdueInvoicesTotal?: number
+  overdueInvoicesCount?: number
   currencyCode: string
   /** e.g. `As of Jun 1, 2026 · ` when position balances are as-of today. */
   positionAsOfPrefix?: string
-  overdueCount?: number | null
-  loadingOverdue?: boolean
 }
 
 type OverviewCardConfig = {
@@ -75,8 +78,8 @@ function OverviewCard({
 
 export function ServiceDashboardFinancialOverviewSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-      {[1, 2, 3].map((i) => (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      {[1, 2, 3, 4].map((i) => (
         <div
           key={i}
           className="h-[72px] animate-pulse rounded-xl border border-slate-200/80 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-800/50"
@@ -91,17 +94,27 @@ export default function FinancialOverviewStrip({
   cashBalance,
   accountsReceivable,
   currentLiabilities,
+  unpaidInvoicesTotal,
+  unpaidInvoicesCount,
+  overdueInvoicesTotal = 0,
+  overdueInvoicesCount = 0,
   currencyCode,
   positionAsOfPrefix = "",
-  overdueCount,
-  loadingOverdue = false,
 }: FinancialOverviewStripProps) {
   const asOf = positionAsOfPrefix
 
-  let overdueNote: string | undefined
-  if (!loadingOverdue && overdueCount != null && overdueCount > 0) {
-    overdueNote =
-      overdueCount === 1 ? "1 overdue invoice" : `${overdueCount} overdue invoices`
+  const unpaidNoteParts: string[] = []
+  if (unpaidInvoicesCount > 0) {
+    unpaidNoteParts.push(
+      unpaidInvoicesCount === 1 ? "1 unpaid invoice" : `${unpaidInvoicesCount} unpaid invoices`
+    )
+  }
+  if (overdueInvoicesCount > 0) {
+    unpaidNoteParts.push(
+      overdueInvoicesCount === 1
+        ? `${formatMoney(overdueInvoicesTotal, currencyCode)} overdue · 1 invoice`
+        : `${formatMoney(overdueInvoicesTotal, currencyCode)} overdue · ${overdueInvoicesCount} invoices`
+    )
   }
 
   const cashNegative = cashBalance < 0
@@ -118,12 +131,19 @@ export default function FinancialOverviewStrip({
       valueTone: cashNegative ? "negative" : "default",
     },
     {
+      key: "unpaid",
+      label: "Unpaid invoices",
+      value: unpaidInvoicesTotal,
+      caption: `${asOf}Operational outstanding`,
+      accent: "#0ea5e9",
+      note: unpaidNoteParts.length > 0 ? unpaidNoteParts.join(" · ") : undefined,
+    },
+    {
       key: "ar",
       label: "Customer balances",
       value: accountsReceivable,
       caption: `${asOf}Based on ledger records`,
       accent: "#4f46e5",
-      note: overdueNote,
     },
     {
       key: "liabilities",
@@ -137,7 +157,7 @@ export default function FinancialOverviewStrip({
   return (
     <section aria-label="Financial overview">
       <h2 className="sr-only">Financial overview</h2>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
           <OverviewCard
             key={card.key}

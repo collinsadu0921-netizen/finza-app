@@ -6,8 +6,8 @@ import { formatMoney } from "@/lib/money"
 export type CollectionsFollowUpSectionProps = {
   cashCollected: number
   overdueCount: number | null
+  overdueTotal?: number
   currencyCode: string
-  loadingOverdue?: boolean
   /** Optional link for cash collected (e.g. payments list). */
   cashReportHref?: string
   cashLinkLabel?: string
@@ -101,18 +101,27 @@ export function ServiceDashboardCollectionsFollowUpSkeleton() {
 export default function CollectionsFollowUpSection({
   cashCollected,
   overdueCount,
+  overdueTotal = 0,
   currencyCode,
-  loadingOverdue = false,
   cashReportHref,
   cashLinkLabel = "View payments",
   overdueReportHref,
   overdueLinkLabel = "Review overdue invoices",
 }: CollectionsFollowUpSectionProps) {
   const overdueValue =
-    loadingOverdue || overdueCount == null ? "—" : String(Math.round(overdueCount))
+    overdueCount == null ? "—" : String(Math.round(overdueCount))
 
   const overdueTone =
-    !loadingOverdue && overdueCount != null && overdueCount > 0 ? "negative" : "default"
+    overdueCount != null && overdueCount > 0 ? "negative" : "default"
+
+  const overdueCaption =
+    overdueCount == null
+      ? "Overdue invoice count unavailable"
+      : overdueCount > 0
+        ? overdueTotal > 0
+          ? `${formatMoney(overdueTotal, currencyCode)} outstanding · past due date`
+          : "Open invoices past their due date"
+        : "No overdue invoices right now"
 
   return (
     <section aria-labelledby="collections-heading" className="max-w-2xl space-y-2.5">
@@ -139,13 +148,7 @@ export default function CollectionsFollowUpSection({
         <FollowUpCard
           label="Overdue invoices"
           value={overdueValue}
-          caption={
-            loadingOverdue
-              ? "Checking overdue invoices…"
-              : overdueCount != null && overdueCount > 0
-                ? "Open invoices past their due date"
-                : "No overdue invoices right now"
-          }
+          caption={overdueCaption}
           accent="#dc2626"
           href={overdueReportHref}
           linkLabel={overdueReportHref ? overdueLinkLabel : undefined}
