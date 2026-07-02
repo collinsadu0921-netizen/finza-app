@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import {
+  loadOrComputeOperationalListCache,
+} from "@/lib/server/operationalListCache"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 const INVOICE_SELECT = `
@@ -23,11 +26,66 @@ const INVOICE_SELECT = `
         )
       `
 
+type OverdueListPayload = {
+  invoices: unknown[]
+  pagination: {
+    page: number
+    pageSize: number
+    totalCount: number
+    totalPages: number
+  }
+}
+
+function overdueCacheKey(params: {
+  businessId: string
+  page: number
+  limit: number
+  customerId: string | null
+  startDate: string | null
+  endDate: string | null
+  search: string | null
+}): string {
+  return [
+    "invoices_overdue",
+    params.businessId,
+    params.page,
+    params.limit,
+    params.customerId ?? "",
+    params.startDate ?? "",
+    params.endDate ?? "",
+    params.search ?? "",
+  ].join("|")
+}
+
 type OverduePageRpcResult = {
   total_count: number
   invoice_ids: string[]
 }
 
+async function buildOverdueListPayload(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  params: {
+    businessId: string
+    page: number
+    limit: number
+    customerId: string | null
+    startDate: string | null
+    endDate: string | null
+    search: string | null
+  },
+  diag: ReturnType<typeof createRouteDiag>
+): Promise<OverdueListPayload> {
+  const { invoices, totalCount } = await fetchOverdueInvoicesPage(supabase, params, diag)
+  return {
+    invoices,
+    pagination: {
+      page: params.page,
+      pageSize: params.limit,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / params.limit)),
+    },
+  }
+}
 /**
  * Overdue invoices must be paginated in the database.
  * Loading all past-due invoices into Node to filter by outstanding balance
@@ -45,9 +103,11 @@ async function fetchOverdueInvoicesPage(
     startDate: string | null
     endDate: string | null
     search: string | null
-  }
+  },
+  diag: ReturnType<typeof createRouteDiag>
 ): Promise<{ invoices: unknown[]; totalCount: number }> {
   const from = (params.page - 1) * params.limit
+  const tRpc = performance.now()
 
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     "get_operational_overdue_invoices_page",
@@ -63,6 +123,11 @@ async function fetchOverdueInvoicesPage(
   )
 
   if (rpcError) {
+    diag.step("overdue_rpc", {
+      rpc: "get_operational_overdue_invoices_page",
+      ms_rpc: timedStepMs(tRpc),
+      ...supabaseErrorDiag(rpcError),
+    })
     throw new Error(rpcError.message)
   }
 
@@ -76,11 +141,18 @@ async function fetchOverdueInvoicesPage(
     : []
 
   const totalCount = Number(pageResult.total_count) || 0
+  diag.step("overdue_rpc", {
+    rpc: "get_operational_overdue_invoices_page",
+    ms_rpc: timedStepMs(tRpc),
+    id_count: invoiceIds.length,
+    total_count: totalCount,
+  })
 
   if (invoiceIds.length === 0) {
     return { invoices: [], totalCount }
   }
 
+  const tRows = performance.now()
   const { data: invoiceRows, error: invoiceError } = await supabase
     .from("invoices")
     .select(INVOICE_SELECT)
@@ -89,8 +161,17 @@ async function fetchOverdueInvoicesPage(
     .in("id", invoiceIds)
 
   if (invoiceError) {
+    diag.step("overdue_rows", {
+      ms_query: timedStepMs(tRows),
+      ...supabaseErrorDiag(invoiceError),
+    })
     throw new Error(invoiceError.message)
   }
+
+  diag.step("overdue_rows", {
+    ms_query: timedStepMs(tRows),
+    row_count: (invoiceRows ?? []).length,
+  })
 
   const byId = new Map((invoiceRows ?? []).map((row) => [row.id as string, row]))
   const ordered = invoiceIds
@@ -143,8 +224,7 @@ export async function GET(request: NextRequest) {
     const to = from + limit - 1
 
     if (status === "overdue") {
-      const tOverdue = performance.now()
-      const { invoices, totalCount } = await fetchOverdueInvoicesPage(supabase, {
+      const overdueParams = {
         businessId: business.id,
         page,
         limit,
@@ -152,24 +232,23 @@ export async function GET(request: NextRequest) {
         startDate,
         endDate,
         search,
-      })
-      diag.step("overdue_rpc", {
-        rpc: "get_operational_overdue_invoices_page",
-        ms_rpc: timedStepMs(tOverdue),
-        row_count: invoices.length,
-        total_count: totalCount,
+      }
+      const cacheKey = overdueCacheKey(overdueParams)
+      const tOverdue = performance.now()
+      const { value: payload, source: cacheSource, cache_enabled } =
+        await loadOrComputeOperationalListCache(cacheKey, () =>
+          buildOverdueListPayload(supabase, overdueParams, diag)
+        )
+      diag.step("cache", {
+        cache_source: cacheSource,
+        cache_enabled,
+        ms_total: timedStepMs(tOverdue),
+        row_count: payload.invoices.length,
+        total_count: payload.pagination.totalCount,
       })
 
       diag.finish(200, { page, limit })
-      return NextResponse.json({
-        invoices,
-        pagination: {
-          page,
-          pageSize: limit,
-          totalCount,
-          totalPages: Math.max(1, Math.ceil(totalCount / limit)),
-        },
-      })
+      return NextResponse.json(payload)
     }
 
     let query = supabase

@@ -1,5 +1,5 @@
 /**
- * GET /api/bills/list — default pagination and access.
+ * GET /api/bills/list — RPC-backed pagination (510).
  */
 
 import { GET } from "../list/route"
@@ -25,53 +25,45 @@ const mockResolveScope = resolveBusinessScopeForUser as jest.MockedFunction<
   typeof resolveBusinessScopeForUser
 >
 
-function buildSupabase(bills: unknown[] = [], count = 0) {
-  const range = jest.fn().mockResolvedValue({ data: bills, error: null, count })
-  const billsChain = {
-    select: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    is: jest.fn().mockReturnThis(),
-    order: jest.fn().mockReturnThis(),
-    ilike: jest.fn().mockReturnThis(),
-    gte: jest.fn().mockReturnThis(),
-    lte: jest.fn().mockReturnThis(),
-    or: jest.fn().mockReturnThis(),
-    range,
-  }
-  return {
-    auth: {
-      getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
-    },
-    from: jest.fn((table: string) => {
-      if (table === "bills") return billsChain
-      if (table === "bill_payments") {
-        return {
-          select: jest.fn().mockReturnThis(),
-          in: jest.fn().mockReturnThis(),
-          is: jest.fn().mockResolvedValue({ data: [], error: null }),
-        }
-      }
-      return { select: jest.fn().mockReturnThis() }
-    }),
-    billsChain,
-  }
+function mockBillsRpc(bills: unknown[], totalCount: number) {
+  return jest.fn().mockImplementation((name: string, args?: Record<string, unknown>) => {
+    if (name === "get_bills_list_page") {
+      return Promise.resolve({
+        data: { total_count: totalCount, bills },
+        error: null,
+      })
+    }
+    return Promise.resolve({ data: null, error: { message: `unexpected ${name}` } })
+  })
 }
 
 beforeEach(() => {
   jest.clearAllMocks()
+  delete process.env.FINZA_OPERATIONAL_LIST_CACHE_TTL_SEC
+  mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
 })
 
 describe("GET /api/bills/list", () => {
-  it("applies default page=1 and limit=50 range when client omits pagination", async () => {
-    const supabase = buildSupabase([{ id: "bill-1", total: 100 }], 1)
-    mockCreateSupabase.mockResolvedValue(supabase as any)
-    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+  it("applies default page=1 and limit=50 via RPC", async () => {
+    const bills = [{ id: "bill-1", total: 100, total_paid: 0, balance: 100 }]
+    const rpc = mockBillsRpc(bills, 1)
+    mockCreateSupabase.mockResolvedValue({
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
+      rpc,
+    } as any)
 
     const req = new NextRequest("http://localhost/api/bills/list?business_id=biz-a")
     const res = await GET(req)
 
     expect(res.status).toBe(200)
-    expect(supabase.billsChain.range).toHaveBeenCalledWith(0, 49)
+    expect(rpc).toHaveBeenCalledWith(
+      "get_bills_list_page",
+      expect.objectContaining({
+        p_business_id: "biz-a",
+        p_limit: 50,
+        p_offset: 0,
+      })
+    )
 
     const body = await res.json()
     expect(body.bills).toHaveLength(1)
@@ -84,15 +76,23 @@ describe("GET /api/bills/list", () => {
   })
 
   it("caps limit at 100", async () => {
-    const supabase = buildSupabase([], 0)
-    mockCreateSupabase.mockResolvedValue(supabase as any)
-    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+    const rpc = mockBillsRpc([], 0)
+    mockCreateSupabase.mockResolvedValue({
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
+      rpc,
+    } as any)
 
     const req = new NextRequest(
       "http://localhost/api/bills/list?business_id=biz-a&page=2&limit=500"
     )
     const res = await GET(req)
     expect(res.status).toBe(200)
-    expect(supabase.billsChain.range).toHaveBeenCalledWith(100, 199)
+    expect(rpc).toHaveBeenCalledWith(
+      "get_bills_list_page",
+      expect.objectContaining({
+        p_limit: 100,
+        p_offset: 100,
+      })
+    )
   })
 })

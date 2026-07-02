@@ -1,209 +1,205 @@
-import { NextRequest, NextResponse } from "next/server"
-import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { resolveBusinessScopeForUser } from "@/lib/business"
-import { billSupplierBalanceRemaining } from "@/lib/billBalance"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
-
-const BILL_ID_IN_CHUNK = 150
-const DEFAULT_PAGE = 1
-const DEFAULT_LIMIT = 50
-const MAX_LIMIT = 100
-
-/**
- * Loads non-deleted bill_payments summed by bill_id in chunks (avoids oversized `.in(...)` URLs).
- * Scoped to the current page of bill IDs only.
- */
-async function totalPaidByBillId(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  billIds: string[]
-): Promise<Map<string, number>> {
-  const totals = new Map<string, number>()
-  if (billIds.length === 0) return totals
-
-  for (let i = 0; i < billIds.length; i += BILL_ID_IN_CHUNK) {
-    const slice = billIds.slice(i, i + BILL_ID_IN_CHUNK)
-    const { data: rows, error } = await supabase
-      .from("bill_payments")
-      .select("bill_id, amount")
-      .in("bill_id", slice)
-      .is("deleted_at", null)
-
-    if (error) throw error
-
-    for (const row of rows ?? []) {
-      const bid = row.bill_id != null ? String(row.bill_id) : ""
-      if (!bid) continue
-      const amt = Number(row.amount) || 0
-      totals.set(bid, (totals.get(bid) ?? 0) + amt)
-    }
-  }
-
-  return totals
-}
-
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const routeName =
-    searchParams.has("page") || searchParams.has("limit")
-      ? "bills_list_paginated"
-      : "bills_list_default_bounded"
-  let diag = createRouteDiag(routeName)
-
-  try {
-    const tAuth = performance.now()
-    const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      diag.fail(401, "Unauthorized")
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const scope = await resolveBusinessScopeForUser(
-      supabase,
-      user.id,
-      searchParams.get("business_id") ?? searchParams.get("businessId")
-    )
-    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
-
-    if (!scope.ok) {
-      diag.fail(scope.status, scope.error)
-      return NextResponse.json({ error: scope.error }, { status: scope.status })
-    }
-
-    const tTier = performance.now()
-    const tierDenied = await enforceServiceIndustryMinTier(
-      supabase,
-      user.id,
-      scope.businessId,
-      "professional"
-    )
-    diag.step("entitlement", { ms_entitlement: timedStepMs(tTier) })
-    if (tierDenied) {
-      diag.fail(tierDenied.status, "tier_denied")
-      return tierDenied
-    }
-
-    diag = createRouteDiag(routeName, scope.businessId)
-
-    const business = { id: scope.businessId }
-    const supplierName = searchParams.get("supplier_name")
-    const status = searchParams.get("status")
-    const startDate = searchParams.get("start_date")
-    const endDate = searchParams.get("end_date")
-    const search = searchParams.get("search")
-
-    const page = Math.max(
-      DEFAULT_PAGE,
-      Number.parseInt(searchParams.get("page") || String(DEFAULT_PAGE), 10) || DEFAULT_PAGE
-    )
-    const limitRaw = Number.parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT
-    const limit = Math.min(MAX_LIMIT, Math.max(1, limitRaw))
-    const from = (page - 1) * limit
-    const to = from + limit - 1
-
-    let query = supabase
-      .from("bills")
-      .select("*", { count: "exact" })
-      .eq("business_id", business.id)
-      .is("deleted_at", null)
-      .order("issue_date", { ascending: false })
-
-    if (supplierName) {
-      query = query.ilike("supplier_name", `%${supplierName}%`)
-    }
-
-    if (status) {
-      query = query.eq("status", status)
-    }
-
-    if (startDate) {
-      query = query.gte("issue_date", startDate)
-    }
-
-    if (endDate) {
-      query = query.lte("issue_date", endDate)
-    }
-
-    if (search) {
-      query = query.or(`bill_number.ilike.%${search}%,supplier_name.ilike.%${search}%`)
-    }
-
-    query = query.range(from, to)
-
-    const tBills = performance.now()
-    const { data: bills, error, count } = await query
-    diag.step("bills_query", {
-      ms_query: timedStepMs(tBills),
-      row_count: (bills ?? []).length,
-      total_count: count ?? 0,
-      page,
-      limit,
-    })
-
-    if (error) {
-      console.error("Error fetching bills:", error)
-      diag.fail(500, error.message, supabaseErrorDiag(error))
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      )
-    }
-
-    const billRows = bills ?? []
-    const billIds = billRows.map((b) => b.id).filter((id): id is string => Boolean(id))
-
-    let paidByBill: Map<string, number>
-    try {
-      const tPayments = performance.now()
-      paidByBill = await totalPaidByBillId(supabase, billIds)
-      diag.step("bill_payments_query", {
-        ms_query: timedStepMs(tPayments),
-        bill_ids: billIds.length,
-      })
-    } catch (payErr) {
-      console.error("Error fetching bill payments for list:", payErr)
-      const message = payErr instanceof Error ? payErr.message : "Failed to load bill payments"
-      diag.fail(500, message)
-      return NextResponse.json({ error: message }, { status: 500 })
-    }
-
-    const billsWithBalances = billRows.map((bill) => {
-      const totalPaid = paidByBill.get(String(bill.id)) ?? 0
-      const balance = billSupplierBalanceRemaining(
-        Number(bill.total),
-        bill.wht_applicable,
-        bill.wht_amount,
-        totalPaid
-      )
-
-      return {
-        ...bill,
-        total_paid: totalPaid,
-        balance,
-      }
-    })
-
-    const total = count ?? 0
-    const hasMore = from + billsWithBalances.length < total
-
-    diag.finish(200, { row_count: billsWithBalances.length, total })
-    return NextResponse.json({
-      bills: billsWithBalances,
-      pagination: {
-        page,
-        limit,
-        total,
-        hasMore,
-      },
-    })
-  } catch (error: unknown) {
-    console.error("Error in bills list:", error)
-    const msg = error instanceof Error ? error.message : "Internal server error"
-    diag.fail(500, msg)
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
-}
+import { NextRequest, NextResponse } from "next/server"
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { resolveBusinessScopeForUser } from "@/lib/business"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import {
+  loadOrComputeOperationalListCache,
+} from "@/lib/server/operationalListCache"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
+
+const DEFAULT_PAGE = 1
+const DEFAULT_LIMIT = 50
+const MAX_LIMIT = 100
+
+type BillsListRpcResult = {
+  total_count: number
+  bills: Record<string, unknown>[]
+}
+
+type BillsListPayload = {
+  bills: Record<string, unknown>[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    hasMore: boolean
+  }
+}
+
+function billsCacheKey(params: {
+  businessId: string
+  page: number
+  limit: number
+  supplierName: string | null
+  status: string | null
+  startDate: string | null
+  endDate: string | null
+  search: string | null
+}): string {
+  return [
+    "bills_list",
+    params.businessId,
+    params.page,
+    params.limit,
+    params.supplierName ?? "",
+    params.status ?? "",
+    params.startDate ?? "",
+    params.endDate ?? "",
+    params.search ?? "",
+  ].join("|")
+}
+
+async function loadBillsListPayload(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  params: {
+    businessId: string
+    page: number
+    limit: number
+    supplierName: string | null
+    status: string | null
+    startDate: string | null
+    endDate: string | null
+    search: string | null
+  },
+  diag: ReturnType<typeof createRouteDiag>
+): Promise<BillsListPayload> {
+  const from = (params.page - 1) * params.limit
+  const tRpc = performance.now()
+
+  const { data, error } = await supabase.rpc("get_bills_list_page", {
+    p_business_id: params.businessId,
+    p_limit: params.limit,
+    p_offset: from,
+    p_supplier_name: params.supplierName || null,
+    p_status: params.status || null,
+    p_start_date: params.startDate || null,
+    p_end_date: params.endDate || null,
+    p_search: params.search || null,
+  })
+
+  if (error) {
+    diag.step("bills_rpc", {
+      rpc: "get_bills_list_page",
+      ms_rpc: timedStepMs(tRpc),
+      ...supabaseErrorDiag(error),
+    })
+    throw error
+  }
+
+  const rpcResult = (data ?? { total_count: 0, bills: [] }) as BillsListRpcResult
+  const bills = Array.isArray(rpcResult.bills) ? rpcResult.bills : []
+  const total = Number(rpcResult.total_count) || 0
+
+  diag.step("bills_rpc", {
+    rpc: "get_bills_list_page",
+    ms_rpc: timedStepMs(tRpc),
+    row_count: bills.length,
+    total_count: total,
+    page: params.page,
+    limit: params.limit,
+  })
+
+  return {
+    bills,
+    pagination: {
+      page: params.page,
+      limit: params.limit,
+      total,
+      hasMore: from + bills.length < total,
+    },
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  const routeName =
+    searchParams.has("page") || searchParams.has("limit")
+      ? "bills_list_paginated"
+      : "bills_list_default_bounded"
+  let diag = createRouteDiag(routeName)
+
+  try {
+    const tAuth = performance.now()
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      diag.fail(401, "Unauthorized")
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      searchParams.get("business_id") ?? searchParams.get("businessId")
+    )
+    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+
+    if (!scope.ok) {
+      diag.fail(scope.status, scope.error)
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
+    }
+
+    const tTier = performance.now()
+    const tierDenied = await enforceServiceIndustryMinTier(
+      supabase,
+      user.id,
+      scope.businessId,
+      "professional"
+    )
+    diag.step("entitlement", { ms_entitlement: timedStepMs(tTier) })
+    if (tierDenied) {
+      diag.fail(tierDenied.status, "tier_denied")
+      return tierDenied
+    }
+
+    diag = createRouteDiag(routeName, scope.businessId)
+
+    const page = Math.max(
+      DEFAULT_PAGE,
+      Number.parseInt(searchParams.get("page") || String(DEFAULT_PAGE), 10) || DEFAULT_PAGE
+    )
+    const limitRaw = Number.parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT
+    const limit = Math.min(MAX_LIMIT, Math.max(1, limitRaw))
+
+    const listParams = {
+      businessId: scope.businessId,
+      page,
+      limit,
+      supplierName: searchParams.get("supplier_name"),
+      status: searchParams.get("status"),
+      startDate: searchParams.get("start_date"),
+      endDate: searchParams.get("end_date"),
+      search: searchParams.get("search"),
+    }
+
+    const cacheKey = billsCacheKey(listParams)
+    const tTotal = performance.now()
+    const { value: payload, source: cacheSource, cache_enabled } =
+      await loadOrComputeOperationalListCache(cacheKey, () =>
+        loadBillsListPayload(supabase, listParams, diag)
+      )
+
+    diag.step("cache", {
+      cache_source: cacheSource,
+      cache_enabled,
+      ms_total: timedStepMs(tTotal),
+      row_count: payload.bills.length,
+    })
+
+    diag.finish(200, { row_count: payload.bills.length, total: payload.pagination.total })
+    return NextResponse.json(payload)
+  } catch (error: unknown) {
+    console.error("Error in bills list:", error)
+    const msg = error instanceof Error ? error.message : "Internal server error"
+    const meta =
+      error && typeof error === "object" && "code" in error
+        ? supabaseErrorDiag(error as { code?: string; message?: string; details?: string; hint?: string })
+        : undefined
+    diag.fail(500, msg, meta)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+

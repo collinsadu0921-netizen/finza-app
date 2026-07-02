@@ -11,6 +11,32 @@ import {
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
+import {
+  loadOrComputeOperationalListCache,
+} from "@/lib/server/operationalListCache"
+
+const DEFAULT_PAYROLL_RUNS_LIMIT = 24
+const MAX_PAYROLL_RUNS_LIMIT = 100
+
+const PAYROLL_RUN_LIST_SELECT = `
+  id,
+  business_id,
+  payroll_month,
+  status,
+  total_gross_salary,
+  total_allowances,
+  total_deductions,
+  total_ssnit_employee,
+  total_ssnit_employer,
+  total_paye,
+  total_net_salary,
+  approved_by,
+  approved_at,
+  journal_entry_id,
+  notes,
+  created_at,
+  updated_at
+`.replace(/\s+/g, " ")
 
 function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; position?: string | null }): boolean {
   const employmentType = String(staff.employment_type || "").toLowerCase()
@@ -65,36 +91,77 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
     }
 
-    const tQuery = performance.now()
-    const { data: runs, error } = await supabase
-      .from("payroll_runs")
-      .select("*")
-      .eq("business_id", business.id)
-      .is("deleted_at", null)
-      .order("payroll_month", { ascending: false })
-    diag.step("payroll_runs_query", {
-      ms_query: timedStepMs(tQuery),
-      row_count: (runs ?? []).length,
+    const { searchParams } = new URL(request.url)
+    const page = Math.max(
+      1,
+      Number.parseInt(searchParams.get("page") || "1", 10) || 1
+    )
+    const limitRaw = Number.parseInt(
+      searchParams.get("limit") || String(DEFAULT_PAYROLL_RUNS_LIMIT),
+      10
+    ) || DEFAULT_PAYROLL_RUNS_LIMIT
+    const limit = Math.min(MAX_PAYROLL_RUNS_LIMIT, Math.max(1, limitRaw))
+    const from = (page - 1) * limit
+    const to = from + limit - 1
+
+    const cacheKey = ["payroll_runs", business.id, page, limit].join("|")
+
+    const { value: payload, source: cacheSource, cache_enabled } =
+      await loadOrComputeOperationalListCache(cacheKey, async () => {
+        const tQuery = performance.now()
+        const { data: runs, error, count } = await supabase
+          .from("payroll_runs")
+          .select(PAYROLL_RUN_LIST_SELECT, { count: "exact" })
+          .eq("business_id", business.id)
+          .is("deleted_at", null)
+          .order("payroll_month", { ascending: false })
+          .range(from, to)
+
+        if (error) {
+          diag.step("payroll_runs_query", {
+            ms_query: timedStepMs(tQuery),
+            ...supabaseErrorDiag(error),
+          })
+          throw error
+        }
+
+        const totalCount = count ?? 0
+        diag.step("payroll_runs_query", {
+          ms_query: timedStepMs(tQuery),
+          row_count: (runs ?? []).length,
+          total_count: totalCount,
+          page,
+          limit,
+        })
+
+        return {
+          runs: runs || [],
+          pagination: {
+            page,
+            limit,
+            totalCount,
+            hasMore: from + (runs?.length ?? 0) < totalCount,
+          },
+        }
+      })
+
+    diag.step("cache", {
+      cache_source: cacheSource,
+      cache_enabled,
+      row_count: payload.runs.length,
     })
 
-    if (error) {
-      console.error("Error fetching payroll runs:", error)
-      diag.fail(500, error.message, supabaseErrorDiag(error))
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      )
-    }
-
     diag.finish(200)
-    return NextResponse.json({ runs: runs || [] })
-  } catch (error: any) {
+    return NextResponse.json(payload)
+  } catch (error: unknown) {
     console.error("Error in payroll runs list:", error)
-    diag.fail(500, error.message || "Internal server error")
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
-    )
+    const message = error instanceof Error ? error.message : "Internal server error"
+    const meta =
+      error && typeof error === "object" && "code" in error
+        ? supabaseErrorDiag(error as { code?: string; message?: string; details?: string; hint?: string })
+        : undefined
+    diag.fail(500, message, meta)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
