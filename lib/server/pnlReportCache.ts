@@ -84,11 +84,17 @@ function clonePayload<T>(value: T): T {
 export async function loadOrComputePnlReportCache<T>(
   key: string,
   compute: () => Promise<T>,
-  options?: { shouldStore?: (value: T) => boolean }
-): Promise<PnlReportCacheResult<T>> {
+  options?: {
+    shouldStore?: (value: T) => boolean
+    /** When true, return last stored payload even after TTL expiry if compute fails. */
+    serveExpiredOnMiss?: boolean
+    isComputeFailure?: (value: T) => boolean
+  }
+): Promise<PnlReportCacheResult<T> & { servedExpiredCache?: boolean }> {
   const cacheEnabled = isPnlReportCacheEnabled()
   const ms = ttlMs()
   const shouldStore = options?.shouldStore ?? shouldCachePnlReportPayload
+  const isComputeFailure = options?.isComputeFailure ?? (() => false)
 
   if (ms > 0) {
     const hit = store.get(key)
@@ -99,7 +105,6 @@ export async function loadOrComputePnlReportCache<T>(
         cache_enabled: cacheEnabled,
       }
     }
-    if (hit) store.delete(key)
   }
 
   const pending = inflight.get(key)
@@ -114,7 +119,7 @@ export async function loadOrComputePnlReportCache<T>(
 
   const promise = compute()
     .then((value) => {
-      if (ms > 0 && shouldStore(value)) {
+      if (ms > 0 && shouldStore(value) && !isComputeFailure(value)) {
         store.set(key, { expiresAt: Date.now() + ms, payload: value })
         if (store.size > 200) {
           const now = Date.now()
@@ -130,6 +135,26 @@ export async function loadOrComputePnlReportCache<T>(
     })
 
   inflight.set(key, promise)
-  const value = await promise
+  let value = await promise
+
+  if (options?.serveExpiredOnMiss && isComputeFailure(value)) {
+    const expired = getExpiredPnlReportCacheEntry<T>(key)
+    if (expired != null) {
+      return {
+        value: expired,
+        source: "cache_hit",
+        cache_enabled: cacheEnabled,
+        servedExpiredCache: true,
+      }
+    }
+  }
+
   return { value: clonePayload(value), source: "cache_miss", cache_enabled: cacheEnabled }
+}
+
+/** Returns last stored payload regardless of TTL (process-local stale cache). */
+export function getExpiredPnlReportCacheEntry<T>(key: string): T | null {
+  const hit = store.get(key)
+  if (!hit) return null
+  return clonePayload(hit.payload as T)
 }

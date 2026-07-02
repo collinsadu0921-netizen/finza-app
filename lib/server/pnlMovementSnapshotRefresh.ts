@@ -5,6 +5,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 
+/** Read snapshot lines without freshness filter (reports degraded path). */
+export const PNL_SNAPSHOT_STALE_ANY_SECONDS = 10 * 365 * 24 * 60 * 60
+
 export async function tryRefreshPnlMovementSnapshot(
   supabase: SupabaseClient,
   businessId: string,
@@ -46,4 +49,19 @@ export async function readPnlMovementLinesFromSnapshot(
     p_end_date: endDate,
     p_max_stale_seconds: maxStaleSeconds,
   })
+}
+
+export async function readStalePnlMovementLinesFromSnapshot(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string
+) {
+  return readPnlMovementLinesFromSnapshot(
+    supabase,
+    businessId,
+    startDate,
+    endDate,
+    PNL_SNAPSHOT_STALE_ANY_SECONDS
+  )
 }

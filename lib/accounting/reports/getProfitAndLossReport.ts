@@ -167,9 +167,21 @@ function buildReportFromMovementRows(
   }
 }
 
+export type PnLReportLoadOptions = {
+  /** When false, snapshot reads only — no refresh or live movement RPC. */
+  refreshOnRequest?: boolean
+}
+
+export type PnLReportLoadMeta = {
+  movementSource: "snapshot" | "ledger" | "unavailable"
+  snapshotStale: boolean
+}
+
 export async function getProfitAndLossReport(
   supabase: SupabaseClient,
-  input: PnLReportInput
+  input: PnLReportInput,
+  options?: PnLReportLoadOptions,
+  loadMeta?: PnLReportLoadMeta
 ): Promise<{ data: PnLReportResponse | null; error: string }> {
   const { businessId } = input
   if (!businessId?.trim()) {
@@ -181,12 +193,26 @@ export async function getProfitAndLossReport(
     return { data: null, error: rangeError ?? "Accounting period could not be resolved" }
   }
 
-  const { rows, error: fetchError, source: movementSource } = await fetchProfitAndLossMovementRows(
-    supabase,
-    businessId,
-    range.movementStart,
-    range.movementEnd
-  )
+  const refreshOnRequest = options?.refreshOnRequest !== false
+
+  const { rows, error: fetchError, source: movementSource, snapshotStale } =
+    await fetchProfitAndLossMovementRows(
+      supabase,
+      businessId,
+      range.movementStart,
+      range.movementEnd,
+      { refreshOnRequest }
+    )
+
+  if (loadMeta) {
+    loadMeta.movementSource = movementSource
+    loadMeta.snapshotStale = snapshotStale
+  }
+
+  if (movementSource === "unavailable") {
+    return { data: null, error: "PNL_SNAPSHOT_UNAVAILABLE" }
+  }
+
   if (fetchError) {
     return { data: null, error: fetchError }
   }

@@ -112,4 +112,36 @@ describe("pnlReportCache", () => {
     await loadOrComputePnlReportCache(key, compute)
     expect(computeCalls).toBe(2)
   })
+
+  it("serveExpiredOnMiss returns last stored payload after TTL when compute fails", async () => {
+    jest.useFakeTimers()
+    const key = `test-pnl-stale-${Date.now()}-${Math.random()}`
+    const payload = sampleReport()
+    let computeCalls = 0
+
+    await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      return payload
+    })
+
+    jest.advanceTimersByTime(31_000)
+
+    const stale = await loadOrComputePnlReportCache(
+      key,
+      async () => {
+        computeCalls += 1
+        return { ok: false }
+      },
+      {
+        serveExpiredOnMiss: true,
+        isComputeFailure: (v) => (v as { ok?: boolean }).ok === false,
+      }
+    )
+
+    expect(stale.servedExpiredCache).toBe(true)
+    expect(stale.source).toBe("cache_hit")
+    expect(stale.value).toEqual(payload)
+    expect(computeCalls).toBe(2)
+    jest.useRealTimers()
+  })
 })

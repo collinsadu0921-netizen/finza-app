@@ -5,7 +5,11 @@ import { resolveBusinessScopeForUser } from "@/lib/business"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
-import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import {
+  getProfitAndLossReport,
+  type PnLReportLoadMeta,
+  type PnLReportResponse,
+} from "@/lib/accounting/reports/getProfitAndLossReport"
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
 import {
   buildPnlReportCacheKey,
@@ -18,11 +22,28 @@ import {
   authFailureStageForScopeError,
   resolveAuthenticatedApiUser,
 } from "@/lib/server/resolveAuthenticatedApiUser"
+import {
+  buildReportsPnlDiagnostics,
+  isReportsPnlRefreshOnRequestEnabled,
+  resolveReportsPnlSource,
+  type ReportsPnlDiagnostics,
+} from "@/lib/server/reportsPnlRefreshPolicy"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 type PnlReportComputeResult =
-  | { ok: true; data: NonNullable<Awaited<ReturnType<typeof getProfitAndLossReport>>["data"]> }
-  | { ok: false; error: string }
+  | { ok: true; data: PnLReportResponse; loadMeta: PnLReportLoadMeta }
+  | { ok: false; error: string; loadMeta: PnLReportLoadMeta }
+
+function isPnlComputeFailure(result: PnlReportComputeResult): boolean {
+  return !result.ok
+}
+
+function attachReportsDiagnostics(
+  payload: PnLReportResponse,
+  diagnostics: ReportsPnlDiagnostics
+): PnLReportResponse & ReportsPnlDiagnostics {
+  return { ...payload, ...diagnostics }
+}
 
 /**
  * GET /api/accounting/reports/profit-and-loss
@@ -30,12 +51,13 @@ type PnlReportComputeResult =
  * Canonical P&L — ledger period movement via getProfitAndLossReport.
  * Query: business_id (required), period_id | period_start | as_of_date | start_date, end_date (optional).
  *
- * Auth: session-first (same pattern as operational list routes). Middleware validates
- * accounting API access; this handler resolves user + business scope without a second
- * Auth-server getUser() when the signed session cookie is valid.
+ * Mixed-load gate: FINZA_REPORTS_PNL_REFRESH_ON_REQUEST unset/0 (default) reads snapshot/cache
+ * only — no live get_profit_and_loss_movement or snapshot refresh in the request path.
  */
 export async function GET(request: NextRequest) {
   let diag = createRouteDiag("reports_pnl")
+  const refreshOnRequest = isReportsPnlRefreshOnRequestEnabled()
+
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
@@ -82,6 +104,7 @@ export async function GET(request: NextRequest) {
     diag.step("auth", {
       ms_auth: Math.round((performance.now() - tAuth) * 10) / 10,
       auth_source: auth.authSource,
+      reports_refresh_on_request: refreshOnRequest ? "enabled" : "disabled",
     })
 
     const tReady = performance.now()
@@ -147,37 +170,73 @@ export async function GET(request: NextRequest) {
     )
 
     const tReport = performance.now()
-    const { value: reportResult, source, cache_enabled } =
+    const { value: reportResult, source, cache_enabled, servedExpiredCache } =
       await loadOrComputePnlReportCache<PnlReportComputeResult>(
         cacheKey,
         async () => {
-          const { data, error } = await getProfitAndLossReport(supabase, reportInput)
-          if (error || !data) {
-            return { ok: false, error: error || "Accounting period could not be resolved" }
+          const loadMeta: PnLReportLoadMeta = {
+            movementSource: "unavailable",
+            snapshotStale: false,
           }
-          return { ok: true, data }
+          const { data, error } = await getProfitAndLossReport(
+            supabase,
+            reportInput,
+            { refreshOnRequest },
+            loadMeta
+          )
+          if (error || !data) {
+            return { ok: false, error: error || "Accounting period could not be resolved", loadMeta }
+          }
+          return { ok: true, data, loadMeta }
         },
-        { shouldStore: (result) => result.ok && shouldCachePnlReportPayload(result.data) }
+        {
+          shouldStore: (result) => result.ok && shouldCachePnlReportPayload(result.data),
+          serveExpiredOnMiss: !refreshOnRequest,
+          isComputeFailure: isPnlComputeFailure,
+        }
       )
 
     const cacheSource = pnlReportCacheSourceForDiag(source, cache_enabled)
+    const loadMeta = reportResult.loadMeta
+
+    const reportsSource = resolveReportsPnlSource({
+      cacheSource: source,
+      movementSource: loadMeta.movementSource,
+      snapshotStale: loadMeta.snapshotStale,
+      servedExpiredCache: Boolean(servedExpiredCache),
+    })
+
+    const reportsDiagnostics = buildReportsPnlDiagnostics({
+      refreshOnRequest,
+      reportsSource,
+      snapshotStale: loadMeta.snapshotStale || Boolean(servedExpiredCache),
+    })
 
     if (!reportResult.ok) {
-      diag.fail(500, reportResult.error, {
-        rpc: "get_profit_and_loss_movement",
+      diag.fail(503, reportResult.error, {
         ms_report: Math.round((performance.now() - tReport) * 10) / 10,
         cache_source: cacheSource,
+        ...reportsDiagnostics,
       })
-      return NextResponse.json({ error: reportResult.error }, { status: 500 })
+      return NextResponse.json(
+        {
+          error: reportResult.error,
+          ...reportsDiagnostics,
+        },
+        { status: 503 }
+      )
     }
 
     diag.step("report", {
       rpc: "get_profit_and_loss_movement",
       ms_report: Math.round((performance.now() - tReport) * 10) / 10,
       cache_source: cacheSource,
+      ...reportsDiagnostics,
     })
-    diag.finish(200, { cache_source: cacheSource })
-    return NextResponse.json(reportResult.data)
+    diag.finish(200, { cache_source: cacheSource, ...reportsDiagnostics })
+    return NextResponse.json(
+      attachReportsDiagnostics(reportResult.data, reportsDiagnostics)
+    )
   } catch (err: unknown) {
     console.error("Error in profit & loss:", err)
     diag.fail(500, err instanceof Error ? err.message : "Internal server error")
