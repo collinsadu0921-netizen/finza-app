@@ -118,4 +118,4 @@ Delete the fake tenant by `business_id` on staging only, or drop/recreate stagin
 1. Run SQL smoke from [`setup.md`](./setup.md).
 2. Update `load-tests/sessions.staging.json` with staging `businessId`.
 3. k6 smoke against staging URL only.
-4. `workday_50` operational gate: `WORKDAY_SKIP_REPORTS=1` (proven). Realistic mixed gate: `SCENARIO=workday_50_plus_reports_5` (see `load-tests/README.md`).
+4. `workday_50` operational gate: `WORKDAY_SKIP_REPORTS=1` (proven). Keep `FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST` **unset or `0`** (cluster reads summary/cache only). Prime dashboard summaries before k6 if needed (`scripts/audit-staging-dashboard-timeline.mjs`). Realistic mixed gate: `SCENARIO=workday_50_plus_reports_5` (see `load-tests/README.md`).

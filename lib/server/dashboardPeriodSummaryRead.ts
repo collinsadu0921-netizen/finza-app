@@ -32,6 +32,24 @@ export type FreshPeriodPnlRow = {
   refreshed_at: string
 }
 
+/** Read period P&L from summary without freshness filter (cluster degraded path). */
+const STALE_SUMMARY_ANY_SECONDS = 10 * 365 * 24 * 60 * 60
+
+export async function fetchStaleDashboardPeriodPnl(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string
+): Promise<FreshPeriodPnlRow | null> {
+  return fetchFreshDashboardPeriodPnl(
+    supabase,
+    businessId,
+    startDate,
+    endDate,
+    STALE_SUMMARY_ANY_SECONDS
+  )
+}
+
 export async function fetchFreshDashboardPeriodPnl(
   supabase: SupabaseClient,
   businessId: string,

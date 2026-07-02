@@ -3,6 +3,9 @@
  *
  * Sequenced dashboard load: timeline → metrics → activity (one HTTP round-trip).
  * Replaces concurrent client-side fan-out to service-metrics/timeline/activity.
+ *
+ * Operational load gate: FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST unset/0 (default)
+ * reads summary/cache only — no refresh or live metrics RPC in the request path.
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -11,9 +14,24 @@ export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { loadOrComputeDashboardClusterCache, loadOrComputeDashboardActivityCache } from "@/lib/server/dashboardClusterCache"
+import {
+  dashboardRefreshOnRequestDiag,
+  dashboardRefreshSkipped,
+  isDashboardClusterRefreshOnRequestEnabled,
+  resolveDashboardClusterSource,
+  type DashboardClusterSource,
+} from "@/lib/server/dashboardClusterRefreshPolicy"
 import { loadServiceDashboardActivityFeed } from "@/lib/server/serviceDashboardActivityLoader"
-import { loadServiceDashboardMetrics } from "@/lib/server/serviceDashboardMetricsLoader"
-import { loadServiceDashboardTimeline, shouldCacheDashboardClusterPayload } from "@/lib/server/serviceDashboardTimeline"
+import {
+  loadServiceDashboardMetrics,
+  type ServiceDashboardMetricsLoadMeta,
+  type ServiceDashboardMetricsPayload,
+} from "@/lib/server/serviceDashboardMetricsLoader"
+import {
+  loadServiceDashboardTimeline,
+  shouldCacheDashboardClusterPayload,
+  type ServiceDashboardTimelineItem,
+} from "@/lib/server/serviceDashboardTimeline"
 import { createRouteDiag, isRouteDiagnosticsEnabled, type RouteDiagFields } from "@/lib/server/routeDiagnostics"
 
 const DEFAULT_PERIODS = 12
@@ -27,11 +45,45 @@ function devClusterLog(label: string, startedAt: number) {
 }
 
 export type ServiceDashboardClusterPayload = {
-  timeline: Awaited<ReturnType<typeof loadServiceDashboardTimeline>>["timeline"]
-  metrics: Awaited<ReturnType<typeof loadServiceDashboardMetrics>>
+  timeline: ServiceDashboardTimelineItem[]
+  metrics: ServiceDashboardMetricsPayload
   activity: { items: Awaited<ReturnType<typeof loadServiceDashboardActivityFeed>>["items"] }
   timelineSource?: string
   timelineCacheable?: boolean
+  dashboard_refresh_on_request: ReturnType<typeof dashboardRefreshOnRequestDiag>
+  dashboard_refresh_skipped: boolean
+  dashboard_source: DashboardClusterSource
+}
+
+function emptyDegradedClusterPayload(
+  refreshOnRequest: boolean,
+  metrics?: ServiceDashboardMetricsPayload
+): ServiceDashboardClusterPayload {
+  return {
+    timeline: [],
+    metrics:
+      metrics ??
+      ({
+        period: { period_start: "", period_end: "", resolution_reason: "degraded" },
+        currency: { code: "GHS", symbol: "GH₵", name: "Ghanaian Cedi" },
+        revenue: 0,
+        expenses: 0,
+        netProfit: 0,
+        cashCollected: 0,
+        accountsReceivable: 0,
+        accountsPayable: 0,
+        cashBalance: 0,
+        positionBalancesAsOfToday: true,
+        positionAsOfDate: "",
+        previousPeriod: null,
+      } satisfies ServiceDashboardMetricsPayload),
+    activity: { items: [] },
+    timelineSource: "degraded",
+    timelineCacheable: true,
+    dashboard_refresh_on_request: dashboardRefreshOnRequestDiag(),
+    dashboard_refresh_skipped: dashboardRefreshSkipped(refreshOnRequest),
+    dashboard_source: "degraded",
+  }
 }
 
 async function loadDashboardCluster(
@@ -42,15 +94,20 @@ async function loadDashboardCluster(
     activityLimit: number
     periodStart?: string
     previousPeriodStart?: string
+    refreshOnRequest: boolean
   },
   diag: ReturnType<typeof createRouteDiag>
 ): Promise<ServiceDashboardClusterPayload> {
+  const loaderOptions = { refreshOnRequest: options.refreshOnRequest }
+  const metricsMeta: ServiceDashboardMetricsLoadMeta = { source: "degraded" }
+
   const tTimeline = performance.now()
   const timelineResult = await loadServiceDashboardTimeline(
     supabase,
     businessId,
     options.periodsParam,
-    diag
+    diag,
+    loaderOptions
   )
   const { timeline, source: timelineSource } = timelineResult
   devClusterLog(`timeline (${timelineSource})`, tTimeline)
@@ -64,25 +121,60 @@ async function loadDashboardCluster(
   }
 
   const tMetrics = performance.now()
-  const metrics = await loadServiceDashboardMetrics(
-    supabase,
-    businessId,
-    {
-      periodStart: options.periodStart,
-      previousPeriodStart,
-    },
-    diag
-  )
+  let metrics: ServiceDashboardMetricsPayload
+  try {
+    metrics = await loadServiceDashboardMetrics(
+      supabase,
+      businessId,
+      {
+        periodStart: options.periodStart,
+        previousPeriodStart,
+      },
+      diag,
+      loaderOptions,
+      metricsMeta
+    )
+  } catch (err) {
+    if (!options.refreshOnRequest) {
+      console.warn(
+        "[service-cluster] metrics degraded:",
+        err instanceof Error ? err.message : "metrics_load_failed"
+      )
+      metrics = emptyDegradedClusterPayload(options.refreshOnRequest).metrics
+      metricsMeta.source = "degraded"
+    } else {
+      throw err
+    }
+  }
   devClusterLog("metrics", tMetrics)
 
   const activityCacheKey = `activity|${businessId}|${options.activityLimit}`
   const tActivity = performance.now()
   const { value: activity, source: activityCacheSource } = await loadOrComputeDashboardActivityCache(
     activityCacheKey,
-    () => loadServiceDashboardActivityFeed(supabase, businessId, options.activityLimit, diag)
+    () =>
+      loadServiceDashboardActivityFeed(
+        supabase,
+        businessId,
+        options.activityLimit,
+        diag,
+        { degradeOnError: !options.refreshOnRequest }
+      )
   )
   devClusterLog(`activity (${activityCacheSource})`, tActivity)
   diag.step("activity_cache", { source: activityCacheSource })
+
+  const fullyDegraded =
+    timeline.length === 0 &&
+    metricsMeta.source === "degraded" &&
+    activity.items.length === 0
+
+  const dashboardSource = resolveDashboardClusterSource({
+    cacheSource: "cache_miss",
+    timelineSource,
+    metricsSource: metricsMeta.source,
+    fullyDegraded,
+  })
 
   return {
     timeline,
@@ -90,12 +182,16 @@ async function loadDashboardCluster(
     activity,
     timelineSource,
     timelineCacheable: timelineResult.cacheable,
+    dashboard_refresh_on_request: dashboardRefreshOnRequestDiag(),
+    dashboard_refresh_skipped: dashboardRefreshSkipped(options.refreshOnRequest),
+    dashboard_source: dashboardSource,
   }
 }
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
   let diag = createRouteDiag("dashboard_cluster")
+  const refreshOnRequest = isDashboardClusterRefreshOnRequestEnabled()
 
   try {
     const tAuth = performance.now()
@@ -115,6 +211,10 @@ export async function GET(request: NextRequest) {
     }
 
     diag = createRouteDiag("dashboard_cluster", businessId)
+    diag.step("refresh_policy", {
+      dashboard_refresh_on_request: dashboardRefreshOnRequestDiag(),
+      dashboard_refresh_skipped: dashboardRefreshSkipped(refreshOnRequest),
+    })
 
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
     if (!auth.authorized) {
@@ -143,6 +243,7 @@ export async function GET(request: NextRequest) {
       activityLimit,
       periodStart ?? "",
       previousPeriodStart ?? "",
+      refreshOnRequest ? "refresh" : "norefresh",
     ].join("|")
 
     try {
@@ -153,23 +254,52 @@ export async function GET(request: NextRequest) {
             loadDashboardCluster(
               supabase,
               businessId,
-              { periodsParam, activityLimit, periodStart, previousPeriodStart },
+              { periodsParam, activityLimit, periodStart, previousPeriodStart, refreshOnRequest },
               diag
             ),
           { shouldStore: shouldCacheDashboardClusterPayload }
         )
 
-      diag.step("cache", { cache_source: cacheSource, cache_enabled })
+      const payload: ServiceDashboardClusterPayload = {
+        ...value,
+        dashboard_source:
+          cacheSource === "cache_hit" ? "cache" : value.dashboard_source,
+      }
+
+      diag.step("cache", {
+        cache_source: cacheSource,
+        cache_enabled,
+        dashboard_source: payload.dashboard_source,
+      })
       diag.finish(200)
       devClusterLog("total route", routeT0)
-      return NextResponse.json(value)
+      return NextResponse.json(payload)
     } catch (err) {
+      if (!refreshOnRequest) {
+        console.warn(
+          "[service-cluster] cluster load degraded:",
+          err instanceof Error ? err.message : "cluster_load_failed"
+        )
+        const degraded = emptyDegradedClusterPayload(refreshOnRequest)
+        diag.step("cluster_degraded", {
+          error: err instanceof Error ? err.message : "cluster_load_failed",
+        })
+        diag.finish(200)
+        devClusterLog("total route (degraded)", routeT0)
+        return NextResponse.json(degraded)
+      }
+
       const rpcMeta = (err as { rpcMeta?: RouteDiagFields }).rpcMeta
       diag.fail(500, err instanceof Error ? err.message : "cluster_load_failed", rpcMeta)
       devClusterLog("total route", routeT0)
       return NextResponse.json({ error: "Could not load dashboard cluster" }, { status: 500 })
     }
   } catch (err) {
+    if (!refreshOnRequest) {
+      const degraded = emptyDegradedClusterPayload(refreshOnRequest)
+      diag.finish(200)
+      return NextResponse.json(degraded)
+    }
     diag.fail(500, err instanceof Error ? err.message : "Server error")
     console.error("Dashboard service-cluster error:", err)
     return NextResponse.json({ error: "Server error" }, { status: 500 })

@@ -228,11 +228,17 @@ async function buildJournalActivityItems(
   })
 }
 
+export type ServiceDashboardActivityLoadOptions = {
+  /** When true, return empty items instead of throwing on journal RPC failure. */
+  degradeOnError?: boolean
+}
+
 export async function loadServiceDashboardActivityFeed(
   supabase: SupabaseClient,
   businessId: string,
   limit: number,
-  diag: RouteDiag
+  diag: RouteDiag,
+  options?: ServiceDashboardActivityLoadOptions
 ): Promise<{ items: ServiceDashboardActivityItem[] }> {
   const journalFetchLimit = Math.min(MAX_ACTIVITY_LIMIT, limit + 5)
 
@@ -288,6 +294,10 @@ export async function loadServiceDashboardActivityFeed(
 
   if (journalError) {
     console.error("[service-activity] journal_activity_rpc:", journalError.message)
+    if (options?.degradeOnError) {
+      diag.step("journal_activity_degraded", supabaseErrorDiag(journalError))
+      return { items: [] }
+    }
     diag.fail(500, "journal_query_failed", supabaseErrorDiag(journalError))
     throw journalError
   }

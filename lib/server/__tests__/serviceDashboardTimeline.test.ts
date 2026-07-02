@@ -57,6 +57,54 @@ describe("loadServiceDashboardTimeline", () => {
     )
   })
 
+  it("returns stale summary without refresh when refreshOnRequest is false", async () => {
+    const tryRefresh = jest.fn().mockResolvedValue({
+      data: { refreshed: true, lock_held: false, period_count: 2 },
+      error: null,
+    })
+    const supabase = mockSupabase({
+      get_service_dashboard_timeline_from_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [], error: null }),
+      get_service_dashboard_timeline_stale_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [row(1)], error: null }),
+      try_refresh_service_dashboard_period_summaries: tryRefresh,
+    })
+
+    const result = await loadServiceDashboardTimeline(supabase, "biz-a", 12, diag, {
+      refreshOnRequest: false,
+    })
+    expect(result.source).toBe("summary_stale")
+    await Promise.resolve()
+    expect(tryRefresh).not.toHaveBeenCalled()
+  })
+
+  it("returns degraded empty timeline when summary missing and refresh disabled", async () => {
+    const supabase = mockSupabase({
+      get_service_dashboard_timeline_from_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [], error: null }),
+      get_service_dashboard_timeline_stale_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [], error: null }),
+    })
+
+    const result = await loadServiceDashboardTimeline(supabase, "biz-a", 12, diag, {
+      refreshOnRequest: false,
+    })
+    expect(result.source).toBe("degraded")
+    expect(result.timeline).toHaveLength(0)
+    expect(supabase.rpc).not.toHaveBeenCalledWith(
+      "refresh_service_dashboard_period_summaries",
+      expect.anything()
+    )
+    expect(supabase.rpc).not.toHaveBeenCalledWith(
+      "try_refresh_service_dashboard_period_summaries",
+      expect.anything()
+    )
+  })
+
   it("returns stale summary and triggers background try_refresh", async () => {
     const tryRefresh = jest
       .fn()

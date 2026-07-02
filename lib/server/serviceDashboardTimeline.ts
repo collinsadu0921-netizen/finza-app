@@ -35,6 +35,12 @@ export type TimelineLoadSource =
   | "empty_refresh_in_progress"
   | "empty_with_ledger"
   | "empty"
+  | "degraded"
+
+export type ServiceDashboardTimelineLoadOptions = {
+  /** When false, read summary only — no refresh or live fallback (cluster operational gate). */
+  refreshOnRequest?: boolean
+}
 
 export type ServiceDashboardTimelineResult = {
   timeline: ServiceDashboardTimelineItem[]
@@ -244,9 +250,11 @@ export async function loadServiceDashboardTimeline(
   supabase: SupabaseClient,
   businessId: string,
   periodsParam: number,
-  diag: RouteDiag
+  diag: RouteDiag,
+  options?: ServiceDashboardTimelineLoadOptions
 ): Promise<ServiceDashboardTimelineResult> {
   const t0 = performance.now()
+  const refreshOnRequest = options?.refreshOnRequest !== false
 
   const freshRows = await readFreshSummary(supabase, businessId, periodsParam)
   if (freshRows.length > 0) {
@@ -255,8 +263,31 @@ export async function loadServiceDashboardTimeline(
 
   const staleRows = await readStaleSummary(supabase, businessId, periodsParam)
   if (staleRows.length > 0) {
-    void tryRefreshSummary(supabase, businessId, periodsParam)
-    return finish(diag, t0, periodsParam, rowsResult(staleRows, "summary_stale"))
+    if (refreshOnRequest) {
+      void tryRefreshSummary(supabase, businessId, periodsParam)
+    }
+    return finish(
+      diag,
+      t0,
+      periodsParam,
+      rowsResult(staleRows, "summary_stale"),
+      refreshOnRequest ? undefined : { refresh_skipped: true }
+    )
+  }
+
+  if (!refreshOnRequest) {
+    return finish(
+      diag,
+      t0,
+      periodsParam,
+      {
+        timeline: [],
+        source: "degraded",
+        cacheable: true,
+        diagnostic: "summary_missing_refresh_disabled",
+      },
+      { refresh_skipped: true }
+    )
   }
 
   const blockingCount = await blockingRefreshSummary(supabase, businessId, periodsParam)

@@ -4,7 +4,7 @@
 
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getBusinessToday } from "@/lib/accounting/businessDate"
-import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
+import { resolvePnLMovementRange, type PnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
 import { getCurrencyName, getCurrencySymbol } from "@/lib/currency"
 import {
   dashboardMetricsCacheKey,
@@ -14,6 +14,7 @@ import {
 import {
   dashboardPnlSourceForDiag,
   fetchFreshDashboardPeriodPnl,
+  fetchStaleDashboardPeriodPnl,
   isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
@@ -85,6 +86,15 @@ export type ServiceDashboardMetricsParams = {
   previousPeriodStart?: string
 }
 
+export type ServiceDashboardMetricsLoadOptions = {
+  /** When false, summary reads only — no live get_service_dashboard_metrics RPC. */
+  refreshOnRequest?: boolean
+}
+
+export type ServiceDashboardMetricsLoadMeta = {
+  source: "summary" | "live" | "degraded"
+}
+
 type PositionRow = {
   cash_balance?: number | string
   accounts_receivable?: number | string
@@ -111,13 +121,18 @@ async function loadBusinessCurrency(
 async function loadPositionsAsOf(
   supabase: SupabaseClient,
   businessId: string,
-  asOfDate: string
+  asOfDate: string,
+  options?: { throwOnError?: boolean }
 ): Promise<PositionRow> {
   const { data, error } = await supabase.rpc("finza_dashboard_positions_as_of", {
     p_business_id: businessId,
     p_as_of_date: asOfDate,
   })
   if (error) {
+    if (options?.throwOnError === false) {
+      console.warn("[dashboard-metrics] positions read failed:", error.message)
+      return {}
+    }
     throw error
   }
   const row = Array.isArray(data) ? data[0] : data
@@ -128,7 +143,8 @@ async function loadCashCollected(
   supabase: SupabaseClient,
   businessId: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  options?: { throwOnError?: boolean }
 ): Promise<number> {
   const { data, error } = await supabase.rpc("get_cash_collected_total", {
     p_business_id: businessId,
@@ -136,6 +152,10 @@ async function loadCashCollected(
     p_end_date: endDate,
   })
   if (error) {
+    if (options?.throwOnError === false) {
+      console.warn("[dashboard-metrics] cash collected read failed:", error.message)
+      return 0
+    }
     throw error
   }
   return num(data)
@@ -151,29 +171,45 @@ async function buildMetricsFromSummarySnapshot(
   },
   positionAsOfDate: string,
   compareStart: string | null,
-  compareEnd: string | null
+  compareEnd: string | null,
+  options?: { allowStalePnl?: boolean; softPositionReads?: boolean }
 ): Promise<ServiceDashboardMetricsPayload | null> {
-  const freshPnl = await fetchFreshDashboardPeriodPnl(
+  let freshPnl = await fetchFreshDashboardPeriodPnl(
     supabase,
     businessId,
     range.movementStart,
     range.movementEnd
   )
+  if (!freshPnl && options?.allowStalePnl) {
+    freshPnl = await fetchStaleDashboardPeriodPnl(
+      supabase,
+      businessId,
+      range.movementStart,
+      range.movementEnd
+    )
+  }
   if (!freshPnl) return null
+
+  const softReads = options?.softPositionReads === true
 
   let previousPeriod: PreviousPeriodPayload | null = null
   if (compareStart && compareEnd) {
-    const prevPnl = await fetchFreshDashboardPeriodPnl(
+    let prevPnl = await fetchFreshDashboardPeriodPnl(
       supabase,
       businessId,
       compareStart,
       compareEnd
     )
+    if (!prevPnl && options?.allowStalePnl) {
+      prevPnl = await fetchStaleDashboardPeriodPnl(supabase, businessId, compareStart, compareEnd)
+    }
     if (!prevPnl) return null
 
     const [prevPositions, prevCash] = await Promise.all([
-      loadPositionsAsOf(supabase, businessId, compareEnd),
-      loadCashCollected(supabase, businessId, compareStart, compareEnd),
+      loadPositionsAsOf(supabase, businessId, compareEnd, { throwOnError: !softReads }),
+      loadCashCollected(supabase, businessId, compareStart, compareEnd, {
+        throwOnError: !softReads,
+      }),
     ])
 
     previousPeriod = {
@@ -189,8 +225,10 @@ async function buildMetricsFromSummarySnapshot(
 
   const [currency, positions, cashCollected] = await Promise.all([
     loadBusinessCurrency(supabase, businessId),
-    loadPositionsAsOf(supabase, businessId, positionAsOfDate),
-    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd),
+    loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
+    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+      throwOnError: !softReads,
+    }),
   ])
 
   return {
@@ -214,19 +252,66 @@ async function buildMetricsFromSummarySnapshot(
   }
 }
 
+async function buildDegradedMetricsPayload(
+  supabase: SupabaseClient,
+  businessId: string,
+  range: PnLMovementRange | null,
+  positionAsOfDate: string
+): Promise<ServiceDashboardMetricsPayload> {
+  const currency = await loadBusinessCurrency(supabase, businessId)
+  const periodStart = range?.movementStart ?? positionAsOfDate
+  const periodEnd = range?.movementEnd ?? positionAsOfDate
+
+  return {
+    period: {
+      period_id: range?.period.period_id,
+      period_start: periodStart,
+      period_end: periodEnd,
+      resolution_reason: range?.period.resolution_reason ?? "degraded",
+    },
+    currency,
+    revenue: 0,
+    expenses: 0,
+    netProfit: 0,
+    cashCollected: 0,
+    accountsReceivable: 0,
+    accountsPayable: 0,
+    cashBalance: 0,
+    positionBalancesAsOfToday: true,
+    positionAsOfDate,
+    previousPeriod: null,
+  }
+}
+
 export async function loadServiceDashboardMetrics(
   supabase: SupabaseClient,
   businessId: string,
   params: ServiceDashboardMetricsParams,
-  diag: RouteDiag
+  diag: RouteDiag,
+  options?: ServiceDashboardMetricsLoadOptions,
+  loadMeta?: ServiceDashboardMetricsLoadMeta
 ): Promise<ServiceDashboardMetricsPayload> {
+  const summaryOnly = options?.refreshOnRequest === false
   const { range, error: rangeError } = await resolvePnLMovementRange(supabase, {
     businessId,
     period_id: params.periodId,
     period_start: params.periodStart,
   })
 
+  const positionAsOfDate = await getBusinessToday(supabase, businessId)
+  diag.step("business_today", { position_as_of_date: positionAsOfDate })
+
   if (rangeError || !range) {
+    if (summaryOnly) {
+      const degraded = await buildDegradedMetricsPayload(supabase, businessId, null, positionAsOfDate)
+      loadMeta && (loadMeta.source = "degraded")
+      diag.step("metrics", {
+        metrics_source: "degraded",
+        refresh_skipped: true,
+        period_resolution_error: rangeError ?? "missing_range",
+      })
+      return degraded
+    }
     throw new Error(rangeError ?? "Could not resolve period or fetch P&L")
   }
 
@@ -234,9 +319,6 @@ export async function loadServiceDashboardMetrics(
     period_start: range.movementStart,
     period_end: range.movementEnd,
   })
-
-  const positionAsOfDate = await getBusinessToday(supabase, businessId)
-  diag.step("business_today", { position_as_of_date: positionAsOfDate })
 
   const prevStart = params.previousPeriodStart?.trim() ? params.previousPeriodStart : null
   let compareStart: string | null = null
@@ -266,18 +348,27 @@ export async function loadServiceDashboardMetrics(
 
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
-      if (isDashboardPnlSummaryFastPathEnabled()) {
+      const summaryOptions = {
+        allowStalePnl: summaryOnly,
+        softPositionReads: summaryOnly,
+      }
+
+      if (summaryOnly || isDashboardPnlSummaryFastPathEnabled()) {
         const snapshotPayload = await buildMetricsFromSummarySnapshot(
           supabase,
           businessId,
           range,
           positionAsOfDate,
           compareStart,
-          compareEnd
+          compareEnd,
+          summaryOptions
         )
         if (snapshotPayload) {
           usedSummaryFastPath = true
           return snapshotPayload
+        }
+        if (summaryOnly) {
+          return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate)
         }
       }
 
@@ -365,10 +456,24 @@ export async function loadServiceDashboardMetrics(
       return built
     })
 
+  const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = summaryOnly
+    ? usedSummaryFastPath
+      ? "summary"
+      : "degraded"
+    : usedSummaryFastPath
+      ? "summary"
+      : "live"
+
+  if (loadMeta) {
+    loadMeta.source = metricsSource
+  }
+
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
     cache_source: cacheSource,
     dashboard_pnl_source: dashboardPnlSourceForDiag(usedSummaryFastPath),
+    metrics_source: metricsSource,
+    ...(summaryOnly ? { refresh_skipped: true } : {}),
   })
 
   return payload
