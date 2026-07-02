@@ -1,0 +1,166 @@
+/**
+ * GET /api/accounting/reports/profit-and-loss — full-response cache + auth gate.
+ */
+
+import { GET } from "../route"
+import { NextRequest } from "next/server"
+
+jest.mock("@/lib/supabaseServer", () => ({
+  createSupabaseServerClient: jest.fn(),
+}))
+jest.mock("@/lib/business", () => ({
+  resolveBusinessScopeForUser: jest.fn(),
+}))
+jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
+  resolveAuthenticatedApiUser: jest.fn(),
+  authFailureStageForScopeError: jest.fn((status: number) =>
+    status === 403 ? "business_access_denied" : "unknown"
+  ),
+}))
+jest.mock("@/lib/accounting/auth", () => ({
+  checkAccountingAuthority: jest.fn(),
+}))
+jest.mock("@/lib/accounting/readiness", () => ({
+  checkAccountingReadiness: jest.fn().mockResolvedValue({ ready: true }),
+}))
+jest.mock("@/lib/accounting/bootstrap", () => ({
+  canUserInitializeAccounting: jest.fn().mockReturnValue(false),
+}))
+jest.mock("@/lib/accounting/reports/resolvePnLMovementRange", () => ({
+  resolvePnLMovementRange: jest.fn().mockResolvedValue({
+    range: {
+      movementStart: "2026-01-01",
+      movementEnd: "2026-01-31",
+      period: { period_id: "p1", period_start: "2026-01-01", period_end: "2026-01-31" },
+    },
+    error: "",
+  }),
+}))
+jest.mock("@/lib/accounting/reports/getProfitAndLossReport", () => ({
+  getProfitAndLossReport: jest.fn(),
+}))
+jest.mock("@/lib/server/pnlReportCache", () => {
+  const actual = jest.requireActual("@/lib/server/pnlReportCache")
+  return {
+    ...actual,
+    resetPnlReportCacheForTests: actual.resetPnlReportCacheForTests,
+  }
+})
+
+import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { resolveBusinessScopeForUser } from "@/lib/business"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
+import { resetPnlReportCacheForTests } from "@/lib/server/pnlReportCache"
+
+const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
+  typeof createSupabaseServerClient
+>
+const mockResolveAuth = resolveAuthenticatedApiUser as jest.MockedFunction<
+  typeof resolveAuthenticatedApiUser
+>
+const mockResolveScope = resolveBusinessScopeForUser as jest.MockedFunction<
+  typeof resolveBusinessScopeForUser
+>
+const mockCheckAuthority = checkAccountingAuthority as jest.MockedFunction<
+  typeof checkAccountingAuthority
+>
+const mockGetReport = getProfitAndLossReport as jest.MockedFunction<typeof getProfitAndLossReport>
+
+const sampleReport = {
+  period: {
+    period_id: "p1",
+    period_start: "2026-01-01",
+    period_end: "2026-01-31",
+    resolution_reason: "period_id",
+  },
+  currency: { code: "GHS", symbol: "₵", name: "Ghanaian Cedi" },
+  sections: [],
+  totals: {
+    gross_profit: 100,
+    operating_profit: 100,
+    profit_before_tax: 100,
+    net_profit: 100,
+  },
+  telemetry: {
+    resolved_period_reason: "period_id",
+    resolved_period_start: "2026-01-01",
+    resolved_period_end: "2026-01-31",
+    source: "snapshot",
+    version: 2,
+  },
+}
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  resetPnlReportCacheForTests()
+  delete process.env.FINZA_REPORTS_PNL_REFRESH_ON_REQUEST
+  process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = "30"
+
+  mockCreateSupabase.mockResolvedValue({
+    auth: { getSession: jest.fn(), getUser: jest.fn() },
+    rpc: jest.fn(),
+  } as any)
+
+  mockResolveAuth.mockResolvedValue({
+    ok: true,
+    user: { id: "user-1" } as any,
+    authSource: "session",
+  })
+  mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+  mockCheckAuthority.mockResolvedValue({
+    authorized: true,
+    authority_source: "owner",
+  } as any)
+  mockGetReport.mockImplementation(async (_supabase, _input, _opts, loadMeta) => {
+    if (loadMeta) {
+      loadMeta.movementSource = "snapshot"
+      loadMeta.snapshotStale = false
+    }
+    return { data: sampleReport, error: "" }
+  })
+})
+
+describe("GET /api/accounting/reports/profit-and-loss", () => {
+  it("returns 403 before cache when business access denied", async () => {
+    mockCheckAuthority.mockResolvedValue({
+      authorized: false,
+      authority_source: "employee",
+    } as any)
+
+    const req = new NextRequest(
+      "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
+    )
+    const res = await GET(req)
+
+    expect(res.status).toBe(403)
+    expect(mockGetReport).not.toHaveBeenCalled()
+  })
+
+  it("returns cached final response on repeated same-key request", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
+    )
+
+    const first = await GET(req)
+    const second = await GET(req)
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(mockGetReport).toHaveBeenCalledTimes(1)
+    expect(second.headers.get("x-finza-reports-cache")).toBe("hit")
+    expect(second.headers.get("x-finza-reports-source")).toBe("cache")
+  })
+
+  it("sets diagnostic headers on 200", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
+    )
+    const res = await GET(req)
+
+    expect(res.headers.get("x-finza-reports-refresh-on-request")).toBe("disabled")
+    expect(res.headers.get("x-finza-reports-cache")).toBe("miss")
+    expect(res.headers.get("x-finza-reports-source")).toBe("fresh_snapshot")
+  })
+})

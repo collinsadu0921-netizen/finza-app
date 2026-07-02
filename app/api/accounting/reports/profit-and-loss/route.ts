@@ -15,7 +15,6 @@ import {
   buildPnlReportCacheKey,
   buildPnlReportQueryFingerprint,
   loadOrComputePnlReportCache,
-  pnlReportCacheSourceForDiag,
   shouldCachePnlReportPayload,
 } from "@/lib/server/pnlReportCache"
 import {
@@ -25,18 +24,11 @@ import {
 import {
   buildReportsPnlDiagnostics,
   isReportsPnlRefreshOnRequestEnabled,
+  reportsPnlResponseHeaders,
   resolveReportsPnlSource,
   type ReportsPnlDiagnostics,
 } from "@/lib/server/reportsPnlRefreshPolicy"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
-
-type PnlReportComputeResult =
-  | { ok: true; data: PnLReportResponse; loadMeta: PnLReportLoadMeta }
-  | { ok: false; error: string; loadMeta: PnLReportLoadMeta }
-
-function isPnlComputeFailure(result: PnlReportComputeResult): boolean {
-  return !result.ok
-}
 
 function attachReportsDiagnostics(
   payload: PnLReportResponse,
@@ -45,14 +37,22 @@ function attachReportsDiagnostics(
   return { ...payload, ...diagnostics }
 }
 
+function jsonWithReportsDiagnostics(
+  payload: PnLReportResponse,
+  diagnostics: ReportsPnlDiagnostics,
+  status = 200
+) {
+  return NextResponse.json(attachReportsDiagnostics(payload, diagnostics), {
+    status,
+    headers: reportsPnlResponseHeaders(diagnostics),
+  })
+}
+
 /**
  * GET /api/accounting/reports/profit-and-loss
  *
  * Canonical P&L — ledger period movement via getProfitAndLossReport.
- * Query: business_id (required), period_id | period_start | as_of_date | start_date, end_date (optional).
- *
- * Mixed-load gate: FINZA_REPORTS_PNL_REFRESH_ON_REQUEST unset/0 (default) reads snapshot/cache
- * only — no live get_profit_and_loss_movement or snapshot refresh in the request path.
+ * Full final-response process cache + singleflight (default TTL 30s).
  */
 export async function GET(request: NextRequest) {
   let diag = createRouteDiag("reports_pnl")
@@ -162,16 +162,17 @@ export async function GET(request: NextRequest) {
       period_end: range.movementEnd,
     })
 
-    const cacheKey = buildPnlReportCacheKey(
+    const cacheKey = buildPnlReportCacheKey({
       businessId,
-      range.movementStart,
-      range.movementEnd,
-      buildPnlReportQueryFingerprint(reportInput)
-    )
+      movementStart: range.movementStart,
+      movementEnd: range.movementEnd,
+      queryFingerprint: buildPnlReportQueryFingerprint(reportInput),
+      refreshOnRequest,
+    })
 
     const tReport = performance.now()
-    const { value: reportResult, source, cache_enabled, servedExpiredCache } =
-      await loadOrComputePnlReportCache<PnlReportComputeResult>(
+    const { value: cached, cacheStatus, servedExpiredCache } =
+      await loadOrComputePnlReportCache<PnLReportResponse>(
         cacheKey,
         async () => {
           const loadMeta: PnLReportLoadMeta = {
@@ -185,58 +186,55 @@ export async function GET(request: NextRequest) {
             loadMeta
           )
           if (error || !data) {
-            return { ok: false, error: error || "Accounting period could not be resolved", loadMeta }
+            return null
           }
-          return { ok: true, data, loadMeta }
+          return { payload: data, loadMeta }
         },
         {
-          shouldStore: (result) => result.ok && shouldCachePnlReportPayload(result.data),
-          serveExpiredOnMiss: !refreshOnRequest,
-          isComputeFailure: isPnlComputeFailure,
+          shouldStore: shouldCachePnlReportPayload,
+          serveExpiredOnMiss: true,
         }
       )
 
-    const cacheSource = pnlReportCacheSourceForDiag(source, cache_enabled)
-    const loadMeta = reportResult.loadMeta
-
+    const loadMeta = cached.loadMeta
     const reportsSource = resolveReportsPnlSource({
-      cacheSource: source,
+      cacheStatus,
       movementSource: loadMeta.movementSource,
       snapshotStale: loadMeta.snapshotStale,
-      servedExpiredCache: Boolean(servedExpiredCache),
+      servedExpiredCache,
     })
 
     const reportsDiagnostics = buildReportsPnlDiagnostics({
       refreshOnRequest,
       reportsSource,
-      snapshotStale: loadMeta.snapshotStale || Boolean(servedExpiredCache),
+      cacheStatus,
+      snapshotStale: loadMeta.snapshotStale || servedExpiredCache,
     })
 
-    if (!reportResult.ok) {
-      diag.fail(503, reportResult.error, {
+    if (
+      loadMeta.movementSource === "unavailable" &&
+      cacheStatus !== "hit" &&
+      cacheStatus !== "expired_served"
+    ) {
+      diag.fail(503, "PNL_SNAPSHOT_UNAVAILABLE", {
         ms_report: Math.round((performance.now() - tReport) * 10) / 10,
-        cache_source: cacheSource,
         ...reportsDiagnostics,
       })
       return NextResponse.json(
+        { error: "PNL_SNAPSHOT_UNAVAILABLE", ...reportsDiagnostics },
         {
-          error: reportResult.error,
-          ...reportsDiagnostics,
-        },
-        { status: 503 }
+          status: 503,
+          headers: reportsPnlResponseHeaders(reportsDiagnostics),
+        }
       )
     }
 
     diag.step("report", {
-      rpc: "get_profit_and_loss_movement",
       ms_report: Math.round((performance.now() - tReport) * 10) / 10,
-      cache_source: cacheSource,
       ...reportsDiagnostics,
     })
-    diag.finish(200, { cache_source: cacheSource, ...reportsDiagnostics })
-    return NextResponse.json(
-      attachReportsDiagnostics(reportResult.data, reportsDiagnostics)
-    )
+    diag.finish(200, reportsDiagnostics)
+    return jsonWithReportsDiagnostics(cached.data, reportsDiagnostics)
   } catch (err: unknown) {
     console.error("Error in profit & loss:", err)
     diag.fail(500, err instanceof Error ? err.message : "Internal server error")

@@ -1,19 +1,26 @@
 /**
- * Short-TTL cache + singleflight for GET /api/accounting/reports/profit-and-loss (512a).
- * Enable on staging preview: FINZA_PNL_REPORT_CACHE_TTL_SEC=30
+ * Full-response cache + singleflight for GET /api/accounting/reports/profit-and-loss.
  *
- * Process-local only — coalesces concurrent requests on the same key within one instance.
+ * Caches the final built report payload (sections/totals/telemetry) per process instance.
+ * Default TTL 30s — override with FINZA_PNL_REPORT_CACHE_TTL_SEC (0 disables).
+ *
+ * Mixed-load: fresh hit skips snapshot reads and report assembly; expired entries are
+ * served while an identical rebuild is in flight.
  */
 
 import type { PnLReportResponse } from "@/lib/accounting/reports/getProfitAndLossReport"
+import type { PnLReportLoadMeta } from "@/lib/accounting/reports/getProfitAndLossReport"
 
-type CacheEntry = { expiresAt: number; payload: unknown }
+type CacheEntry = { expiresAt: number; payload: unknown; loadMeta: PnLReportLoadMeta }
 
 const store = new Map<string, CacheEntry>()
-const inflight = new Map<string, Promise<unknown>>()
+const inflight = new Map<string, Promise<{ payload: unknown; loadMeta: PnLReportLoadMeta }>>()
+
+const DEFAULT_TTL_SEC = 30
 
 function ttlMs(): number {
-  const sec = Number(process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC ?? 0)
+  const raw = process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC
+  const sec = raw === undefined || raw === "" ? DEFAULT_TTL_SEC : Number(raw)
   if (!Number.isFinite(sec) || sec <= 0) return 0
   return Math.min(Math.max(sec, 15), 120) * 1000
 }
@@ -22,12 +29,28 @@ export function isPnlReportCacheEnabled(): boolean {
   return ttlMs() > 0
 }
 
+export type PnlReportCacheStatus =
+  | "hit"
+  | "miss"
+  | "expired_served"
+  | "singleflight_owner"
+  | "singleflight_joined"
+
+/** @deprecated use PnlReportCacheStatus */
 export type PnlReportCacheSource = "cache_hit" | "cache_miss" | "cache_coalesce"
 
+export type PnlReportCachedPayload<T> = {
+  data: T
+  loadMeta: PnLReportLoadMeta
+}
+
 export type PnlReportCacheResult<T> = {
-  value: T
-  source: PnlReportCacheSource
+  value: PnlReportCachedPayload<T>
+  cacheStatus: PnlReportCacheStatus
   cache_enabled: boolean
+  servedExpiredCache: boolean
+  /** @deprecated */
+  source: PnlReportCacheSource
 }
 
 export type PnlReportQueryFingerprintInput = {
@@ -48,24 +71,65 @@ export function buildPnlReportQueryFingerprint(input: PnlReportQueryFingerprintI
   ].join("|")
 }
 
-export function buildPnlReportCacheKey(
+export type PnlReportCacheKeyInput = {
+  businessId: string
+  movementStart: string
+  movementEnd: string
+  queryFingerprint: string
+  /** Refresh-on-request changes data path — separate cache entries. */
+  refreshOnRequest: boolean
+}
+
+export function buildPnlReportCacheKey(input: PnlReportCacheKeyInput): string {
+  return [
+    "pnl",
+    input.businessId,
+    input.movementStart,
+    input.movementEnd,
+    input.queryFingerprint,
+    input.refreshOnRequest ? "refresh" : "norefresh",
+  ].join("|")
+}
+
+/** @deprecated pass PnlReportCacheKeyInput */
+export function buildPnlReportCacheKeyLegacy(
   businessId: string,
   movementStart: string,
   movementEnd: string,
   queryFingerprint: string
 ): string {
-  return ["pnl", businessId, movementStart, movementEnd, queryFingerprint].join("|")
+  return buildPnlReportCacheKey({
+    businessId,
+    movementStart,
+    movementEnd,
+    queryFingerprint,
+    refreshOnRequest: false,
+  })
 }
 
-/** Map internal cache source to reports_pnl route diagnostic vocabulary. */
+export function pnlReportCacheStatusForDiag(
+  status: PnlReportCacheStatus,
+  cacheEnabled: boolean
+): "disabled" | "hit" | "miss" | "singleflight" {
+  if (!cacheEnabled) return "disabled"
+  if (status === "hit" || status === "expired_served") return "hit"
+  if (status === "singleflight_joined" || status === "singleflight_owner") return "singleflight"
+  return "miss"
+}
+
+/** @deprecated */
 export function pnlReportCacheSourceForDiag(
   source: PnlReportCacheSource,
   cacheEnabled: boolean
-): "disabled" | "miss" | "hit" | "singleflight" {
-  if (!cacheEnabled) return "disabled"
-  if (source === "cache_hit") return "hit"
-  if (source === "cache_coalesce") return "singleflight"
-  return "miss"
+): "disabled" | "hit" | "miss" | "singleflight" {
+  return pnlReportCacheStatusForDiag(
+    source === "cache_hit"
+      ? "hit"
+      : source === "cache_coalesce"
+        ? "singleflight_joined"
+        : "miss",
+    cacheEnabled
+  )
 }
 
 export function shouldCachePnlReportPayload(payload: unknown): boolean {
@@ -81,75 +145,114 @@ function clonePayload<T>(value: T): T {
   return structuredClone(value)
 }
 
+function getEntry(key: string): CacheEntry | undefined {
+  return store.get(key)
+}
+
+function wrapResult<T>(
+  payload: T,
+  loadMeta: PnLReportLoadMeta,
+  cacheStatus: PnlReportCacheStatus,
+  cacheEnabled: boolean,
+  servedExpiredCache: boolean
+): PnlReportCacheResult<T> {
+  const source: PnlReportCacheSource =
+    cacheStatus === "hit" || cacheStatus === "expired_served"
+      ? "cache_hit"
+      : cacheStatus === "singleflight_joined"
+        ? "cache_coalesce"
+        : "cache_miss"
+
+  return {
+    value: { data: clonePayload(payload), loadMeta: { ...loadMeta } },
+    cacheStatus,
+    cache_enabled: cacheEnabled,
+    servedExpiredCache,
+    source,
+  }
+}
+
 export async function loadOrComputePnlReportCache<T>(
   key: string,
-  compute: () => Promise<T>,
+  compute: () => Promise<{ payload: T; loadMeta: PnLReportLoadMeta } | null>,
   options?: {
-    shouldStore?: (value: T) => boolean
-    /** When true, return last stored payload even after TTL expiry if compute fails. */
+    shouldStore?: (payload: T) => boolean
+    /** When compute returns null/failure, serve last expired entry if present. */
     serveExpiredOnMiss?: boolean
-    isComputeFailure?: (value: T) => boolean
   }
-): Promise<PnlReportCacheResult<T> & { servedExpiredCache?: boolean }> {
+): Promise<PnlReportCacheResult<T>> {
   const cacheEnabled = isPnlReportCacheEnabled()
   const ms = ttlMs()
   const shouldStore = options?.shouldStore ?? shouldCachePnlReportPayload
-  const isComputeFailure = options?.isComputeFailure ?? (() => false)
+  const now = Date.now()
 
-  if (ms > 0) {
-    const hit = store.get(key)
-    if (hit && Date.now() < hit.expiresAt) {
-      return {
-        value: clonePayload(hit.payload as T),
-        source: "cache_hit",
-        cache_enabled: cacheEnabled,
-      }
-    }
+  const entry = ms > 0 ? getEntry(key) : undefined
+  const isFresh = Boolean(entry && now < entry.expiresAt)
+  const isExpired = Boolean(entry && now >= entry.expiresAt)
+
+  if (ms > 0 && isFresh && entry) {
+    return wrapResult(
+      entry.payload as T,
+      entry.loadMeta,
+      "hit",
+      cacheEnabled,
+      false
+    )
   }
 
   const pending = inflight.get(key)
   if (pending) {
-    const value = (await pending) as T
-    return {
-      value: clonePayload(value),
-      source: "cache_coalesce",
-      cache_enabled: cacheEnabled,
+    if (ms > 0 && isExpired && entry) {
+      return wrapResult(
+        entry.payload as T,
+        entry.loadMeta,
+        "expired_served",
+        cacheEnabled,
+        true
+      )
     }
+    const built = await pending
+    return wrapResult(built.payload as T, built.loadMeta, "singleflight_joined", cacheEnabled, false)
   }
 
-  const promise = compute()
-    .then((value) => {
-      if (ms > 0 && shouldStore(value) && !isComputeFailure(value)) {
-        store.set(key, { expiresAt: Date.now() + ms, payload: value })
-        if (store.size > 200) {
-          const now = Date.now()
-          for (const [k, v] of store) {
-            if (v.expiresAt <= now) store.delete(k)
-          }
+  const promise = (async () => {
+    const built = await compute()
+    if (built && ms > 0 && shouldStore(built.payload)) {
+      store.set(key, {
+        expiresAt: Date.now() + ms,
+        payload: built.payload,
+        loadMeta: built.loadMeta,
+      })
+      if (store.size > 200) {
+        const t = Date.now()
+        for (const [k, v] of store) {
+          if (v.expiresAt <= t) store.delete(k)
         }
       }
-      return value
-    })
-    .finally(() => {
-      inflight.delete(key)
-    })
-
-  inflight.set(key, promise)
-  let value = await promise
-
-  if (options?.serveExpiredOnMiss && isComputeFailure(value)) {
-    const expired = getExpiredPnlReportCacheEntry<T>(key)
-    if (expired != null) {
-      return {
-        value: expired,
-        source: "cache_hit",
-        cache_enabled: cacheEnabled,
-        servedExpiredCache: true,
-      }
     }
+    return built
+  })().finally(() => {
+    inflight.delete(key)
+  })
+
+  inflight.set(key, promise as Promise<{ payload: unknown; loadMeta: PnLReportLoadMeta }>)
+
+  const built = await promise
+
+  if (!built) {
+    if (options?.serveExpiredOnMiss && entry) {
+      return wrapResult(entry.payload as T, entry.loadMeta, "expired_served", cacheEnabled, true)
+    }
+    return wrapResult({} as T, { movementSource: "unavailable", snapshotStale: false }, "miss", cacheEnabled, false)
   }
 
-  return { value: clonePayload(value), source: "cache_miss", cache_enabled: cacheEnabled }
+  return wrapResult(
+    built.payload,
+    built.loadMeta,
+    isExpired ? "singleflight_owner" : "miss",
+    cacheEnabled,
+    false
+  )
 }
 
 /** Returns last stored payload regardless of TTL (process-local stale cache). */
@@ -157,4 +260,18 @@ export function getExpiredPnlReportCacheEntry<T>(key: string): T | null {
   const hit = store.get(key)
   if (!hit) return null
   return clonePayload(hit.payload as T)
+}
+
+/** Test-only: mark cache entry expired immediately. */
+export function expirePnlReportCacheEntryForTests(key: string): void {
+  const hit = store.get(key)
+  if (hit) {
+    hit.expiresAt = Date.now() - 1
+  }
+}
+
+/** Test-only: clear process-local store and inflight. */
+export function resetPnlReportCacheForTests(): void {
+  store.clear()
+  inflight.clear()
 }

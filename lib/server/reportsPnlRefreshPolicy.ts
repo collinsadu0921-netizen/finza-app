@@ -6,10 +6,13 @@
  * for controlled validation or manual priming workflows.
  */
 
+import type { PnlReportCacheStatus } from "@/lib/server/pnlReportCache"
+
 export type ReportsRefreshOnRequestDiag = "enabled" | "disabled"
 
 export type ReportsPnlSource =
   | "cache"
+  | "expired_cache"
   | "fresh_snapshot"
   | "stale_snapshot"
   | "live"
@@ -31,6 +34,7 @@ export function reportsRefreshSkipped(refreshOnRequest: boolean): boolean {
 export type ReportsPnlDiagnostics = {
   reports_refresh_on_request: ReportsRefreshOnRequestDiag
   reports_source: ReportsPnlSource
+  reports_cache_status: PnlReportCacheStatus
   reports_refresh_skipped: boolean
   reports_snapshot_stale: boolean
 }
@@ -38,23 +42,34 @@ export type ReportsPnlDiagnostics = {
 export function buildReportsPnlDiagnostics(input: {
   refreshOnRequest: boolean
   reportsSource: ReportsPnlSource
+  cacheStatus: PnlReportCacheStatus
   snapshotStale: boolean
 }): ReportsPnlDiagnostics {
   return {
     reports_refresh_on_request: reportsRefreshOnRequestDiag(),
     reports_source: input.reportsSource,
+    reports_cache_status: input.cacheStatus,
     reports_refresh_skipped: reportsRefreshSkipped(input.refreshOnRequest),
     reports_snapshot_stale: input.snapshotStale,
   }
 }
 
+export function reportsPnlResponseHeaders(diagnostics: ReportsPnlDiagnostics): Record<string, string> {
+  return {
+    "x-finza-reports-source": diagnostics.reports_source,
+    "x-finza-reports-cache": diagnostics.reports_cache_status,
+    "x-finza-reports-refresh-on-request": diagnostics.reports_refresh_on_request,
+  }
+}
+
 export function resolveReportsPnlSource(input: {
-  cacheSource: "cache_hit" | "cache_miss" | "cache_coalesce"
+  cacheStatus: PnlReportCacheStatus
   movementSource: "snapshot" | "ledger" | "unavailable"
   snapshotStale: boolean
   servedExpiredCache: boolean
 }): ReportsPnlSource {
-  if (input.servedExpiredCache || input.cacheSource === "cache_hit") return "cache"
+  if (input.cacheStatus === "hit") return "cache"
+  if (input.cacheStatus === "expired_served" || input.servedExpiredCache) return "expired_cache"
   if (input.movementSource === "ledger") return "live"
   if (input.movementSource === "unavailable") return "unavailable"
   if (input.movementSource === "snapshot") {
