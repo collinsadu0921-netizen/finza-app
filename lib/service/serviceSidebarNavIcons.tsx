@@ -35,6 +35,7 @@ import {
   ScrollText,
   Send,
   Settings,
+  LifeBuoy,
   TrendingUp,
   Users,
   UsersRound,
@@ -139,6 +140,7 @@ const SERVICE_SIDEBAR_ICON_BY_LABEL: Record<string, LucideIcon> = {
   "Accountant requests": Mail,
   "All settings": Settings,
   "Subscription & plan": CreditCard,
+  "Help & Support": LifeBuoy,
   "Full Audit Log": FileSearch,
 }
 

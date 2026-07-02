@@ -559,6 +559,7 @@ export default function Sidebar() {
           items: [
             { label: "All settings",        route: "/service/settings",              minTier: "starter" },
             { label: "Subscription & plan", route: "/service/settings/subscription", minTier: "starter" },
+            { label: "Help & Support",      route: "/help",                            minTier: "starter" },
           ],
         })
       if (!isAccountantFirmUser) {
@@ -624,6 +625,7 @@ export default function Sidebar() {
             { label: "Manage Registers", route: "/retail/admin/registers" },
             { label: "Payment Settings", route: "/retail/admin/payment-settings" },
             { label: "Staff Management", route: "/retail/admin/staff" },
+            { label: "Help & Support", route: "/help" },
           ],
         },
       ]
