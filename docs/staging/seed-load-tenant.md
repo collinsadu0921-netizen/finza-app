@@ -21,7 +21,7 @@ Phase 2 invoices/payments/bills/expenses/journal-trigger data
 SQL smoke
 sessions.staging.json
 k6 smoke
-workday_50 only if smoke passes
+workday_50 gates (after smoke passes)
 ```
 
 ### Commands (staging terminal)
@@ -113,9 +113,127 @@ Delete the fake tenant by `business_id` on staging only, or drop/recreate stagin
 
 ---
 
-## After seed
+## After seed — k6 scalability gates
 
-1. Run SQL smoke from [`setup.md`](./setup.md).
-2. Update `load-tests/sessions.staging.json` with staging `businessId`.
-3. k6 smoke against staging URL only.
-4. `workday_50` operational gate: `WORKDAY_SKIP_REPORTS=1` (proven). Keep `FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST` **unset or `0`**. Keep `FINZA_REPORTS_PNL_REFRESH_ON_REQUEST` **unset or `0`** for operational, reports-isolation, and mixed gates. Prime dashboard summaries and P&L movement snapshots before k6 if needed. Realistic mixed gate: `SCENARIO=workday_50_plus_reports_5` (see `load-tests/README.md`).
+Complete steps 1–3 below before any gate. See [`workday50-read-model-plan.md`](./workday50-read-model-plan.md) for accepted results and env requirements.
+
+### Required order
+
+```text
+Phase 1 → 1.5 → 2
+SQL smoke (setup.md)
+sessions.staging.json updated
+node scripts/refresh-staging-load-session.mjs --probe   ← must pass
+k6 smoke
+Operational-only gate (WORKDAY_SKIP_REPORTS=1)
+Reports-only gate (ROUTE_FILTER=reports)
+Mixed gate (workday_50_plus_reports_5)
+```
+
+### Probe-first workflow
+
+Always refresh and probe the session before k6:
+
+```powershell
+# Mint or refresh session cookie (writes load-tests/sessions.staging.json)
+node scripts/refresh-staging-load-session.mjs
+
+# Verify profile + dashboard cluster respond 200 with current session
+node scripts/refresh-staging-load-session.mjs --probe
+```
+
+If `--probe` fails, do **not** run k6 gates. Fix session/`BASE_URL`/business_id first.
+
+### Vercel staging env (must remain off)
+
+| Variable | Value for validated gates |
+|----------|---------------------------|
+| `FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST` | unset or `0` |
+| `FINZA_REPORTS_PNL_REFRESH_ON_REQUEST` | unset or `0` |
+| `FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH` | unset or `0` |
+
+### k6 command examples (PowerShell)
+
+Set once per terminal session:
+
+```powershell
+$env:BASE_URL = "https://<your-staging-preview>.vercel.app"
+$env:SESSIONS_JSON = "./sessions.staging.json"
+$env:SCENARIO = "workday_50"
+```
+
+#### a) Operational-only gate (PASS: 0.04% failed, global p95 1.92s)
+
+```powershell
+$env:ROUTE_FILTER = "all"
+$env:WORKDAY_SKIP_REPORTS = "1"
+Remove-Item Env:WORKDAY_REPORTS_EVERY_N -ErrorAction SilentlyContinue
+
+& "C:\Program Files\k6\k6.exe" run `
+  -e BASE_URL=$env:BASE_URL `
+  -e SESSIONS_JSON=$env:SESSIONS_JSON `
+  -e SCENARIO=workday_50 `
+  -e ROUTE_FILTER=all `
+  -e WORKDAY_SKIP_REPORTS=1 `
+  --out json="load-tests/results/workday_50_all_skip_reports_dashboard_refresh_guard_valid_session.json" `
+  load-tests/finza-service-workday.js
+```
+
+#### b) Reports-only gate (PASS: 5916/5916, p95 1.33s)
+
+```powershell
+$env:ROUTE_FILTER = "reports"
+Remove-Item Env:WORKDAY_SKIP_REPORTS -ErrorAction SilentlyContinue
+
+& "C:\Program Files\k6\k6.exe" run `
+  -e BASE_URL=$env:BASE_URL `
+  -e SESSIONS_JSON=$env:SESSIONS_JSON `
+  -e SCENARIO=workday_50 `
+  -e ROUTE_FILTER=reports `
+  --out json="load-tests/results/workday_50_reports_auth_fix.json" `
+  load-tests/finza-service-workday.js
+```
+
+#### c) Mixed 50 + 5 gate (PASS: global p95 1.67s, reports_pnl p95 2.16s)
+
+```powershell
+$env:SCENARIO = "workday_50_plus_reports_5"
+$env:ROUTE_FILTER = "all"
+Remove-Item Env:WORKDAY_SKIP_REPORTS -ErrorAction SilentlyContinue
+
+& "C:\Program Files\k6\k6.exe" run `
+  -e BASE_URL=$env:BASE_URL `
+  -e SESSIONS_JSON=$env:SESSIONS_JSON `
+  -e SCENARIO=workday_50_plus_reports_5 `
+  -e ROUTE_FILTER=all `
+  --out json="load-tests/results/workday_50_plus_reports_5_reports_guard.json" `
+  load-tests/finza-service-workday.js
+```
+
+**Recommended result filenames** (store under `load-tests/results/`):
+
+| Gate | Filename |
+|------|----------|
+| Operational-only | `workday_50_all_skip_reports_dashboard_refresh_guard_valid_session.json` |
+| Reports-only | `workday_50_reports_auth_fix.json` |
+| Mixed 50+5 | `workday_50_plus_reports_5_reports_guard.json` |
+
+### Troubleshooting
+
+| Symptom | Likely cause | Action |
+|---------|--------------|--------|
+| ~100% failures, sub-second latency | Invalid session, wrong `BASE_URL`, or placeholder cookies | Run `refresh-staging-load-session.mjs --probe`; verify `sessions.staging.json` |
+| `business_profile` 404 + operational 401 | Stale/expired session | Refresh session; re-probe before re-running |
+| `reports_pnl` 401 dominating after minute 1 | Was auth-server pressure on accounting routes (fixed) | If recurrence: probe session first, then check middleware deploy |
+| 0% failures but high p95 in mixed (20s+) | Shared-resource contention (reports + operational) | Ensure refresh guards off; prime snapshots; confirm full-response cache deployed |
+| `reports_pnl` 503 spike | Missing P&L movement snapshot | Run snapshot refresh from `scripts/verify-staging-migration-513.sql` |
+| Single `invoices_overdue` 500 | Transient app/DB blip | Accepted at ≤0.01% mixed gate rate; investigate only if sustained |
+
+### What not to run
+
+- **`workday_100` / `workday_200`** — blocked until G5 production approval.
+- Repeated mixed loops after an accepted pass — only re-run when validating a new deploy.
+
+### Quick reference (legacy one-liner)
+
+Operational gate only: `WORKDAY_SKIP_REPORTS=1` with `FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST` and `FINZA_REPORTS_PNL_REFRESH_ON_REQUEST` unset. Mixed gate: `SCENARIO=workday_50_plus_reports_5`. Details: [`load-tests/README.md`](../../load-tests/README.md).
