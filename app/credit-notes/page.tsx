@@ -9,6 +9,7 @@ import { NativeSelect } from "@/components/ui/NativeSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { clearLegacyCreditNoteCreateInvoiceStorage } from "@/lib/creditNotes/creditNoteCreateNavigation"
 
 type CreditNote = {
   id: string
@@ -68,6 +69,11 @@ export default function CreditNotesPage() {
   const viewPath = (creditNoteId: string) =>
     isServiceRoute ? `/service/credit-notes/${creditNoteId}/view` : `/credit-notes/${creditNoteId}/view`
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("creditNotes")
+
+  const goToCreateCreditNote = () => {
+    clearLegacyCreditNoteCreateInvoiceStorage()
+    router.push(createPath)
+  }
 
   useEffect(() => {
     loadCreditNotes()
@@ -142,7 +148,7 @@ export default function CreditNotesPage() {
             {!readOnly && (
               <button
                 data-tour="service-credit-notes-new"
-                onClick={() => guardWriteAction(() => router.push(createPath))}
+                onClick={() => guardWriteAction(goToCreateCreditNote)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,7 +251,7 @@ export default function CreditNotesPage() {
               </p>
               {!search && statusFilter === "all" && !readOnly && (
                 <button
-                  onClick={() => guardWriteAction(() => router.push(createPath))}
+                  onClick={() => guardWriteAction(goToCreateCreditNote)}
                   className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
                 >
                   Create Credit Note

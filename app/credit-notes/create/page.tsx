@@ -10,6 +10,12 @@ import { getCanonicalTaxResultFromLineItems, deriveLegacyTaxColumnsFromTaxLines 
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import type { InvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
+import {
+  clearLegacyCreditNoteCreateInvoiceStorage,
+  getCreditNoteCreateBasePath,
+  getCreditNoteViewPath,
+  getInvoiceViewPath,
+} from "@/lib/creditNotes/creditNoteCreateNavigation"
 
 type InvoiceItem = {
   id: string
@@ -75,38 +81,41 @@ function CreateCreditNoteContent() {
 
   useSyncServiceBusinessIdInUrl(businessId)
 
-  const STORAGE_KEY = "credit_note_create_invoice_id"
-
-  useEffect(() => {
-    const params = new URLSearchParams(searchParamsString)
-    const paramId = params.get("invoiceId")
-    if (paramId) {
-      try {
-        sessionStorage.setItem(STORAGE_KEY, paramId)
-      } catch {
-        /* ignore */
-      }
-      loadInvoiceData(paramId)
-      return
-    }
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY)
-      if (stored) {
-        replaceIfChanged(
-          router,
-          pathname,
-          searchParamsString,
-          `${pathname}?invoiceId=${encodeURIComponent(stored)}`
-        )
-        setLoading(false)
-        return
-      }
-    } catch {
-      /* ignore */
-    }
+  const goToInvoicePicker = () => {
+    clearLegacyCreditNoteCreateInvoiceStorage()
+    setInvoice(null)
+    setCreditCapacity(null)
+    setItems([])
+    setError("")
     setShowInvoicePicker(true)
     setLoading(false)
-  }, [pathname, searchParamsString, router])
+    const basePath = getCreditNoteCreateBasePath(pathname)
+    replaceIfChanged(router, pathname, searchParamsString, basePath)
+  }
+
+  useEffect(() => {
+    clearLegacyCreditNoteCreateInvoiceStorage()
+
+    const paramId = searchParams.get("invoiceId")?.trim() || null
+    if (paramId) {
+      setShowInvoicePicker(false)
+      void loadInvoiceData(paramId)
+      return
+    }
+
+    setInvoice(null)
+    setCreditCapacity(null)
+    setItems([])
+    setError("")
+    setShowInvoicePicker(true)
+    setLoading(false)
+  }, [pathname, searchParamsString])
+
+  useEffect(() => {
+    return () => {
+      clearLegacyCreditNoteCreateInvoiceStorage()
+    }
+  }, [])
 
   useEffect(() => {
     if (!showInvoicePicker) return
@@ -352,7 +361,8 @@ function CreateCreditNoteContent() {
       }
 
       const { creditNote } = await response.json()
-      router.push(`/credit-notes/${creditNote.id}/view`)
+      clearLegacyCreditNoteCreateInvoiceStorage()
+      router.push(getCreditNoteViewPath(creditNote.id, pathname))
     } catch (err: any) {
       setError(err.message || "Failed to create credit note")
       setSaving(false)
@@ -397,11 +407,6 @@ function CreateCreditNoteContent() {
                   <button
                     type="button"
                     onClick={() => {
-                      try {
-                        sessionStorage.setItem(STORAGE_KEY, inv.id)
-                      } catch {
-                        /* ignore */
-                      }
                       const nextParams = new URLSearchParams(searchParamsString)
                       nextParams.set("invoiceId", inv.id)
                       replaceIfChanged(
@@ -456,13 +461,24 @@ function CreateCreditNoteContent() {
             {creditCapacity.appliedCreditsTotal.toFixed(2)} · Remaining creditable amount: ₵0.00
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => router.push(`/service/invoices/${invoice?.id ?? invoiceId}/view`)}
-          className="mt-6 text-blue-600 dark:text-blue-400 hover:underline"
-        >
-          ← Back to Invoice
-        </button>
+        <div className="mt-6 flex flex-wrap gap-4">
+          <button
+            type="button"
+            onClick={goToInvoicePicker}
+            className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
+          >
+            Choose another invoice
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              router.push(getInvoiceViewPath(invoice?.id ?? invoiceId ?? "", pathname))
+            }
+            className="text-blue-600 dark:text-blue-400 hover:underline self-center"
+          >
+            ← Back to Invoice
+          </button>
+        </div>
       </div>
     )
   }

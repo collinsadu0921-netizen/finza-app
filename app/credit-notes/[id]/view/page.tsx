@@ -9,6 +9,7 @@ import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { clearLegacyCreditNoteCreateInvoiceStorage } from "@/lib/creditNotes/creditNoteCreateNavigation"
 
 const safeNumber = (v: unknown): number =>
   Number.isFinite(Number(v)) ? Number(v) : 0
@@ -157,6 +158,7 @@ export default function CreditNoteViewPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || "Failed to apply credit note")
+      clearLegacyCreditNoteCreateInvoiceStorage()
       toast.showToast("Credit note applied successfully.", "success")
       await loadCreditNoteBundle(id)
     } catch (err: unknown) {
@@ -217,6 +219,7 @@ Thank you.`
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || data.message || "Failed to send credit note")
+      clearLegacyCreditNoteCreateInvoiceStorage()
       toast.showToast("Credit note sent successfully.", "success")
       await loadCreditNoteBundle(id)
     } catch (err: unknown) {
