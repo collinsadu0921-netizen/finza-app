@@ -11,6 +11,7 @@ import {
   isDashboardMetricsCacheEnabled,
   loadOrComputeDashboardMetrics,
 } from "@/lib/server/dashboardMetricsCache"
+import { fetchFreshDashboardPeriodPnl } from "@/lib/server/dashboardPeriodSummaryRead"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
 import type { RouteDiagFields } from "@/lib/server/routeDiagnostics"
 import type { createRouteDiag } from "@/lib/server/routeDiagnostics"
@@ -80,6 +81,135 @@ export type ServiceDashboardMetricsParams = {
   previousPeriodStart?: string
 }
 
+type PositionRow = {
+  cash_balance?: number | string
+  accounts_receivable?: number | string
+  accounts_payable?: number | string
+}
+
+async function loadBusinessCurrency(
+  supabase: SupabaseClient,
+  businessId: string
+): Promise<{ code: string; symbol: string; name: string }> {
+  const { data: biz } = await supabase
+    .from("businesses")
+    .select("default_currency")
+    .eq("id", businessId)
+    .single()
+  const currencyCode = String(biz?.default_currency ?? "GHS")
+  return {
+    code: currencyCode,
+    symbol: getCurrencySymbol(currencyCode) || currencyCode,
+    name: getCurrencyName(currencyCode) || currencyCode,
+  }
+}
+
+async function loadPositionsAsOf(
+  supabase: SupabaseClient,
+  businessId: string,
+  asOfDate: string
+): Promise<PositionRow> {
+  const { data, error } = await supabase.rpc("finza_dashboard_positions_as_of", {
+    p_business_id: businessId,
+    p_as_of_date: asOfDate,
+  })
+  if (error) {
+    throw error
+  }
+  const row = Array.isArray(data) ? data[0] : data
+  return (row ?? {}) as PositionRow
+}
+
+async function loadCashCollected(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string
+): Promise<number> {
+  const { data, error } = await supabase.rpc("get_cash_collected_total", {
+    p_business_id: businessId,
+    p_start_date: startDate,
+    p_end_date: endDate,
+  })
+  if (error) {
+    throw error
+  }
+  return num(data)
+}
+
+async function buildMetricsFromSummarySnapshot(
+  supabase: SupabaseClient,
+  businessId: string,
+  range: {
+    movementStart: string
+    movementEnd: string
+    period: { period_id: string; resolution_reason?: string }
+  },
+  positionAsOfDate: string,
+  compareStart: string | null,
+  compareEnd: string | null
+): Promise<ServiceDashboardMetricsPayload | null> {
+  const freshPnl = await fetchFreshDashboardPeriodPnl(
+    supabase,
+    businessId,
+    range.movementStart,
+    range.movementEnd
+  )
+  if (!freshPnl) return null
+
+  let previousPeriod: PreviousPeriodPayload | null = null
+  if (compareStart && compareEnd) {
+    const prevPnl = await fetchFreshDashboardPeriodPnl(
+      supabase,
+      businessId,
+      compareStart,
+      compareEnd
+    )
+    if (!prevPnl) return null
+
+    const [prevPositions, prevCash] = await Promise.all([
+      loadPositionsAsOf(supabase, businessId, compareEnd),
+      loadCashCollected(supabase, businessId, compareStart, compareEnd),
+    ])
+
+    previousPeriod = {
+      revenue: num(prevPnl.revenue),
+      expenses: num(prevPnl.expenses),
+      netProfit: num(prevPnl.net_profit),
+      cashCollected: prevCash,
+      accountsReceivable: num(prevPositions.accounts_receivable),
+      accountsPayable: num(prevPositions.accounts_payable),
+      cashBalance: num(prevPositions.cash_balance),
+    }
+  }
+
+  const [currency, positions, cashCollected] = await Promise.all([
+    loadBusinessCurrency(supabase, businessId),
+    loadPositionsAsOf(supabase, businessId, positionAsOfDate),
+    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd),
+  ])
+
+  return {
+    period: {
+      period_id: range.period.period_id,
+      period_start: range.movementStart,
+      period_end: range.movementEnd,
+      resolution_reason: range.period.resolution_reason,
+    },
+    currency,
+    revenue: num(freshPnl.revenue),
+    expenses: num(freshPnl.expenses),
+    netProfit: num(freshPnl.net_profit),
+    cashCollected,
+    accountsReceivable: num(positions.accounts_receivable),
+    accountsPayable: num(positions.accounts_payable),
+    cashBalance: num(positions.cash_balance),
+    positionBalancesAsOfToday: true,
+    positionAsOfDate,
+    previousPeriod,
+  }
+}
+
 export async function loadServiceDashboardMetrics(
   supabase: SupabaseClient,
   businessId: string,
@@ -128,8 +258,23 @@ export async function loadServiceDashboardMetrics(
     compareEnd,
   })
 
+  let pnlReadSource: "summary_snapshot" | "live_rpc" = "live_rpc"
+
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
+      const snapshotPayload = await buildMetricsFromSummarySnapshot(
+        supabase,
+        businessId,
+        range,
+        positionAsOfDate,
+        compareStart,
+        compareEnd
+      )
+      if (snapshotPayload) {
+        pnlReadSource = "summary_snapshot"
+        return snapshotPayload
+      }
+
       const tRpc = performance.now()
       const { data: metricsRaw, error: rpcError } = await supabase.rpc(
         "get_service_dashboard_metrics",
@@ -217,6 +362,7 @@ export async function loadServiceDashboardMetrics(
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
     cache_source: cacheSource,
+    pnl_read_source: pnlReadSource,
   })
 
   return payload

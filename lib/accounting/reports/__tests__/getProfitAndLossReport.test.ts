@@ -53,6 +53,9 @@ const MOVEMENT_Q1 = [
 
 function buildMockSupabase(movementRows = MOVEMENT_JAN): SupabaseClient {
   const rpc = jest.fn((name: string, args?: Record<string, unknown>) => {
+    if (name === "get_pnl_movement_lines_from_snapshot") {
+      return Promise.resolve({ data: [], error: null })
+    }
     if (name === "get_profit_and_loss_movement") {
       return Promise.resolve({ data: movementRows, error: null })
     }

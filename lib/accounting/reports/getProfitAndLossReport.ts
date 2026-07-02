@@ -59,7 +59,7 @@ export type PnLReportResponse = {
     resolved_period_reason: string
     resolved_period_start: string
     resolved_period_end: string
-    source: "trial_balance" | "ledger" | "rpc"
+    source: "trial_balance" | "ledger" | "rpc" | "snapshot"
     version: number
   }
 }
@@ -100,7 +100,8 @@ function buildReportFromMovementRows(
   },
   currency: PnLReportResponse["currency"],
   movementStart: string,
-  movementEnd: string
+  movementEnd: string,
+  movementSource: "snapshot" | "ledger" = "ledger"
 ): PnLReportResponse {
   const sectionMap = new Map<PnLSectionKey, PnLLine[]>()
   const keys: PnLSectionKey[] = [
@@ -160,7 +161,7 @@ function buildReportFromMovementRows(
       resolved_period_reason: resolvedPeriod.resolution_reason,
       resolved_period_start: movementStart,
       resolved_period_end: movementEnd,
-      source: "ledger",
+      source: movementSource === "snapshot" ? "snapshot" : "ledger",
       version: 2,
     },
   }
@@ -180,7 +181,7 @@ export async function getProfitAndLossReport(
     return { data: null, error: rangeError ?? "Accounting period could not be resolved" }
   }
 
-  const { rows, error: fetchError } = await fetchProfitAndLossMovementRows(
+  const { rows, error: fetchError, source: movementSource } = await fetchProfitAndLossMovementRows(
     supabase,
     businessId,
     range.movementStart,
@@ -208,7 +209,8 @@ export async function getProfitAndLossReport(
       range.period,
       currency,
       range.movementStart,
-      range.movementEnd
+      range.movementEnd,
+      movementSource
     ),
     error: "",
   }

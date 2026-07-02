@@ -192,4 +192,5 @@ Never rely on Vercel in-memory cache as the **only** coalescing layer — it is 
 
 - Migration 506: `supabase/migrations/506_stabilize_workday50_hot_paths.sql`
 - k6: `ROUTE_FILTER`, `WORKDAY_SKIP_REPORTS`, `WORKDAY_REPORTS_EVERY_N`, `workday_50_plus_reports_5` in `load-tests/finza-service-workday.js`
+- Migration **512**: `service_pnl_movement_lines` + shared refresh with `service_dashboard_period_summary`
 - Route diagnostics: `FINZA_ROUTE_DIAG=1` on staging preview
