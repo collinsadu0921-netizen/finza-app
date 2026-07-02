@@ -21,6 +21,9 @@ describe("fetchProfitAndLossMovementRows", () => {
       if (name === "get_pnl_movement_lines_from_snapshot") {
         return Promise.resolve({ data: MOVEMENT_ROWS, error: null })
       }
+      if (name === "try_refresh_service_pnl_movement_snapshot") {
+        return Promise.resolve({ data: { refreshed: true }, error: null })
+      }
       if (name === "get_profit_and_loss_movement") {
         return Promise.resolve({ data: [], error: null })
       }
@@ -38,12 +41,61 @@ describe("fetchProfitAndLossMovementRows", () => {
     expect(result.source).toBe("snapshot")
     expect(result.rows).toEqual(MOVEMENT_ROWS)
     expect(rpc).not.toHaveBeenCalledWith("get_profit_and_loss_movement", expect.anything())
+    expect(rpc).not.toHaveBeenCalledWith(
+      "try_refresh_service_pnl_movement_snapshot",
+      expect.anything()
+    )
+  })
+
+  it("tries reports-only snapshot refresh before live RPC when snapshot is empty", async () => {
+    let snapshotReads = 0
+    const rpc = jest.fn((name: string) => {
+      if (name === "get_pnl_movement_lines_from_snapshot") {
+        snapshotReads += 1
+        return Promise.resolve({
+          data: snapshotReads >= 2 ? MOVEMENT_ROWS : [],
+          error: null,
+        })
+      }
+      if (name === "try_refresh_service_pnl_movement_snapshot") {
+        return Promise.resolve({
+          data: { refreshed: true, lock_held: false },
+          error: null,
+        })
+      }
+      if (name === "get_profit_and_loss_movement") {
+        return Promise.resolve({ data: [], error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    })
+
+    const supabase = { rpc } as unknown as SupabaseClient
+    const result = await fetchProfitAndLossMovementRows(
+      supabase,
+      "biz-1",
+      "2026-01-01",
+      "2026-01-31"
+    )
+
+    expect(result.source).toBe("snapshot")
+    expect(rpc).toHaveBeenCalledWith("try_refresh_service_pnl_movement_snapshot", {
+      p_business_id: "biz-1",
+      p_start_date: "2026-01-01",
+      p_end_date: "2026-01-31",
+    })
+    expect(rpc).not.toHaveBeenCalledWith("get_profit_and_loss_movement", expect.anything())
   })
 
   it("falls back to live RPC when snapshot is empty", async () => {
     const rpc = jest.fn((name: string) => {
       if (name === "get_pnl_movement_lines_from_snapshot") {
         return Promise.resolve({ data: [], error: null })
+      }
+      if (name === "try_refresh_service_pnl_movement_snapshot") {
+        return Promise.resolve({
+          data: { refreshed: false, lock_held: true },
+          error: null,
+        })
       }
       if (name === "get_profit_and_loss_movement") {
         return Promise.resolve({ data: MOVEMENT_ROWS, error: null })

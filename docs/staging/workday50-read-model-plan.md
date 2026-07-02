@@ -192,6 +192,7 @@ Never rely on Vercel in-memory cache as the **only** coalescing layer — it is 
 
 - Migration 506: `supabase/migrations/506_stabilize_workday50_hot_paths.sql`
 - k6: `ROUTE_FILTER`, `WORKDAY_SKIP_REPORTS`, `WORKDAY_REPORTS_EVERY_N`, `workday_50_plus_reports_5` in `load-tests/finza-service-workday.js`
-- Migration **512**: `service_pnl_movement_lines` + shared refresh with `service_dashboard_period_summary`
-- **Dashboard metrics summary fast path** (512 app): **off by default**. Set `FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH=1` on staging preview only after operational `workday_50` re-validates. Reports `pnlMovement` snapshot-first path is unchanged.
+- Migration **512**: `service_pnl_movement_lines` + reports snapshot read-through
+- Migration **513**: decouples P&L line snapshot **refresh** from `refresh_service_dashboard_period_summaries` — dashboard timeline refresh no longer rebuilds movement lines (protects operational `workday_50`)
+- **Dashboard metrics summary fast path** (512 app): **off by default**. Set `FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH=1` on staging preview only after operational `workday_50` re-validates. Reports use `try_refresh_service_pnl_movement_snapshot` on snapshot miss.
 - Route diagnostics: `FINZA_ROUTE_DIAG=1` on staging preview (`dashboard_pnl_source`: `live_metrics_rpc` | `summary_fast_path`)
