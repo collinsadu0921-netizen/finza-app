@@ -1,6 +1,7 @@
 "use client"
 
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import DashboardHelpLink from "@/components/support/DashboardHelpLink"
 
 export type DashboardHeaderProps = {
   periodLabel: string
@@ -14,6 +15,8 @@ export type DashboardHeaderProps = {
   onRefresh?: () => void
   /** When false, hide the Refresh control (e.g. moved next to workspace title). @default true */
   showRefreshButton?: boolean
+  /** Show muted Help & Support link (e.g. when not in workspace top bar). @default false */
+  showHelpLink?: boolean
 }
 
 export default function DashboardHeader({
@@ -27,6 +30,7 @@ export default function DashboardHeader({
   onSwitchToLastActive,
   onRefresh,
   showRefreshButton = true,
+  showHelpLink = false,
 }: DashboardHeaderProps) {
   return (
     <header className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -70,6 +74,7 @@ export default function DashboardHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        {showHelpLink ? <DashboardHelpLink /> : null}
         {showEmptyPeriodCta && onSwitchToLastActive && (
           <button
             type="button"
