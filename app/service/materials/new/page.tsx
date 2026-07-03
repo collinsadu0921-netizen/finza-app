@@ -13,25 +13,20 @@ export default function ServiceNewMaterialPage() {
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [warning, setWarning] = useState("")
+
   const [name, setName] = useState("")
-  const [sku, setSku] = useState("")
   const [unit, setUnit] = useState("")
-  const [reorder_level, setReorderLevel] = useState("0")
-  const [initial_quantity, setInitialQuantity] = useState("0")
-  const [is_active, setIsActive] = useState(true)
-  const [is_billable, setIsBillable] = useState(false)
-  const [sales_name, setSalesName] = useState("")
-  const [sales_description, setSalesDescription] = useState("")
-  const [default_selling_price, setDefaultSellingPrice] = useState("")
-  const [sales_unit, setSalesUnit] = useState("")
-  const [sales_tax_code, setSalesTaxCode] = useState("")
-  const [sales_notes, setSalesNotes] = useState("")
+  const [description, setDescription] = useState("")
+  const [costPrice, setCostPrice] = useState("")
+  const [sellingPrice, setSellingPrice] = useState("")
+  const [quantity, setQuantity] = useState("0")
+  const [lowStockAlert, setLowStockAlert] = useState("0")
+  const [notes, setNotes] = useState("")
 
   useEffect(() => {
     ;(async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       const business = await getCurrentBusiness(supabase, user.id)
       if (business) setBusinessId(business.id)
@@ -43,36 +38,7 @@ export default function ServiceNewMaterialPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-    if (!name.trim()) {
-      setError("Inventory name is required")
-      return
-    }
-    if (!unit.trim()) {
-      setError("Stock unit is required")
-      return
-    }
-    const reorder = parseFloat(reorder_level)
-    if (isNaN(reorder) || reorder < 0) {
-      setError("Reorder level must be a non-negative number")
-      return
-    }
-    const initialQty = parseFloat(initial_quantity)
-    if (isNaN(initialQty) || initialQty < 0) {
-      setError("Initial quantity must be a non-negative number")
-      return
-    }
-    if (is_billable) {
-      const price = parseFloat(default_selling_price)
-      if (isNaN(price) || price < 0) {
-        setError("Default selling price is required and must be non-negative when billable")
-        return
-      }
-      const resolvedSalesUnit = sales_unit.trim() || unit.trim()
-      if (!resolvedSalesUnit) {
-        setError("Sales unit is required when billable (or set a stock unit)")
-        return
-      }
-    }
+    setWarning("")
     setLoading(true)
     try {
       const res = await fetch("/api/service/materials/inventory", {
@@ -80,28 +46,25 @@ export default function ServiceNewMaterialPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          sku: sku.trim() || null,
           unit: unit.trim(),
-          reorder_level: reorder,
-          initial_quantity: initialQty,
-          is_active,
-          is_billable,
-          sales_name: sales_name.trim() || null,
-          sales_description: sales_description.trim() || null,
-          default_selling_price: is_billable ? parseFloat(default_selling_price) : null,
-          sales_unit: is_billable ? (sales_unit.trim() || unit.trim()) : sales_unit.trim() || null,
-          sales_tax_code: sales_tax_code.trim() || null,
-          sales_notes: sales_notes.trim() || null,
+          description: description.trim() || null,
+          cost_price: costPrice.trim() ? parseFloat(costPrice) : null,
+          selling_price: sellingPrice.trim() ? parseFloat(sellingPrice) : null,
+          quantity_available: parseFloat(quantity) || 0,
+          low_stock_alert: parseFloat(lowStockAlert) || 0,
+          notes: notes.trim() || null,
         }),
       })
       const payload = await res.json().catch(() => ({}))
       if (!res.ok) {
-        throw new Error(typeof payload?.error === "string" ? payload.error : "Failed to create material")
+        throw new Error(typeof payload?.error === "string" ? payload.error : "Failed to save material")
       }
-
+      if (Array.isArray(payload.warnings) && payload.warnings[0]) {
+        setWarning(payload.warnings[0])
+      }
       router.push("/service/materials")
-    } catch (err: any) {
-      setError(err.message || "Failed to create material")
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save material")
       setLoading(false)
     }
   }
@@ -111,211 +74,75 @@ export default function ServiceNewMaterialPage() {
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <PageHeader
           title="New Material"
-          subtitle="Track inventory and cost; optionally set customer pricing for quotes and invoices"
-          actions={
-            <Button variant="outline" onClick={() => router.back()}>
-              Back
-            </Button>
-          }
+          subtitle="Save a material your business uses"
+          actions={<Button variant="outline" onClick={() => router.back()}>Back</Button>}
         />
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">{error}</div>}
+        {warning && <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded mb-4 text-sm">{warning}</div>}
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Material details</h2>
             <div>
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Inventory &amp; cost</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Internal stock tracking. Average cost comes from supplier bills, not customer price.
-              </p>
+              <label className="block text-sm font-medium mb-1">Material name <span className="text-red-600">*</span></label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} required disabled={loading}
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Inventory name <span className="text-red-600">*</span>
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                placeholder="e.g. 12mm copper pipe"
-                disabled={loading}
-              />
+              <label className="block text-sm font-medium mb-1">Unit <span className="text-red-600">*</span></label>
+              <input type="text" value={unit} onChange={(e) => setUnit(e.target.value)} required placeholder="e.g. bucket, cylinder, m" disabled={loading}
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">SKU</label>
-              <input
-                type="text"
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                placeholder="Optional"
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Stock unit <span className="text-red-600">*</span>
-              </label>
-              <input
-                type="text"
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                required
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                placeholder="e.g. kg, L, pcs, m"
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Initial quantity</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={initial_quantity}
-                onChange={(e) => setInitialQuantity(e.target.value)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reorder level</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={reorder_level}
-                onChange={(e) => setReorderLevel(e.target.value)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                disabled={loading}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="is_active"
-                checked={is_active}
-                onChange={(e) => setIsActive(e.target.checked)}
-                disabled={loading}
-                className="rounded border-gray-300"
-              />
-              <label htmlFor="is_active" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Active
-              </label>
+              <label className="block text-sm font-medium mb-1">Description</label>
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} disabled={loading}
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
+              <p className="text-xs text-gray-500 mt-1">Description can be used later when adding this material to customer documents.</p>
             </div>
           </section>
 
           <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Prices</h2>
+            <p className="text-xs text-gray-500">Cost price is what you buy it for. Selling price is what you charge the customer.</p>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Cost price</label>
+                <input type="number" step="0.01" min="0" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} disabled={loading}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Selling price</label>
+                <input type="number" step="0.01" min="0" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} disabled={loading}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
+              </div>
+            </div>
+          </section>
+
+          <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Stock</h2>
+            <p className="text-xs text-gray-500">Leave quantity as 0 if you only want to save the material price.</p>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Quantity available</label>
+                <input type="number" step="0.01" min="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} disabled={loading}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Low stock alert</label>
+                <input type="number" step="0.01" min="0" value={lowStockAlert} onChange={(e) => setLowStockAlert(e.target.value)} disabled={loading}
+                  className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
+              </div>
+            </div>
             <div>
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Billable pricing</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Optional customer-facing price for quotes, proformas, and invoices. Does not change stock.
-              </p>
+              <label className="block text-sm font-medium mb-1">Notes</label>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} disabled={loading}
+                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white" />
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="is_billable"
-                checked={is_billable}
-                onChange={(e) => setIsBillable(e.target.checked)}
-                disabled={loading}
-                className="rounded border-gray-300"
-              />
-              <label htmlFor="is_billable" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Billable on customer documents
-              </label>
-            </div>
-            {is_billable && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Customer-facing name
-                  </label>
-                  <input
-                    type="text"
-                    value={sales_name}
-                    onChange={(e) => setSalesName(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                    placeholder={name.trim() || "Defaults to inventory name"}
-                    disabled={loading}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Line description
-                  </label>
-                  <textarea
-                    value={sales_description}
-                    onChange={(e) => setSalesDescription(e.target.value)}
-                    rows={2}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                    placeholder="Shown on quotes and invoices when this material is selected"
-                    disabled={loading}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Default selling price <span className="text-red-600">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={default_selling_price}
-                    onChange={(e) => setDefaultSellingPrice(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                    placeholder="Customer unit price (not average cost)"
-                    disabled={loading}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sales unit</label>
-                  <input
-                    type="text"
-                    value={sales_unit}
-                    onChange={(e) => setSalesUnit(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                    placeholder={unit.trim() || "Defaults to stock unit"}
-                    disabled={loading}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tax code</label>
-                  <input
-                    type="text"
-                    value={sales_tax_code}
-                    onChange={(e) => setSalesTaxCode(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                    placeholder="Optional"
-                    disabled={loading}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Pricing notes</label>
-                  <textarea
-                    value={sales_notes}
-                    onChange={(e) => setSalesNotes(e.target.value)}
-                    rows={2}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 dark:bg-gray-700 dark:text-white"
-                    placeholder="Internal notes (not printed on documents)"
-                    disabled={loading}
-                  />
-                </div>
-              </>
-            )}
           </section>
 
           <div className="flex gap-4">
-            <Button type="button" variant="outline" onClick={() => router.back()} disabled={loading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create Material"}
-            </Button>
+            <Button type="button" variant="outline" onClick={() => router.back()} disabled={loading}>Cancel</Button>
+            <Button type="submit" disabled={loading}>{loading ? "Saving..." : "Save Material"}</Button>
           </div>
         </form>
       </div>

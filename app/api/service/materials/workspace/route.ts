@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     let materialQuery = supabase
       .from("service_material_inventory")
       .select(
-        "id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active, is_billable, default_selling_price, sales_unit",
+        "id, name, unit, quantity_on_hand, average_cost, default_cost_price, reorder_level, is_active, default_selling_price",
         {
         count: "exact",
       }
@@ -53,15 +53,13 @@ export async function GET(request: NextRequest) {
     let materials: Array<{
       id: string
       name: string
-      sku: string | null
       unit: string
       quantity_on_hand: number
       average_cost: number
+      default_cost_price: number | null
       reorder_level: number
       is_active: boolean
-      is_billable: boolean
       default_selling_price: number | null
-      sales_unit: string | null
     }> = []
     let count = 0
     let matErr: { message?: string } | null = null
@@ -74,7 +72,7 @@ export async function GET(request: NextRequest) {
     } else {
       const prefiltered = await materialQuery
         .select(
-          "id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active, is_billable, default_selling_price, sales_unit"
+          "id, name, unit, quantity_on_hand, average_cost, default_cost_price, reorder_level, is_active, default_selling_price"
         )
         .order("name", { ascending: true })
       if (prefiltered.error) {
@@ -130,8 +128,17 @@ export async function GET(request: NextRequest) {
 
     const rows = list.map((m) => {
       const last = lastByMaterial[m.id]
+      const costPrice =
+        m.default_cost_price != null ? Number(m.default_cost_price) : Number(m.average_cost ?? 0)
       return {
-        ...m,
+        id: m.id,
+        name: m.name,
+        unit: m.unit,
+        quantity_on_hand: m.quantity_on_hand,
+        cost_price: costPrice,
+        selling_price: m.default_selling_price != null ? Number(m.default_selling_price) : null,
+        reorder_level: m.reorder_level,
+        is_active: m.is_active,
         last_movement_at: last?.created_at ?? null,
         last_movement_type: last?.movement_type ?? null,
         last_movement_reference_id: last?.reference_id ?? null,

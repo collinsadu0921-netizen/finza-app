@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { parseMaterialBillableFields } from "@/lib/service/materialBillableFields"
+import { parseMaterialFormInput } from "@/lib/service/materialFormFields"
 
 /**
  * POST /api/service/materials/inventory
- * Create inventory row and optional initial stock movement.
+ * Create material with optional starting quantity (setup_stock movement).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -31,66 +31,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
     }
 
-    const {
-      name,
-      sku = null,
-      unit,
-      reorder_level = 0,
-      initial_quantity = 0,
-      is_active = true,
-      is_billable,
-      sales_name,
-      sales_description,
-      default_selling_price,
-      sales_unit,
-      sales_tax_code,
-      sales_notes,
-    } = body as Record<string, unknown>
-
-    if (!name || typeof name !== "string" || !name.trim()) {
-      return NextResponse.json({ error: "name is required" }, { status: 400 })
-    }
-    if (!unit || typeof unit !== "string" || !unit.trim()) {
-      return NextResponse.json({ error: "unit is required" }, { status: 400 })
+    const parsed = parseMaterialFormInput(body as Record<string, unknown>, { isCreate: true })
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
 
-    const reorder = Number(reorder_level)
-    if (isNaN(reorder) || reorder < 0) {
-      return NextResponse.json({ error: "reorder_level must be a non-negative number" }, { status: 400 })
-    }
-    const initialQty = Number(initial_quantity)
-    if (isNaN(initialQty) || initialQty < 0) {
-      return NextResponse.json({ error: "initial_quantity must be a non-negative number" }, { status: 400 })
-    }
-
-    const billableParsed = parseMaterialBillableFields(
-      {
-        is_billable,
-        sales_name,
-        sales_description,
-        default_selling_price,
-        sales_unit,
-        sales_tax_code,
-        sales_notes,
-      },
-      { stockUnit: unit.trim() }
-    )
-    if (!billableParsed.ok) {
-      return NextResponse.json({ error: billableParsed.error }, { status: 400 })
-    }
+    const f = parsed.fields
 
     const { data: inserted, error: insertErr } = await supabase
       .from("service_material_inventory")
       .insert({
         business_id: business.id,
-        name: name.trim(),
-        sku: sku != null && String(sku).trim() ? String(sku).trim() : null,
-        unit: unit.trim(),
-        quantity_on_hand: initialQty,
-        average_cost: 0,
-        reorder_level: reorder,
-        is_active: Boolean(is_active),
-        ...billableParsed.fields,
+        name: f.name,
+        sku: f.sku,
+        unit: f.unit,
+        quantity_on_hand: f.quantity_on_hand,
+        average_cost: f.average_cost,
+        reorder_level: f.reorder_level,
+        is_active: f.is_active,
+        default_cost_price: f.default_cost_price,
+        default_selling_price: f.default_selling_price,
+        is_billable: f.is_billable,
+        sales_description: f.sales_description,
+        sales_unit: f.sales_unit,
+        sales_notes: f.sales_notes,
       })
       .select("id")
       .single()
@@ -103,22 +67,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (initialQty > 0) {
+    if (f.quantity_on_hand > 0) {
       const { error: movErr } = await supabase.from("service_material_movements").insert({
         business_id: business.id,
         material_id: inserted.id,
-        movement_type: "adjustment",
-        quantity: initialQty,
-        unit_cost: 0,
+        movement_type: "setup_stock",
+        quantity: f.quantity_on_hand,
+        unit_cost: f.average_cost,
+        reason_code: "existing_stock",
         reference_id: null,
       })
       if (movErr) {
         console.error("service_material_movements insert:", movErr)
+        await supabase.from("service_material_inventory").delete().eq("id", inserted.id)
         return NextResponse.json({ error: movErr.message }, { status: 500 })
       }
     }
 
-    return NextResponse.json({ id: inserted.id }, { status: 201 })
+    return NextResponse.json(
+      { id: inserted.id, warnings: f.warnings.length > 0 ? f.warnings : undefined },
+      { status: 201 }
+    )
   } catch (err: unknown) {
     console.error("POST /api/service/materials/inventory:", err)
     return NextResponse.json(

@@ -6,29 +6,23 @@ import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+import { stockStatusLabel } from "@/lib/service/materialMovementLabels"
 
 type MaterialRow = {
   id: string
   name: string
-  sku: string | null
   unit: string
   quantity_on_hand: number
-  average_cost: number
+  cost_price: number
+  selling_price: number | null
   reorder_level: number
   is_active: boolean
-  is_billable: boolean
-  default_selling_price: number | null
-  sales_unit: string | null
-  last_movement_at: string | null
-  last_movement_type: string | null
-  last_movement_reference_id: string | null
 }
 
 type MaterialsSummary = {
   totalItems: number
   activeItems: number
   lowStockItems: number
-  totalValue: number
 }
 
 export default function ServiceMaterialsPage() {
@@ -53,30 +47,15 @@ export default function ServiceMaterialsPage() {
     const p = Number.parseInt(searchParams.get("page") || "1", 10)
     return Number.isFinite(p) && p > 0 ? p : 1
   })
-  const [pagination, setPagination] = useState({
-    page: 1,
-    pageSize: PAGE_SIZE,
-    totalCount: 0,
-    totalPages: 0,
-  })
-  const [summary, setSummary] = useState<MaterialsSummary>({
-    totalItems: 0,
-    activeItems: 0,
-    lowStockItems: 0,
-    totalValue: 0,
-  })
+  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
+  const [summary, setSummary] = useState<MaterialsSummary>({ totalItems: 0, activeItems: 0, lowStockItems: 0 })
   const searchDebounce = useRef<NodeJS.Timeout | null>(null)
 
-  useEffect(() => {
-    load()
-  }, [searchQuery, filterStatus, filterStock, page])
+  useEffect(() => { load() }, [searchQuery, filterStatus, filterStock, page])
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
-    searchDebounce.current = setTimeout(() => {
-      setPage(1)
-      setSearchQuery(search.trim())
-    }, 280)
+    searchDebounce.current = setTimeout(() => { setPage(1); setSearchQuery(search.trim()) }, 280)
     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current) }
   }, [search])
 
@@ -99,22 +78,17 @@ export default function ServiceMaterialsPage() {
       }
       setRows((data.rows ?? []) as MaterialRow[])
       setPagination(data.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
-      setSummary(
-        data.summary || {
-          totalItems: 0,
-          activeItems: 0,
-          lowStockItems: 0,
-          totalValue: 0,
-        }
-      )
+      setSummary({
+        totalItems: data.summary?.totalItems ?? 0,
+        activeItems: data.summary?.activeItems ?? 0,
+        lowStockItems: data.summary?.lowStockItems ?? 0,
+      })
       setLoading(false)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load")
+    } catch {
+      setError("Failed to load")
       setLoading(false)
     }
   }
-
-  const visible = rows
 
   const filtersActive = !!(search || filterStatus !== "all" || filterStock !== "all")
 
@@ -128,12 +102,7 @@ export default function ServiceMaterialsPage() {
     else params.delete("stock")
     if (page > 1) params.set("page", String(page))
     else params.delete("page")
-    replaceIfChanged(
-      router,
-      pathname,
-      searchParamsString,
-      `/service/materials?${params.toString()}`
-    )
+    replaceIfChanged(router, pathname, searchParamsString, `/service/materials?${params.toString()}`)
   }, [searchQuery, filterStatus, filterStock, page, pathname, searchParamsString, router])
 
   if (loading) {
@@ -150,287 +119,88 @@ export default function ServiceMaterialsPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-
-        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Materials</h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Inventory, supplier cost, and optional billable pricing for customer documents
-            </p>
+            <p className="text-sm text-slate-500 mt-0.5">Save materials, prices, and quantities your business uses.</p>
           </div>
-          <button
-            onClick={() => router.push("/service/materials/new")}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
+          <button onClick={() => router.push("/service/materials/new")}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700">
             Add Material
           </button>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>
-        )}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>}
 
-        {/* Stat Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <KpiStatCard
-            icon={
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
-            }
-            iconWrapperClassName="bg-blue-100"
-            value={summary.totalItems}
-            label="Total"
-          />
-          <KpiStatCard
-            icon={
-              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            iconWrapperClassName="bg-emerald-100"
-            value={summary.activeItems}
-            label="Active"
-          />
-          <KpiStatCard
-            icon={
-              <svg className={`w-5 h-5 ${summary.lowStockItems > 0 ? "text-amber-600" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            }
-            iconWrapperClassName={summary.lowStockItems > 0 ? "bg-amber-100" : "bg-slate-100"}
-            value={summary.lowStockItems}
-            label="Low Stock"
-            valueClassName={summary.lowStockItems > 0 ? "text-amber-600" : undefined}
-            className={
-              summary.lowStockItems > 0 ? "border-amber-300 hover:bg-amber-50" : undefined
-            }
-            onClick={() => {
-              if (!summary.lowStockItems) return
-              setPage(1)
-              setFilterStock(filterStock === "low" ? "all" : "low")
-            }}
-          />
-          <KpiStatCard
-            icon={
-              <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            iconWrapperClassName="bg-slate-100"
-            value={format(summary.totalValue)}
-            label="Total Value"
-            valueVariant="currency"
-          />
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <KpiStatCard icon={<span className="text-blue-600 font-bold">#</span>} iconWrapperClassName="bg-blue-100" label="Materials" value={String(summary.totalItems)} />
+          <KpiStatCard icon={<span className="text-emerald-600 font-bold">✓</span>} iconWrapperClassName="bg-emerald-100" label="Active" value={String(summary.activeItems)} />
+          <KpiStatCard icon={<span className="text-amber-600 font-bold">!</span>} iconWrapperClassName="bg-amber-100" label="Low stock" value={String(summary.lowStockItems)} />
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </div>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name or SKU…"
-              className="pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
-            />
-          </div>
-          <MenuSelect
-            value={filterStatus}
-            onValueChange={(v) => {
-              setPage(1)
-              setFilterStatus(v as "all" | "active" | "inactive")
-            }}
-            wrapperClassName="w-auto shrink-0 min-w-[9rem]"
-            options={[
-              { value: "all", label: "All Status" },
-              { value: "active", label: "Active" },
-              { value: "inactive", label: "Inactive" },
-            ]}
-          />
-          <MenuSelect
-            value={filterStock}
-            onValueChange={(v) => {
-              setPage(1)
-              setFilterStock(v as "all" | "low" | "ok")
-            }}
-            wrapperClassName="w-auto shrink-0 min-w-[9rem]"
-            options={[
-              { value: "all", label: "All Stock" },
-              { value: "low", label: "Low Stock" },
-              { value: "ok", label: "In Stock" },
-            ]}
-          />
-          {filtersActive && (
-            <button
-              onClick={() => { setPage(1); setSearch(""); setSearchQuery(""); setFilterStatus("all"); setFilterStock("all") }}
-              className="px-3 py-2.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition-colors"
-            >
-              Clear
-            </button>
-          )}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input type="search" placeholder="Search materials…" value={search} onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 border border-slate-200 rounded-lg px-4 py-2 text-sm" />
+          <MenuSelect value={filterStatus} onValueChange={(v) => { setPage(1); setFilterStatus(v as typeof filterStatus) }}
+            options={[{ value: "all", label: "All status" }, { value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]} />
+          <MenuSelect value={filterStock} onValueChange={(v) => { setPage(1); setFilterStock(v as typeof filterStock) }}
+            options={[{ value: "all", label: "All stock" }, { value: "low", label: "Low stock" }, { value: "ok", label: "In stock" }]} />
         </div>
 
-        {/* Table / Empty State */}
-        {visible.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
-            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
-            </div>
-            <p className="text-slate-700 font-semibold mb-1">
-              {filtersActive ? "No materials match your filters" : "No materials yet"}
-            </p>
-            <p className="text-slate-500 text-sm mb-4">
-              {filtersActive
-                ? "Try adjusting your search or filters."
-                : "Add your first material to start tracking service stock."}
-            </p>
+        {rows.length === 0 ? (
+          <div className="bg-white rounded-xl border p-12 text-center">
+            <p className="font-semibold text-slate-700 mb-1">{filtersActive ? "No materials match your filters" : "No materials yet"}</p>
             {!filtersActive && (
-              <button
-                onClick={() => router.push("/service/materials/new")}
-                className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
-              >
-                Add Material
-              </button>
+              <button onClick={() => router.push("/service/materials/new")} className="mt-4 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg">Add Material</button>
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">SKU</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">On Hand</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg Cost</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Sell Price</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Value</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Reorder At</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Last Movement</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+                  <tr className="bg-slate-50 border-b text-left text-xs font-semibold text-slate-500 uppercase">
+                    <th className="px-4 py-3">Material</th>
+                    <th className="px-4 py-3">Unit</th>
+                    <th className="px-4 py-3 text-right">Cost price</th>
+                    <th className="px-4 py-3 text-right">Selling price</th>
+                    <th className="px-4 py-3 text-right">Quantity</th>
+                    <th className="px-4 py-3">Stock status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((row) => {
-                    const isLow =
-                      row.is_active &&
-                      Number(row.reorder_level) > 0 &&
-                      Number(row.quantity_on_hand) <= Number(row.reorder_level)
-                    const lineValue = Number(row.quantity_on_hand) * Number(row.average_cost)
+                  {rows.map((row) => {
+                    const status = stockStatusLabel({
+                      quantity_on_hand: row.quantity_on_hand,
+                      reorder_level: row.reorder_level,
+                      is_active: row.is_active,
+                    })
+                    const statusClass =
+                      status.tone === "low" ? "text-amber-700 bg-amber-50" :
+                      status.tone === "out" ? "text-red-700 bg-red-50" :
+                      status.tone === "inactive" ? "text-slate-500 bg-slate-100" :
+                      "text-emerald-700 bg-emerald-50"
                     return (
-                      <tr
-                        key={row.id}
-                        className={`border-b border-slate-100 transition-colors ${isLow ? "bg-amber-50/60 hover:bg-amber-50" : "hover:bg-slate-50"}`}
-                      >
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-slate-900">{row.name}</span>
-                            {isLow && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                                Low
-                              </span>
-                            )}
-                            {row.is_billable && (
-                              <span className="inline-flex px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                                Billable
-                              </span>
-                            )}
-                          </div>
+                      <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="px-4 py-3.5 font-medium text-slate-900">{row.name}</td>
+                        <td className="px-4 py-3.5 text-slate-600">{row.unit}</td>
+                        <td className="px-4 py-3.5 text-right tabular-nums text-slate-600">
+                          {row.cost_price > 0 ? format(row.cost_price) : "—"}
                         </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className="text-sm text-slate-500 font-mono">{row.sku ?? "—"}</span>
+                        <td className="px-4 py-3.5 text-right tabular-nums text-slate-700">
+                          {row.selling_price != null ? format(row.selling_price) : "—"}
                         </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className="text-sm text-slate-600">{row.unit}</span>
+                        <td className="px-4 py-3.5 text-right tabular-nums font-medium">{Number(row.quantity_on_hand)}</td>
+                        <td className="px-4 py-3.5">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${statusClass}`}>{status.label}</span>
                         </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className={`text-sm font-semibold tabular-nums ${isLow ? "text-amber-600" : "text-slate-900"}`}>
-                            {Number(row.quantity_on_hand ?? 0)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm text-slate-600 tabular-nums">{format(Number(row.average_cost ?? 0))}</span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          {row.is_billable && row.default_selling_price != null ? (
-                            <span className="text-sm text-slate-700 tabular-nums">
-                              {format(Number(row.default_selling_price))}
-                              {row.sales_unit || row.unit ? (
-                                <span className="text-xs text-slate-400 ml-1">/ {row.sales_unit || row.unit}</span>
-                              ) : null}
-                            </span>
-                          ) : (
-                            <span className="text-sm text-slate-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm font-medium text-slate-800 tabular-nums">{format(lineValue)}</span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm text-slate-500 tabular-nums">
-                            {Number(row.reorder_level) > 0 ? Number(row.reorder_level) : "—"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${row.is_active ? "text-emerald-700" : "text-slate-500"}`}>
-                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${row.is_active ? "bg-emerald-500" : "bg-slate-400"}`} />
-                            {row.is_active ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {row.last_movement_at ? (
-                            <div>
-                              <p className="text-xs text-slate-700 font-medium capitalize">
-                                {(row.last_movement_type ?? "").replace(/_/g, " ")}
-                              </p>
-                              <p className="text-xs text-slate-400">
-                                {new Date(row.last_movement_at).toLocaleDateString("en-GH", { day: "2-digit", month: "short", year: "numeric" })}
-                              </p>
-                              {row.last_movement_reference_id && row.last_movement_type === "job_usage" && (
-                                <a
-                                  href={`/service/jobs/${row.last_movement_reference_id}`}
-                                  className="text-xs text-blue-600 hover:underline font-mono"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {row.last_movement_reference_id.slice(0, 8)}…
-                                </a>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-sm text-slate-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <div className="flex items-center justify-end gap-3">
-                            <button
-                              onClick={() => router.push(`/service/materials/${row.id}/adjust`)}
-                              className="text-xs px-2.5 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg font-medium hover:bg-slate-100 transition-colors"
-                            >
-                              Adjust Stock
-                            </button>
-                            <button
-                              onClick={() => router.push(`/service/materials/${row.id}/edit`)}
-                              className="text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors"
-                            >
-                              Edit →
-                            </button>
+                        <td className="px-4 py-3.5">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            <button onClick={() => router.push(`/service/materials/${row.id}/add-stock`)} className="text-xs px-2 py-1 border rounded-lg hover:bg-slate-50">Add stock</button>
+                            <button onClick={() => router.push(`/service/materials/${row.id}/use-stock`)} className="text-xs px-2 py-1 border rounded-lg hover:bg-slate-50">Use stock</button>
+                            <button onClick={() => router.push(`/service/materials/${row.id}/history`)} className="text-xs px-2 py-1 border rounded-lg hover:bg-slate-50">History</button>
+                            <button onClick={() => router.push(`/service/materials/${row.id}/edit`)} className="text-xs px-2 py-1 text-slate-600 hover:text-slate-900">Edit</button>
                           </div>
                         </td>
                       </tr>
@@ -440,31 +210,16 @@ export default function ServiceMaterialsPage() {
               </table>
             </div>
             {pagination.totalPages > 1 && (
-              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Previous
-                </button>
-                <span className="text-xs text-slate-600 tabular-nums">
-                  Page {pagination.page} of {pagination.totalPages} ({pagination.totalCount} total)
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= pagination.totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
+              <div className="flex items-center justify-between px-4 py-3 border-t bg-slate-50/80">
+                <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="text-sm px-3 py-1.5 border rounded-lg disabled:opacity-40">Previous</button>
+                <span className="text-xs text-slate-600">Page {pagination.page} of {pagination.totalPages}</span>
+                <button type="button" disabled={page >= pagination.totalPages} onClick={() => setPage((p) => p + 1)}
+                  className="text-sm px-3 py-1.5 border rounded-lg disabled:opacity-40">Next</button>
               </div>
             )}
           </div>
         )}
-
       </div>
     </div>
   )
