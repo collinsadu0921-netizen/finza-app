@@ -15,6 +15,10 @@ import {
 } from "@/lib/tax/ghanaTaxScheduleMetadata"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
+import {
+  mapInvoiceItemsForInsert,
+  validateInvoiceLineMaterials,
+} from "@/lib/invoices/validateInvoiceLineMaterials"
 
 export async function POST(request: NextRequest) {
   try {
@@ -73,6 +77,18 @@ export async function POST(request: NextRequest) {
     }
 
     const business_id = business.id
+
+    const materialValidationEarly = await validateInvoiceLineMaterials(
+      supabase,
+      business_id,
+      items
+    )
+    if (!materialValidationEarly.ok) {
+      return NextResponse.json(
+        { error: materialValidationEarly.error },
+        { status: materialValidationEarly.status }
+      )
+    }
 
     // Invoice number is system-controlled: only assign when status is "sent"
     // For draft invoices, invoice_number will be null until the invoice is issued
@@ -471,20 +487,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const invoiceItems = items.map((item: any) => {
-      const rawId = item.product_service_id || item.product_id || null
-      const product_service_id =
-        rawId && validProductServiceIds.has(rawId) ? rawId : null
-      return {
-        invoice_id: invoice.id,
-        product_service_id,
-        description: item.description || "",
-        qty: Number(item.qty) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        discount_amount: Number(item.discount_amount) || 0,
-        line_subtotal: Math.round(((Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0)) * 100) / 100,
-      }
-    })
+    const materialValidation = materialValidationEarly
+
+    const invoiceItems = mapInvoiceItemsForInsert(
+      invoice.id,
+      items,
+      validProductServiceIds,
+      materialValidation.validMaterialIds
+    )
 
     const { error: itemsError } = await supabase
       .from("invoice_items")

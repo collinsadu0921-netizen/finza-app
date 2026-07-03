@@ -34,6 +34,9 @@ type Customer = {
 type InvoiceItem = {
   id: string
   product_id: string | null
+  material_id?: string | null
+  /** Service workspace: material lines use material picker instead of service catalog. */
+  _lineKind?: "service" | "material"
   description: string
   quantity: number
   price: number
@@ -45,6 +48,16 @@ type InvoiceItem = {
   _rawQty?: string
   _rawPrice?: string
   _rawDiscount?: string
+}
+
+type BillableMaterialOption = {
+  id: string
+  name: string
+  description: string
+  unit: string
+  sellingPrice: number
+  taxCode: string | null
+  quantityAvailable: number
 }
 
 const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
@@ -79,18 +92,22 @@ const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{chil
 type LineItemRowProps = {
   item: InvoiceItem
   productMenuOptions: MenuSelectOption[]
+  materialMenuOptions?: MenuSelectOption[]
+  showMaterialPicker?: boolean
   /** ISO code for line totals (matches invoice view formatMoney). */
   amountCurrencyCode: string | null
   onUpdate: (id: string, field: keyof InvoiceItem | "_rawQty" | "_rawPrice" | "_rawDiscount", value: any) => void
   onCommit: (id: string, field: "quantity" | "price" | "discount_value") => void
   onRemove: (id: string) => void
   onSelectProduct: (itemId: string, productId: string) => void
+  onSelectMaterial?: (itemId: string, materialId: string) => void
 }
 
 const LineItemRow = memo(function LineItemRow({
-  item, productMenuOptions, amountCurrencyCode,
-  onUpdate, onCommit, onRemove, onSelectProduct,
+  item, productMenuOptions, materialMenuOptions, showMaterialPicker, amountCurrencyCode,
+  onUpdate, onCommit, onRemove, onSelectProduct, onSelectMaterial,
 }: LineItemRowProps) {
+  const isMaterialLine = showMaterialPicker && (item._lineKind === "material" || !!item.material_id)
   // Local description state — typed into immediately, flushed to parent only on blur
   const [localDesc, setLocalDesc] = useState(item.description)
 
@@ -103,13 +120,26 @@ const LineItemRow = memo(function LineItemRow({
     <tr className="group hover:bg-slate-50/50 transition-colors">
       <td className="min-w-0 px-4 py-3 align-top sm:px-6">
         <div className="space-y-1.5">
-          <MenuSelect
-            value={item.product_id || ""}
-            onValueChange={(v) => (v ? onSelectProduct(item.id, v) : onUpdate(item.id, "product_id", null))}
-            options={productMenuOptions}
-            placeholder="Select product or service…"
-            size="sm"
-          />
+          {isMaterialLine ? (
+            <MenuSelect
+              value={item.material_id || ""}
+              onValueChange={(v) => {
+                if (v && onSelectMaterial) onSelectMaterial(item.id, v)
+                else onUpdate(item.id, "material_id", null)
+              }}
+              options={materialMenuOptions ?? [{ value: "", label: "Select material…" }]}
+              placeholder="Select material…"
+              size="sm"
+            />
+          ) : (
+            <MenuSelect
+              value={item.product_id || ""}
+              onValueChange={(v) => (v ? onSelectProduct(item.id, v) : onUpdate(item.id, "product_id", null))}
+              options={productMenuOptions}
+              placeholder="Select product or service…"
+              size="sm"
+            />
+          )}
           <textarea
             value={localDesc}
             onChange={(e) => setLocalDesc(e.target.value)}
@@ -197,6 +227,7 @@ function NewInvoicePageContent() {
   // -- State Management --
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [dueDate, setDueDate] = useState<string>("")
@@ -362,6 +393,13 @@ function NewInvoicePageContent() {
         } else {
           setJobs([])
         }
+        const materialsRes = await fetch("/api/service/materials/billable-list")
+        const materialsPayload = await materialsRes.json().catch(() => ({}))
+        if (materialsRes.ok && Array.isArray(materialsPayload.materials)) {
+          setMaterials(materialsPayload.materials as BillableMaterialOption[])
+        } else {
+          setMaterials([])
+        }
       } else {
       // Load products_services (non-service workspace)
       const { data: productsData } = await supabase
@@ -411,6 +449,26 @@ function NewInvoicePageContent() {
       {
         id: Date.now().toString(),
         product_id: null,
+        material_id: null,
+        _lineKind: "service",
+        description: "",
+        quantity: 1,
+        price: 0,
+        discount_type: "amount",
+        discount_value: 0,
+        total: 0,
+      },
+    ])
+  }, [])
+
+  const addMaterialLine = useCallback(() => {
+    setItems(prev => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        product_id: null,
+        material_id: null,
+        _lineKind: "material",
         description: "",
         quantity: 1,
         price: 0,
@@ -477,10 +535,38 @@ function NewInvoicePageContent() {
       if (it.id !== itemId) return it
       const qty = it.quantity || 1
       const price = Number(product.price) || 0
-      const nextItem = { ...it, product_id: productId, description: product.name, price, quantity: qty }
+      const nextItem = {
+        ...it,
+        product_id: productId,
+        material_id: null,
+        _lineKind: "service" as const,
+        description: product.name,
+        price,
+        quantity: qty,
+      }
       return { ...nextItem, total: getLineTotal(nextItem) }
     }))
   }, [products])
+
+  const selectMaterial = useCallback((itemId: string, materialId: string) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    setItems(prev => prev.map(it => {
+      if (it.id !== itemId) return it
+      const qty = it.quantity || 1
+      const price = Number(material.sellingPrice) || 0
+      const nextItem = {
+        ...it,
+        material_id: materialId,
+        product_id: null,
+        _lineKind: "material" as const,
+        description: material.description || material.name,
+        price,
+        quantity: qty,
+      }
+      return { ...nextItem, total: getLineTotal(nextItem) }
+    }))
+  }, [materials])
 
   // -- Financial Calculations (Strictly Preserved) --
   // Calculate subtotal from line items (sum of all line totals)
@@ -610,7 +696,8 @@ function NewInvoicePageContent() {
           fx_rate: parseFloat(fxRate),
         } : {}),
         items: items.map(item => ({
-          product_service_id: item.product_id || null,
+          product_service_id: item.material_id ? null : (item.product_id || null),
+          material_id: item.material_id || null,
           description: item.description || "",
           qty: Number(item.quantity) || 0,
           unit_price: Number(item.price) || 0,
@@ -680,6 +767,16 @@ function NewInvoicePageContent() {
     ],
     [customers]
   )
+
+  const materialMenuOptions = useMemo((): MenuSelectOption[] => {
+    return [
+      { value: "", label: "Select material…" },
+      ...materials.map((m) => ({
+        value: m.id,
+        label: `${m.name}${m.unit ? ` (${m.unit})` : ""} — ${formatMoneyWithSymbol(Number(m.sellingPrice), displaySymbol)}`,
+      })),
+    ]
+  }, [materials, displaySymbol])
 
   const productMenuOptions = useMemo((): MenuSelectOption[] => {
     const emptyLabel =
@@ -932,7 +1029,7 @@ function NewInvoicePageContent() {
 
             {/* 3. High Density Line Items Table */}
             <div className="border-t border-slate-200 dark:border-slate-700" data-tour="service-invoice-lines">
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 sm:px-6">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 sm:px-6 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={addItem}
@@ -941,6 +1038,16 @@ function NewInvoicePageContent() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                   Add Line Item
                 </button>
+                {businessIndustry === "service" && (
+                  <button
+                    type="button"
+                    onClick={addMaterialLine}
+                    className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    Add material
+                  </button>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[56rem] table-fixed text-sm text-left">
@@ -975,11 +1082,14 @@ function NewInvoicePageContent() {
                           key={item.id}
                           item={item}
                           productMenuOptions={productMenuOptions}
+                          materialMenuOptions={materialMenuOptions}
+                          showMaterialPicker={businessIndustry === "service"}
                           amountCurrencyCode={amountCurrencyCode}
                           onUpdate={updateItem}
                           onCommit={commitItem}
                           onRemove={removeItem}
                           onSelectProduct={selectProduct}
+                          onSelectMaterial={selectMaterial}
                         />
                       ))
                     )}

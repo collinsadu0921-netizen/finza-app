@@ -26,6 +26,8 @@ type Customer = {
 type InvoiceItem = {
   id: string
   product_id: string | null
+  material_id?: string | null
+  _lineKind?: "service" | "material"
   description: string
   quantity: number
   price: number
@@ -35,6 +37,14 @@ type InvoiceItem = {
   /** Persisted/legacy amount stored on invoice_items. Derived from discount_type/value in the UI. */
   discount_amount?: number
   _rawDiscount?: string
+}
+
+type BillableMaterialOption = {
+  id: string
+  name: string
+  description: string
+  unit: string
+  sellingPrice: number
 }
 
 const round2 = (value: number): number => Math.round((value || 0) * 100) / 100
@@ -114,6 +124,7 @@ function InvoiceEditPageContent() {
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
@@ -315,6 +326,16 @@ function InvoiceEditPageContent() {
 
       setCustomers(customersData || [])
 
+      if (isUnderService) {
+        const materialsRes = await fetch("/api/service/materials/billable-list")
+        const materialsPayload = await materialsRes.json().catch(() => ({}))
+        if (materialsRes.ok && Array.isArray(materialsPayload.materials)) {
+          setMaterials(materialsPayload.materials as BillableMaterialOption[])
+        } else {
+          setMaterials([])
+        }
+      }
+
       // Load invoice items AFTER products are loaded (for description fallback)
       if (invoiceItems && invoiceItems.length > 0) {
         console.log("📥 Loading invoice items for edit:", JSON.stringify(invoiceItems, null, 2))
@@ -352,7 +373,9 @@ function InvoiceEditPageContent() {
 
           const mapped = {
             id: item.id,
-            product_id: item.product_service_id,
+            product_id: item.material_id ? null : item.product_service_id,
+            material_id: item.material_id ?? null,
+            _lineKind: item.material_id ? ("material" as const) : ("service" as const),
             description: description,
             quantity: quantity,
             price: price,
@@ -384,6 +407,27 @@ function InvoiceEditPageContent() {
       {
         id: Date.now().toString(),
         product_id: null,
+        material_id: null,
+        _lineKind: "service",
+        description: "",
+        quantity: 1,
+        price: 0,
+        total: 0,
+        discount_type: "amount",
+        discount_value: 0,
+        discount_amount: 0,
+      },
+    ])
+  }
+
+  const addMaterialLine = () => {
+    setItems([
+      ...items,
+      {
+        id: Date.now().toString(),
+        product_id: null,
+        material_id: null,
+        _lineKind: "material",
         description: "",
         quantity: 1,
         price: 0,
@@ -425,6 +469,8 @@ function InvoiceEditPageContent() {
             const discountAmount = getDiscountAmount(updated)
             updated.discount_amount = discountAmount
             updated.total = Math.max(0, qty * price - discountAmount)
+          } else {
+            ;(updated as Record<string, unknown>)[field] = value
           }
           return updated
         }
@@ -451,6 +497,8 @@ function InvoiceEditPageContent() {
             return {
               ...item,
               product_id: productId,
+              material_id: null,
+              _lineKind: "service" as const,
               description: product.name, // Auto-fill description with product name
               price: price,
               discount_amount: discountAmount,
@@ -461,6 +509,34 @@ function InvoiceEditPageContent() {
         })
       )
     }
+  }
+
+  const selectMaterial = (itemId: string, materialId: string) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    const currentItem = items.find((i) => i.id === itemId)
+    if (!currentItem) return
+
+    const qty = currentItem.quantity || 1
+    const price = Number(material.sellingPrice) || 0
+    const discountAmount = getDiscountAmount({ ...currentItem, quantity: qty, price })
+    const total = Math.max(0, qty * price - discountAmount)
+
+    setItems(
+      items.map((item) => {
+        if (item.id !== itemId) return item
+        return {
+          ...item,
+          material_id: materialId,
+          product_id: null,
+          _lineKind: "material" as const,
+          description: material.description || material.name,
+          price,
+          discount_amount: discountAmount,
+          total,
+        }
+      })
+    )
   }
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
@@ -627,7 +703,8 @@ function InvoiceEditPageContent() {
           const lineSubtotal = qty * unitPrice - discount
           return {
             id: item.id.startsWith("temp_") ? undefined : item.id,
-            product_service_id: item.product_id || null,
+            product_service_id: item.material_id ? null : (item.product_id || null),
+            material_id: item.material_id || null,
             description: item.description || "",
             qty: qty,
             unit_price: unitPrice,
@@ -689,6 +766,26 @@ function InvoiceEditPageContent() {
       })),
     ]
   }, [products, currency])
+
+  const materialMenuOptions = useMemo((): MenuSelectOption[] => {
+    const list = Array.isArray(materials) ? materials : []
+    const options: MenuSelectOption[] = [
+      { value: "", label: "Select material…" },
+      ...list.map((m) => ({
+        value: m.id,
+        label: `${m.name}${m.unit ? ` (${m.unit})` : ""} — ${currency}${Number(m.sellingPrice).toFixed(2)}`,
+      })),
+    ]
+    for (const item of items) {
+      if (item.material_id && !list.some((m) => m.id === item.material_id)) {
+        options.push({
+          value: item.material_id,
+          label: item.description || "Material (saved on invoice)",
+        })
+      }
+    }
+    return options
+  }, [materials, items, currency])
 
   if (loading) {
     return (
@@ -930,16 +1027,30 @@ function InvoiceEditPageContent() {
                 <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full"></div>
                 <h2 className="text-xl font-semibold text-gray-900">Items</h2>
               </div>
-              <button
-                type="button"
-                onClick={addItem}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Add Item
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Item
+                </button>
+                {isUnderService && (
+                  <button
+                    type="button"
+                    onClick={addMaterialLine}
+                    className="bg-white text-blue-700 border border-blue-200 px-4 py-2 rounded-lg hover:bg-blue-50 font-medium transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add material
+                  </button>
+                )}
+              </div>
             </div>
 
             {items.length === 0 ? (
@@ -953,32 +1064,53 @@ function InvoiceEditPageContent() {
                     <div className="grid grid-cols-12 gap-3">
                       <div className="col-span-12 md:col-span-5">
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Product/Service
+                          {item._lineKind === "material" || item.material_id ? "Material" : "Product/Service"}
                         </label>
-                        <MenuSelect
-                          value={item.product_id || ""}
-                          onValueChange={(v) => {
-                            if (v) {
-                              selectProduct(item.id, v)
-                            } else {
-                              setItems(
-                                items.map((it) => {
-                                  if (it.id === item.id) {
-                                    return {
-                                      ...it,
-                                      product_id: null,
-                                      description: "",
+                        {isUnderService && (item._lineKind === "material" || item.material_id) ? (
+                          <MenuSelect
+                            value={item.material_id || ""}
+                            onValueChange={(v) => {
+                              if (v) selectMaterial(item.id, v)
+                              else {
+                                setItems(
+                                  items.map((it) =>
+                                    it.id === item.id
+                                      ? { ...it, material_id: null, description: "" }
+                                      : it
+                                  )
+                                )
+                              }
+                            }}
+                            options={materialMenuOptions}
+                            placeholder="Select material…"
+                            size="sm"
+                          />
+                        ) : (
+                          <MenuSelect
+                            value={item.product_id || ""}
+                            onValueChange={(v) => {
+                              if (v) {
+                                selectProduct(item.id, v)
+                              } else {
+                                setItems(
+                                  items.map((it) => {
+                                    if (it.id === item.id) {
+                                      return {
+                                        ...it,
+                                        product_id: null,
+                                        description: "",
+                                      }
                                     }
-                                  }
-                                  return it
-                                })
-                              )
-                            }
-                          }}
-                          options={productMenuOptions}
-                          placeholder="Select product/service"
-                          size="sm"
-                        />
+                                    return it
+                                  })
+                                )
+                              }
+                            }}
+                            options={productMenuOptions}
+                            placeholder="Select product/service"
+                            size="sm"
+                          />
+                        )}
                         <input
                           type="text"
                           value={item.description || ""}

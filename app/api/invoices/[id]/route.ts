@@ -17,6 +17,10 @@ import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engi
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  mapInvoiceItemsForInsert,
+  validateInvoiceLineMaterials,
+} from "@/lib/invoices/validateInvoiceLineMaterials"
 
 export async function GET(
   request: NextRequest,
@@ -345,7 +349,22 @@ export async function PUT(
       updated_at: new Date().toISOString(),
     }
 
+    let materialValidationForItems: Awaited<ReturnType<typeof validateInvoiceLineMaterials>> | null =
+      null
+
     if (items && items.length > 0) {
+      materialValidationForItems = await validateInvoiceLineMaterials(
+        supabase,
+        businessId,
+        items
+      )
+      if (!materialValidationForItems.ok) {
+        return NextResponse.json(
+          { error: materialValidationForItems.error },
+          { status: materialValidationForItems.status }
+        )
+      }
+
       // Prepare line items for tax calculation
       const lineItems = items.map((item: any) => ({
         quantity: Number(item.qty) || 0,
@@ -591,20 +610,17 @@ export async function PUT(
         }
       }
 
-      const invoiceItems = items.map((item: any) => {
-        const rawId = item.product_service_id || item.product_id || null
-        const product_service_id =
-          rawId && validProductServiceIds.has(rawId) ? rawId : null
-        return {
-          invoice_id: invoiceId,
-          product_service_id,
-          description: item.description || "",
-          qty: Number(item.qty) || 0,
-          unit_price: Number(item.unit_price) || 0,
-          discount_amount: Number(item.discount_amount) || 0,
-          line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
-        }
-      })
+      const validMaterialIds =
+        materialValidationForItems && materialValidationForItems.ok
+          ? materialValidationForItems.validMaterialIds
+          : new Set<string>()
+
+      const invoiceItems = mapInvoiceItemsForInsert(
+        invoiceId,
+        items,
+        validProductServiceIds,
+        validMaterialIds
+      )
 
       const { error: itemsError } = await supabase
         .from("invoice_items")
