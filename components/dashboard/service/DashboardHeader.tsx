@@ -74,7 +74,7 @@ export default function DashboardHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {showHelpLink ? <DashboardHelpLink /> : null}
+        {showHelpLink ? <DashboardHelpLink variant="default" /> : null}
         {showEmptyPeriodCta && onSwitchToLastActive && (
           <button
             type="button"

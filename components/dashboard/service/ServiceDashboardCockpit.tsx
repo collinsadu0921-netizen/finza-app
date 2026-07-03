@@ -8,7 +8,7 @@ import QuickActionsBar from "./QuickActionsBar"
 import RecentActivityFeed from "./RecentActivityFeed"
 import type { ActivityItem } from "./RecentActivityFeed"
 import FinancialOverviewStrip from "./FinancialOverviewStrip"
-import DashboardHelpLink from "@/components/support/DashboardHelpLink"
+import DashboardTopActions from "@/components/support/DashboardTopActions"
 import ServiceDashboardSkeleton, {
   ServiceDashboardActivityPanelSkeleton,
   ServiceDashboardCollectionsFollowUpSkeleton,
@@ -489,7 +489,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">{headerLead}</div>
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end sm:pt-0.5">
-          <p className="text-xs text-slate-500 sm:max-w-[16rem] sm:text-right dark:text-slate-400">
+          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400 sm:max-w-[16rem] sm:text-right dark:text-slate-500">
             {new Date().toLocaleDateString("en-GB", {
               weekday: "long",
               day: "numeric",
@@ -497,26 +497,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
               year: "numeric",
             })}
           </p>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <DashboardHelpLink />
-            <button
-              type="button"
-              onClick={() => load()}
-              disabled={anyLoading}
-              title="Refresh dashboard"
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60 sm:w-auto dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              Refresh
-            </button>
-          </div>
+          <DashboardTopActions onRefresh={load} refreshing={anyLoading} />
         </div>
       </div>
     ) : null

@@ -15,6 +15,11 @@ export default function HelpArticleView({ article }: { article: HelpArticle }) {
         </p>
         <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">{article.title}</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">{article.summary}</p>
+        {article.planNote ? (
+          <p className="mt-2 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
+            {article.planNote}
+          </p>
+        ) : null}
       </div>
 
       <ol className="list-decimal space-y-3 pl-5 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
