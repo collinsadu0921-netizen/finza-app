@@ -37,9 +37,12 @@ export async function GET(request: NextRequest) {
 
     let materialQuery = supabase
       .from("service_material_inventory")
-      .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active", {
+      .select(
+        "id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active, is_billable, default_selling_price, sales_unit",
+        {
         count: "exact",
-      })
+      }
+      )
       .eq("business_id", business.id)
 
     if (search) {
@@ -56,6 +59,9 @@ export async function GET(request: NextRequest) {
       average_cost: number
       reorder_level: number
       is_active: boolean
+      is_billable: boolean
+      default_selling_price: number | null
+      sales_unit: string | null
     }> = []
     let count = 0
     let matErr: { message?: string } | null = null
@@ -67,7 +73,9 @@ export async function GET(request: NextRequest) {
       matErr = result.error
     } else {
       const prefiltered = await materialQuery
-        .select("id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active")
+        .select(
+          "id, name, sku, unit, quantity_on_hand, average_cost, reorder_level, is_active, is_billable, default_selling_price, sales_unit"
+        )
         .order("name", { ascending: true })
       if (prefiltered.error) {
         matErr = prefiltered.error

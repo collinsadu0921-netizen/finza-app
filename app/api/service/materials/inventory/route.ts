@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { parseMaterialBillableFields } from "@/lib/service/materialBillableFields"
 
 /**
  * POST /api/service/materials/inventory
@@ -37,6 +38,13 @@ export async function POST(request: NextRequest) {
       reorder_level = 0,
       initial_quantity = 0,
       is_active = true,
+      is_billable,
+      sales_name,
+      sales_description,
+      default_selling_price,
+      sales_unit,
+      sales_tax_code,
+      sales_notes,
     } = body as Record<string, unknown>
 
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -55,6 +63,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "initial_quantity must be a non-negative number" }, { status: 400 })
     }
 
+    const billableParsed = parseMaterialBillableFields(
+      {
+        is_billable,
+        sales_name,
+        sales_description,
+        default_selling_price,
+        sales_unit,
+        sales_tax_code,
+        sales_notes,
+      },
+      { stockUnit: unit.trim() }
+    )
+    if (!billableParsed.ok) {
+      return NextResponse.json({ error: billableParsed.error }, { status: 400 })
+    }
+
     const { data: inserted, error: insertErr } = await supabase
       .from("service_material_inventory")
       .insert({
@@ -66,6 +90,7 @@ export async function POST(request: NextRequest) {
         average_cost: 0,
         reorder_level: reorder,
         is_active: Boolean(is_active),
+        ...billableParsed.fields,
       })
       .select("id")
       .single()

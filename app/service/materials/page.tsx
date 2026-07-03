@@ -16,6 +16,9 @@ type MaterialRow = {
   average_cost: number
   reorder_level: number
   is_active: boolean
+  is_billable: boolean
+  default_selling_price: number | null
+  sales_unit: string | null
   last_movement_at: string | null
   last_movement_type: string | null
   last_movement_reference_id: string | null
@@ -152,7 +155,9 @@ export default function ServiceMaterialsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Materials</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Track service materials and stock levels</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Inventory, supplier cost, and optional billable pricing for customer documents
+            </p>
           </div>
           <button
             onClick={() => router.push("/service/materials/new")}
@@ -311,6 +316,7 @@ export default function ServiceMaterialsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Unit</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">On Hand</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg Cost</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Sell Price</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Value</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Reorder At</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
@@ -341,6 +347,11 @@ export default function ServiceMaterialsPage() {
                                 Low
                               </span>
                             )}
+                            {row.is_billable && (
+                              <span className="inline-flex px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                Billable
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
@@ -356,6 +367,18 @@ export default function ServiceMaterialsPage() {
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
                           <span className="text-sm text-slate-600 tabular-nums">{format(Number(row.average_cost ?? 0))}</span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-right">
+                          {row.is_billable && row.default_selling_price != null ? (
+                            <span className="text-sm text-slate-700 tabular-nums">
+                              {format(Number(row.default_selling_price))}
+                              {row.sales_unit || row.unit ? (
+                                <span className="text-xs text-slate-400 ml-1">/ {row.sales_unit || row.unit}</span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-slate-400">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
                           <span className="text-sm font-medium text-slate-800 tabular-nums">{format(lineValue)}</span>
