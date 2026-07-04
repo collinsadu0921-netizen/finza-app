@@ -11,6 +11,11 @@ import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { canEditEstimate, shouldCreateRevision } from "@/lib/documentState"
 import { pickEstimateItemProductServiceId } from "@/lib/estimates/pickEstimateItemProductServiceId"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  mapEstimateItemsForInsert,
+  resolveValidProductServiceIds,
+  validateDocumentLineMaterials,
+} from "@/lib/documents/documentLineMaterials"
 
 /** Fields PUT overwrites on the estimate row — used to restore draft header after failed line replace. */
 const ESTIMATE_PUT_REVERT_KEYS = [
@@ -74,6 +79,10 @@ function mapSnapshotRowToEstimateItemInsert(
   )
   if (productServiceId) {
     out.product_service_id = productServiceId
+  }
+  const materialId = row.material_id
+  if (materialId != null && String(materialId).trim() !== "") {
+    out.material_id = String(materialId).trim()
   }
   return out
 }
@@ -312,6 +321,20 @@ export async function PUT(
     }
     const estimateCurrencySymbol = getCurrencySymbol(estimateCurrencyCode || "")
 
+    const materialValidation = await validateDocumentLineMaterials(
+      supabase,
+      scopedBusinessId,
+      items
+    )
+    if (!materialValidation.ok) {
+      return NextResponse.json(
+        { error: materialValidation.error },
+        { status: materialValidation.status }
+      )
+    }
+
+    const validProductServiceIds = await resolveValidProductServiceIds(supabase, items)
+
     // Prepare line items for tax calculation
     const lineItems = items.map((item: any) => ({
       quantity: Number(item.qty || item.quantity) || 0,
@@ -544,26 +567,12 @@ export async function PUT(
     }
 
     // Prepare new items
-    const estimateItems = items.map((item: any) => {
-      const qty = Number(item.qty || item.quantity) || 0
-      const price = Number(item.unit_price || item.price) || 0
-      const discount = Number(item.discount_amount) || 0
-      const total = Math.round(Math.max(0, (qty * price) - discount) * 100) / 100
-      const productServiceId = pickEstimateItemProductServiceId(item)
-
-      const row: Record<string, unknown> = {
-        estimate_id: finalEstimateId,
-        description: item.description || "",
-        quantity: qty,
-        price: price,
-        total: total,
-        discount_amount: discount,
-      }
-      if (productServiceId) {
-        row.product_service_id = productServiceId
-      }
-      return row
-    })
+    const estimateItems = mapEstimateItemsForInsert(
+      finalEstimateId,
+      items,
+      validProductServiceIds,
+      materialValidation.validMaterialIds
+    )
 
     // Insert new items (or update if creating revision)
     const { error: itemsError } = await supabase

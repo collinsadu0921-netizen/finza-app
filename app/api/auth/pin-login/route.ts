@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
 import { signCashierPosToken } from "@/lib/cashierPosToken.server"
-
-// Service role client for database operations
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 
 // Rate limiting: Store failed attempts in memory (in production, use Redis)
 const failedAttempts = new Map<string, { count: number; lastAttempt: number }>()
@@ -55,6 +49,14 @@ function clearFailedAttempts(identifier: string) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabaseAdmin = getSupabaseServiceRoleClient()
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Server configuration error" },
+        { status: 503 }
+      )
+    }
+
     const body = await request.json()
     const { pin_code, store_id } = body
 

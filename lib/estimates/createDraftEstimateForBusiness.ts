@@ -9,6 +9,11 @@ import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { pickEstimateItemProductServiceId } from "@/lib/estimates/pickEstimateItemProductServiceId"
+import {
+  mapEstimateItemsForInsert,
+  resolveValidProductServiceIds,
+  validateDocumentLineMaterials,
+} from "@/lib/documents/documentLineMaterials"
 
 /** Line shape compatible with POST /api/estimates/create `items`. */
 export type DraftEstimateLineInput = {
@@ -20,6 +25,7 @@ export type DraftEstimateLineInput = {
   discount_amount?: number
   product_service_id?: string | null
   product_id?: string | null
+  material_id?: string | null
 }
 
 export type CreateDraftEstimateForBusinessInput = {
@@ -63,6 +69,22 @@ export async function createDraftEstimateForBusiness(opts: {
       message: "Invalid request",
     }
   }
+
+  const materialValidation = await validateDocumentLineMaterials(
+    supabase,
+    businessId,
+    items
+  )
+  if (!materialValidation.ok) {
+    return {
+      ok: false,
+      status: materialValidation.status,
+      error: materialValidation.error,
+      message: materialValidation.error,
+    }
+  }
+
+  const validProductServiceIds = await resolveValidProductServiceIds(supabase, items)
 
   const QUOTE_PREFIX = "QUO-"
   let finalEstimateNumber = input.estimate_number ?? null
@@ -263,26 +285,12 @@ export async function createDraftEstimateForBusiness(opts: {
     }
   }
 
-  const estimateItems = items.map((item) => {
-    const qty = Number(item.qty ?? item.quantity) || 0
-    const price = Number(item.unit_price ?? item.price) || 0
-    const discount = Number(item.discount_amount) || 0
-    const total = Math.round(Math.max(0, qty * price - discount) * 100) / 100
-    const productServiceId = pickEstimateItemProductServiceId(item as Record<string, unknown>)
-
-    const itemData: Record<string, unknown> = {
-      estimate_id: estimate.id,
-      description: item.description || "",
-      quantity: qty,
-      price,
-      total,
-      discount_amount: discount,
-    }
-    if (productServiceId) {
-      itemData.product_service_id = productServiceId
-    }
-    return itemData
-  })
+  const estimateItems = mapEstimateItemsForInsert(
+    estimate.id as string,
+    items,
+    validProductServiceIds,
+    materialValidation.validMaterialIds
+  )
 
   const { error: itemsError } = await supabase.from("estimate_items").insert(estimateItems).select()
 

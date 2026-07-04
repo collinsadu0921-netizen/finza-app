@@ -10,6 +10,13 @@ import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import { getCurrencySymbol } from "@/lib/currency"
+import {
+  fetchBillableMaterials,
+  formatMaterialMenuLabel,
+  snapshotFromBillableMaterial,
+  type BillableMaterialOption,
+} from "@/lib/service/billableMaterialPickerUi"
 
 type Customer = {
   id: string
@@ -22,6 +29,8 @@ type Customer = {
 type LineItem = {
   id: string
   product_service_id: string | null
+  material_id?: string | null
+  _lineKind?: "service" | "material"
   description: string
   qty: number
   unit_price: number
@@ -69,6 +78,7 @@ function ProformaEditPageContent() {
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [validityDate, setValidityDate] = useState<string>("")
@@ -170,7 +180,9 @@ function ProformaEditPageContent() {
         setItems(
           proformaItems.map((item: any) => ({
             id: item.id || Date.now().toString() + Math.random(),
-            product_service_id: item.product_service_id || null,
+            product_service_id: item.material_id ? null : (item.product_service_id || null),
+            material_id: item.material_id ?? null,
+            _lineKind: item.material_id ? ("material" as const) : ("service" as const),
             description: item.description || "",
             qty: Number(item.qty) || 1,
             unit_price: Number(item.unit_price) || 0,
@@ -223,6 +235,10 @@ function ProformaEditPageContent() {
         )
       }
 
+      if (industryResolved === "service") {
+        setMaterials(await fetchBillableMaterials())
+      }
+
       setLoading(false)
     } catch (err: any) {
       setError(err.message || "Failed to load proforma invoice")
@@ -236,6 +252,26 @@ function ProformaEditPageContent() {
       {
         id: Date.now().toString(),
         product_service_id: null,
+        material_id: null,
+        _lineKind: "service",
+        description: "",
+        qty: 1,
+        unit_price: 0,
+        discount_type: "amount",
+        discount_value: 0,
+        discount_amount: 0,
+      },
+    ])
+  }
+
+  const addMaterialLine = () => {
+    setItems([
+      ...items,
+      {
+        id: Date.now().toString(),
+        product_service_id: null,
+        material_id: null,
+        _lineKind: "material",
         description: "",
         qty: 1,
         unit_price: 0,
@@ -284,12 +320,37 @@ function ProformaEditPageContent() {
         return {
           ...item,
           product_service_id: productId,
+          material_id: null,
+          _lineKind: "service" as const,
           description: product.name || "",
           unit_price: Number(product.price) || 0,
         }
       })
     )
   }
+
+  const selectMaterial = (itemId: string, materialId: string) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    const current = items.find((i) => i.id === itemId)
+    const snap = snapshotFromBillableMaterial(material, current?.qty || 1)
+    setItems(
+      items.map((item) => {
+        if (item.id !== itemId) return item
+        return {
+          ...item,
+          material_id: snap.material_id,
+          product_service_id: null,
+          _lineKind: "material" as const,
+          description: snap.description,
+          unit_price: snap.price,
+          qty: snap.quantity,
+        }
+      })
+    )
+  }
+
+  const materialPricePrefix = `${getCurrencySymbol(currencyCode || "") || ""} `
 
   // Tax calculation
   const lineItemsTotal = items.reduce((sum, item) => sum + getLineTotal(item), 0)
@@ -402,7 +463,8 @@ function ProformaEditPageContent() {
           footer_message: footerMessage || null,
           apply_taxes: applyTaxes,
           items: items.map((item) => ({
-            product_service_id: item.product_service_id,
+            product_service_id: item.material_id ? null : item.product_service_id,
+            material_id: item.material_id || null,
             description: item.description,
             qty: item.qty,
             unit_price: item.unit_price,
@@ -610,6 +672,37 @@ function ProformaEditPageContent() {
                           <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
                             <td className="min-w-0 px-4 py-3 align-top sm:px-6">
                               <div className="space-y-1.5">
+                                <p className="text-[10px] uppercase tracking-wide text-slate-400">
+                                  {item._lineKind === "material" || item.material_id ? "Material" : "Service"}
+                                </p>
+                                {item._lineKind === "material" || item.material_id ? (
+                                  <NativeSelect
+                                    value={item.material_id || ""}
+                                    onChange={(e) => {
+                                      if (e.target.value) selectMaterial(item.id, e.target.value)
+                                      else {
+                                        updateItem(item.id, "material_id", null)
+                                        updateItem(item.id, "description", "")
+                                        updateItem(item.id, "unit_price", 0)
+                                      }
+                                    }}
+                                    size="sm"
+                                    className="dark:bg-gray-700"
+                                  >
+                                    <option value="">Select material…</option>
+                                    {materials.map((m) => (
+                                      <option key={m.id} value={m.id}>
+                                        {formatMaterialMenuLabel(m, materialPricePrefix)}
+                                      </option>
+                                    ))}
+                                    {item.material_id &&
+                                      !materials.some((m) => m.id === item.material_id) && (
+                                        <option value={item.material_id}>
+                                          {item.description || "Material (saved on proforma)"}
+                                        </option>
+                                      )}
+                                  </NativeSelect>
+                                ) : (
                                 <NativeSelect
                                   value={item.product_service_id || ""}
                                   onChange={(e) => {
@@ -631,6 +724,7 @@ function ProformaEditPageContent() {
                                     </option>
                                   ))}
                                 </NativeSelect>
+                                )}
                                 <input
                                   type="text"
                                   placeholder="Description"
@@ -713,7 +807,7 @@ function ProformaEditPageContent() {
                   </tbody>
                 </table>
               </div>
-              <div className="bg-slate-50 dark:bg-slate-900/30 border-t border-slate-200 dark:border-slate-700 px-6 py-3">
+              <div className="bg-slate-50 dark:bg-slate-900/30 border-t border-slate-200 dark:border-slate-700 px-6 py-3 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={addItem}
@@ -724,6 +818,18 @@ function ProformaEditPageContent() {
                   </svg>
                   Add Line Item
                 </button>
+                {businessIndustry === "service" && (
+                  <button
+                    type="button"
+                    onClick={addMaterialLine}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1.5 hover:underline"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add material
+                  </button>
+                )}
               </div>
             </div>
 
