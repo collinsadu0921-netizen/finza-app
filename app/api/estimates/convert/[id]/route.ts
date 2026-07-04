@@ -3,6 +3,12 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  buildConversionInvoiceItems,
+  mapConversionSourceLineToInvoiceInput,
+  resolveValidProductServiceIds,
+  validateDocumentLineMaterials,
+} from "@/lib/documents/documentLineMaterials"
 
 export async function POST(
   request: NextRequest,
@@ -129,6 +135,41 @@ export async function POST(
       )
     }
 
+    const invoiceItemInputs = estimateItems.map((item: any) => {
+      const description = item.description || ""
+      const qty = Number(item.qty ?? item.quantity ?? 0)
+      const unit_price = Number(item.unit_price ?? item.price ?? 0)
+
+      if (!description.trim()) {
+        throw new Error("Estimate item missing description")
+      }
+      if (qty <= 0) {
+        throw new Error("Estimate item quantity must be greater than 0")
+      }
+      if (unit_price < 0) {
+        throw new Error("Estimate item unit price cannot be negative")
+      }
+
+      return mapConversionSourceLineToInvoiceInput(item)
+    })
+
+    const materialValidation = await validateDocumentLineMaterials(
+      supabase,
+      scopedBusinessId,
+      invoiceItemInputs
+    )
+    if (!materialValidation.ok) {
+      return NextResponse.json(
+        { error: materialValidation.error },
+        { status: materialValidation.status }
+      )
+    }
+
+    const validProductServiceIds = await resolveValidProductServiceIds(
+      supabase,
+      invoiceItemInputs
+    )
+
     const customerId = estimate.customer_id ?? null
 
     // AR contract: draft invoices must not have invoice_number.
@@ -167,46 +208,13 @@ export async function POST(
       )
     }
 
-    // Normalize estimate items (handle both schema versions: qty/unit_price/line_total OR quantity/price/total)
-    const normalizedItems = estimateItems.map((item: any) => {
-      const product_service_id = item.product_service_id ?? item.product_id ?? null
-      const qty = Number(item.qty ?? item.quantity ?? 0)
-      const unit_price = Number(item.unit_price ?? item.price ?? 0)
-      const line_subtotal = Number(item.line_total ?? item.total ?? 0)
-      const discount_amount = Number(item.discount_amount ?? 0)
-      const description = item.description || ""
-
-      // Validate required fields
-      if (!description.trim()) {
-        throw new Error("Estimate item missing description")
-      }
-      if (qty <= 0) {
-        throw new Error("Estimate item quantity must be greater than 0")
-      }
-      if (unit_price < 0) {
-        throw new Error("Estimate item unit price cannot be negative")
-      }
-
-      return {
-        product_service_id,
-        qty,
-        unit_price,
-        line_subtotal,
-        discount_amount,
-        description,
-      }
-    })
-
-    // Create invoice items from normalized estimate items - use ONLY valid invoice_items columns
-    const invoiceItems = normalizedItems.map((item) => ({
-      invoice_id: invoice.id,
-      product_service_id: item.product_service_id,
-      description: item.description,
-      qty: item.qty,
-      unit_price: item.unit_price,
-      discount_amount: item.discount_amount,
-      line_subtotal: item.line_subtotal,
-    }))
+    // Normalize estimate items and build invoice lines from snapshotted source values
+    const invoiceItems = buildConversionInvoiceItems(
+      invoice.id,
+      invoiceItemInputs,
+      validProductServiceIds,
+      materialValidation.validMaterialIds
+    )
 
     const { error: itemsInsertError } = await supabase
       .from("invoice_items")

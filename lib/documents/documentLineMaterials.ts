@@ -1,14 +1,65 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   validateInvoiceLineMaterials,
+  mapInvoiceItemsForInsert,
   type InvoiceItemInput,
 } from "@/lib/invoices/validateInvoiceLineMaterials"
 import { pickEstimateItemProductServiceId } from "@/lib/estimates/pickEstimateItemProductServiceId"
 
-export { validateInvoiceLineMaterials as validateDocumentLineMaterials }
+export {
+  validateInvoiceLineMaterials as validateDocumentLineMaterials,
+  mapInvoiceItemsForInsert,
+}
 
 export type DocumentLineWithMaterial = {
   material_id?: string | null
+}
+
+export type ConversionSourceLine = {
+  material_id?: string | null
+  product_service_id?: string | null
+  product_id?: string | null
+  description?: string
+  qty?: number
+  quantity?: number
+  unit_price?: number
+  price?: number
+  discount_amount?: number
+  line_subtotal?: number
+  line_total?: number
+  total?: number
+}
+
+/** Map quote/proforma line to invoice input using snapshotted source values only. */
+export function mapConversionSourceLineToInvoiceInput(
+  line: ConversionSourceLine
+): InvoiceItemInput {
+  const qty = Number(line.qty ?? line.quantity ?? 0)
+  const unit_price = Number(line.unit_price ?? line.price ?? 0)
+  const discount_amount = Number(line.discount_amount ?? 0)
+  const explicitSubtotal = Number(line.line_subtotal ?? line.line_total ?? line.total ?? NaN)
+
+  return {
+    material_id: line.material_id ?? null,
+    product_service_id: line.product_service_id ?? line.product_id ?? null,
+    description: line.description || "",
+    qty,
+    unit_price,
+    discount_amount,
+    line_subtotal: Number.isFinite(explicitSubtotal)
+      ? explicitSubtotal
+      : Math.round(Math.max(0, qty * unit_price - discount_amount) * 100) / 100,
+  }
+}
+
+export function buildConversionInvoiceItems(
+  invoiceId: string,
+  sourceLines: ConversionSourceLine[],
+  validProductServiceIds: Set<string>,
+  validMaterialIds: Set<string>
+) {
+  const inputs = sourceLines.map(mapConversionSourceLineToInvoiceInput)
+  return mapInvoiceItemsForInsert(invoiceId, inputs, validProductServiceIds, validMaterialIds)
 }
 
 export async function resolveValidProductServiceIds(

@@ -10,6 +10,12 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  buildConversionInvoiceItems,
+  mapConversionSourceLineToInvoiceInput,
+  resolveValidProductServiceIds,
+  validateDocumentLineMaterials,
+} from "@/lib/documents/documentLineMaterials"
 
 export async function POST(
   request: NextRequest,
@@ -90,6 +96,27 @@ export async function POST(
         { status: 500 }
       )
     }
+
+    const invoiceItemInputs = (proformaItems || []).map((item: any) =>
+      mapConversionSourceLineToInvoiceInput(item)
+    )
+
+    const materialValidation = await validateDocumentLineMaterials(
+      supabase,
+      scope.businessId,
+      invoiceItemInputs
+    )
+    if (!materialValidation.ok) {
+      return NextResponse.json(
+        { error: materialValidation.error },
+        { status: materialValidation.status }
+      )
+    }
+
+    const validProductServiceIds = await resolveValidProductServiceIds(
+      supabase,
+      invoiceItemInputs
+    )
 
     const business_id = scope.businessId
 
@@ -318,45 +345,13 @@ export async function POST(
       )
     }
 
-    // Validate product_service_id references
-    const candidateIds = [
-      ...new Set(
-        (proformaItems || [])
-          .map((item: any) => item.product_service_id)
-          .filter(Boolean)
-      ),
-    ] as string[]
-    let validProductServiceIds: Set<string> = new Set()
-    if (candidateIds.length > 0) {
-      const { data: validRows } = await supabase
-        .from("products_services")
-        .select("id")
-        .in("id", candidateIds)
-      if (validRows?.length) {
-        validProductServiceIds = new Set(validRows.map((r) => r.id))
-      }
-    }
-
-    // Insert invoice items copied from proforma items
-    const invoiceItems = (proformaItems || []).map((item: any) => {
-      const rawId = item.product_service_id || null
-      const product_service_id =
-        rawId && validProductServiceIds.has(rawId) ? rawId : null
-      return {
-        invoice_id: invoice.id,
-        product_service_id,
-        description: item.description || "",
-        qty: Number(item.qty) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        discount_amount: Number(item.discount_amount) || 0,
-        line_subtotal:
-          Math.round(
-            ((Number(item.qty) || 0) * (Number(item.unit_price) || 0) -
-              (Number(item.discount_amount) || 0)) *
-              100
-          ) / 100,
-      }
-    })
+    // Insert invoice items copied from proforma items (preserve snapshotted values + material_id)
+    const invoiceItems = buildConversionInvoiceItems(
+      invoice.id,
+      invoiceItemInputs,
+      validProductServiceIds,
+      materialValidation.validMaterialIds
+    )
 
     if (invoiceItems.length > 0) {
       const { error: invoiceItemsError } = await supabase
