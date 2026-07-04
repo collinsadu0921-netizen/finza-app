@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  mapProformaItemsForInsert,
+  resolveValidProductServiceIds,
+  validateDocumentLineMaterials,
+} from "@/lib/documents/documentLineMaterials"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { createAuditLog } from "@/lib/auditLog"
@@ -188,7 +193,23 @@ export async function PATCH(
       updated_at: new Date().toISOString(),
     }
 
+    let materialValidationForItems: Awaited<
+      ReturnType<typeof validateDocumentLineMaterials>
+    > | null = null
+
     if (items && items.length > 0) {
+      materialValidationForItems = await validateDocumentLineMaterials(
+        supabase,
+        scope.businessId,
+        items
+      )
+      if (!materialValidationForItems.ok) {
+        return NextResponse.json(
+          { error: materialValidationForItems.error },
+          { status: materialValidationForItems.status }
+        )
+      }
+
       // Prepare line items for tax calculation
       const lineItems = items.map((item: any) => ({
         quantity: Number(item.qty) || 0,
@@ -284,40 +305,19 @@ export async function PATCH(
         .delete()
         .eq("proforma_invoice_id", proformaId)
 
-      // Validate product_service_id references
-      const candidateIds = [
-        ...new Set(items.map((item: any) => item.product_service_id).filter(Boolean)),
-      ] as string[]
-      let validProductServiceIds: Set<string> = new Set()
-      if (candidateIds.length > 0) {
-        const { data: validRows } = await supabase
-          .from("products_services")
-          .select("id")
-          .in("id", candidateIds)
-        if (validRows?.length) {
-          validProductServiceIds = new Set(validRows.map((r) => r.id))
-        }
-      }
+      const validProductServiceIds = await resolveValidProductServiceIds(supabase, items)
 
-      const proformaItems = items.map((item: any) => {
-        const rawId = item.product_service_id || null
-        const product_service_id =
-          rawId && validProductServiceIds.has(rawId) ? rawId : null
-        return {
-          proforma_invoice_id: proformaId,
-          product_service_id,
-          description: item.description || "",
-          qty: Number(item.qty) || 0,
-          unit_price: Number(item.unit_price) || 0,
-          discount_amount: Number(item.discount_amount) || 0,
-          line_subtotal:
-            Math.round(
-              ((Number(item.qty) || 0) * (Number(item.unit_price) || 0) -
-                (Number(item.discount_amount) || 0)) *
-                100
-            ) / 100,
-        }
-      })
+      const validMaterialIds =
+        materialValidationForItems && materialValidationForItems.ok
+          ? materialValidationForItems.validMaterialIds
+          : new Set<string>()
+
+      const proformaItems = mapProformaItemsForInsert(
+        proformaId,
+        items,
+        validProductServiceIds,
+        validMaterialIds
+      )
 
       const { error: itemsError } = await supabase
         .from("proforma_invoice_items")

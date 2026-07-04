@@ -58,7 +58,7 @@ export async function validateInvoiceLineMaterials(
     if (!isBillableMaterialRow(row as Parameters<typeof isBillableMaterialRow>[0])) {
       return {
         ok: false,
-        error: "One or more materials are inactive or not available for invoicing.",
+        error: "One or more materials are inactive or not available on customer documents.",
         status: 400,
       }
     }

@@ -6,12 +6,19 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { formatMoney } from "@/lib/money"
+import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
+import {
+  fetchBillableMaterials,
+  formatMaterialMenuLabel,
+  snapshotFromBillableMaterial,
+  type BillableMaterialOption,
+} from "@/lib/service/billableMaterialPickerUi"
 
 type Customer = {
   id: string
@@ -24,6 +31,8 @@ type Customer = {
 type LineItem = {
   id: string
   product_service_id: string | null
+  material_id?: string | null
+  _lineKind?: "service" | "material"
   description: string
   qty: number
   unit_price: number
@@ -60,6 +69,7 @@ function ProformaCreateForm() {
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [validityDate, setValidityDate] = useState<string>("")
@@ -85,6 +95,7 @@ function ProformaCreateForm() {
 
   const effectiveCurrencyCode =
     fxEnabled && fxCurrencyCode ? fxCurrencyCode : homeCurrencyCode
+  const materialPricePrefix = `${getCurrencySymbol(effectiveCurrencyCode || "") || ""} `
 
   // Create customer modal state
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -173,6 +184,10 @@ function ProformaCreateForm() {
         )
       }
 
+      if (industry === "service") {
+        setMaterials(await fetchBillableMaterials())
+      }
+
       // Set default validity date (30 days from now)
       const validity = new Date()
       validity.setDate(validity.getDate() + 30)
@@ -194,7 +209,9 @@ function ProformaCreateForm() {
               setItems(
                 estItems.map((item: any) => ({
                   id: Date.now().toString() + Math.random(),
-                  product_service_id: item.product_id || null,
+                  product_service_id: item.material_id ? null : (item.product_service_id || item.product_id || null),
+                  material_id: item.material_id ?? null,
+                  _lineKind: item.material_id ? ("material" as const) : ("service" as const),
                   description: item.description || "",
                   qty: Number(item.quantity) || 1,
                   unit_price: Number(item.price) || 0,
@@ -221,6 +238,26 @@ function ProformaCreateForm() {
       {
         id: Date.now().toString(),
         product_service_id: null,
+        material_id: null,
+        _lineKind: "service",
+        description: "",
+        qty: 1,
+        unit_price: 0,
+        discount_type: "amount",
+        discount_value: 0,
+        discount_amount: 0,
+      },
+    ])
+  }
+
+  const addMaterialLine = () => {
+    setItems([
+      ...items,
+      {
+        id: Date.now().toString(),
+        product_service_id: null,
+        material_id: null,
+        _lineKind: "material",
         description: "",
         qty: 1,
         unit_price: 0,
@@ -269,8 +306,31 @@ function ProformaCreateForm() {
         return {
           ...item,
           product_service_id: productId,
+          material_id: null,
+          _lineKind: "service" as const,
           description: product.name || "",
           unit_price: Number(product.price) || 0,
+        }
+      })
+    )
+  }
+
+  const selectMaterial = (itemId: string, materialId: string) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    const current = items.find((i) => i.id === itemId)
+    const snap = snapshotFromBillableMaterial(material, current?.qty || 1)
+    setItems(
+      items.map((item) => {
+        if (item.id !== itemId) return item
+        return {
+          ...item,
+          material_id: snap.material_id,
+          product_service_id: null,
+          _lineKind: "material" as const,
+          description: snap.description,
+          unit_price: snap.price,
+          qty: snap.quantity,
         }
       })
     )
@@ -396,7 +456,8 @@ function ProformaCreateForm() {
             fx_rate: parseFloat(fxRate),
           } : {}),
           items: items.map((item) => ({
-            product_service_id: item.product_service_id,
+            product_service_id: item.material_id ? null : item.product_service_id,
+            material_id: item.material_id || null,
             description: item.description,
             qty: item.qty,
             unit_price: item.unit_price,
@@ -653,6 +714,29 @@ function ProformaCreateForm() {
                         <tr key={item.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors">
                           <td className="min-w-0 px-4 py-3 align-top sm:px-6">
                             <div className="space-y-1.5">
+                              {businessIndustry === "service" &&
+                              (item._lineKind === "material" || item.material_id) ? (
+                                <NativeSelect
+                                  value={item.material_id || ""}
+                                  onChange={(e) => {
+                                    if (e.target.value) selectMaterial(item.id, e.target.value)
+                                    else {
+                                      updateItem(item.id, "material_id", null)
+                                      updateItem(item.id, "description", "")
+                                      updateItem(item.id, "unit_price", 0)
+                                    }
+                                  }}
+                                  size="sm"
+                                  className="dark:bg-gray-700"
+                                >
+                                  <option value="">Select material…</option>
+                                  {materials.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {formatMaterialMenuLabel(m, materialPricePrefix)}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              ) : (
                               <NativeSelect
                                 value={item.product_service_id || ""}
                                 onChange={(e) => {
@@ -674,6 +758,7 @@ function ProformaCreateForm() {
                                   </option>
                                 ))}
                               </NativeSelect>
+                              )}
                               <input
                                 type="text"
                                 placeholder="Description"
@@ -756,7 +841,7 @@ function ProformaCreateForm() {
                 </tbody>
               </table>
             </div>
-            <div className="bg-slate-50 dark:bg-slate-900/30 border-t border-slate-200 dark:border-slate-700 px-6 py-3">
+            <div className="bg-slate-50 dark:bg-slate-900/30 border-t border-slate-200 dark:border-slate-700 px-6 py-3 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={addItem}
@@ -767,6 +852,18 @@ function ProformaCreateForm() {
                 </svg>
                 Add Line Item
               </button>
+              {businessIndustry === "service" && (
+                <button
+                  type="button"
+                  onClick={addMaterialLine}
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1.5 hover:underline"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add material
+                </button>
+              )}
             </div>
           </div>
 

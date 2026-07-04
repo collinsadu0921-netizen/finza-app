@@ -11,6 +11,12 @@ import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
+import {
+  fetchBillableMaterials,
+  formatMaterialMenuLabel,
+  snapshotFromBillableMaterial,
+  type BillableMaterialOption,
+} from "@/lib/service/billableMaterialPickerUi"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 
@@ -25,6 +31,8 @@ type Customer = {
 type EstimateItem = {
   id: string
   product_id: string | null
+  material_id?: string | null
+  _lineKind?: "service" | "material"
   description: string
   quantity: number
   price: number
@@ -62,6 +70,7 @@ function NewEstimatePageContent() {
   const Wrapper = isUnderService ? FragmentWrapper : ProtectedLayout
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [estimateNumber, setEstimateNumber] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
@@ -152,6 +161,7 @@ function NewEstimatePageContent() {
             tax_code: p.tax_code ?? null,
           })))
         }
+        setMaterials(await fetchBillableMaterials())
       } else {
       const { data: productsData, error: productsError } = await supabase
         .from("products_services")
@@ -214,6 +224,26 @@ function NewEstimatePageContent() {
       {
         id: Date.now().toString(),
         product_id: null,
+        material_id: null,
+        _lineKind: "service",
+        description: "",
+        quantity: 1,
+        price: 0,
+        total: 0,
+        discount_type: "amount",
+        discount_value: 0,
+      },
+    ])
+  }
+
+  const addMaterialLine = () => {
+    setItems([
+      ...items,
+      {
+        id: Date.now().toString(),
+        product_id: null,
+        material_id: null,
+        _lineKind: "material",
         description: "",
         quantity: 1,
         price: 0,
@@ -274,6 +304,8 @@ function NewEstimatePageContent() {
             return {
               ...item,
               product_id: productId,
+              material_id: null,
+              _lineKind: "service" as const,
               description: product.name || "",
               price: productPrice,
               total: total,
@@ -286,6 +318,41 @@ function NewEstimatePageContent() {
     } else {
       console.warn("Product not found:", productId)
     }
+  }
+
+  const selectMaterial = (itemId: string, materialId: string) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    const currentItem = items.find((item) => item.id === itemId)
+    const snap = snapshotFromBillableMaterial(material, currentItem?.quantity || 1)
+    const total = getLineTotal({
+      ...currentItem,
+      quantity: snap.quantity,
+      price: snap.price,
+      discount_type: currentItem?.discount_type ?? "amount",
+      discount_value: currentItem?.discount_value ?? 0,
+    } as EstimateItem)
+
+    setItems(
+      items.map((item) => {
+        if (item.id !== itemId) return item
+        return {
+          ...item,
+          material_id: snap.material_id,
+          product_id: null,
+          _lineKind: "material" as const,
+          description: snap.description,
+          price: snap.price,
+          quantity: snap.quantity,
+          total,
+          discount_amount: getDiscountAmount({
+            ...item,
+            quantity: snap.quantity,
+            price: snap.price,
+          } as EstimateItem),
+        }
+      })
+    )
   }
 
   // Calculate subtotal from line items
@@ -404,8 +471,9 @@ function NewEstimatePageContent() {
           expiry_date: expiryDate || null,
           notes: notes || null,
           items: items.map(item => ({
-            product_id: item.product_id,
-            product_service_id: item.product_id,
+            product_id: item.material_id ? null : item.product_id,
+            product_service_id: item.material_id ? null : item.product_id,
+            material_id: item.material_id || null,
             description: item.description || "",
             quantity: Number(item.quantity) || 0,
             qty: Number(item.quantity) || 0,
@@ -678,6 +746,30 @@ function NewEstimatePageContent() {
                           <tr key={item.id} className="group hover:bg-slate-50/50 transition-colors">
                             <td className="min-w-0 px-4 py-3 align-top sm:px-6">
                               <div className="space-y-1.5">
+                                {businessIndustry === "service" &&
+                                (item._lineKind === "material" || item.material_id) ? (
+                                  <NativeSelect
+                                    value={item.material_id || ""}
+                                    onChange={(e) => {
+                                      const materialId = e.target.value
+                                      if (materialId) selectMaterial(item.id, materialId)
+                                      else {
+                                        updateItem(item.id, "material_id", null)
+                                        updateItem(item.id, "description", "")
+                                        updateItem(item.id, "price", 0)
+                                        updateItem(item.id, "total", 0)
+                                      }
+                                    }}
+                                    size="sm"
+                                  >
+                                    <option value="">Select material…</option>
+                                    {materials.map((m) => (
+                                      <option key={m.id} value={m.id}>
+                                        {formatMaterialMenuLabel(m, `${homeCurrencySymbol} `)}
+                                      </option>
+                                    ))}
+                                  </NativeSelect>
+                                ) : (
                                 <NativeSelect
                                   value={item.product_id || ""}
                                   onChange={(e) => {
@@ -704,6 +796,7 @@ function NewEstimatePageContent() {
                                     ))
                                   )}
                                 </NativeSelect>
+                                )}
                                 <input
                                   type="text"
                                   placeholder="Description"
@@ -788,7 +881,7 @@ function NewEstimatePageContent() {
                     </tbody>
                   </table>
                 </div>
-                <div className="bg-slate-50 border-t border-slate-200 px-6 py-3">
+                <div className="bg-slate-50 border-t border-slate-200 px-6 py-3 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={addItem}
@@ -799,6 +892,18 @@ function NewEstimatePageContent() {
                     </svg>
                     Add Line Item
                   </button>
+                  {businessIndustry === "service" && (
+                    <button
+                      type="button"
+                      onClick={addMaterialLine}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1.5 hover:underline"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add material
+                    </button>
+                  )}
                 </div>
               </div>
 

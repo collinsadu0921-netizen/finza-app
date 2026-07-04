@@ -12,6 +12,12 @@ import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { getCurrencySymbol } from "@/lib/currency"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import {
+  fetchBillableMaterials,
+  formatMaterialMenuLabel,
+  snapshotFromBillableMaterial,
+  type BillableMaterialOption,
+} from "@/lib/service/billableMaterialPickerUi"
 
 type Customer = {
   id: string
@@ -21,6 +27,8 @@ type Customer = {
 type EstimateItem = {
   id: string
   product_id: string | null
+  material_id?: string | null
+  _lineKind?: "service" | "material"
   description: string
   quantity: number
   price: number
@@ -84,6 +92,7 @@ function EstimateEditPageContent() {
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
+  const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [estimateNumber, setEstimateNumber] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
@@ -184,7 +193,9 @@ function EstimateEditPageContent() {
       if (estimateItems && estimateItems.length > 0) {
         const mappedItems = estimateItems.map((item: any) => ({
           id: item.id || Date.now().toString() + Math.random(),
-          product_id: item.product_id || null,
+          product_id: item.material_id ? null : (item.product_service_id || item.product_id || null),
+          material_id: item.material_id ?? null,
+          _lineKind: item.material_id ? ("material" as const) : ("service" as const),
           description: item.description || "",
           quantity: Number(item.quantity) || 1,
           price: Number(item.price) || 0,
@@ -215,6 +226,10 @@ function EstimateEditPageContent() {
         .order("name", { ascending: true })
 
       setCustomers(customersData || [])
+
+      if (isUnderService) {
+        setMaterials(await fetchBillableMaterials())
+      }
 
       // Load products/services
       const { data: productsData, error: productsError } = await supabase
@@ -251,6 +266,27 @@ function EstimateEditPageContent() {
       {
         id: Date.now().toString(),
         product_id: null,
+        material_id: null,
+        _lineKind: "service",
+        description: "",
+        quantity: 1,
+        price: 0,
+        total: 0,
+        discount_type: "amount",
+        discount_value: 0,
+        discount_amount: 0,
+      },
+    ])
+  }
+
+  const addMaterialLine = () => {
+    setItems([
+      ...items,
+      {
+        id: Date.now().toString(),
+        product_id: null,
+        material_id: null,
+        _lineKind: "material",
         description: "",
         quantity: 1,
         price: 0,
@@ -307,6 +343,8 @@ function EstimateEditPageContent() {
         const next: EstimateItem = {
           ...it,
           product_id: productId,
+          material_id: null,
+          _lineKind: "service",
           description: product.name,
           price,
           quantity,
@@ -317,6 +355,32 @@ function EstimateEditPageContent() {
         return next
       }))
     }
+  }
+
+  const selectMaterial = (itemId: string, materialId: string) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    const current = items.find((i) => i.id === itemId)
+    if (!current) return
+    const snap = snapshotFromBillableMaterial(material, current.quantity || 1)
+    setItems(
+      items.map((it) => {
+        if (it.id !== itemId) return it
+        const next: EstimateItem = {
+          ...it,
+          material_id: snap.material_id,
+          product_id: null,
+          _lineKind: "material",
+          description: snap.description,
+          price: snap.price,
+          quantity: snap.quantity,
+          total: 0,
+        }
+        next.total = getLineTotal(next)
+        next.discount_amount = getDiscountAmount(next)
+        return next
+      })
+    )
   }
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
@@ -442,7 +506,8 @@ function EstimateEditPageContent() {
           expiry_date: expiryDate || null,
           notes: notes || null,
           items: items.map(item => ({
-            product_id: item.product_id,
+            product_id: item.material_id ? null : item.product_id,
+            material_id: item.material_id || null,
             description: item.description,
             quantity: item.quantity,
             price: item.price,
@@ -592,21 +657,63 @@ function EstimateEditPageContent() {
 
           {/* Line Items */}
           <div className="bg-white p-6 rounded-lg shadow">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
               <h2 className="text-xl font-semibold">Line Items</h2>
-              <button
-                type="button"
-                onClick={addItem}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-              >
-                + Add Item
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  + Add Item
+                </button>
+                {isUnderService && (
+                  <button
+                    type="button"
+                    onClick={addMaterialLine}
+                    className="bg-white text-blue-700 border border-blue-200 px-4 py-2 rounded-lg hover:bg-blue-50"
+                  >
+                    + Add material
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="space-y-4">
               {items.map((item) => (
                 <div key={item.id} className="grid grid-cols-12 gap-4 items-start">
                   <div className="col-span-12 md:col-span-4">
+                    {isUnderService && (
+                      <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">
+                        {item._lineKind === "material" || item.material_id ? "Material" : "Service"}
+                      </p>
+                    )}
+                    {isUnderService && (item._lineKind === "material" || item.material_id) ? (
+                      <NativeSelect
+                        value={item.material_id || ""}
+                        onChange={(e) => {
+                          if (e.target.value) selectMaterial(item.id, e.target.value)
+                          else {
+                            updateItem(item.id, "material_id", null)
+                            updateItem(item.id, "description", "")
+                          }
+                        }}
+                        size="md"
+                      >
+                        <option value="">Select material…</option>
+                        {materials.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {formatMaterialMenuLabel(m, `${currencySymbol} `)}
+                          </option>
+                        ))}
+                        {item.material_id &&
+                          !materials.some((m) => m.id === item.material_id) && (
+                            <option value={item.material_id}>
+                              {item.description || "Material (saved on quote)"}
+                            </option>
+                          )}
+                      </NativeSelect>
+                    ) : (
                     <NativeSelect
                       value={item.product_id || ""}
                       onChange={(e) => {
@@ -623,6 +730,7 @@ function EstimateEditPageContent() {
                         </option>
                       ))}
                     </NativeSelect>
+                    )}
                   </div>
                   <div className="col-span-12 md:col-span-4">
                     <input
