@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import Toast from "@/components/Toast"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { getGhanaLegacyView, getTaxBreakdown } from "@/lib/taxes/readTaxLines"
-import { formatMoney } from "@/lib/money"
+import { formatMoneyForContext } from "@/lib/currency/formatCurrency"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { downloadProformaPdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
@@ -410,6 +410,8 @@ export default function ProformaViewPage() {
     : { nhil: proforma.nhil || 0, getfund: proforma.getfund || 0, covid: proforma.covid || 0, vat: proforma.vat || 0 }
   const allTaxLines = proforma.tax_lines ? getTaxBreakdown(proforma.tax_lines) : null
   const totalDiscount = (items || []).reduce((sum, item) => sum + Number(item.discount_amount || 0), 0)
+  const formatProformaMoney = (amount: number | null | undefined) =>
+    formatMoneyForContext(amount, proforma)
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -626,15 +628,15 @@ export default function ProformaViewPage() {
                         <td className="px-4 py-3 text-slate-800">{item.description || "—"}</td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">{Number(item.qty) || 0}</td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
-                          {formatMoney(Number(item.unit_price || 0), proforma.currency_code)}
+                          {formatProformaMoney(Number(item.unit_price || 0))}
                         </td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">
                           {Number(item.discount_amount || 0) > 0
-                            ? formatMoney(Number(item.discount_amount), proforma.currency_code)
+                            ? formatProformaMoney(Number(item.discount_amount))
                             : "—"}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-800 tabular-nums">
-                          {formatMoney(Number(item.line_subtotal || 0), proforma.currency_code)}
+                          {formatProformaMoney(Number(item.line_subtotal || 0))}
                         </td>
                       </tr>
                     ))}
@@ -655,14 +657,14 @@ export default function ProformaViewPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Subtotal:</span>
                   <span className="font-medium text-slate-800 tabular-nums">
-                    {formatMoney(Number(proforma.subtotal), proforma.currency_code)}
+                    {formatProformaMoney(Number(proforma.subtotal))}
                   </span>
                 </div>
                 {totalDiscount > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-500">Discounts:</span>
                     <span className="font-medium text-rose-600 tabular-nums">
-                      {formatMoney(-Math.abs(totalDiscount), proforma.currency_code)}
+                      {formatProformaMoney(-Math.abs(totalDiscount))}
                     </span>
                   </div>
                 )}
@@ -674,7 +676,7 @@ export default function ProformaViewPage() {
                         .map(([code, amount]) => (
                           <div key={code} className="flex justify-between text-sm text-slate-500">
                             <span>{code}:</span>
-                            <span className="tabular-nums">{formatMoney(Number(amount), proforma.currency_code)}</span>
+                            <span className="tabular-nums">{formatProformaMoney(Number(amount))}</span>
                           </div>
                         ))
                     ) : (
@@ -682,19 +684,19 @@ export default function ProformaViewPage() {
                         {taxBreakdown.nhil > 0 && (
                           <div className="flex justify-between text-sm text-slate-500">
                             <span>NHIL:</span>
-                            <span className="tabular-nums">{formatMoney(Number(taxBreakdown.nhil), proforma.currency_code)}</span>
+                            <span className="tabular-nums">{formatProformaMoney(Number(taxBreakdown.nhil))}</span>
                           </div>
                         )}
                         {taxBreakdown.getfund > 0 && (
                           <div className="flex justify-between text-sm text-slate-500">
                             <span>GETFund:</span>
-                            <span className="tabular-nums">{formatMoney(Number(taxBreakdown.getfund), proforma.currency_code)}</span>
+                            <span className="tabular-nums">{formatProformaMoney(Number(taxBreakdown.getfund))}</span>
                           </div>
                         )}
                         {taxBreakdown.vat > 0 && (
                           <div className="flex justify-between text-sm text-slate-500">
                             <span>VAT:</span>
-                            <span className="tabular-nums">{formatMoney(Number(taxBreakdown.vat), proforma.currency_code)}</span>
+                            <span className="tabular-nums">{formatProformaMoney(Number(taxBreakdown.vat))}</span>
                           </div>
                         )}
                       </>
@@ -702,7 +704,7 @@ export default function ProformaViewPage() {
                     <div className="flex justify-between text-sm pt-1 border-t border-slate-100">
                       <span className="text-slate-500 font-medium">Total Tax:</span>
                       <span className="font-medium text-slate-800 tabular-nums">
-                        {formatMoney(Number(proforma.total_tax), proforma.currency_code)}
+                        {formatProformaMoney(Number(proforma.total_tax))}
                       </span>
                     </div>
                   </>
@@ -710,7 +712,7 @@ export default function ProformaViewPage() {
                 <div className="flex justify-between text-lg pt-2 border-t-2 border-slate-800">
                   <span className="font-bold text-slate-900">Total:</span>
                   <span className="font-bold text-slate-900 tabular-nums">
-                    {formatMoney(Number(proforma.total), proforma.currency_code)}
+                    {formatProformaMoney(Number(proforma.total))}
                   </span>
                 </div>
               </div>

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { formatMoney } from "@/lib/money"
+import { resolveCurrencyCode } from "@/lib/currency/resolveCurrencyDisplay"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
@@ -93,6 +94,7 @@ function ProformaEditPageContent() {
   const [businessIndustry, setBusinessIndustry] = useState<string | null>(null)
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
+  const [proformaDocumentCurrency, setProformaDocumentCurrency] = useState<string | null>(null)
 
   // Create customer modal state
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -175,6 +177,7 @@ function ProformaEditPageContent() {
       setNotes(proformaData.notes || "")
       setFooterMessage(proformaData.footer_message || "")
       setApplyTaxes(proformaData.apply_taxes !== false)
+      setProformaDocumentCurrency(proformaData.currency_code ?? null)
 
       if (proformaItems.length > 0) {
         setItems(
@@ -350,7 +353,12 @@ function ProformaEditPageContent() {
     )
   }
 
-  const materialPricePrefix = `${getCurrencySymbol(currencyCode || "") || ""} `
+  const effectiveCurrencyCode = resolveCurrencyCode(
+    { currency_code: proformaDocumentCurrency },
+    { default_currency: currencyCode }
+  )
+
+  const materialPricePrefix = `${getCurrencySymbol(effectiveCurrencyCode) || ""} `
 
   // Tax calculation
   const lineItemsTotal = items.reduce((sum, item) => sum + getLineTotal(item), 0)
@@ -720,7 +728,7 @@ function ProformaEditPageContent() {
                                   <option value="">{businessIndustry === "service" ? "Select Service" : "Select product/service"}</option>
                                   {products.map((p) => (
                                     <option key={p.id} value={p.id}>
-                                      {p.name} — {formatMoney(p.price, currencyCode)}
+                                      {p.name} — {formatMoney(p.price, effectiveCurrencyCode)}
                                     </option>
                                   ))}
                                 </NativeSelect>
@@ -787,7 +795,7 @@ function ProformaEditPageContent() {
                               </div>
                             </td>
                             <td className="px-4 py-3 align-top text-right text-sm font-medium tabular-nums text-slate-900 dark:text-white whitespace-nowrap sm:px-6 sm:text-base sm:pt-5">
-                              {formatMoney(lineTotal, currencyCode)}
+                              {formatMoney(lineTotal, effectiveCurrencyCode)}
                             </td>
                             <td className="px-2 py-3 align-top pt-4">
                               <button
@@ -879,13 +887,13 @@ function ProformaEditPageContent() {
 
                 <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                   <span>Subtotal</span>
-                  <span className="font-medium">{formatMoney(displaySubtotal, currencyCode)}</span>
+                  <span className="font-medium">{formatMoney(displaySubtotal, effectiveCurrencyCode)}</span>
                 </div>
 
                 {totalDiscount > 0 && (
                   <div className="flex justify-between items-center text-sm text-slate-600 dark:text-slate-400">
                     <span>Discounts</span>
-                    <span className="font-medium text-rose-600">{formatMoney(-Math.abs(totalDiscount), currencyCode)}</span>
+                    <span className="font-medium text-rose-600">{formatMoney(-Math.abs(totalDiscount), effectiveCurrencyCode)}</span>
                   </div>
                 )}
 
@@ -896,19 +904,19 @@ function ProformaEditPageContent() {
                       .map((line) => (
                         <div key={line.code} className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400">
                           <span>{line.code}</span>
-                          <span>{formatMoney(Number(line.amount), currencyCode)}</span>
+                          <span>{formatMoney(Number(line.amount), effectiveCurrencyCode)}</span>
                         </div>
                       ))}
                     <div className="flex justify-between items-center text-xs text-slate-500 dark:text-slate-400 pt-1">
                       <span>Total Tax</span>
-                      <span className="font-medium">{formatMoney(displayTax, currencyCode)}</span>
+                      <span className="font-medium">{formatMoney(displayTax, effectiveCurrencyCode)}</span>
                     </div>
                   </div>
                 )}
 
                 <div className="flex justify-between items-center pt-2">
                   <span className="text-base font-bold text-slate-900 dark:text-white">Total</span>
-                  <span className="text-xl font-bold text-slate-900 dark:text-white">{formatMoney(displayTotal, currencyCode)}</span>
+                  <span className="text-xl font-bold text-slate-900 dark:text-white">{formatMoney(displayTotal, effectiveCurrencyCode)}</span>
                 </div>
               </div>
             </div>

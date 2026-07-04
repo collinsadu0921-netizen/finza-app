@@ -7,6 +7,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { formatMoney } from "@/lib/money"
 import { getCurrencySymbol } from "@/lib/currency"
+import { resolveCurrencyCode } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
@@ -94,7 +95,9 @@ function ProformaCreateForm() {
   const [fxRate, setFxRate] = useState<string>("")
 
   const effectiveCurrencyCode =
-    fxEnabled && fxCurrencyCode ? fxCurrencyCode : homeCurrencyCode
+    fxEnabled && fxCurrencyCode
+      ? fxCurrencyCode
+      : resolveCurrencyCode({ default_currency: homeCurrencyCode })
   const materialPricePrefix = `${getCurrencySymbol(effectiveCurrencyCode || "") || ""} `
 
   // Create customer modal state

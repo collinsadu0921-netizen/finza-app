@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
+import { formatMoneyForContext } from "@/lib/currency/formatCurrency"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
@@ -15,6 +16,7 @@ type ProformaInvoice = {
   customer_id: string | null
   issue_date: string
   validity_date: string | null
+  currency_code?: string | null
   total: number
   status: "draft" | "sent" | "accepted" | "converted" | "cancelled" | "rejected"
   created_at: string
@@ -59,7 +61,7 @@ export default function ProformaListPage() {
   const searchParams = useSearchParams()
   const searchParamsString = searchParams.toString()
   const PAGE_SIZE = 25
-  const { format } = useBusinessCurrency()
+  const { currencyCode: businessCurrencyCode } = useBusinessCurrency()
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("proforma")
   const [proformas, setProformas] = useState<ProformaInvoice[]>([])
   const [loading, setLoading] = useState(true)
@@ -294,7 +296,7 @@ export default function ProformaListPage() {
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
                         <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                          {format(pf.total)}
+                          {formatMoneyForContext(pf.total, pf, { default_currency: businessCurrencyCode })}
                         </span>
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">

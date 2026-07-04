@@ -1,4 +1,5 @@
-import { resolveCurrencyDisplay } from "./resolveCurrencyDisplay"
+import { formatMoney } from "@/lib/money"
+import { resolveCurrencyCode, resolveCurrencyDisplay } from "./resolveCurrencyDisplay"
 import type { CurrencyContext } from "./resolveCurrencyDisplay"
 
 /**
@@ -11,6 +12,17 @@ export function formatCurrency(
   const symbol = resolveCurrencyDisplay(...contexts)
   const value = Number(amount ?? 0).toFixed(2)
   return `${symbol}${value}`
+}
+
+/**
+ * Format amount using resolved ISO currency code (with platform fallback).
+ * Use for document UIs when currency_code or business.default_currency may be unset.
+ */
+export function formatMoneyForContext(
+  amount: number | null | undefined,
+  ...contexts: (CurrencyContext | null | undefined)[]
+): string {
+  return formatMoney(amount, resolveCurrencyCode(...contexts))
 }
 
 /**
