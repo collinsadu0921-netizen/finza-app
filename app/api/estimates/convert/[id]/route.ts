@@ -8,6 +8,7 @@ import {
   mapConversionSourceLineToInvoiceInput,
   resolveValidProductServiceIds,
   validateDocumentLineMaterials,
+  validateConversionLineMaterials,
 } from "@/lib/documents/documentLineMaterials"
 
 export async function POST(
@@ -153,7 +154,7 @@ export async function POST(
       return mapConversionSourceLineToInvoiceInput(item)
     })
 
-    const materialValidation = await validateDocumentLineMaterials(
+    const materialValidation = await validateConversionLineMaterials(
       supabase,
       scopedBusinessId,
       invoiceItemInputs

@@ -134,6 +134,13 @@ describe("POST /api/proforma/create — material lines", () => {
       if (table === "proforma_invoice_items") {
         return { insert: proformaItemsInsert }
       }
+      if (table === "estimates") {
+        return {
+          update: jest.fn(() => ({
+            eq: jest.fn(() => Promise.resolve({ error: null })),
+          })),
+        }
+      }
       if (table === "business_users") {
         const chain: Record<string, jest.Mock> = {}
         chain.select = jest.fn(() => chain)
@@ -281,5 +288,151 @@ describe("POST /api/proforma/create — material lines", () => {
       })
     )
     expect(res.status).toBe(400)
+  })
+
+  it("preserves material_id when creating proforma from quote", async () => {
+    const request = new NextRequest("http://localhost/api/proforma/create", {
+      method: "POST",
+      body: JSON.stringify({
+        source_estimate_id: "est-source-1",
+        issue_date: "2025-12-31",
+        items: [
+          {
+            material_id: MATERIAL_ID,
+            description: "Premium paint",
+            qty: 1,
+            unit_price: 450,
+            discount_amount: 0,
+          },
+        ],
+        apply_taxes: false,
+      }),
+    })
+
+    jest.mocked(createSupabaseServerClient).mockResolvedValue({
+      auth: {
+        getUser: jest.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from: jest.fn((table: string) => {
+        if (table === "service_material_inventory") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            in: jest.fn().mockResolvedValue({
+              data: [{ id: MATERIAL_ID }],
+              error: null,
+            }),
+          }
+        }
+        if (table === "businesses") {
+          const chain: Record<string, jest.Mock> = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.is = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => chain)
+          chain.single = jest.fn(() =>
+            Promise.resolve({
+              data: {
+                id: BUSINESS_ID,
+                address_country: "GH",
+                default_currency: "GHS",
+                owner_id: "user-1",
+                archived_at: null,
+              },
+              error: null,
+            })
+          )
+          chain.maybeSingle = jest.fn(() =>
+            Promise.resolve({
+              data: {
+                id: BUSINESS_ID,
+                address_country: "GH",
+                default_currency: "GHS",
+                owner_id: "user-1",
+                archived_at: null,
+              },
+              error: null,
+            })
+          )
+          return chain
+        }
+        if (table === "products_services") {
+          return {
+            select: jest.fn(() => ({
+              in: jest.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          }
+        }
+        if (table === "proforma_invoices") {
+          return {
+            insert: jest.fn(() => ({
+              select: jest.fn(() => ({
+                single: jest.fn(() =>
+                  Promise.resolve({ data: { id: "pf-new", status: "draft" }, error: null })
+                ),
+              })),
+            })),
+            delete: jest.fn(() => ({ eq: jest.fn(() => Promise.resolve({})) })),
+          }
+        }
+        if (table === "proforma_invoice_items") {
+          return { insert: proformaItemsInsert }
+        }
+        if (table === "estimates") {
+          return {
+            update: jest.fn(() => ({
+              eq: jest.fn(() => Promise.resolve({ error: null })),
+            })),
+          }
+        }
+        if (table === "business_users") {
+          const chain: Record<string, jest.Mock> = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => Promise.resolve({ data: [], error: null }))
+          return chain
+        }
+        return {}
+      }),
+      rpc: jest.fn(() => Promise.resolve({ data: null, error: null })),
+    } as never)
+
+    const res = await POST(request)
+    expect(res.status).toBe(201)
+    expect(proformaItemsInsert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        material_id: MATERIAL_ID,
+        description: "Premium paint",
+        unit_price: 450,
+      }),
+    ])
+  })
+
+  it("quote to proforma still works without material_id", async () => {
+    const request = new NextRequest("http://localhost/api/proforma/create", {
+      method: "POST",
+      body: JSON.stringify({
+        source_estimate_id: "est-source-1",
+        issue_date: "2025-12-31",
+        items: [
+          {
+            description: "Consulting",
+            qty: 1,
+            unit_price: 100,
+            discount_amount: 0,
+          },
+        ],
+        apply_taxes: false,
+      }),
+    })
+
+    const res = await POST(request)
+    expect(res.status).toBe(201)
+    expect(proformaItemsInsert.mock.calls[0][0][0].material_id).toBeFalsy()
   })
 })

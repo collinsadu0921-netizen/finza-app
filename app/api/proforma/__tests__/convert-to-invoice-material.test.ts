@@ -216,6 +216,128 @@ describe("POST /api/proforma/[id]/convert-to-invoice — material_id", () => {
     expect(fromMock).not.toHaveBeenCalledWith("service_material_movements")
   })
 
+  it("allows inactive tenant-owned material from saved proforma", async () => {
+    jest.mocked(createSupabaseServerClient).mockResolvedValue({
+      auth: {
+        getUser: jest.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from: jest.fn((table: string) => {
+        if (table === "proforma_invoices") {
+          const chain: Record<string, jest.Mock> = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.is = jest.fn(() => chain)
+          chain.single = jest.fn(() =>
+            Promise.resolve({
+              data: {
+                id: PROFORMA_ID,
+                business_id: BUSINESS_ID,
+                status: "accepted",
+                apply_taxes: false,
+                currency_code: "GHS",
+                currency_symbol: "₵",
+              },
+              error: null,
+            })
+          )
+          chain.update = jest.fn(() => ({ eq: jest.fn(() => Promise.resolve({ error: null })) }))
+          return chain
+        }
+        if (table === "proforma_invoice_items") {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                order: jest.fn(() =>
+                  Promise.resolve({
+                    data: [
+                      {
+                        material_id: MATERIAL_ID,
+                        description: "Legacy paint",
+                        qty: 1,
+                        unit_price: 450,
+                        discount_amount: 0,
+                        line_subtotal: 450,
+                      },
+                    ],
+                    error: null,
+                  })
+                ),
+              })),
+            })),
+          }
+        }
+        if (table === "businesses") {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                single: jest.fn(() =>
+                  Promise.resolve({
+                    data: { address_country: "GH", default_currency: "GHS" },
+                    error: null,
+                  })
+                ),
+              })),
+            })),
+          }
+        }
+        if (table === "service_material_inventory") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            in: jest.fn().mockResolvedValue({
+              data: [{ id: MATERIAL_ID }],
+              error: null,
+            }),
+          }
+        }
+        if (table === "invoices") {
+          return {
+            insert: jest.fn(() => ({
+              select: jest.fn(() => ({
+                single: jest.fn(() =>
+                  Promise.resolve({ data: { id: "inv-new" }, error: null })
+                ),
+              })),
+            })),
+          }
+        }
+        if (table === "invoice_items") {
+          return { insert: invoiceItemsInsert }
+        }
+        if (table === "products_services") {
+          return {
+            select: jest.fn(() => ({
+              in: jest.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          }
+        }
+        return {}
+      }),
+      rpc: jest.fn((name: string) => {
+        if (name === "generate_invoice_number_with_settings") {
+          return Promise.resolve({ data: "INV-0001", error: null })
+        }
+        return Promise.resolve({ data: "token-abc", error: null })
+      }),
+    } as never)
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/proforma/${PROFORMA_ID}/convert-to-invoice`, {
+        method: "POST",
+        body: JSON.stringify({ business_id: BUSINESS_ID }),
+      }),
+      { params: Promise.resolve({ id: PROFORMA_ID }) }
+    )
+
+    expect(res.status).toBe(201)
+    expect(invoiceItemsInsert).toHaveBeenCalledWith([
+      expect.objectContaining({ material_id: MATERIAL_ID }),
+    ])
+  })
+
   it("still converts manual lines without material_id", async () => {
     jest.mocked(createSupabaseServerClient).mockResolvedValue({
       auth: {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   validateInvoiceLineMaterials,
+  validateConversionLineMaterials,
   mapInvoiceItemsForInsert,
   type InvoiceItemInput,
 } from "@/lib/invoices/validateInvoiceLineMaterials"
@@ -8,6 +9,7 @@ import { pickEstimateItemProductServiceId } from "@/lib/estimates/pickEstimateIt
 
 export {
   validateInvoiceLineMaterials as validateDocumentLineMaterials,
+  validateConversionLineMaterials,
   mapInvoiceItemsForInsert,
 }
 

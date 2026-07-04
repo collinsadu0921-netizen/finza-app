@@ -8,18 +8,17 @@ export type InvoiceLineWithMaterial = {
 const MATERIAL_SELECT =
   "id, is_active, is_billable, default_selling_price"
 
+const CONVERSION_MATERIAL_SELECT = "id"
+
 export type ValidateInvoiceLineMaterialsResult =
   | { ok: true; validMaterialIds: Set<string> }
   | { ok: false; error: string; status: number }
 
-/**
- * Validates material_id references for invoice lines.
- * Does not read cost fields, update stock, or create movements.
- */
-export async function validateInvoiceLineMaterials(
+async function validateMaterialIdsForBusiness(
   supabase: SupabaseClient,
   businessId: string,
-  items: InvoiceLineWithMaterial[]
+  items: InvoiceLineWithMaterial[],
+  options: { requireBillable: boolean }
 ): Promise<ValidateInvoiceLineMaterialsResult> {
   const requestedIds = [
     ...new Set(
@@ -33,9 +32,10 @@ export async function validateInvoiceLineMaterials(
     return { ok: true, validMaterialIds: new Set() }
   }
 
+  const selectColumns = options.requireBillable ? MATERIAL_SELECT : CONVERSION_MATERIAL_SELECT
   const { data, error } = await supabase
     .from("service_material_inventory")
-    .select(MATERIAL_SELECT)
+    .select(selectColumns)
     .eq("business_id", businessId)
     .in("id", requestedIds)
 
@@ -43,7 +43,16 @@ export async function validateInvoiceLineMaterials(
     return { ok: false, error: error.message, status: 500 }
   }
 
-  const rowsById = new Map((data ?? []).map((row) => [row.id as string, row]))
+  type MaterialValidationRow = {
+    id: string
+    is_active?: boolean
+    is_billable?: boolean
+    default_selling_price?: number | null
+  }
+
+  const rowsById = new Map(
+    ((data ?? []) as unknown as MaterialValidationRow[]).map((row) => [row.id, row])
+  )
   const validMaterialIds = new Set<string>()
 
   for (const id of requestedIds) {
@@ -55,7 +64,10 @@ export async function validateInvoiceLineMaterials(
         status: 400,
       }
     }
-    if (!isBillableMaterialRow(row as Parameters<typeof isBillableMaterialRow>[0])) {
+    if (
+      options.requireBillable &&
+      !isBillableMaterialRow(row as Parameters<typeof isBillableMaterialRow>[0])
+    ) {
       return {
         ok: false,
         error: "One or more materials are inactive or not available on customer documents.",
@@ -66,6 +78,34 @@ export async function validateInvoiceLineMaterials(
   }
 
   return { ok: true, validMaterialIds }
+}
+
+/**
+ * Validates material_id references for invoice lines.
+ * Does not read cost fields, update stock, or create movements.
+ */
+export async function validateInvoiceLineMaterials(
+  supabase: SupabaseClient,
+  businessId: string,
+  items: InvoiceLineWithMaterial[]
+): Promise<ValidateInvoiceLineMaterialsResult> {
+  return validateMaterialIdsForBusiness(supabase, businessId, items, {
+    requireBillable: true,
+  })
+}
+
+/**
+ * Validates material_id for document conversion flows.
+ * Only checks tenant ownership — saved lines may reference inactive materials.
+ */
+export async function validateConversionLineMaterials(
+  supabase: SupabaseClient,
+  businessId: string,
+  items: InvoiceLineWithMaterial[]
+): Promise<ValidateInvoiceLineMaterialsResult> {
+  return validateMaterialIdsForBusiness(supabase, businessId, items, {
+    requireBillable: false,
+  })
 }
 
 export type InvoiceItemInput = {

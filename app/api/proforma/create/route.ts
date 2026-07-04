@@ -14,6 +14,7 @@ import {
   mapProformaItemsForInsert,
   resolveValidProductServiceIds,
   validateDocumentLineMaterials,
+  validateConversionLineMaterials,
 } from "@/lib/documents/documentLineMaterials"
 
 export async function POST(request: NextRequest) {
@@ -69,11 +70,9 @@ export async function POST(request: NextRequest) {
 
     const business_id = business.id
 
-    const materialValidationEarly = await validateDocumentLineMaterials(
-      supabase,
-      business_id,
-      items
-    )
+    const materialValidationEarly = source_estimate_id
+      ? await validateConversionLineMaterials(supabase, business_id, items)
+      : await validateDocumentLineMaterials(supabase, business_id, items)
     if (!materialValidationEarly.ok) {
       return NextResponse.json(
         { error: materialValidationEarly.error },

@@ -1,6 +1,7 @@
 import { describe, it, expect, jest } from "@jest/globals"
 import {
   mapInvoiceItemsForInsert,
+  validateConversionLineMaterials,
   validateInvoiceLineMaterials,
 } from "../validateInvoiceLineMaterials"
 
@@ -83,6 +84,49 @@ describe("validateInvoiceLineMaterials", () => {
       [{ material_id: materialId }]
     )
     expect(result.ok).toBe(false)
+  })
+})
+
+describe("validateConversionLineMaterials", () => {
+  const businessId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+  const materialId = "m1111111-1111-4111-8111-111111111111"
+
+  it("accepts tenant-owned inactive material for saved document conversion", async () => {
+    const supabase = {
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        in: jest.fn().mockResolvedValue({
+          data: [{ id: materialId }],
+          error: null,
+        }),
+      })),
+    }
+
+    const result = await validateConversionLineMaterials(
+      supabase as never,
+      businessId,
+      [{ material_id: materialId }]
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it("rejects cross-tenant material ids", async () => {
+    const supabase = {
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        in: jest.fn().mockResolvedValue({ data: [], error: null }),
+      })),
+    }
+
+    const result = await validateConversionLineMaterials(
+      supabase as never,
+      businessId,
+      [{ material_id: materialId }]
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(400)
   })
 })
 

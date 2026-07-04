@@ -164,6 +164,108 @@ describe("POST /api/estimates/convert/[id] — material_id", () => {
     expect(fromMock).not.toHaveBeenCalledWith("service_material_movements")
   })
 
+  it("allows inactive tenant-owned material from saved quote", async () => {
+    jest.mocked(createSupabaseServerClient).mockResolvedValue({
+      auth: {
+        getUser: jest.fn().mockResolvedValue({
+          data: { user: { id: "user-1" } },
+          error: null,
+        }),
+      },
+      from: jest.fn((table: string) => {
+        if (table === "estimates") {
+          const chain: Record<string, jest.Mock> = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.is = jest.fn(() => chain)
+          chain.single = jest.fn(() =>
+            Promise.resolve({
+              data: {
+                id: ESTIMATE_ID,
+                business_id: BUSINESS_ID,
+                customer_id: null,
+                issue_date: "2025-12-31",
+                subtotal: 450,
+                total_amount: 450,
+              },
+              error: null,
+            })
+          )
+          chain.update = jest.fn(() => ({ eq: jest.fn(() => ({ eq: jest.fn(() => Promise.resolve({})) })) }))
+          return chain
+        }
+        if (table === "estimate_items") {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                order: jest.fn(() =>
+                  Promise.resolve({
+                    data: [
+                      {
+                        material_id: MATERIAL_ID,
+                        description: "Legacy paint",
+                        quantity: 1,
+                        price: 450,
+                        total: 450,
+                        discount_amount: 0,
+                      },
+                    ],
+                    error: null,
+                  })
+                ),
+              })),
+            })),
+          }
+        }
+        if (table === "service_material_inventory") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            in: jest.fn().mockResolvedValue({
+              data: [{ id: MATERIAL_ID }],
+              error: null,
+            }),
+          }
+        }
+        if (table === "invoices") {
+          return {
+            insert: jest.fn(() => ({
+              select: jest.fn(() => ({
+                single: jest.fn(() =>
+                  Promise.resolve({ data: { id: "inv-new" }, error: null })
+                ),
+              })),
+            })),
+          }
+        }
+        if (table === "invoice_items") {
+          return { insert: invoiceItemsInsert }
+        }
+        if (table === "products_services") {
+          return {
+            select: jest.fn(() => ({
+              in: jest.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          }
+        }
+        return {}
+      }),
+    } as never)
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/estimates/convert/${ESTIMATE_ID}`, {
+        method: "POST",
+        body: JSON.stringify({ business_id: BUSINESS_ID }),
+      }),
+      { params: Promise.resolve({ id: ESTIMATE_ID }) }
+    )
+
+    expect(res.status).toBe(200)
+    expect(invoiceItemsInsert).toHaveBeenCalledWith([
+      expect.objectContaining({ material_id: MATERIAL_ID }),
+    ])
+  })
+
   it("still converts manual lines without material_id", async () => {
     jest.mocked(createSupabaseServerClient).mockResolvedValue({
       auth: {

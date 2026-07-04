@@ -48,6 +48,7 @@ type EstimateItem = {
   quantity: number
   price: number
   total: number
+  material_id?: string | null
 }
 
 export default function EstimateViewPage() {
@@ -208,6 +209,7 @@ export default function EstimateViewPage() {
             description: item.description,
             qty: item.quantity,
             unit_price: item.price,
+            material_id: item.material_id || null,
             discount_amount: Math.max(
               0,
               Math.round(((Number(item.quantity) || 0) * (Number(item.price) || 0) - Number(item.total || 0)) * 100) / 100
