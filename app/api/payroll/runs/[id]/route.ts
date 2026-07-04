@@ -231,7 +231,7 @@ export async function PUT(
 
       const { data: entries, error: entriesError } = await supabase
         .from("payroll_entries")
-        .select("gross_salary, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary")
+        .select("is_included, gross_salary, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary")
         .eq("payroll_run_id", runId)
 
       if (entriesError) {
@@ -242,7 +242,9 @@ export async function PUT(
       }
 
       const safe = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
-      const aggregated = (entries || []).reduce(
+      const aggregated = (entries || [])
+        .filter((entry: { is_included?: boolean | null }) => entry.is_included !== false)
+        .reduce(
         (acc, entry: any) => {
           acc.gross += safe(entry.gross_salary)
           acc.deductions += safe(entry.deductions_total)

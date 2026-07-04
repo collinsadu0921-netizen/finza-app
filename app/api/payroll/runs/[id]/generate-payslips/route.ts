@@ -79,6 +79,7 @@ export async function POST(
     // Generate payslips for each entry
     const payslips = []
     for (const entry of entries || []) {
+      if (entry.is_included === false) continue
       // Check if payslip already exists for this entry
       const { data: existingPayslip } = await supabase
         .from("payslips")
