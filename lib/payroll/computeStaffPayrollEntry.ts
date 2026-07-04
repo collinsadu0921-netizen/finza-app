@@ -1,0 +1,222 @@
+import { calculatePayroll } from "@/lib/payrollEngine"
+import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
+
+export type StaffPayrollInput = {
+  id: string
+  name?: string | null
+  basic_salary?: number | null
+  employment_type?: string | null
+  position?: string | null
+}
+
+export type AllowanceRow = {
+  type?: string | null
+  amount?: number | null
+}
+
+export type DeductionRow = {
+  amount?: number | null
+}
+
+export type ComputeStaffPayrollEntryParams = {
+  staff: StaffPayrollInput
+  businessCountry: string
+  effectiveDate: string
+  allowances: AllowanceRow[] | null | undefined
+  deductions: DeductionRow[] | null | undefined
+  /** One-off basic salary delta for this run (negative = deduction). */
+  adjustmentAmount?: number
+  /** When false, returns zeroed amounts but preserves snapshot metadata. */
+  isIncluded?: boolean
+  /** Use stored snapshot instead of staff master salary (for recalc on existing lines). */
+  baseSalarySnapshot?: number
+  adjustmentReason?: string | null
+  exclusionReason?: string | null
+}
+
+export type ComputedPayrollEntryRow = {
+  staff_id: string
+  is_included: boolean
+  base_salary_snapshot: number
+  adjustment_amount: number
+  adjustment_reason: string | null
+  exclusion_reason: string | null
+  basic_salary: number
+  allowances_total: number
+  regular_allowances_amount: number
+  bonus_amount: number
+  overtime_amount: number
+  deductions_total: number
+  gross_salary: number
+  ssnit_employee: number
+  ssnit_employer: number
+  taxable_income: number
+  paye: number
+  bonus_tax_5: number
+  bonus_tax_graduated: number
+  overtime_tax_5: number
+  overtime_tax_10: number
+  overtime_tax_graduated: number
+  is_qualifying_junior_employee: boolean
+  bonus_cap_amount: number
+  overtime_threshold_amount: number
+  net_salary: number
+}
+
+function isQualifyingJuniorEmployee(staff: StaffPayrollInput): boolean {
+  const employmentType = String(staff.employment_type || "").toLowerCase()
+  const position = String(staff.position || "").toLowerCase()
+  return employmentType.includes("junior") || position.includes("junior")
+}
+
+function zeroEntry(
+  staffId: string,
+  baseSnapshot: number,
+  adjustmentAmount: number,
+  adjustmentReason: string | null,
+  exclusionReason: string | null,
+  isIncluded: boolean
+): ComputedPayrollEntryRow {
+  return {
+    staff_id: staffId,
+    is_included: isIncluded,
+    base_salary_snapshot: baseSnapshot,
+    adjustment_amount: adjustmentAmount,
+    adjustment_reason: adjustmentReason,
+    exclusion_reason: exclusionReason,
+    basic_salary: 0,
+    allowances_total: 0,
+    regular_allowances_amount: 0,
+    bonus_amount: 0,
+    overtime_amount: 0,
+    deductions_total: 0,
+    gross_salary: 0,
+    ssnit_employee: 0,
+    ssnit_employer: 0,
+    taxable_income: 0,
+    paye: 0,
+    bonus_tax_5: 0,
+    bonus_tax_graduated: 0,
+    overtime_tax_5: 0,
+    overtime_tax_10: 0,
+    overtime_tax_graduated: 0,
+    is_qualifying_junior_employee: false,
+    bonus_cap_amount: 0,
+    overtime_threshold_amount: 0,
+    net_salary: 0,
+  }
+}
+
+export function computeStaffPayrollEntry(
+  params: ComputeStaffPayrollEntryParams
+): ComputedPayrollEntryRow {
+  const {
+    staff,
+    businessCountry,
+    effectiveDate,
+    allowances,
+    deductions,
+    adjustmentAmount = 0,
+    isIncluded = true,
+    baseSalarySnapshot,
+    adjustmentReason = null,
+    exclusionReason = null,
+  } = params
+
+  const baseSnapshot =
+    baseSalarySnapshot !== undefined ? Number(baseSalarySnapshot) || 0 : Number(staff.basic_salary) || 0
+  const adjustment = Number(adjustmentAmount) || 0
+  const effectiveBasic = Math.max(0, baseSnapshot + adjustment)
+
+  if (!isIncluded) {
+    return zeroEntry(
+      staff.id,
+      baseSnapshot,
+      adjustment,
+      adjustmentReason,
+      exclusionReason,
+      false
+    )
+  }
+
+  const bonusAmount =
+    allowances
+      ?.filter((a) => String(a.type || "").toLowerCase() === "bonus")
+      .reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0
+  const overtimeAmount =
+    allowances
+      ?.filter((a) => String(a.type || "").toLowerCase() === "overtime")
+      .reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0
+  const regularAllowances =
+    allowances
+      ?.filter((a) => {
+        const type = String(a.type || "").toLowerCase()
+        return type !== "bonus" && type !== "overtime"
+      })
+      .reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0
+  const allowancesTotal = regularAllowances + bonusAmount + overtimeAmount
+
+  const deductionsTotal =
+    deductions?.reduce((sum, d) => sum + Number(d.amount || 0), 0) || 0
+
+  const payrollResult = calculatePayroll(
+    {
+      jurisdiction: businessCountry,
+      effectiveDate,
+      basicSalary: effectiveBasic,
+      allowances: allowancesTotal,
+      otherDeductions: deductionsTotal,
+      bonusAmount,
+      overtimeAmount,
+      isQualifyingJuniorEmployee: isQualifyingJuniorEmployee(staff),
+    },
+    businessCountry
+  )
+
+  const employeeStatutoryContributions = payrollResult.statutoryDeductions
+    .filter((d) => d.code !== "PAYE" && d.code !== "CBHI")
+    .reduce((sum, d) => sum + (Number.isFinite(Number(d.amount)) ? Number(d.amount) : 0), 0)
+
+  const payeDeduction = payrollResult.statutoryDeductions.find((d) => d.code === "PAYE")
+  const paye = Number.isFinite(Number(payeDeduction?.amount)) ? Number(payeDeduction?.amount) : 0
+
+  const employerStatutoryContributions = payrollResult.employerContributions.reduce(
+    (sum, c) => sum + (Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0),
+    0
+  )
+
+  const breakdown = payrollResult.complianceBreakdown
+
+  return {
+    staff_id: staff.id,
+    is_included: true,
+    base_salary_snapshot: baseSnapshot,
+    adjustment_amount: adjustment,
+    adjustment_reason: adjustmentReason,
+    exclusion_reason: exclusionReason,
+    basic_salary: payrollResult.earnings.basicSalary,
+    allowances_total: payrollResult.earnings.allowances,
+    regular_allowances_amount: Number(breakdown?.regularAllowancesAmount ?? allowancesTotal),
+    bonus_amount: Number(breakdown?.bonusAmount ?? 0),
+    overtime_amount: Number(breakdown?.overtimeAmount ?? 0),
+    deductions_total: payrollResult.totals.totalOtherDeductions,
+    gross_salary: payrollResult.earnings.grossSalary,
+    ssnit_employee: employeeStatutoryContributions,
+    ssnit_employer: employerStatutoryContributions,
+    taxable_income: payrollResult.totals.taxableIncome,
+    paye,
+    bonus_tax_5: Number(breakdown?.bonusTax5 ?? 0),
+    bonus_tax_graduated: Number(breakdown?.bonusTaxGraduated ?? 0),
+    overtime_tax_5: Number(breakdown?.overtimeTax5 ?? 0),
+    overtime_tax_10: Number(breakdown?.overtimeTax10 ?? 0),
+    overtime_tax_graduated: Number(breakdown?.overtimeTaxGraduated ?? 0),
+    is_qualifying_junior_employee: Boolean(breakdown?.isQualifyingJuniorEmployee ?? false),
+    bonus_cap_amount: Number(breakdown?.bonusCapAmount ?? 0),
+    overtime_threshold_amount: Number(breakdown?.overtimeThresholdAmount ?? 0),
+    net_salary: payrollResult.totals.netSalary,
+  }
+}
+
+export function isPayrollEngineCountryError(error: unknown): error is MissingCountryError | UnsupportedCountryError {
+  return error instanceof MissingCountryError || error instanceof UnsupportedCountryError
+}

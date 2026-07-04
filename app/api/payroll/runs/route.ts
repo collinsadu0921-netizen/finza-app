@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { calculatePayroll } from "@/lib/payrollEngine"
-import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
+import {
+  computeStaffPayrollEntry,
+  isPayrollEngineCountryError,
+} from "@/lib/payroll/computeStaffPayrollEntry"
+import { rollupPayrollRunTotals } from "@/lib/payroll/rollupPayrollRunTotals"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { logAudit } from "@/lib/auditLog"
@@ -38,10 +41,23 @@ const PAYROLL_RUN_LIST_SELECT = `
   updated_at
 `.replace(/\s+/g, " ")
 
-function isQualifyingJuniorEmployee(staff: { employment_type?: string | null; position?: string | null }): boolean {
-  const employmentType = String(staff.employment_type || "").toLowerCase()
-  const position = String(staff.position || "").toLowerCase()
-  return employmentType.includes("junior") || position.includes("junior")
+async function fetchStaffAllowancesAndDeductions(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  staffId: string
+) {
+  const [{ data: allowances }, { data: deductions }] = await Promise.all([
+    supabase
+      .from("allowances")
+      .select("type, amount, recurring")
+      .eq("staff_id", staffId)
+      .is("deleted_at", null),
+    supabase
+      .from("deductions")
+      .select("amount")
+      .eq("staff_id", staffId)
+      .is("deleted_at", null),
+  ])
+  return { allowances: allowances || [], deductions: deductions || [] }
 }
 
 export async function GET(request: NextRequest) {
@@ -260,158 +276,39 @@ export async function POST(request: NextRequest) {
 
     // Calculate payroll for each staff using payroll engine
     const payrollEntries = []
-    let totalGross = 0
-    let totalAllowances = 0
-    let totalDeductions = 0
-    let totalSsnitEmployee = 0
-    let totalSsnitEmployer = 0
-    let totalPaye = 0
-    let totalNet = 0
 
     for (const staff of staffList) {
-      // Get allowances:
-      // - include all allowance rows (recurring and non-recurring)
-      // - split bonus/overtime explicitly for Ghana tax bucket handling
-      const { data: allowances } = await supabase
-        .from("allowances")
-        .select("type, amount, recurring")
-        .eq("staff_id", staff.id)
-        .is("deleted_at", null)
+      const { allowances, deductions } = await fetchStaffAllowancesAndDeductions(supabase, staff.id)
 
-      const bonusAmount = allowances
-        ?.filter((a: any) => String(a.type || "").toLowerCase() === "bonus")
-        .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
-      const overtimeAmount = allowances
-        ?.filter((a: any) => String(a.type || "").toLowerCase() === "overtime")
-        .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
-      const regularAllowances = allowances
-        ?.filter((a: any) => {
-          const type = String(a.type || "").toLowerCase()
-          return type !== "bonus" && type !== "overtime"
-        })
-        .reduce((sum, a: any) => sum + Number(a.amount || 0), 0) || 0
-      const allowancesTotal = regularAllowances + bonusAmount + overtimeAmount
-
-      // Get deductions (other deductions, not statutory) - include recurring and non-recurring
-      const { data: deductions } = await supabase
-        .from("deductions")
-        .select("amount")
-        .eq("staff_id", staff.id)
-        .is("deleted_at", null)
-
-      const deductionsTotal = deductions?.reduce((sum, d) => sum + Number(d.amount || 0), 0) || 0
-
-      // Calculate payroll using new engine
       try {
-        const payrollResult = calculatePayroll(
-          {
-            jurisdiction: businessCountry, // Will be normalized by engine
-            effectiveDate,
-            basicSalary: Number(staff.basic_salary) || 0,
-            allowances: allowancesTotal,
-            otherDeductions: deductionsTotal,
-            bonusAmount,
-            overtimeAmount,
-            isQualifyingJuniorEmployee: isQualifyingJuniorEmployee(staff),
-          },
-          businessCountry
-        )
-
-        // Extract payroll components dynamically for multi-country support
-        // 
-        // RULE 1: Employee statutory contributions (stored into ssnit_employee field)
-        // Note: ssnit_* fields are "statutory contribution aggregates" for all countries (schema uses Ghana-centric names for backward compatibility)
-        // Sum ALL statutoryDeductions EXCEPT:
-        //   - code === 'PAYE' (income tax, stored separately)
-        //   - code === 'CBHI' (Community Based Health Insurance - net-based health solidarity contribution; do not merge into pension bucket)
-        // Ghana: SSNIT_EMPLOYEE → ssnit_employee
-        // Kenya: NSSF_EMPLOYEE + SHIF + AHL_EMPLOYEE → ssnit_employee (aggregated)
-        // Rwanda: RSSB_PENSION_EMPLOYEE + RSSB_MATERNITY_EMPLOYEE → ssnit_employee (aggregated)
-        // Future countries: All employee statutory contributions (except PAYE and CBHI) aggregate here
-        const employeeStatutoryContributions = payrollResult.statutoryDeductions
-          .filter(d => d.code !== 'PAYE' && d.code !== 'CBHI')
-          .reduce((sum, d) => {
-            const amount = Number(d.amount) || 0
-            return sum + (Number.isFinite(amount) ? amount : 0)
-          }, 0)
-        
-        // RULE 2: PAYE (income tax)
-        // Extract statutoryDeductions where code === 'PAYE'
-        // Works for all countries (Ghana, Kenya, future countries)
-        const payeDeduction = payrollResult.statutoryDeductions.find(d => d.code === 'PAYE')
-        const payeAmount = payeDeduction?.amount
-        const paye = (payeAmount !== undefined && Number.isFinite(Number(payeAmount))) ? Number(payeAmount) : 0
-        
-        // RULE 3: Employer statutory contributions
-        // Sum ALL employerContributions amounts
-        // Ghana: SSNIT_EMPLOYER → ssnit_employer
-        // Kenya: NSSF_EMPLOYER + AHL_EMPLOYER → ssnit_employer (aggregated)
-        // Future countries: All employer contributions aggregate here
-        const employerStatutoryContributions = payrollResult.employerContributions
-          .reduce((sum, c) => {
-            const amount = Number(c.amount) || 0
-            return sum + (Number.isFinite(amount) ? amount : 0)
-          }, 0)
-        
-        // Map to database field names (schema uses Ghana-centric names for backward compatibility)
-        // Ensure values are never NaN or undefined (defensive programming)
-        const ssnitEmployee = Number.isFinite(employeeStatutoryContributions) ? employeeStatutoryContributions : 0
-        const ssnitEmployer = Number.isFinite(employerStatutoryContributions) ? employerStatutoryContributions : 0
-
-        const breakdown = payrollResult.complianceBreakdown
-        const bonusAmountSnapshot = Number(breakdown?.bonusAmount ?? 0)
-        const overtimeAmountSnapshot = Number(breakdown?.overtimeAmount ?? 0)
-        const regularAllowancesSnapshot = Number(breakdown?.regularAllowancesAmount ?? allowancesTotal)
-
-        payrollEntries.push({
-          staff_id: staff.id,
-          basic_salary: payrollResult.earnings.basicSalary,
-          allowances_total: payrollResult.earnings.allowances,
-          regular_allowances_amount: regularAllowancesSnapshot,
-          bonus_amount: bonusAmountSnapshot,
-          overtime_amount: overtimeAmountSnapshot,
-          deductions_total: payrollResult.totals.totalOtherDeductions,
-          gross_salary: payrollResult.earnings.grossSalary,
-          ssnit_employee: ssnitEmployee,
-          ssnit_employer: ssnitEmployer,
-          taxable_income: payrollResult.totals.taxableIncome,
-          paye: paye,
-          bonus_tax_5: Number(breakdown?.bonusTax5 ?? 0),
-          bonus_tax_graduated: Number(breakdown?.bonusTaxGraduated ?? 0),
-          overtime_tax_5: Number(breakdown?.overtimeTax5 ?? 0),
-          overtime_tax_10: Number(breakdown?.overtimeTax10 ?? 0),
-          overtime_tax_graduated: Number(breakdown?.overtimeTaxGraduated ?? 0),
-          is_qualifying_junior_employee: Boolean(breakdown?.isQualifyingJuniorEmployee ?? false),
-          bonus_cap_amount: Number(breakdown?.bonusCapAmount ?? 0),
-          overtime_threshold_amount: Number(breakdown?.overtimeThresholdAmount ?? 0),
-          net_salary: payrollResult.totals.netSalary,
+        const computed = computeStaffPayrollEntry({
+          staff,
+          businessCountry,
+          effectiveDate,
+          allowances,
+          deductions,
+          isIncluded: true,
         })
 
-        const expectedGross = Number(staff.basic_salary || 0) + allowancesTotal
-        if (Math.abs(Number(payrollResult.earnings.grossSalary || 0) - expectedGross) > 0.01) {
+        const allowancesTotal = computed.allowances_total
+        const expectedGross = (Number(staff.basic_salary) || 0) + allowancesTotal
+        if (Math.abs(Number(computed.gross_salary || 0) - expectedGross) > 0.01) {
           return NextResponse.json(
             { error: `Payroll component reconciliation failed for ${staff.name || "staff"}: gross mismatch.` },
             { status: 400 }
           )
         }
 
-        totalGross += payrollResult.earnings.grossSalary
-        totalAllowances += payrollResult.earnings.allowances
-        totalDeductions += payrollResult.totals.totalOtherDeductions
-        totalSsnitEmployee += ssnitEmployee
-        totalSsnitEmployer += ssnitEmployer
-        totalPaye += paye
-        totalNet += payrollResult.totals.netSalary
-      } catch (error: any) {
-        if (error instanceof MissingCountryError || error instanceof UnsupportedCountryError) {
-          return NextResponse.json(
-            { error: error.message },
-            { status: 400 }
-          )
+        payrollEntries.push(computed)
+      } catch (error: unknown) {
+        if (isPayrollEngineCountryError(error)) {
+          return NextResponse.json({ error: error.message }, { status: 400 })
         }
-        throw error // Re-throw unexpected errors
+        throw error
       }
     }
+
+    const runTotals = rollupPayrollRunTotals(payrollEntries)
 
     // Create payroll run
     const { data: payrollRun, error: runError } = await supabase
@@ -420,13 +317,13 @@ export async function POST(request: NextRequest) {
         business_id: business.id,
         payroll_month,
         status: "draft",
-        total_gross_salary: totalGross,
-        total_allowances: totalAllowances,
-        total_deductions: totalDeductions,
-        total_ssnit_employee: totalSsnitEmployee,
-        total_ssnit_employer: totalSsnitEmployer,
-        total_paye: totalPaye,
-        total_net_salary: totalNet,
+        total_gross_salary: runTotals.total_gross_salary,
+        total_allowances: runTotals.total_allowances,
+        total_deductions: runTotals.total_deductions,
+        total_ssnit_employee: runTotals.total_ssnit_employee,
+        total_ssnit_employer: runTotals.total_ssnit_employer,
+        total_paye: runTotals.total_paye,
+        total_net_salary: runTotals.total_net_salary,
       })
       .select()
       .single()
@@ -467,12 +364,12 @@ export async function POST(request: NextRequest) {
       entityId: payrollRun.id,
       newValues: {
         payroll_month,
-        total_gross_salary: totalGross,
-        total_net_salary: totalNet,
+        total_gross_salary: runTotals.total_gross_salary,
+        total_net_salary: runTotals.total_net_salary,
         staff_count: staffList.length,
         status: "draft",
       },
-      description: `Created payroll run for ${payroll_month} (${staffList.length} staff, gross ${totalGross})`,
+      description: `Created payroll run for ${payroll_month} (${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
       request,
     })
 

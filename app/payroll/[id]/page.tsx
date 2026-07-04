@@ -10,6 +10,11 @@ import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 type PayrollEntry = {
   id: string
   basic_salary: number
+  base_salary_snapshot?: number
+  adjustment_amount?: number
+  adjustment_reason?: string | null
+  exclusion_reason?: string | null
+  is_included?: boolean
   allowances_total: number
   regular_allowances_amount?: number
   bonus_amount?: number
@@ -133,6 +138,11 @@ export default function PayrollRunViewPage() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState("")
 
+  const [savingEntryId, setSavingEntryId] = useState<string | null>(null)
+  const [entryDrafts, setEntryDrafts] = useState<
+    Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }>
+  >({})
+
   const loadPayrollRun = useCallback(async () => {
     try {
       const response = await fetch(`/api/payroll/runs/${runId}`)
@@ -179,6 +189,53 @@ export default function PayrollRunViewPage() {
     loadPayslips()
     loadPayrollPayments()
   }, [loadPayrollRun, loadPayslips, loadPayrollPayments])
+
+  useEffect(() => {
+    const drafts: Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }> = {}
+    for (const entry of entries) {
+      drafts[entry.id] = {
+        adjustment_amount: String(entry.adjustment_amount ?? 0),
+        adjustment_reason: entry.adjustment_reason || "",
+        exclusion_reason: entry.exclusion_reason || "",
+      }
+    }
+    setEntryDrafts(drafts)
+  }, [entries])
+
+  const handleUpdateEntry = async (
+    entry: PayrollEntry,
+    patch: {
+      is_included?: boolean
+      adjustment_amount?: number
+      adjustment_reason?: string | null
+      exclusion_reason?: string | null
+    }
+  ) => {
+    setSavingEntryId(entry.id)
+    try {
+      const response = await fetch(`/api/payroll/runs/${runId}/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        toast.showToast(data.error || "Failed to update payroll line", "error")
+        return
+      }
+      if (data.payrollRun) setPayrollRun(data.payrollRun)
+      if (data.entry) {
+        setEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...e, ...data.entry } : e)))
+      } else {
+        await loadPayrollRun()
+      }
+      toast.showToast("Payroll line updated", "success")
+    } catch {
+      toast.showToast("Failed to update payroll line", "error")
+    } finally {
+      setSavingEntryId(null)
+    }
+  }
 
   const handleApprove = async () => {
     setUpdating(true)
@@ -368,12 +425,14 @@ export default function PayrollRunViewPage() {
   const canRecordPayment = isRunPayable && outstandingAmount > 0.01
   const totals = entries.reduce(
     (acc, entry) => {
+      if (entry.is_included === false) return acc
       acc.bonus += Number(entry.bonus_amount ?? 0)
       acc.overtime += Number(entry.overtime_amount ?? 0)
       return acc
     },
     { bonus: 0, overtime: 0 }
   )
+  const isDraftRun = payrollRun?.status === "draft"
 
   const formatMonth = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
@@ -451,7 +510,7 @@ export default function PayrollRunViewPage() {
             <div className="flex flex-col gap-3 w-full sm:w-auto sm:items-end">
               {payrollRun.status === "draft" && (
                 <p className="text-sm text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 max-w-xl text-left">
-                  Approving payroll posts salary expense and payroll liabilities to accounting. It does not mark salaries as paid.
+                  Review each employee line before approval. Exclude staff from this month only, or apply one-off salary adjustments — employee status and base salary are not changed.
                 </p>
               )}
               {!readOnly && (
@@ -641,13 +700,24 @@ export default function PayrollRunViewPage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white">Employee Breakdown</h2>
+              {isDraftRun && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Uncheck Include to skip an active employee for this run only. Use adjustment for sick leave, absence, bonus, or corrections.
+                </p>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-700/50">
                   <tr>
                     <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Employee</th>
+                    {isDraftRun && (
+                      <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Include</th>
+                    )}
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Basic</th>
+                    {isDraftRun && (
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[220px]">Run adjustment</th>
+                    )}
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Allowances</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Bonus</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Overtime</th>
@@ -664,14 +734,141 @@ export default function PayrollRunViewPage() {
                     const sentViaWA = payslip?.sent_via_whatsapp
                     const sentViaEmail = payslip?.sent_via_email
                     const anySent = sentViaWA || sentViaEmail
+                    const included = entry.is_included !== false
+                    const draft = entryDrafts[entry.id]
+                    const baseSnapshot = Number(entry.base_salary_snapshot ?? entry.basic_salary)
 
                     return (
-                      <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                      <tr
+                        key={entry.id}
+                        className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${
+                          !included ? "opacity-60 bg-gray-50/80 dark:bg-gray-900/40" : ""
+                        }`}
+                      >
                         <td className="px-5 py-4">
                           <p className="font-medium text-gray-900 dark:text-white">{entry.staff.name}</p>
                           {entry.staff.position && <p className="text-xs text-gray-500">{entry.staff.position}</p>}
+                          {!included && entry.exclusion_reason && (
+                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">Excluded: {entry.exclusion_reason}</p>
+                          )}
+                          {included && entry.adjustment_reason && Number(entry.adjustment_amount) !== 0 && (
+                            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">{entry.adjustment_reason}</p>
+                          )}
                         </td>
-                        <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">₵{Number(entry.basic_salary).toFixed(2)}</td>
+                        {isDraftRun && (
+                          <td className="px-3 py-4 text-center">
+                            {!readOnly && (
+                              <input
+                                type="checkbox"
+                                checked={included}
+                                disabled={savingEntryId === entry.id}
+                                onChange={(e) => {
+                                  const nextIncluded = e.target.checked
+                                  void handleUpdateEntry(entry, {
+                                    is_included: nextIncluded,
+                                    exclusion_reason: nextIncluded ? null : draft?.exclusion_reason || "Excluded from this run",
+                                  })
+                                }}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                aria-label={`Include ${entry.staff.name} in this payroll run`}
+                              />
+                            )}
+                          </td>
+                        )}
+                        <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">
+                          <div>₵{Number(entry.basic_salary).toFixed(2)}</div>
+                          {Number(entry.adjustment_amount) !== 0 && (
+                            <div className="text-[11px] text-gray-500">
+                              base ₵{baseSnapshot.toFixed(2)} {Number(entry.adjustment_amount) > 0 ? "+" : ""}
+                              {Number(entry.adjustment_amount).toFixed(2)}
+                            </div>
+                          )}
+                        </td>
+                        {isDraftRun && (
+                          <td className="px-4 py-4">
+                            {!readOnly && included ? (
+                              <div className="flex flex-col gap-2 min-w-[200px]">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={draft?.adjustment_amount ?? "0"}
+                                  disabled={savingEntryId === entry.id}
+                                  onChange={(e) =>
+                                    setEntryDrafts((prev) => ({
+                                      ...prev,
+                                      [entry.id]: {
+                                        ...prev[entry.id],
+                                        adjustment_amount: e.target.value,
+                                        adjustment_reason: prev[entry.id]?.adjustment_reason ?? "",
+                                        exclusion_reason: prev[entry.id]?.exclusion_reason ?? "",
+                                      },
+                                    }))
+                                  }
+                                  className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs"
+                                  placeholder="Amount (+/-)"
+                                />
+                                <input
+                                  type="text"
+                                  value={draft?.adjustment_reason ?? ""}
+                                  disabled={savingEntryId === entry.id}
+                                  onChange={(e) =>
+                                    setEntryDrafts((prev) => ({
+                                      ...prev,
+                                      [entry.id]: {
+                                        ...prev[entry.id],
+                                        adjustment_reason: e.target.value,
+                                        adjustment_amount: prev[entry.id]?.adjustment_amount ?? "0",
+                                        exclusion_reason: prev[entry.id]?.exclusion_reason ?? "",
+                                      },
+                                    }))
+                                  }
+                                  className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs"
+                                  placeholder="Reason (e.g. unpaid sick leave)"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={savingEntryId === entry.id}
+                                  onClick={() =>
+                                    void handleUpdateEntry(entry, {
+                                      is_included: true,
+                                      adjustment_amount: Number(draft?.adjustment_amount || 0),
+                                      adjustment_reason: draft?.adjustment_reason?.trim() || null,
+                                    })
+                                  }
+                                  className="self-start rounded bg-slate-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                                >
+                                  {savingEntryId === entry.id ? "Saving…" : "Apply"}
+                                </button>
+                              </div>
+                            ) : !readOnly && !included ? (
+                              <input
+                                type="text"
+                                value={draft?.exclusion_reason ?? ""}
+                                disabled={savingEntryId === entry.id}
+                                onChange={(e) =>
+                                  setEntryDrafts((prev) => ({
+                                    ...prev,
+                                    [entry.id]: {
+                                      adjustment_amount: prev[entry.id]?.adjustment_amount ?? "0",
+                                      adjustment_reason: prev[entry.id]?.adjustment_reason ?? "",
+                                      exclusion_reason: e.target.value,
+                                    },
+                                  }))
+                                }
+                                onBlur={() =>
+                                  void handleUpdateEntry(entry, {
+                                    is_included: false,
+                                    exclusion_reason: draft?.exclusion_reason?.trim() || "Excluded from this run",
+                                  })
+                                }
+                                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs"
+                                placeholder="Exclusion reason"
+                              />
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </td>
+                        )}
                         <td className="px-4 py-4 text-right text-gray-700 dark:text-gray-300 tabular-nums">₵{Number(entry.allowances_total).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-violet-600 dark:text-violet-400 tabular-nums">₵{Number(entry.bonus_amount ?? 0).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-indigo-600 dark:text-indigo-400 tabular-nums">₵{Number(entry.overtime_amount ?? 0).toFixed(2)}</td>
