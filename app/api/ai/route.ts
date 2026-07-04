@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { buildMinimalFinzaAssistContext } from "@/lib/ai/finzaAssistContext"
 import {
   FINZA_ASSIST_TOOL_DEFINITIONS,
   executeFinzaAssistTool,
@@ -131,6 +132,18 @@ function createGroqOpenAIClient(apiKey: string) {
 const MAX_TOOL_ROUNDS = 5
 const MAX_TOOL_CALLS_PER_REQUEST = 10
 
+const AI_TIMING_DEBUG =
+  process.env.NODE_ENV === "development" || process.env.FINZA_AI_DEBUG === "1"
+
+function jsonByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value ?? null), "utf8")
+}
+
+function logAiTiming(label: string, timings: Record<string, number | string>) {
+  if (!AI_TIMING_DEBUG) return
+  console.info(`[api/ai] ${label}`, timings)
+}
+
 async function streamTextResponse(text: string): Promise<Response> {
   const encoder = new TextEncoder()
   const chunkSize = 48
@@ -156,6 +169,14 @@ async function streamTextResponse(text: string): Promise<Response> {
 }
 
 export async function POST(request: NextRequest) {
+  const requestStartMs = Date.now()
+  let authSessionMs = 0
+  let fullContextBytes = 0
+  let minimalContextBytes = 0
+  let groqRoundMsTotal = 0
+  let toolExecutionMsTotal = 0
+  let modelUsed = ""
+
   try {
     const groqApiKey = process.env.GROQ_API_KEY?.trim()
     if (!groqApiKey) {
@@ -174,6 +195,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "message or receipt_path is required" }, { status: 400 })
     }
 
+    const authStartMs = Date.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
@@ -195,6 +217,7 @@ export async function POST(request: NextRequest) {
     if (!business?.id) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
+    authSessionMs = Date.now() - authStartMs
 
     let receiptOcrPrefix = ""
     if (receiptPath) {
@@ -233,12 +256,14 @@ export async function POST(request: NextRequest) {
     }
 
     const model = process.env.AI_MODEL || "gemma3:12b"
+    modelUsed = model
     const client = createGroqOpenAIClient(groqApiKey)
 
-    const contextNote =
-      context == null
-        ? ""
-        : `\n\nOptional client UI snapshot (may be stale; prefer tools for authoritative figures): ${JSON.stringify(context)}`
+    fullContextBytes = jsonByteLength(context)
+    const minimalContext = buildMinimalFinzaAssistContext(context, business.id)
+    minimalContextBytes = jsonByteLength(minimalContext)
+
+    const contextNote = `\n\nMinimal page context (prefer tools for authoritative figures): ${JSON.stringify(minimalContext)}`
 
     const systemContent = `${BASE_INSTRUCTIONS}${contextNote}`
 
@@ -254,6 +279,7 @@ export async function POST(request: NextRequest) {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let completion: OpenAI.Chat.Completions.ChatCompletion
       try {
+        const groqRoundStartMs = Date.now()
         completion = await client.chat.completions.create({
           model,
           messages,
@@ -261,14 +287,17 @@ export async function POST(request: NextRequest) {
           tool_choice: "auto",
           stream: false,
         })
+        groqRoundMsTotal += Date.now() - groqRoundStartMs
       } catch (toolErr: unknown) {
         const msg = toolErr instanceof Error ? toolErr.message : String(toolErr)
         console.warn("[api/ai] Tool-enabled completion failed, retrying without tools:", msg)
+        const groqFallbackStartMs = Date.now()
         const llmStream = await client.chat.completions.create({
           model,
           messages,
           stream: true,
         })
+        groqRoundMsTotal += Date.now() - groqFallbackStartMs
         const encoder = new TextEncoder()
         const readable = new ReadableStream<Uint8Array>({
           async start(controller) {
@@ -320,7 +349,9 @@ export async function POST(request: NextRequest) {
           toolCallsSoFar += 1
           const name = tc.function.name
           const args = tc.function.arguments || "{}"
+          const toolStartMs = Date.now()
           const exec = await executeFinzaAssistTool(supabase, business.id, user.id, name, args)
+          toolExecutionMsTotal += Date.now() - toolStartMs
           messages.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -339,6 +370,18 @@ export async function POST(request: NextRequest) {
         ? "I ran the requested lookups but could not form a reply. Please try rephrasing your question."
         : "I could not generate a reply. Check that your local model is running and try again."
     }
+
+    logAiTiming("request", {
+      auth_session_ms: authSessionMs,
+      full_context_bytes: fullContextBytes,
+      minimal_context_bytes: minimalContextBytes,
+      groq_round_ms: groqRoundMsTotal,
+      tool_execution_ms: toolExecutionMsTotal,
+      total_request_ms: Date.now() - requestStartMs,
+      model: modelUsed,
+      tool_calls: toolCallsSoFar,
+      used_tools: usedTools ? "yes" : "no",
+    })
 
     return streamTextResponse(finalText)
   } catch (error: unknown) {
