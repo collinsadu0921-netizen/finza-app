@@ -14,6 +14,7 @@
 
 import { calculateTaxesFromAmount } from "@/lib/taxEngine"
 import type { TaxLine } from "@/lib/taxEngine/types"
+import { resolveDocumentCurrencySymbol } from "@/lib/currency/resolveCurrencyDisplay"
 import { formatMoneyWithSymbol } from "@/lib/money"
 import {
   showTenantBankPaymentCard,
@@ -256,6 +257,8 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     )
   }
 
+  const displayCurrencySymbol = resolveDocumentCurrencySymbol(currency_code, currency_symbol)
+
   const labels = getDocumentLabels(documentType)
 
   // Normalize totals
@@ -384,7 +387,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
 
   /** Grouped thousands + always 2 decimals; NBSP after symbol for PDF wrap. */
   const fmtMoney = (amount: number) =>
-    formatMoneyWithSymbol(amount, currency_symbol, {
+    formatMoneyWithSymbol(amount, displayCurrencySymbol, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
       useGrouping: true,

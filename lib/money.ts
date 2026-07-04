@@ -6,6 +6,7 @@
  */
 
 import { getCurrencySymbol } from "./currency"
+import { normalizeCurrencySymbol } from "./currency/normalizeCurrencySymbol"
 
 export interface MoneyFormatOptions {
   /**
@@ -162,6 +163,8 @@ export function formatMoneyWithSymbol(
     return missingPlaceholder
   }
 
+  const safeSymbol = normalizeCurrencySymbol(symbol)
+
   const isNegative = amount < 0
   const formattedNumber = new Intl.NumberFormat("en-US", {
     minimumFractionDigits,
@@ -171,7 +174,7 @@ export function formatMoneyWithSymbol(
 
   const glue = symbolNumberGlue
   return isNegative
-    ? `-${symbol}${glue}${formattedNumber}`
-    : `${symbol}${glue}${formattedNumber}`
+    ? `-${safeSymbol}${glue}${formattedNumber}`
+    : `${safeSymbol}${glue}${formattedNumber}`
 }
 

@@ -84,7 +84,7 @@ export default function InvoicePreviewModal({
         })
         .then(html => {
           // Create blob URL from HTML response
-          const blob = new Blob([html], { type: 'text/html' })
+          const blob = new Blob([html], { type: "text/html;charset=utf-8" })
           const url = URL.createObjectURL(blob)
           setPreviewUrl(url)
           setLoading(false)

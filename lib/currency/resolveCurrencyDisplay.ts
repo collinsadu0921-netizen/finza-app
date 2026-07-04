@@ -1,4 +1,5 @@
 import { DEFAULT_PLATFORM_CURRENCY_CODE, getCurrencySymbol } from "@/lib/currency"
+import { normalizeCurrencySymbol } from "./normalizeCurrencySymbol"
 
 export type CurrencyContext = {
   currency_symbol?: string | null
@@ -41,14 +42,19 @@ export function resolveCurrencyDisplay(
   for (const ctx of contexts) {
     if (!ctx) continue
 
-    if (ctx.currency_symbol && ctx.currency_symbol.trim() !== "") {
-      return ctx.currency_symbol
-    }
-
-    if (ctx.currency_code && ctx.currency_code.trim() !== "") {
-      return ctx.currency_code
+    const code = pickCurrencyCode(ctx)
+    const stored = ctx.currency_symbol?.trim()
+    if (code || stored) {
+      return normalizeCurrencySymbol(stored, code)
     }
   }
 
-  return getCurrencySymbol(DEFAULT_PLATFORM_CURRENCY_CODE) || DEFAULT_PLATFORM_CURRENCY_CODE
+  return normalizeCurrencySymbol(null, DEFAULT_PLATFORM_CURRENCY_CODE)
 }
+
+export {
+  isCorruptedGhsSymbol,
+  MOJIBAKE_GHS_CEDI,
+  normalizeCurrencySymbol,
+  resolveDocumentCurrencySymbol,
+} from "./normalizeCurrencySymbol"

@@ -2,6 +2,7 @@ import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
 import { formatMoneyForContext } from "../formatCurrency"
 import { resolveCurrencyCode, resolveCurrencyDisplay } from "../resolveCurrencyDisplay"
+import { MOJIBAKE_GHS_CEDI } from "../normalizeCurrencySymbol"
 
 describe("resolveCurrencyCode", () => {
   it("uses document currency_code when present", () => {
@@ -63,6 +64,16 @@ describe("formatMoneyForContext (proforma totals)", () => {
 describe("resolveCurrencyDisplay (invoice/quote pattern unchanged)", () => {
   it("still falls back to GHS symbol when currency is missing", () => {
     expect(resolveCurrencyDisplay({ currency_code: null })).toBe("₵")
+  })
+
+  it("repairs corrupted stored GHS symbol using currency_code", () => {
+    expect(
+      resolveCurrencyDisplay({ currency_code: "GHS", currency_symbol: MOJIBAKE_GHS_CEDI })
+    ).toBe("₵")
+  })
+
+  it("maps ISO code to symbol when stored symbol is absent", () => {
+    expect(resolveCurrencyDisplay({ currency_code: "USD" })).toBe("$")
   })
 
   it("formatMoney without context still shows em dash for missing currency", () => {

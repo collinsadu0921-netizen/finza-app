@@ -7,6 +7,7 @@
  */
 
 import { formatMoney, formatMoneyWithCode, formatMoneyWithSymbol } from "../money"
+import { MOJIBAKE_GHS_CEDI } from "../currency/normalizeCurrencySymbol"
 
 /**
  * Validates money format structure with regex and exact value
@@ -241,6 +242,12 @@ describe("formatMoneyWithSymbol", () => {
     expect(
       formatMoneyWithSymbol(null, "$", { missingPlaceholder: "N/A" })
     ).toBe("N/A")
+  })
+
+  it("repairs corrupted GHS symbol passed as custom symbol", () => {
+    const result = formatMoneyWithSymbol(20, MOJIBAKE_GHS_CEDI)
+    expect(result).toBe("₵20.00")
+    expect(result).not.toContain(MOJIBAKE_GHS_CEDI)
   })
 })
 
