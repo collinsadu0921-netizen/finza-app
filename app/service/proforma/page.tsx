@@ -9,6 +9,7 @@ import { formatMoneyForContext } from "@/lib/currency/formatCurrency"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { canEditProforma } from "@/lib/documentState"
 
 type ProformaInvoice = {
   id: string
@@ -303,7 +304,25 @@ export default function ProformaListPage() {
                         <StatusBadge status={pf.status} />
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                        <span className="text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors">View →</span>
+                        <div className="flex items-center justify-end gap-3">
+                          {!readOnly && canEditProforma(pf.status) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                guardWriteAction(() =>
+                                  router.push(`/service/proforma/${pf.id}/edit`)
+                                )
+                              }}
+                              className="text-sm font-medium text-blue-700 hover:underline"
+                            >
+                              {pf.status === "sent" ? "Edit (Revision)" : "Edit"}
+                            </button>
+                          )}
+                          <span className="text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors">
+                            View →
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   ))}

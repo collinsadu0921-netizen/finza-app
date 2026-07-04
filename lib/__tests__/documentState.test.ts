@@ -1,9 +1,11 @@
 import {
   type EstimateStatus,
+  type ProformaStatus,
   ESTIMATE_ACTIONS,
   ESTIMATE_STATES,
   ESTIMATE_TRANSITIONS,
   canEditEstimate,
+  canEditProforma,
   isEstimateActionAllowed,
   isValidEstimateTransition,
   shouldCreateRevision,
@@ -31,5 +33,22 @@ describe("documentState — estimates", () => {
   it("allows duplicate action on rejected (parity with expired)", () => {
     expect(isEstimateActionAllowed("rejected", "duplicate")).toBe(true)
     expect(isEstimateActionAllowed("rejected", "edit")).toBe(false)
+  })
+})
+
+describe("documentState — proformas", () => {
+  it("allows edit for draft and sent only", () => {
+    expect(canEditProforma("draft")).toBe(true)
+    expect(canEditProforma("sent")).toBe(true)
+    expect(canEditProforma("accepted" as ProformaStatus)).toBe(false)
+    expect(canEditProforma("converted" as ProformaStatus)).toBe(false)
+    expect(canEditProforma("cancelled" as ProformaStatus)).toBe(false)
+    expect(canEditProforma("rejected" as ProformaStatus)).toBe(false)
+  })
+
+  it("creates revision only when editing sent proforma", () => {
+    expect(shouldCreateRevision("proforma", "draft")).toBe(false)
+    expect(shouldCreateRevision("proforma", "sent")).toBe(true)
+    expect(shouldCreateRevision("proforma", "accepted")).toBe(false)
   })
 })

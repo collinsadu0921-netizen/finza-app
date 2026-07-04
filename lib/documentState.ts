@@ -94,6 +94,27 @@ export const ORDER_EXECUTION_TRANSITIONS = {
 } as const
 
 // ============================================================================
+// PROFORMA STATES
+// ============================================================================
+
+export type ProformaStatus =
+  | "draft"
+  | "sent"
+  | "accepted"
+  | "rejected"
+  | "cancelled"
+  | "converted"
+
+export const PROFORMA_STATES = {
+  draft: "draft",
+  sent: "sent",
+  accepted: "accepted",
+  rejected: "rejected",
+  cancelled: "cancelled",
+  converted: "converted",
+} as const
+
+// ============================================================================
 // INVOICE STATES (STRICT - IMMUTABLE AFTER ISSUED)
 // ============================================================================
 
@@ -233,11 +254,16 @@ export function canEditInvoice(status: InvoiceStatus): boolean {
   return status === "draft" // Invoices are immutable after issued
 }
 
+/** Draft: direct edit. Sent: creates a new draft revision (original sent row unchanged). */
+export function canEditProforma(status: ProformaStatus): boolean {
+  return status === "draft" || status === "sent"
+}
+
 /**
  * Check if editing should create a revision (sent/issued documents)
  */
 export function shouldCreateRevision(
-  documentType: "estimate" | "order" | "invoice",
+  documentType: "estimate" | "order" | "invoice" | "proforma",
   status: string,
   executionStatus?: string | null
 ): boolean {
@@ -246,6 +272,9 @@ export function shouldCreateRevision(
   }
   if (documentType === "estimate") {
     return status === "sent" // Editing sent estimate creates revision
+  }
+  if (documentType === "proforma") {
+    return status === "sent" // Editing sent proforma creates revision
   }
   if (documentType === "order") {
     // For orders, check both commercial and execution state

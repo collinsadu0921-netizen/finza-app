@@ -524,7 +524,8 @@ function EstimateEditPageContent() {
         throw new Error(data.error || "Failed to update quote")
       }
 
-      router.push(`/service/estimates/${estimateId}/view`)
+      const nextEstimateId = data.estimateId || data.estimate?.id || estimateId
+      router.push(`/service/estimates/${nextEstimateId}/view`)
     } catch (err: any) {
       setError(err.message || "Failed to update quote")
       setSaving(false)

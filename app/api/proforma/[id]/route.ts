@@ -11,6 +11,7 @@ import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxRe
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
 import { createAuditLog } from "@/lib/auditLog"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { canEditProforma, shouldCreateRevision } from "@/lib/documentState"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 
 export async function GET(
@@ -91,9 +92,30 @@ export async function GET(
       console.error("Error fetching proforma invoice items:", itemsError)
     }
 
+    let pendingRevisionId: string | null = null
+    if (
+      proforma.status === "sent" &&
+      proforma.proforma_number &&
+      proforma.revision_number != null
+    ) {
+      const nextRevisionNumber = (proforma.revision_number || 1) + 1
+      const { data: pendingRevision } = await supabase
+        .from("proforma_invoices")
+        .select("id")
+        .eq("business_id", scope.businessId)
+        .eq("proforma_number", proforma.proforma_number)
+        .eq("revision_number", nextRevisionNumber)
+        .eq("supersedes_id", proformaId)
+        .eq("status", "draft")
+        .is("deleted_at", null)
+        .maybeSingle()
+      pendingRevisionId = pendingRevision?.id ?? null
+    }
+
     return NextResponse.json({
       proforma,
       items: items || [],
+      pending_revision_id: pendingRevisionId,
     })
   } catch (error: any) {
     console.error("Error fetching proforma invoice:", error)
@@ -148,9 +170,10 @@ export async function PATCH(
 
     const { data: existingProforma } = await supabase
       .from("proforma_invoices")
-      .select("id, business_id, status, apply_taxes")
+      .select("id, business_id, status, apply_taxes, revision_number, proforma_number")
       .eq("id", proformaId)
       .eq("business_id", scope.businessId)
+      .is("deleted_at", null)
       .single()
 
     if (!existingProforma) {
@@ -160,12 +183,16 @@ export async function PATCH(
       )
     }
 
-    if (existingProforma.status !== "draft") {
+    if (!canEditProforma(existingProforma.status as any)) {
       return NextResponse.json(
-        { error: "Only draft proformas can be edited" },
+        {
+          error: `Cannot edit proforma with status "${existingProforma.status}". Only draft and sent proformas can be edited.`,
+        },
         { status: 400 }
       )
     }
+
+    const shouldCreateNewRevision = shouldCreateRevision("proforma", existingProforma.status)
 
     const {
       business_id: _bodyBusinessId,
@@ -278,32 +305,166 @@ export async function PATCH(
     if (footer_message !== undefined) updateData.footer_message = footer_message || null
     if (apply_taxes !== undefined) updateData.apply_taxes = apply_taxes
 
-    const { data: updatedProforma, error: updateError } = await supabase
-      .from("proforma_invoices")
-      .update(updateData)
-      .eq("id", proformaId)
-      .select()
-      .single()
+    let finalProformaId = proformaId
+    let finalProforma: Record<string, unknown> | null = null
+    let createdNewRevision = false
+    let reusedExistingRevision = false
 
-    if (updateError) {
-      console.error("Error updating proforma invoice:", updateError)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Proforma invoice could not be updated. Please check all fields and try again.",
-          code: updateError.code,
-          details: { message: updateError.message },
-        },
-        { status: 500 }
-      )
+    if (shouldCreateNewRevision) {
+      const { data: originalProforma, error: origError } = await supabase
+        .from("proforma_invoices")
+        .select("*")
+        .eq("id", proformaId)
+        .eq("business_id", scope.businessId)
+        .is("deleted_at", null)
+        .single()
+
+      if (origError || !originalProforma) {
+        return NextResponse.json(
+          { error: "Original proforma invoice not found" },
+          { status: 404 }
+        )
+      }
+
+      const nextRevisionNumber = (originalProforma.revision_number || 1) + 1
+
+      const { data: existingDraftRevision } = await supabase
+        .from("proforma_invoices")
+        .select("*")
+        .eq("business_id", scope.businessId)
+        .eq("proforma_number", originalProforma.proforma_number)
+        .eq("revision_number", nextRevisionNumber)
+        .eq("supersedes_id", proformaId)
+        .eq("status", "draft")
+        .is("deleted_at", null)
+        .maybeSingle()
+
+      if (existingDraftRevision) {
+        reusedExistingRevision = true
+        finalProformaId = existingDraftRevision.id
+
+        const { data: updatedRevision, error: reuseUpdateError } = await supabase
+          .from("proforma_invoices")
+          .update(updateData)
+          .eq("id", finalProformaId)
+          .eq("business_id", scope.businessId)
+          .select()
+          .single()
+
+        if (reuseUpdateError || !updatedRevision) {
+          console.error("Error updating existing proforma revision:", reuseUpdateError)
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                reuseUpdateError?.message ||
+                "Failed to update existing proforma revision draft",
+            },
+            { status: 500 }
+          )
+        }
+
+        finalProforma = updatedRevision
+      } else {
+      const { data: newRevision, error: revisionError } = await supabase
+        .from("proforma_invoices")
+        .insert({
+          business_id: scope.businessId,
+          customer_id:
+            customer_id !== undefined ? customer_id : originalProforma.customer_id,
+          proforma_number: originalProforma.proforma_number,
+          status: "draft",
+          revision_number: nextRevisionNumber,
+          supersedes_id: proformaId,
+          issue_date:
+            issue_date !== undefined ? issue_date : originalProforma.issue_date,
+          validity_date:
+            validity_date !== undefined
+              ? validity_date || null
+              : originalProforma.validity_date,
+          subtotal: updateData.subtotal ?? originalProforma.subtotal,
+          total_tax: updateData.total_tax ?? originalProforma.total_tax,
+          total: updateData.total ?? originalProforma.total,
+          nhil: updateData.nhil ?? originalProforma.nhil,
+          getfund: updateData.getfund ?? originalProforma.getfund,
+          covid: updateData.covid ?? originalProforma.covid,
+          vat: updateData.vat ?? originalProforma.vat,
+          currency_code: originalProforma.currency_code,
+          currency_symbol: originalProforma.currency_symbol,
+          payment_terms:
+            payment_terms !== undefined
+              ? payment_terms || null
+              : originalProforma.payment_terms,
+          notes: notes !== undefined ? notes || null : originalProforma.notes,
+          footer_message:
+            footer_message !== undefined
+              ? footer_message || null
+              : originalProforma.footer_message,
+          apply_taxes:
+            apply_taxes !== undefined ? apply_taxes : originalProforma.apply_taxes,
+          public_token: null,
+          tax_lines: updateData.tax_lines ?? originalProforma.tax_lines,
+          tax_engine_code: updateData.tax_engine_code ?? originalProforma.tax_engine_code,
+          tax_jurisdiction:
+            updateData.tax_jurisdiction ?? originalProforma.tax_jurisdiction,
+          tax_engine_effective_from:
+            updateData.tax_engine_effective_from ??
+            originalProforma.tax_engine_effective_from,
+          source_estimate_id: originalProforma.source_estimate_id,
+          converted_invoice_id: null,
+          sent_at: null,
+          accepted_at: null,
+        })
+        .select()
+        .single()
+
+      if (revisionError || !newRevision) {
+        console.error("Error creating proforma revision:", revisionError)
+        return NextResponse.json(
+          {
+            success: false,
+            error: revisionError?.message || "Failed to create proforma revision",
+          },
+          { status: 500 }
+        )
+      }
+
+      finalProformaId = newRevision.id
+      finalProforma = newRevision
+      createdNewRevision = true
+      }
+    } else {
+      const { data: updatedProforma, error: updateError } = await supabase
+        .from("proforma_invoices")
+        .update(updateData)
+        .eq("id", proformaId)
+        .select()
+        .single()
+
+      if (updateError) {
+        console.error("Error updating proforma invoice:", updateError)
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Proforma invoice could not be updated. Please check all fields and try again.",
+            code: updateError.code,
+            details: { message: updateError.message },
+          },
+          { status: 500 }
+        )
+      }
+
+      finalProforma = updatedProforma
     }
 
     // Replace line items if provided
     if (items && items.length > 0) {
-      await supabase
-        .from("proforma_invoice_items")
-        .delete()
-        .eq("proforma_invoice_id", proformaId)
+      if (!shouldCreateNewRevision || reusedExistingRevision) {
+        await supabase
+          .from("proforma_invoice_items")
+          .delete()
+          .eq("proforma_invoice_id", finalProformaId)
+      }
 
       const validProductServiceIds = await resolveValidProductServiceIds(supabase, items)
 
@@ -313,7 +474,7 @@ export async function PATCH(
           : new Set<string>()
 
       const proformaItems = mapProformaItemsForInsert(
-        proformaId,
+        finalProformaId,
         items,
         validProductServiceIds,
         validMaterialIds
@@ -325,6 +486,19 @@ export async function PATCH(
 
       if (itemsError) {
         console.error("Error updating proforma invoice items:", itemsError)
+
+        if (createdNewRevision && finalProformaId !== proformaId) {
+          await supabase
+            .from("proforma_invoice_items")
+            .delete()
+            .eq("proforma_invoice_id", finalProformaId)
+          await supabase
+            .from("proforma_invoices")
+            .delete()
+            .eq("id", finalProformaId)
+            .eq("business_id", scope.businessId)
+        }
+
         return NextResponse.json(
           {
             success: false,
@@ -341,17 +515,22 @@ export async function PATCH(
     await createAuditLog({
       businessId: scope.businessId,
       userId: user?.id || null,
-      actionType: "proforma.updated",
+      actionType: createdNewRevision ? "proforma.revision_created" : "proforma.updated",
       entityType: "proforma_invoice",
-      entityId: proformaId,
+      entityId: finalProformaId,
       oldValues: existingProforma,
-      newValues: updatedProforma,
+      newValues: finalProforma,
+      description: createdNewRevision
+        ? `Created revision for proforma ${existingProforma.proforma_number || proformaId}`
+        : undefined,
       request,
     })
 
     return NextResponse.json({
       success: true,
-      proforma: updatedProforma,
+      proforma: finalProforma,
+      isRevision: createdNewRevision,
+      reusedExistingRevision,
     })
   } catch (error: any) {
     console.error("Error updating proforma invoice:", error)

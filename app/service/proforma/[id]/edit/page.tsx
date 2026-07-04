@@ -7,6 +7,7 @@ import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { formatMoney } from "@/lib/money"
 import { resolveCurrencyCode } from "@/lib/currency/resolveCurrencyDisplay"
+import { canEditProforma } from "@/lib/documentState"
 import type { TaxResult } from "@/lib/taxEngine/types"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { MenuSelect } from "@/components/ui/MenuSelect"
@@ -95,6 +96,7 @@ function ProformaEditPageContent() {
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
   const [proformaDocumentCurrency, setProformaDocumentCurrency] = useState<string | null>(null)
+  const [proformaStatus, setProformaStatus] = useState<string>("draft")
 
   // Create customer modal state
   const [showCustomerModal, setShowCustomerModal] = useState(false)
@@ -162,13 +164,27 @@ function ProformaEditPageContent() {
 
       if (!proformaData) throw new Error("Proforma invoice not found")
 
+      if (
+        proformaData.status === "sent" &&
+        responseData.pending_revision_id &&
+        responseData.pending_revision_id !== proformaId
+      ) {
+        const qs = resolvedForFetch
+          ? `?business_id=${encodeURIComponent(resolvedForFetch)}`
+          : ""
+        router.replace(`/service/proforma/${responseData.pending_revision_id}/edit${qs}`)
+        return
+      }
+
       setBusinessId(proformaData.business_id)
 
-      // Only allow editing draft proformas
-      if (proformaData.status !== "draft") {
+      // Allow editing draft and sent proformas (sent creates revision)
+      if (!canEditProforma(proformaData.status)) {
         router.replace(`/service/proforma/${proformaId}/view`)
         return
       }
+
+      setProformaStatus(proformaData.status || "draft")
 
       setSelectedCustomerId(proformaData.customer_id || "")
       setIssueDate(proformaData.issue_date || new Date().toISOString().split("T")[0])
@@ -487,7 +503,8 @@ function ProformaEditPageContent() {
         throw new Error(data.error || data.message || "Failed to update proforma invoice")
       }
 
-      router.push(`/service/proforma/${proformaId}/view`)
+      const nextId = data.proforma?.id || proformaId
+      router.push(`/service/proforma/${nextId}/view`)
     } catch (err: any) {
       setError(err.message || "Failed to update proforma invoice")
       setSaving(false)
@@ -552,6 +569,12 @@ function ProformaEditPageContent() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div className="text-sm text-red-800">{error}</div>
+          </div>
+        )}
+
+        {proformaStatus === "sent" && (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Editing a sent proforma creates a new draft revision. The original sent version stays unchanged until you send the revision.
           </div>
         )}
 

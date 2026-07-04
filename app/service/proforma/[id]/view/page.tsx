@@ -36,6 +36,8 @@ type ProformaInvoice = {
   currency_symbol: string | null
   converted_invoice_id: string | null
   public_token: string | null
+  revision_number?: number
+  supersedes_id?: string | null
   client_name_signed: string | null
   client_id_type: string | null
   client_id_number: string | null
@@ -88,6 +90,7 @@ export default function ProformaViewPage() {
   const [error, setError] = useState("")
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [pendingRevisionId, setPendingRevisionId] = useState<string | null>(null)
 
   // Send / share modal
   const [showSendModal, setShowSendModal] = useState(false)
@@ -125,6 +128,7 @@ export default function ProformaViewPage() {
       if (!data.proforma) throw new Error("Proforma data is missing from the response")
       setProforma(data.proforma)
       setItems(data.items || [])
+      setPendingRevisionId(data.pending_revision_id ?? null)
     } catch (err: any) {
       setError(err.message || "Failed to load proforma invoice")
     } finally {
@@ -439,6 +443,7 @@ export default function ProformaViewPage() {
                 {proforma.proforma_number && (
                   <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-full text-sm font-mono font-medium">
                     {proforma.proforma_number}
+                    {(proforma.revision_number ?? 1) > 1 ? ` (rev ${proforma.revision_number})` : ""}
                   </span>
                 )}
               </div>
@@ -446,6 +451,15 @@ export default function ProformaViewPage() {
                 <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_STYLES[proforma.status] || STATUS_STYLES.draft}`}>
                   {proforma.status.charAt(0).toUpperCase() + proforma.status.slice(1)}
                 </span>
+                {proforma.supersedes_id && (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/service/proforma/${proforma.supersedes_id}/view`)}
+                    className="text-xs font-medium text-blue-700 hover:underline"
+                  >
+                    Previous revision
+                  </button>
+                )}
                 {proforma.status === "sent" && (
                   <span className="text-xs text-blue-600">Awaiting client response</span>
                 )}
@@ -498,6 +512,16 @@ export default function ProformaViewPage() {
               {/* SENT */}
               {!readOnly && proforma.status === "sent" && (
                 <>
+                  <button
+                    onClick={() =>
+                      router.push(
+                        `/service/proforma/${pendingRevisionId || proformaId}/edit`
+                      )
+                    }
+                    className="px-4 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors"
+                  >
+                    {pendingRevisionId ? "Continue Revision" : "Edit (Revision)"}
+                  </button>
                   <button
                     onClick={openSendModal}
                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg hover:bg-slate-700 transition-colors"
