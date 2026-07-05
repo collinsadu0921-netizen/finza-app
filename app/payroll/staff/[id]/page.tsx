@@ -22,6 +22,10 @@ type Staff = {
   tin_number: string | null
   start_date: string
   status: string
+  is_tax_resident?: boolean
+  is_pensionable?: boolean
+  gra_position_code?: string | null
+  secondary_employment?: boolean
 }
 
 type Allowance = {
@@ -497,6 +501,27 @@ export default function StaffViewPage() {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">TIN Number</p>
                   <p className="text-gray-900 dark:text-white">{staff.tin_number || "—"}</p>
+                </div>
+                <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ghana payroll (PAYE / SSNIT)</p>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-gray-500 dark:text-gray-400">Tax resident</dt>
+                      <dd className="text-gray-900 dark:text-white">{staff.is_tax_resident !== false ? "Yes" : "No"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-gray-500 dark:text-gray-400">Pensionable</dt>
+                      <dd className="text-gray-900 dark:text-white">{staff.is_pensionable !== false ? "Yes" : "No"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-gray-500 dark:text-gray-400">GRA position code</dt>
+                      <dd className="text-gray-900 dark:text-white">{staff.gra_position_code || "—"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-gray-500 dark:text-gray-400">Secondary employment</dt>
+                      <dd className="text-gray-900 dark:text-white">{staff.secondary_employment === true ? "Yes" : "No"}</dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
             </div>

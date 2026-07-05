@@ -1582,6 +1582,22 @@ export default function PayrollRunViewPage() {
                     type="button"
                     onClick={() =>
                       downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye`,
+                        "GRA DT 107A PAYE CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 sm:text-center sm:col-span-2"
+                  >
+                    GRA DT 107A PAYE CSV
+                  </button>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 -mt-1">
+                    Uses GRA DT 107A upload column layout. Requires TIN and GRA position code on each employee snapshot.
+                    Verify before filing.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
                         `/api/payroll/runs/${runId}/exports/pension-tier1`,
                         "Tier 1 CSV downloaded"
                       )
