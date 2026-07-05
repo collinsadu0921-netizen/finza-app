@@ -317,7 +317,7 @@ export async function GET(request: NextRequest) {
 
     const pdfBuffer = Buffer.concat(chunks)
     return pdfBuffer
-    })
+    })()
 
     // Generate filename
     const periodLabelForFile = periodStart 
