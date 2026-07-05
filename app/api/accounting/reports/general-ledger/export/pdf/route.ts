@@ -5,6 +5,7 @@ import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/account
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { resolveGeneralLedgerAccount } from "@/lib/accounting/resolveGeneralLedgerAccount"
+import { withPdfKitBundledFontsAsync } from "@/lib/pdf/createPdfKitDocument"
 
 /**
  * GET /api/accounting/reports/general-ledger/export/pdf
@@ -201,6 +202,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const pdfBuffer = await withPdfKitBundledFontsAsync(async () => {
     // Generate PDF
     const PDFDocument = (await import("pdfkit")).default
     const doc = new PDFDocument({ margin: 50 })
@@ -316,6 +318,8 @@ export async function GET(request: NextRequest) {
     })
 
     const pdfBuffer = Buffer.concat(chunks)
+    return pdfBuffer
+    })
 
     // Generate filename
     const periodLabelForFile = periodStart 
