@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
+import { GRA_POSITION_CODES } from "@/lib/payroll/staffTaxProfile"
 
 type Staff = {
   id: string
@@ -19,6 +20,10 @@ type Staff = {
   tin_number: string | null
   start_date: string
   status: string
+  is_tax_resident?: boolean
+  is_pensionable?: boolean
+  gra_position_code?: string | null
+  secondary_employment?: boolean
 }
 
 export default function EditStaffPage() {
@@ -47,6 +52,10 @@ export default function EditStaffPage() {
     tin_number: "",
     start_date: "",
     status: "active",
+    is_tax_resident: true,
+    is_pensionable: true,
+    gra_position_code: "" as string,
+    secondary_employment: false,
   })
 
   useEffect(() => {
@@ -75,6 +84,10 @@ export default function EditStaffPage() {
           tin_number: data.staff.tin_number || "",
           start_date: data.staff.start_date || "",
           status: data.staff.status || "active",
+          is_tax_resident: data.staff.is_tax_resident !== false,
+          is_pensionable: data.staff.is_pensionable !== false,
+          gra_position_code: data.staff.gra_position_code || "",
+          secondary_employment: data.staff.secondary_employment === true,
         })
       } else {
         setError(data.error || "Failed to load staff")
@@ -110,6 +123,10 @@ export default function EditStaffPage() {
           tin_number: formData.tin_number.trim() || null,
           start_date: formData.start_date,
           status: formData.status,
+          is_tax_resident: formData.is_tax_resident,
+          is_pensionable: formData.is_pensionable,
+          gra_position_code: formData.gra_position_code.trim() || null,
+          secondary_employment: formData.secondary_employment,
         }),
       })
 
@@ -325,6 +342,59 @@ export default function EditStaffPage() {
                   onChange={(e) => setFormData({ ...formData, tin_number: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
+              </div>
+
+              <div className="md:col-span-2 border-t border-gray-200 dark:border-gray-600 pt-4 mt-2">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">Ghana payroll (PAYE / SSNIT)</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_tax_resident}
+                      onChange={(e) => setFormData({ ...formData, is_tax_resident: e.target.checked })}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Tax resident (Ghana PAYE)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_pensionable}
+                      onChange={(e) => setFormData({ ...formData, is_pensionable: e.target.checked })}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Pensionable (SSNIT)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer md:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={formData.secondary_employment}
+                      onChange={(e) => setFormData({ ...formData, secondary_employment: e.target.checked })}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Secondary employment</span>
+                  </label>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      GRA position code (optional)
+                    </label>
+                    <select
+                      value={formData.gra_position_code}
+                      onChange={(e) => setFormData({ ...formData, gra_position_code: e.target.value })}
+                      className="w-full max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="">Not set</option>
+                      {GRA_POSITION_CODES.map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      For GRA PAYE schedules. Job title stays in Position above.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div>
