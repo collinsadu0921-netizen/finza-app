@@ -211,7 +211,17 @@ export async function GET(request: NextRequest) {
       chunks.push(chunk)
     })
 
-    // Title
+    const addFooter = () => {
+      const pageHeight = doc.page.height
+      doc.fontSize(8).font("Helvetica")
+      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
+      doc.text("FINZA — Read-only report", 50, pageHeight - 30, {
+        width: doc.page.width - 100,
+        align: "right",
+      })
+    }
+
+    // Register footers manually before page breaks; pageAdded + fillAndStroke can overflow pdfkit stack.
     doc.fontSize(18).font("Helvetica-Bold").text("General Ledger Report", { align: "center" })
     doc.moveDown(0.5)
 
@@ -243,6 +253,7 @@ export async function GET(request: NextRequest) {
       for (const line of ledgerLines) {
         x = 50
         if (y + rowHeight > doc.page.height - 50) {
+          addFooter()
           doc.addPage()
           y = 50
         }
@@ -273,6 +284,7 @@ export async function GET(request: NextRequest) {
       : 0
 
     if (y + rowHeight > doc.page.height - 50) {
+      addFooter()
       doc.addPage()
       y = 50
     }
@@ -291,19 +303,7 @@ export async function GET(request: NextRequest) {
     doc.rect(x, y, columnWidths[4], rowHeight).fillAndStroke("#F0F0F0", "#000000")
     doc.text(formatNumeric(finalBalance), x + 5, y + 7, { width: columnWidths[4] - 10, align: "right" })
 
-    // Footer on each page
-    doc.on("pageAdded", () => {
-      const pageHeight = doc.page.height
-      doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-      doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
-    })
-
-    // Footer on current page
-    const pageHeight = doc.page.height
-    doc.fontSize(8).font("Helvetica")
-    doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-    doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
+    addFooter()
 
     // Finalize PDF
     doc.end()
