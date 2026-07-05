@@ -84,10 +84,28 @@ export async function GET(
       console.error("Error fetching deductions:", deductionsError)
     }
 
+    const { data: paymentMethods, error: paymentMethodsError } = await supabase
+      .from("staff_payment_methods")
+      .select("*")
+      .eq("staff_id", staffId)
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: false })
+
+    if (paymentMethodsError) {
+      console.error("Error fetching payment methods:", paymentMethodsError)
+    }
+
+    const pmList = paymentMethods || []
+    const default_payment_method = pmList.find((m) => m.is_default) ?? null
+
     return NextResponse.json({
       staff,
       allowances: allowances || [],
       deductions: deductions || [],
+      payment_methods: pmList,
+      default_payment_method,
     })
   } catch (error: any) {
     console.error("Error fetching staff:", error)

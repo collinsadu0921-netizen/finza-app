@@ -40,6 +40,61 @@ type Deduction = {
   description: string | null
 }
 
+type StaffPaymentMethod = {
+  id: string
+  method_type: string
+  provider_name: string | null
+  bank_name: string | null
+  bank_code: string | null
+  branch_name: string | null
+  account_number: string | null
+  account_name: string | null
+  momo_provider: string | null
+  momo_number: string | null
+  is_default: boolean
+  is_verified: boolean
+  verification_status: string
+}
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  bank: "Bank transfer",
+  momo: "Mobile money",
+  cash: "Cash",
+}
+
+function emptyPaymentMethodForm() {
+  return {
+    method_type: "bank" as "bank" | "momo" | "cash",
+    provider_name: "",
+    bank_name: "",
+    bank_code: "",
+    branch_name: "",
+    account_number: "",
+    account_name: "",
+    momo_provider: "",
+    momo_number: "",
+    is_default: false,
+  }
+}
+
+function MiniBadge({
+  label,
+  tone = "neutral",
+}: {
+  label: string
+  tone?: "neutral" | "blue"
+}) {
+  const tones = {
+    neutral: "bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100",
+    blue: "bg-blue-100 dark:bg-blue-900/50 text-blue-900 dark:text-blue-200",
+  } as const
+  return (
+    <span className={`text-[10px] px-2 py-0.5 rounded-full mr-1 mb-1 inline-block ${tones[tone]}`}>
+      {label}
+    </span>
+  )
+}
+
 export default function StaffViewPage() {
   const router = useRouter()
   const payrollBase = usePayrollBasePath()
@@ -53,11 +108,14 @@ export default function StaffViewPage() {
   const [staff, setStaff] = useState<Staff | null>(null)
   const [allowances, setAllowances] = useState<Allowance[]>([])
   const [deductions, setDeductions] = useState<Deduction[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<StaffPaymentMethod[]>([])
   const [error, setError] = useState("")
   const [showAllowanceModal, setShowAllowanceModal] = useState(false)
   const [showDeductionModal, setShowDeductionModal] = useState(false)
+  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false)
   const [editingAllowance, setEditingAllowance] = useState<Allowance | null>(null)
   const [editingDeduction, setEditingDeduction] = useState<Deduction | null>(null)
+  const [editingPaymentMethod, setEditingPaymentMethod] = useState<StaffPaymentMethod | null>(null)
 
   const [allowanceForm, setAllowanceForm] = useState({
     type: "",
@@ -73,6 +131,8 @@ export default function StaffViewPage() {
     description: "",
   })
 
+  const [paymentMethodForm, setPaymentMethodForm] = useState(emptyPaymentMethodForm())
+
   useEffect(() => {
     loadStaff()
   }, [staffId])
@@ -87,6 +147,7 @@ export default function StaffViewPage() {
         setStaff(data.staff)
         setAllowances(data.allowances || [])
         setDeductions(data.deductions || [])
+        setPaymentMethods(data.payment_methods || [])
       } else {
         setError(data.error || "Failed to load staff")
       }
@@ -237,6 +298,113 @@ export default function StaffViewPage() {
     setShowDeductionModal(true)
   }
 
+  const openAddPaymentMethod = () => {
+    setEditingPaymentMethod(null)
+    setPaymentMethodForm(emptyPaymentMethodForm())
+    setShowPaymentMethodModal(true)
+  }
+
+  const openEditPaymentMethod = (m: StaffPaymentMethod) => {
+    setEditingPaymentMethod(m)
+    const mtKnown =
+      m.method_type === "bank" || m.method_type === "momo" || m.method_type === "cash"
+        ? m.method_type
+        : "bank"
+    setPaymentMethodForm({
+      method_type: mtKnown,
+      provider_name: m.provider_name || "",
+      bank_name: m.bank_name || "",
+      bank_code: m.bank_code || "",
+      branch_name: m.branch_name || "",
+      account_number: m.account_number || "",
+      account_name: m.account_name || "",
+      momo_provider: m.momo_provider || "",
+      momo_number: m.momo_number || "",
+      is_default: m.is_default,
+    })
+    setShowPaymentMethodModal(true)
+  }
+
+  const handleSavePaymentMethod = async () => {
+    try {
+      const url = editingPaymentMethod
+        ? `/api/staff/${staffId}/payment-methods/${editingPaymentMethod.id}`
+        : `/api/staff/${staffId}/payment-methods`
+      const method = editingPaymentMethod ? "PATCH" : "POST"
+      const body: Record<string, unknown> = {
+        method_type: paymentMethodForm.method_type,
+        provider_name: paymentMethodForm.provider_name.trim() || null,
+        is_default: paymentMethodForm.is_default,
+      }
+      const mt = paymentMethodForm.method_type
+      if (mt === "bank") {
+        body.bank_name = paymentMethodForm.bank_name.trim() || null
+        body.bank_code = paymentMethodForm.bank_code.trim() || null
+        body.branch_name = paymentMethodForm.branch_name.trim() || null
+        body.account_number = paymentMethodForm.account_number.trim() || null
+        body.account_name = paymentMethodForm.account_name.trim() || null
+      } else if (mt === "momo") {
+        body.momo_provider = paymentMethodForm.momo_provider.trim() || null
+        body.momo_number = paymentMethodForm.momo_number.trim() || null
+        body.account_name = paymentMethodForm.account_name.trim() || null
+      }
+
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const data = await response.json()
+
+      if (response.ok) {
+        setShowPaymentMethodModal(false)
+        setEditingPaymentMethod(null)
+        setPaymentMethodForm(emptyPaymentMethodForm())
+        loadStaff()
+      } else {
+        toast.showToast(data.error || "Failed to save payment method", "error")
+      }
+    } catch (err: any) {
+      toast.showToast(err.message || "Failed to save payment method", "error")
+    }
+  }
+
+  const runSetDefaultPaymentMethod = async (id: string) => {
+    try {
+      const response = await fetch(`/api/staff/${staffId}/payment-methods/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_default: true }),
+      })
+      const data = await response.json()
+      if (response.ok) loadStaff()
+      else toast.showToast(data.error || "Failed to set default", "error")
+    } catch (err: any) {
+      toast.showToast(err.message || "Failed to set default", "error")
+    }
+  }
+
+  const handleDeletePaymentMethod = (id: string) => {
+    openConfirm({
+      title: "Remove payment method",
+      description: "This only removes the saved destination; it does not send money or change payroll history.",
+      onConfirm: () => runDeletePaymentMethod(id),
+    })
+  }
+
+  const runDeletePaymentMethod = async (id: string) => {
+    try {
+      const response = await fetch(`/api/staff/${staffId}/payment-methods/${id}`, { method: "DELETE" })
+      if (response.ok) loadStaff()
+      else {
+        const data = await response.json()
+        toast.showToast(data.error || "Failed to remove payment method", "error")
+      }
+    } catch (err: any) {
+      toast.showToast(err.message || "Failed to remove payment method", "error")
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6">
@@ -332,6 +500,97 @@ export default function StaffViewPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Payment methods */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+            <div className="flex justify-between items-start mb-4 gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Payment methods</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-3xl">
+                  Payment methods are stored for payroll planning and future salary payment workflows. Finza does not
+                  send money from this screen.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openAddPaymentMethod}
+                className="shrink-0 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+              >
+                + Add method
+              </button>
+            </div>
+            {paymentMethods.length === 0 ? (
+              <p className="text-gray-500 dark:text-gray-400 text-sm">No payment methods saved yet.</p>
+            ) : (
+              <div className="space-y-4">
+                {paymentMethods.map((m) => (
+                  <div
+                    key={m.id}
+                    className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 flex flex-col md:flex-row md:justify-between md:items-start gap-3"
+                  >
+                    <div className="space-y-1 text-sm text-gray-900 dark:text-white">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">
+                          {PAYMENT_METHOD_LABELS[m.method_type] || m.method_type}
+                        </span>
+                        {m.is_default ? <MiniBadge tone="blue" label="Default" /> : null}
+                        <MiniBadge label={`Status: ${m.verification_status}`} />
+                      </div>
+                      {m.method_type === "bank" ? (
+                        <ul className="text-gray-600 dark:text-gray-300 list-disc list-inside">
+                          {m.bank_name ? <li>Bank: {m.bank_name}</li> : null}
+                          {m.branch_name ? <li>Branch: {m.branch_name}</li> : null}
+                          {m.account_number ? <li>Account no.: {m.account_number}</li> : null}
+                          {m.account_name ? <li>Account name: {m.account_name}</li> : null}
+                          {m.bank_code ? <li>Bank code: {m.bank_code}</li> : null}
+                        </ul>
+                      ) : null}
+                      {m.method_type === "momo" ? (
+                        <ul className="text-gray-600 dark:text-gray-300 list-disc list-inside">
+                          {m.momo_provider ? <li>Provider: {m.momo_provider}</li> : null}
+                          {m.momo_number ? <li>Number: {m.momo_number}</li> : null}
+                          {m.account_name ? <li>Registered name: {m.account_name}</li> : null}
+                        </ul>
+                      ) : null}
+                      {m.method_type === "cash" ? (
+                        <p className="text-gray-600 dark:text-gray-300">
+                          Cash payment / manual handling — record payouts outside integrated transfers.
+                        </p>
+                      ) : null}
+                      {m.provider_name ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Note: {m.provider_name}</p>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2 shrink-0">
+                      {!m.is_default ? (
+                        <button
+                          type="button"
+                          onClick={() => runSetDefaultPaymentMethod(m.id)}
+                          className="text-sm px-3 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+                        >
+                          Set as default
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => openEditPaymentMethod(m)}
+                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePaymentMethod(m.id)}
+                        className="text-sm text-red-600 dark:text-red-400 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Allowances */}
@@ -606,6 +865,199 @@ export default function StaffViewPage() {
                   setShowDeductionModal(false)
                   setEditingDeduction(null)
                   setDeductionForm({ type: "", amount: "", recurring: true, description: "" })
+                }}
+                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Method Modal */}
+      {showPaymentMethodModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+              {editingPaymentMethod ? "Edit payment method" : "Add payment method"}
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              For planning only — no funds are transferred from Finza.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Method *</label>
+                <select
+                  value={paymentMethodForm.method_type}
+                  onChange={(e) => {
+                    const method_type = e.target.value as "bank" | "momo" | "cash"
+                    setPaymentMethodForm((f) => ({
+                      ...f,
+                      method_type,
+                      bank_name: method_type === "bank" ? f.bank_name : "",
+                      bank_code: method_type === "bank" ? f.bank_code : "",
+                      branch_name: method_type === "bank" ? f.branch_name : "",
+                      account_number: method_type === "bank" ? f.account_number : "",
+                      account_name: method_type === "momo" || method_type === "bank" ? f.account_name : "",
+                      momo_provider: method_type === "momo" ? f.momo_provider : "",
+                      momo_number: method_type === "momo" ? f.momo_number : "",
+                    }))
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="bank">Bank transfer</option>
+                  <option value="momo">Mobile money</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Label / note (optional)
+                </label>
+                <input
+                  value={paymentMethodForm.provider_name}
+                  onChange={(e) => setPaymentMethodForm({ ...paymentMethodForm, provider_name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  placeholder="e.g. Primary salary account"
+                />
+              </div>
+              {paymentMethodForm.method_type === "bank" ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Bank name *
+                    </label>
+                    <input
+                      value={paymentMethodForm.bank_name}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, bank_name: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Branch (optional)
+                    </label>
+                    <input
+                      value={paymentMethodForm.branch_name}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, branch_name: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Account number *
+                    </label>
+                    <input
+                      value={paymentMethodForm.account_number}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, account_number: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Account name (recommended)
+                    </label>
+                    <input
+                      value={paymentMethodForm.account_name}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, account_name: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Bank code (optional)
+                    </label>
+                    <input
+                      value={paymentMethodForm.bank_code}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, bank_code: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </>
+              ) : null}
+              {paymentMethodForm.method_type === "momo" ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Provider *
+                    </label>
+                    <input
+                      value={paymentMethodForm.momo_provider}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      placeholder="e.g. MTN, Vodafone"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      MoMo number *
+                    </label>
+                    <input
+                      value={paymentMethodForm.momo_number}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, momo_number: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Registered name (optional)
+                    </label>
+                    <input
+                      value={paymentMethodForm.account_name}
+                      onChange={(e) =>
+                        setPaymentMethodForm({ ...paymentMethodForm, account_name: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </>
+              ) : null}
+              {paymentMethodForm.method_type === "cash" ? (
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  No bank or MoMo details required. Salary can be settled manually outside integrated payouts.
+                </p>
+              ) : null}
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={paymentMethodForm.is_default}
+                  onChange={(e) =>
+                    setPaymentMethodForm({ ...paymentMethodForm, is_default: e.target.checked })
+                  }
+                  className="w-5 h-5"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Use as default for exports & planning</span>
+              </label>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleSavePaymentMethod}
+                className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPaymentMethodModal(false)
+                  setEditingPaymentMethod(null)
+                  setPaymentMethodForm(emptyPaymentMethodForm())
                 }}
                 className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
