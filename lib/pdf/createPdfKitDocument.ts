@@ -1,23 +1,33 @@
 import fs from "fs"
+import { existsSync } from "node:fs"
 import path from "path"
 
 const PDFKIT_BUNDLED_DATA_DIR = path.join(process.cwd(), "lib", "pdf", "pdfkit-data")
 
-function installPdfKitFontReadFallback(): () => void {
-  const originalReadFileSync = fs.readFileSync
-  const patchedReadFileSync = ((filePath: fs.PathOrFileDescriptor, options?: Parameters<typeof fs.readFileSync>[1]) => {
-    if (typeof filePath === "string" && filePath.endsWith(".afm")) {
-      const bundledPath = path.join(PDFKIT_BUNDLED_DATA_DIR, path.basename(filePath))
-      if (fs.existsSync(bundledPath)) {
-        return originalReadFileSync(bundledPath, options)
-      }
-    }
-    return originalReadFileSync(filePath, options)
-  }) as typeof fs.readFileSync
+// Capture before any patch; pdfkit and node:fs share this function reference.
+const nativeReadFileSync = fs.readFileSync.bind(fs)
 
-  fs.readFileSync = patchedReadFileSync
+let patchDepth = 0
+
+function installPdfKitFontReadFallback(): () => void {
+  if (patchDepth === 0) {
+    fs.readFileSync = ((filePath: fs.PathOrFileDescriptor, options?: Parameters<typeof fs.readFileSync>[1]) => {
+      if (typeof filePath === "string" && filePath.endsWith(".afm")) {
+        const bundledPath = path.join(PDFKIT_BUNDLED_DATA_DIR, path.basename(filePath))
+        if (existsSync(bundledPath)) {
+          return nativeReadFileSync(bundledPath, options)
+        }
+      }
+      return nativeReadFileSync(filePath, options)
+    }) as typeof fs.readFileSync
+  }
+
+  patchDepth += 1
   return () => {
-    fs.readFileSync = originalReadFileSync
+    patchDepth -= 1
+    if (patchDepth === 0) {
+      fs.readFileSync = nativeReadFileSync
+    }
   }
 }
 
