@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "app/api/accounting/reports/general-ledger/export/pdf/route.ts": {
-      "includeFiles": "lib/pdf/pdfkit-data/**"
-    }
-  },
   "crons": [
     {
       "path": "/api/cron/service-subscription-lifecycle",

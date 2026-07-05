@@ -5,7 +5,7 @@ import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/account
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { resolveGeneralLedgerAccount } from "@/lib/accounting/resolveGeneralLedgerAccount"
-import { withPdfKitBundledFontsAsync } from "@/lib/pdf/createPdfKitDocument"
+import { createPdfKitDocument } from "@/lib/pdf/createPdfKitDocument"
 
 /**
  * GET /api/accounting/reports/general-ledger/export/pdf
@@ -202,10 +202,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const pdfBuffer = await withPdfKitBundledFontsAsync(async () => {
-    // Generate PDF
-    const PDFDocument = (await import("pdfkit")).default
-    const doc = new PDFDocument({ margin: 50 })
+    const pdfBuffer = await (async () => {
+    const doc = await createPdfKitDocument({ margin: 50 })
 
     // Collect PDF chunks - set up listener BEFORE adding any content
     const chunks: Buffer[] = []

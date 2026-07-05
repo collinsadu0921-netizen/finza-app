@@ -18,10 +18,7 @@ const nextConfig = {
   ],
   // NFT does not trace pdfkit's dynamic fs reads; include Helvetica.afm for GL PDF export
   outputFileTracingIncludes: {
-    '/api/accounting/reports/general-ledger/export/pdf': [
-      PDFKIT_STANDARD_FONT_DATA,
-      './lib/pdf/pdfkit-data/**/*',
-    ],
+    '/api/accounting/reports/general-ledger/export/pdf': [PDFKIT_STANDARD_FONT_DATA],
   },
 }
 
