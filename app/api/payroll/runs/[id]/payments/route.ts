@@ -184,6 +184,23 @@ export async function POST(
     const reference = body.reference ? String(body.reference).trim() : null
     const notes = body.notes ? String(body.notes).trim() : null
 
+    let batchId: string | null = null
+    if (body.batch_id != null && String(body.batch_id).trim()) {
+      batchId = String(body.batch_id).trim()
+      const { data: batchRow, error: batchErr } = await supabase
+        .from("payroll_payment_batches")
+        .select("id")
+        .eq("id", batchId)
+        .eq("business_id", business.id)
+        .eq("payroll_run_id", runId)
+        .is("deleted_at", null)
+        .maybeSingle()
+
+      if (batchErr || !batchRow) {
+        return NextResponse.json({ error: "Invalid batch_id for this payroll run." }, { status: 400 })
+      }
+    }
+
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
       return NextResponse.json({ error: "payment_date must be YYYY-MM-DD" }, { status: 400 })
     }
@@ -254,6 +271,7 @@ export async function POST(
         reference: reference || null,
         notes: notes || null,
         created_by: user.id,
+        ...(batchId ? { batch_id: batchId } : {}),
       })
       .select("*")
       .single()
