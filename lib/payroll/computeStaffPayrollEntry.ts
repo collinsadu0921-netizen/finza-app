@@ -1,5 +1,6 @@
 import { calculatePayroll } from "@/lib/payrollEngine"
 import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
+import { buildGraFilingFieldsForPayrollEntry } from "@/lib/payroll/staffTaxProfile"
 
 export type StaffPayrollInput = {
   id: string
@@ -7,6 +8,11 @@ export type StaffPayrollInput = {
   basic_salary?: number | null
   employment_type?: string | null
   position?: string | null
+  tin_number?: string | null
+  is_tax_resident?: boolean | null
+  is_pensionable?: boolean | null
+  gra_position_code?: string | null
+  secondary_employment?: boolean | null
 }
 
 export type AllowanceRow = {
@@ -61,6 +67,11 @@ export type ComputedPayrollEntryRow = {
   bonus_cap_amount: number
   overtime_threshold_amount: number
   net_salary: number
+  payroll_tax_profile: Record<string, unknown>
+  filing_tin: string | null
+  filing_employee_name: string | null
+  bonus_concessional_amount: number
+  bonus_graduated_amount: number
 }
 
 function isQualifyingJuniorEmployee(staff: StaffPayrollInput): boolean {
@@ -70,15 +81,16 @@ function isQualifyingJuniorEmployee(staff: StaffPayrollInput): boolean {
 }
 
 function zeroEntry(
-  staffId: string,
+  staff: StaffPayrollInput,
   baseSnapshot: number,
   adjustmentAmount: number,
   adjustmentReason: string | null,
   exclusionReason: string | null,
   isIncluded: boolean
 ): ComputedPayrollEntryRow {
+  const filing = buildGraFilingFieldsForPayrollEntry({ staff, breakdown: null })
   return {
-    staff_id: staffId,
+    staff_id: staff.id,
     is_included: isIncluded,
     base_salary_snapshot: baseSnapshot,
     adjustment_amount: adjustmentAmount,
@@ -104,6 +116,7 @@ function zeroEntry(
     bonus_cap_amount: 0,
     overtime_threshold_amount: 0,
     net_salary: 0,
+    ...filing,
   }
 }
 
@@ -130,7 +143,7 @@ export function computeStaffPayrollEntry(
 
   if (!isIncluded) {
     return zeroEntry(
-      staff.id,
+      staff,
       baseSnapshot,
       adjustment,
       adjustmentReason,
@@ -186,6 +199,7 @@ export function computeStaffPayrollEntry(
   )
 
   const breakdown = payrollResult.complianceBreakdown
+  const filing = buildGraFilingFieldsForPayrollEntry({ staff, breakdown: breakdown ?? null })
 
   return {
     staff_id: staff.id,
@@ -214,6 +228,7 @@ export function computeStaffPayrollEntry(
     bonus_cap_amount: Number(breakdown?.bonusCapAmount ?? 0),
     overtime_threshold_amount: Number(breakdown?.overtimeThresholdAmount ?? 0),
     net_salary: payrollResult.totals.netSalary,
+    ...filing,
   }
 }
 
