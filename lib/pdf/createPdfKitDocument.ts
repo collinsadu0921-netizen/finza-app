@@ -1,24 +1,43 @@
 import fs from "fs"
-import { existsSync } from "node:fs"
+import { createRequire } from "node:module"
 import path from "path"
+
+const nodeRequire = createRequire(path.join(process.cwd(), "package.json"))
+const nativeReadFileSync = nodeRequire("fs").readFileSync as typeof fs.readFileSync
+const nativeExistsSync = nodeRequire("fs").existsSync as typeof fs.existsSync
 
 const PDFKIT_BUNDLED_DATA_DIR = path.join(process.cwd(), "lib", "pdf", "pdfkit-data")
 
-// Capture before any patch; pdfkit and node:fs share this function reference.
-const nativeReadFileSync = fs.readFileSync.bind(fs)
-
 let patchDepth = 0
+let inNativeRead = false
 
 function installPdfKitFontReadFallback(): () => void {
+  const previousReadFileSync = fs.readFileSync
+
   if (patchDepth === 0) {
     fs.readFileSync = ((filePath: fs.PathOrFileDescriptor, options?: Parameters<typeof fs.readFileSync>[1]) => {
+      if (inNativeRead) {
+        return nativeReadFileSync(filePath, options)
+      }
+
       if (typeof filePath === "string" && filePath.endsWith(".afm")) {
         const bundledPath = path.join(PDFKIT_BUNDLED_DATA_DIR, path.basename(filePath))
-        if (existsSync(bundledPath)) {
-          return nativeReadFileSync(bundledPath, options)
+        if (nativeExistsSync(bundledPath)) {
+          inNativeRead = true
+          try {
+            return nativeReadFileSync(bundledPath, options)
+          } finally {
+            inNativeRead = false
+          }
         }
       }
-      return nativeReadFileSync(filePath, options)
+
+      inNativeRead = true
+      try {
+        return nativeReadFileSync(filePath, options)
+      } finally {
+        inNativeRead = false
+      }
     }) as typeof fs.readFileSync
   }
 
@@ -26,7 +45,7 @@ function installPdfKitFontReadFallback(): () => void {
   return () => {
     patchDepth -= 1
     if (patchDepth === 0) {
-      fs.readFileSync = nativeReadFileSync
+      fs.readFileSync = previousReadFileSync
     }
   }
 }
@@ -58,4 +77,8 @@ export async function createPdfKitDocument(options?: Record<string, unknown>): P
   const pdfkitModule = await import("pdfkit")
   const PDFDocument = pdfkitModule.default ?? pdfkitModule
   return withPdfKitBundledFonts(() => new PDFDocument(options))
+}
+
+export function bundledPdfKitFontPath(name: "Helvetica" | "Helvetica-Bold"): string {
+  return path.join(PDFKIT_BUNDLED_DATA_DIR, `${name}.afm`)
 }
