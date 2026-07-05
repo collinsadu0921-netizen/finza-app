@@ -2,7 +2,7 @@
  * GET  /api/payroll/advances
  *   Returns all salary advances for the current business, enriched with:
  *   - staff name
- *   - repaid amount (based on approved/locked payroll runs since date_issued)
+ *   - repaid amount (explicitly tracked on salary_advances)
  *   - outstanding balance
  *   Also returns staff list and bank/cash accounts for the issue form.
  *
@@ -46,7 +46,7 @@ export async function GET() {
     // ── Fetch advances with staff join ────────────────────────────────────────
     const { data: advances, error: advErr } = await supabase
       .from("salary_advances")
-      .select("*, staff:staff_id(id, name, position)")
+      .select("*, staff:staff_id(id, name, position), bank_account:bank_account_id(id, name, code)")
       .eq("business_id", business.id)
       .order("date_issued", { ascending: false })
 
@@ -96,48 +96,50 @@ export async function GET() {
       })
     }
 
-    // ── Enrich each advance with repaid / outstanding ─────────────────────────
-    // Get all approved/locked run IDs for this business once
-    const { data: approvedRuns } = await supabase
-      .from("payroll_runs")
-      .select("id, payroll_month")
-      .eq("business_id", business.id)
-      .in("status", ["approved", "locked"])
+    // ── Fetch repayments scoped to current business/advances ──────────────────
+    const advanceIds = (advances as any[]).map((adv) => adv.id)
+    const { data: repayments, error: repaymentsErr } = advanceIds.length > 0
+      ? await supabase
+          .from("salary_advance_repayments")
+          .select("id, salary_advance_id, payroll_run_id, payroll_entry_id, amount, status, journal_entry_id, posted_at, created_at, payroll_run:payroll_run_id(id, payroll_month)")
+          .eq("business_id", business.id)
+          .in("salary_advance_id", advanceIds)
+          .order("created_at", { ascending: false })
+      : { data: [], error: null }
 
-    const enriched = await Promise.all(
-      (advances as any[]).map(async (adv) => {
-        let repaid = 0
+    if (repaymentsErr) {
+      return NextResponse.json({ error: repaymentsErr.message }, { status: 500 })
+    }
 
-        if (approvedRuns && approvedRuns.length > 0) {
-          // Filter runs that occurred on or after the advance date
-          const relevantRunIds = approvedRuns
-            .filter((r) => r.payroll_month >= adv.date_issued)
-            .map((r) => r.id)
+    const repaymentsByAdvanceId = new Map<string, any[]>()
+    for (const repayment of repayments || []) {
+      const key = String((repayment as any).salary_advance_id)
+      const existing = repaymentsByAdvanceId.get(key) || []
+      existing.push(repayment as any)
+      repaymentsByAdvanceId.set(key, existing)
+    }
 
-          if (relevantRunIds.length > 0) {
-            const { count } = await supabase
-              .from("payroll_entries")
-              .select("id", { count: "exact", head: true })
-              .eq("staff_id", adv.staff_id)
-              .in("payroll_run_id", relevantRunIds)
-
-            repaid = Math.min(
-              Number(adv.monthly_repayment) * (count ?? 0),
-              Number(adv.amount)
-            )
-          }
-        }
-
-        const outstanding = Math.max(0, Number(adv.amount) - repaid)
-
-        return {
-          ...adv,
-          staff_name: (adv.staff as any)?.name ?? null,
-          repaid,
-          outstanding,
-        }
-      })
-    )
+    // ── Enrich each advance with repaid / outstanding + repayment history ─────
+    const enriched = (advances as any[]).map((adv) => {
+      const repaid = Math.min(Number(adv.repaid_amount || 0), Number(adv.amount || 0))
+      const outstanding_amount = Math.max(0, Number(adv.amount || 0) - repaid)
+      const normalizedStatus = ["outstanding", "partially_repaid", "cleared", "cancelled"].includes(String(adv.status || ""))
+        ? String(adv.status)
+        : (outstanding_amount <= 0 ? "cleared" : (repaid > 0 ? "partially_repaid" : "outstanding"))
+      const advanceRepayments = repaymentsByAdvanceId.get(String(adv.id)) || []
+      return {
+        ...adv,
+        staff_name: (adv.staff as any)?.name ?? null,
+        bank_account_name: (adv.bank_account as any)?.name ?? null,
+        bank_account_code: (adv.bank_account as any)?.code ?? null,
+        repaid,
+        repaid_amount: repaid,
+        outstanding: outstanding_amount,
+        outstanding_amount,
+        status: normalizedStatus,
+        repayments: advanceRepayments,
+      }
+    })
 
     return NextResponse.json({
       advances: enriched,
@@ -180,6 +182,9 @@ export async function POST(request: NextRequest) {
     if (!monthly_repayment || Number(monthly_repayment) <= 0) return NextResponse.json({ error: "monthly_repayment must be a positive number" }, { status: 400 })
     if (!date_issued || !/^\d{4}-\d{2}-\d{2}$/.test(date_issued)) return NextResponse.json({ error: "date_issued must be YYYY-MM-DD" }, { status: 400 })
     if (!bank_account_id) return NextResponse.json({ error: "bank_account_id is required" }, { status: 400 })
+    if (Number(monthly_repayment) > Number(amount)) {
+      return NextResponse.json({ error: "monthly_repayment cannot exceed advance amount" }, { status: 400 })
+    }
 
     // Verify staff belongs to this business
     const { data: staffMember } = await supabase
@@ -195,13 +200,23 @@ export async function POST(request: NextRequest) {
     // Verify bank account belongs to this business
     const { data: bankAccount } = await supabase
       .from("accounts")
-      .select("id, name")
+      .select("id, name, code, type, sub_type")
       .eq("id", bank_account_id)
       .eq("business_id", business.id)
       .is("deleted_at", null)
       .single()
 
     if (!bankAccount) return NextResponse.json({ error: "Bank account not found" }, { status: 404 })
+    const subType = String((bankAccount as any).sub_type || "").toLowerCase()
+    const isAllowedDisbursementAccount =
+      (bankAccount as any).type === "asset" &&
+      (["cash", "bank", "momo", "mobile_money"].includes(subType) || ["1000", "1010", "1020"].includes(String((bankAccount as any).code || "")))
+    if (!isAllowedDisbursementAccount) {
+      return NextResponse.json(
+        { error: "Selected disbursement account is invalid. Choose an active cash/bank/momo asset account." },
+        { status: 400 }
+      )
+    }
 
     // Find accounting period for the advance date
     const { data: period } = await supabase
@@ -301,6 +316,8 @@ export async function POST(request: NextRequest) {
         date_issued,
         bank_account_id,
         journal_entry_id: je.id,
+        repaid_amount: 0,
+        status: "outstanding",
         notes: notes?.trim() || null,
       })
       .select()
@@ -331,14 +348,10 @@ export async function POST(request: NextRequest) {
       })
 
     if (dedError) {
-      console.error("Deduction creation warning:", dedError)
-      // Non-fatal: advance is recorded, JE is posted. Warn but don't fail.
-      return NextResponse.json({
-        success: true,
-        journal_entry_id: je.id,
-        advance,
-        warning: "Advance issued but recurring deduction could not be set up automatically: " + dedError.message,
-      })
+      console.error("Deduction creation failed:", dedError)
+      await supabase.from("salary_advances").delete().eq("id", advance.id)
+      await supabase.from("journal_entries").delete().eq("id", je.id)
+      return NextResponse.json({ error: dedError.message }, { status: 500 })
     }
 
     return NextResponse.json({ success: true, journal_entry_id: je.id, advance })
