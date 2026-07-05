@@ -4,30 +4,21 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { fetchGeneralLedgerForAccount } from "@/lib/accounting/fetchGeneralLedgerForAccount"
+import {
+  resolveGeneralLedgerAccountSelection,
+} from "@/lib/accounting/resolveGeneralLedgerAccountSelection"
+import type { GeneralLedgerAccountRow } from "@/lib/accounting/resolveGeneralLedgerAccount"
 
 /**
  * GET /api/accounting/reports/general-ledger/export/csv
- * 
- * Exports General Ledger as CSV
- * Ledger-only: Uses same get_general_ledger() function as on-screen report
- * 
- * Query Parameters:
- * - business_id (required)
- * - account_id (required)
- * - period_start (optional) - if provided, use period_start/period_end from accounting_periods
- * - start_date (optional) - if period_start not provided, use date range
- * - end_date (optional) - if period_start not provided, use date range
- * - include_metadata (optional, default 1) - if 0, export only header + data rows (no metadata)
- * 
- * Access: Admin/Owner/Accountant (read or write)
- * 
- * CSV Format:
- * - Entry Date, Journal Entry ID, Description, Reference Type, Reference ID, Line ID, Line Description, Debit, Credit, Running Balance
- * - No currency symbols
- * - UTF-8 encoding
- * 
- * Note: Uses unpaginated get_general_ledger() function to export complete dataset.
- * For large datasets (>50k rows), a warning is included in metadata but export is allowed.
+ *
+ * Exports General Ledger as CSV (ledger-only, get_general_ledger / same math as on-screen report).
+ *
+ * Single-account: business_id + account_id or account_code; period_start or start_date+end_date.
+ * Multi-account: business_id + one of preset=payroll_liabilities | account_codes= | account_code_from + account_code_to.
+ *
+ * Columns include Account Code and Account Name on every data row.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -41,12 +32,16 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
     const accountId = searchParams.get("account_id")
+    const accountCodeParam = searchParams.get("account_code")
+    const accountCodeFrom = searchParams.get("account_code_from")
+    const accountCodeTo = searchParams.get("account_code_to")
+    const accountCodes = searchParams.get("account_codes")
+    const preset = searchParams.get("preset")
     const periodStart = searchParams.get("period_start")
     const startDate = searchParams.get("start_date")
     const endDate = searchParams.get("end_date")
-    const includeMetadata = searchParams.get("include_metadata") !== "0" // Default true (1)
+    const includeMetadata = searchParams.get("include_metadata") !== "0"
 
     try {
       assertAccountingAccess(accountingUserFromRequest(request))
@@ -70,13 +65,6 @@ export async function GET(request: NextRequest) {
     }
     const resolvedBusinessId = resolved.businessId
 
-    if (!accountId) {
-      return NextResponse.json(
-        { error: "Missing required parameter: account_id" },
-        { status: 400 }
-      )
-    }
-
     const auth = await checkAccountingAuthority(
       supabase,
       user.id,
@@ -97,69 +85,12 @@ export async function GET(request: NextRequest) {
     )
     if (tierBlock) return tierBlock
 
-    // Verify account exists and belongs to business
-    const { data: account, error: accountError } = await supabase
-      .from("accounts")
-      .select("id, code, name, type")
-      .eq("id", accountId)
-      .eq("business_id", resolvedBusinessId)
-      .is("deleted_at", null)
-      .single()
-
-    if (accountError || !account) {
-      return NextResponse.json(
-        { error: "Account not found or does not belong to business" },
-        { status: 404 }
-      )
+    const periodResolved = await resolveGlExportPeriod(supabase, resolvedBusinessId, periodStart, startDate, endDate)
+    if ("error" in periodResolved) {
+      return NextResponse.json({ error: periodResolved.error }, { status: periodResolved.status })
     }
+    const { effectiveStartDate, effectiveEndDate } = periodResolved
 
-    // Determine date range: either from period or direct date range
-    let effectiveStartDate: string
-    let effectiveEndDate: string
-
-    if (periodStart) {
-      let { data: period, error: periodError } = await supabase
-        .from("accounting_periods")
-        .select("period_start, period_end")
-        .eq("business_id", resolvedBusinessId)
-        .eq("period_start", periodStart)
-        .single()
-
-      if (periodError || !period) {
-        const periodDate = periodStart.length === 7 ? `${periodStart}-01` : periodStart
-        const { error: ensureError } = await supabase.rpc("ensure_accounting_period", {
-          p_business_id: resolvedBusinessId,
-          p_date: periodDate,
-        })
-        if (ensureError) {
-          console.error("ensure_accounting_period failed:", ensureError)
-          return NextResponse.json({ error: "Accounting period could not be resolved" }, { status: 500 })
-        }
-        const refetch = await supabase
-          .from("accounting_periods")
-          .select("period_start, period_end")
-          .eq("business_id", resolvedBusinessId)
-          .eq("period_start", periodDate)
-          .single()
-        if (refetch.error || !refetch.data) {
-          return NextResponse.json({ error: "Accounting period could not be resolved" }, { status: 500 })
-        }
-        period = refetch.data
-      }
-
-      effectiveStartDate = period.period_start
-      effectiveEndDate = period.period_end
-    } else if (startDate && endDate) {
-      effectiveStartDate = startDate
-      effectiveEndDate = endDate
-    } else {
-      return NextResponse.json(
-        { error: "Either period_start or both start_date and end_date must be provided" },
-        { status: 400 }
-      )
-    }
-
-    // Validate date range (reject absurd ranges > 10 years)
     const start = new Date(effectiveStartDate)
     const end = new Date(effectiveEndDate)
     const yearsDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)
@@ -170,36 +101,79 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Use same function as on-screen report (non-paginated for export)
-    const { data: ledgerLines, error: rpcError } = await supabase.rpc("get_general_ledger", {
-      p_business_id: resolvedBusinessId,
-      p_account_id: accountId,
-      p_start_date: effectiveStartDate,
-      p_end_date: effectiveEndDate,
-    })
+    const { result: selection, error: selectionError } = await resolveGeneralLedgerAccountSelection(
+      supabase,
+      resolvedBusinessId,
+      {
+        accountId,
+        accountCode: accountCodeParam,
+        accountCodeFrom,
+        accountCodeTo,
+        accountCodes,
+        preset,
+      }
+    )
 
-    if (rpcError) {
-      console.error("Error fetching general ledger:", rpcError)
+    if (selectionError) {
+      const isMissing = selectionError.includes("Missing")
+      const notFound =
+        selectionError.includes("not found") ||
+        selectionError.includes("does not belong") ||
+        selectionError.includes("Multiple accounts match")
       return NextResponse.json(
-        { error: rpcError.message || "Failed to fetch general ledger" },
+        { error: selectionError },
+        { status: isMissing ? 400 : notFound ? 404 : 400 }
+      )
+    }
+
+    if (selection.kind === "multi") {
+      return await buildMultiAccountCsvResponse({
+        supabase,
+        businessId: resolvedBusinessId,
+        accounts: selection.accounts,
+        truncated: selection.truncated,
+        emptyReason: selection.emptyReason,
+        effectiveStartDate,
+        effectiveEndDate,
+        periodStart,
+        includeMetadata,
+      })
+    }
+
+    const account = selection.accounts[0]
+    let block: Awaited<ReturnType<typeof fetchGeneralLedgerForAccount>>
+    try {
+      block = await fetchGeneralLedgerForAccount(
+        supabase,
+        resolvedBusinessId,
+        account,
+        effectiveStartDate,
+        effectiveEndDate
+      )
+    } catch (e: unknown) {
+      console.error("Error fetching general ledger:", e)
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Failed to fetch general ledger" },
         { status: 500 }
       )
     }
 
-    // Check row count (for warning, not blocking)
-    // Note: get_general_ledger() is unpaginated, so it returns all rows for the date range
-    const rowCount = ledgerLines?.length || 0
+    const ledgerLines = block.lines
+    const rowCount = ledgerLines.length
     const hasLargeRowCount = rowCount > 50000
+    const openingBalance = block.summary.opening_balance
+    const totalDebit = block.summary.total_debit
+    const totalCredit = block.summary.total_credit
+    const finalBalance = block.totals.final_balance
 
-    // Generate CSV
     const csvRows: string[] = []
-    
-    // Metadata rows (prefixed with # if include_metadata is true)
+
     if (includeMetadata) {
       csvRows.push("# Report,General Ledger")
       csvRows.push(`# Account,${account.code} - ${account.name}`)
       csvRows.push(`# Period Start,${effectiveStartDate}`)
       csvRows.push(`# Period End,${effectiveEndDate}`)
+      csvRows.push(`# Opening Balance,${formatNumeric(openingBalance)}`)
       csvRows.push(`# Generated,${new Date().toISOString()}`)
       if (hasLargeRowCount) {
         csvRows.push(`# Warning,This export contains ${rowCount} rows, which is large. CSV export allowed.`)
@@ -207,15 +181,17 @@ export async function GET(request: NextRequest) {
       csvRows.push("# FINZA,Read-only report")
       csvRows.push("")
     }
-    
-    // Header row
-    csvRows.push("Entry Date,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance")
 
-    // Data rows
-    if (ledgerLines && ledgerLines.length > 0) {
-      for (const line of ledgerLines) {
-        const row = [
+    csvRows.push(
+      "Entry Date,Account Code,Account Name,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance"
+    )
+
+    for (const line of ledgerLines) {
+      csvRows.push(
+        [
           line.entry_date || "",
+          escapeCsvValue(line.account_code || ""),
+          escapeCsvValue(line.account_name || ""),
           line.journal_entry_id || "",
           escapeCsvValue(line.journal_entry_description || line.line_description || ""),
           escapeCsvValue(line.reference_type || ""),
@@ -225,45 +201,32 @@ export async function GET(request: NextRequest) {
           formatNumeric(line.debit || 0),
           formatNumeric(line.credit || 0),
           formatNumeric(line.running_balance || 0),
-        ]
-        csvRows.push(row.join(","))
-      }
+        ].join(",")
+      )
     }
 
-    // Calculate totals
-    const totalDebit = ledgerLines?.reduce((sum: number, line: any) => sum + Number(line.debit || 0), 0) || 0
-    const totalCredit = ledgerLines?.reduce((sum: number, line: any) => sum + Number(line.credit || 0), 0) || 0
-    const finalBalance = ledgerLines && ledgerLines.length > 0 
-      ? Number(ledgerLines[ledgerLines.length - 1].running_balance || 0)
-      : 0
-
-    // Totals rows (include in data section if include_metadata is false, otherwise add to metadata)
     if (!includeMetadata) {
-      // When metadata is excluded, totals are part of the data section
       csvRows.push("")
+      csvRows.push(`Opening Balance,${formatNumeric(openingBalance)}`)
       csvRows.push(`Total Debit,${formatNumeric(totalDebit)}`)
       csvRows.push(`Total Credit,${formatNumeric(totalCredit)}`)
+      csvRows.push(`Net Movement,${formatNumeric(finalBalance - openingBalance)}`)
       csvRows.push(`Final Balance,${formatNumeric(finalBalance)}`)
     } else {
-      // When metadata is included, totals are added after data
       csvRows.push("")
       csvRows.push("# Summary")
+      csvRows.push(`# Opening Balance,${formatNumeric(openingBalance)}`)
       csvRows.push(`# Total Debit,${formatNumeric(totalDebit)}`)
       csvRows.push(`# Total Credit,${formatNumeric(totalCredit)}`)
+      csvRows.push(`# Net Movement,${formatNumeric(finalBalance - openingBalance)}`)
       csvRows.push(`# Final Balance,${formatNumeric(finalBalance)}`)
     }
 
-    // Create CSV content with UTF-8 BOM for Excel compatibility
     const BOM = "\uFEFF"
     const csvContent = BOM + csvRows.join("\n")
-
-    // Generate filename
-    const periodLabel = periodStart 
-      ? `period-${periodStart}` 
-      : `${effectiveStartDate}-to-${effectiveEndDate}`
+    const periodLabel = periodStart ? `period-${periodStart}` : `${effectiveStartDate}-to-${effectiveEndDate}`
     const filename = `general-ledger-${account.code}-${periodLabel}.csv`
 
-    // Return CSV file
     return new NextResponse(csvContent, {
       status: 200,
       headers: {
@@ -280,9 +243,208 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * Escape CSV value (handle commas, quotes, newlines)
- */
+async function resolveGlExportPeriod(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  businessId: string,
+  periodStart: string | null,
+  startDate: string | null,
+  endDate: string | null
+): Promise<
+  | { effectiveStartDate: string; effectiveEndDate: string }
+  | { error: string; status: number }
+> {
+  if (periodStart) {
+    let { data: period, error: periodError } = await supabase
+      .from("accounting_periods")
+      .select("period_start, period_end")
+      .eq("business_id", businessId)
+      .eq("period_start", periodStart)
+      .single()
+
+    if (periodError || !period) {
+      const periodDate = periodStart.length === 7 ? `${periodStart}-01` : periodStart
+      const { error: ensureError } = await supabase.rpc("ensure_accounting_period", {
+        p_business_id: businessId,
+        p_date: periodDate,
+      })
+      if (ensureError) {
+        console.error("ensure_accounting_period failed:", ensureError)
+        return { error: "Accounting period could not be resolved", status: 500 }
+      }
+      const refetch = await supabase
+        .from("accounting_periods")
+        .select("period_start, period_end")
+        .eq("business_id", businessId)
+        .eq("period_start", periodDate)
+        .single()
+      if (refetch.error || !refetch.data) {
+        return { error: "Accounting period could not be resolved", status: 500 }
+      }
+      period = refetch.data
+    }
+
+    return { effectiveStartDate: period.period_start, effectiveEndDate: period.period_end }
+  }
+
+  if (startDate && endDate) {
+    return { effectiveStartDate: startDate, effectiveEndDate: endDate }
+  }
+
+  return {
+    error: "Either period_start or both start_date and end_date must be provided",
+    status: 400,
+  }
+}
+
+async function buildMultiAccountCsvResponse(params: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>
+  businessId: string
+  accounts: GeneralLedgerAccountRow[]
+  truncated: boolean
+  emptyReason?: string
+  effectiveStartDate: string
+  effectiveEndDate: string
+  periodStart: string | null
+  includeMetadata: boolean
+}): Promise<NextResponse> {
+  const {
+    supabase,
+    businessId,
+    accounts,
+    truncated,
+    emptyReason,
+    effectiveStartDate,
+    effectiveEndDate,
+    periodStart,
+    includeMetadata,
+  } = params
+
+  const accountList = accounts
+
+  const csvRows: string[] = []
+  if (includeMetadata) {
+    csvRows.push("# Report,General Ledger (multi-account)")
+    csvRows.push(`# Period Start,${effectiveStartDate}`)
+    csvRows.push(`# Period End,${effectiveEndDate}`)
+    csvRows.push(`# Account count,${accountList.length}`)
+    if (truncated) {
+      csvRows.push("# Warning,Export truncated to max account limit; narrow range or use account_codes.")
+    }
+    if (emptyReason) {
+      csvRows.push(`# Note,${emptyReason}`)
+    }
+    csvRows.push(`# Generated,${new Date().toISOString()}`)
+    csvRows.push("# FINZA,Read-only report")
+    csvRows.push("")
+  }
+
+  const header =
+    "Entry Date,Account Code,Account Name,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance"
+
+  if (accountList.length === 0) {
+    csvRows.push(header)
+    csvRows.push("")
+    csvRows.push("# No accounts matched this selection for your chart of accounts.")
+    const BOM = "\uFEFF"
+    const periodLabel = periodStart ? `period-${periodStart}` : `${effectiveStartDate}-to-${effectiveEndDate}`
+    const filename = `general-ledger-multi-${periodLabel}.csv`
+    return new NextResponse(BOM + csvRows.join("\n"), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv;charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    })
+  }
+
+  let totalRows = 0
+  const blocks: Awaited<ReturnType<typeof fetchGeneralLedgerForAccount>>[] = []
+  for (const account of accountList) {
+    try {
+      const block = await fetchGeneralLedgerForAccount(
+        supabase,
+        businessId,
+        account,
+        effectiveStartDate,
+        effectiveEndDate
+      )
+      blocks.push(block)
+      totalRows += block.lines.length
+    } catch (e: unknown) {
+      console.error("Error fetching general ledger for CSV:", e)
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Failed to fetch general ledger" },
+        { status: 500 }
+      )
+    }
+  }
+
+  const hasLargeRowCount = totalRows > 50000
+  if (includeMetadata && hasLargeRowCount) {
+    csvRows.push(`# Warning,This export contains ${totalRows} rows across accounts. CSV export allowed.`)
+    csvRows.push("")
+  }
+
+  for (let i = 0; i < accountList.length; i++) {
+    const account = accountList[i]
+    const block = blocks[i]
+    if (includeMetadata) {
+      csvRows.push(`# --- Account: ${account.code} - ${account.name} ---`)
+      csvRows.push(`# Opening Balance,${formatNumeric(block.summary.opening_balance)}`)
+      csvRows.push("")
+    }
+    csvRows.push(header)
+    for (const line of block.lines) {
+      csvRows.push(
+        [
+          line.entry_date || "",
+          escapeCsvValue(line.account_code || ""),
+          escapeCsvValue(line.account_name || ""),
+          line.journal_entry_id || "",
+          escapeCsvValue(line.journal_entry_description || line.line_description || ""),
+          escapeCsvValue(line.reference_type || ""),
+          line.reference_id || "",
+          line.line_id || "",
+          escapeCsvValue(line.line_description || ""),
+          formatNumeric(line.debit || 0),
+          formatNumeric(line.credit || 0),
+          formatNumeric(line.running_balance || 0),
+        ].join(",")
+      )
+    }
+    if (includeMetadata) {
+      csvRows.push("")
+      csvRows.push("# Summary")
+      csvRows.push(`# Opening Balance,${formatNumeric(block.summary.opening_balance)}`)
+      csvRows.push(`# Total Debit,${formatNumeric(block.summary.total_debit)}`)
+      csvRows.push(`# Total Credit,${formatNumeric(block.summary.total_credit)}`)
+      csvRows.push(`# Net Movement,${formatNumeric(block.summary.net_movement)}`)
+      csvRows.push(`# Closing Balance,${formatNumeric(block.summary.closing_balance)}`)
+      csvRows.push("")
+    } else {
+      csvRows.push("")
+      csvRows.push(`Opening Balance,${formatNumeric(block.summary.opening_balance)}`)
+      csvRows.push(`Total Debit,${formatNumeric(block.summary.total_debit)}`)
+      csvRows.push(`Total Credit,${formatNumeric(block.summary.total_credit)}`)
+      csvRows.push(`Net Movement,${formatNumeric(block.summary.net_movement)}`)
+      csvRows.push(`Closing Balance,${formatNumeric(block.summary.closing_balance)}`)
+      csvRows.push("")
+    }
+  }
+
+  const BOM = "\uFEFF"
+  const periodLabel = periodStart ? `period-${periodStart}` : `${effectiveStartDate}-to-${effectiveEndDate}`
+  const filename = `general-ledger-multi-${periodLabel}.csv`
+
+  return new NextResponse(BOM + csvRows.join("\n"), {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv;charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  })
+}
+
 function escapeCsvValue(value: string | number): string {
   const str = String(value)
   if (str.includes(",") || str.includes('"') || str.includes("\n")) {
@@ -291,9 +453,6 @@ function escapeCsvValue(value: string | number): string {
   return str
 }
 
-/**
- * Format numeric value for CSV (no currency symbols, 2 decimal places)
- */
 function formatNumeric(value: number | null | undefined): string {
   if (value === null || value === undefined || isNaN(Number(value))) {
     return "0.00"
