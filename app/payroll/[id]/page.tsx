@@ -96,12 +96,65 @@ type PaymentAccount = {
   type: string
 }
 
+type PayrollObligation = {
+  id: string
+  obligation_type: "salary_net" | "paye_gra" | "ssnit_tier1" | "tier2_pension" | "other_employee_deductions"
+  label: string
+  amount_due: number
+  amount_paid: number
+  outstanding_amount: number
+  status: "unpaid" | "partially_paid" | "paid"
+  status_display?: string
+  due_date: string | null
+  is_payable?: boolean
+  internal_note?: string | null
+  latest_payment_date?: string | null
+  latest_payment_reference?: string | null
+}
+
+type ObligationsResponse = {
+  obligations: PayrollObligation[]
+  canGenerateObligations: boolean
+  totals: {
+    total_due: number
+    total_paid: number
+    total_outstanding: number
+    salary_outstanding: number
+    statutory_outstanding: number
+  }
+}
+
 type SendModalState = {
   payslipId: string
   staffName: string
   staffEmail: string | null
   staffPhone: string | null
 } | null
+
+function isPaymentDateBeforePayrollPeriod(
+  paymentDate: string,
+  payrollMonth: string | null | undefined
+): boolean {
+  if (!paymentDate?.trim() || payrollMonth == null || payrollMonth === "") return false
+  const periodDay = String(payrollMonth).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDay)) return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) return false
+  return paymentDate < periodDay
+}
+
+function obligationSettledActionLabel(
+  obligationType: PayrollObligation["obligation_type"]
+): string {
+  switch (obligationType) {
+    case "paye_gra":
+      return "Paid"
+    case "ssnit_tier1":
+    case "tier2_pension":
+      return "Remitted"
+    default:
+      return "Paid"
+  }
+}
 
 export default function PayrollRunViewPage() {
   const router = useRouter()
@@ -142,6 +195,19 @@ export default function PayrollRunViewPage() {
   const [entryDrafts, setEntryDrafts] = useState<
     Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }>
   >({})
+  const [obligationsData, setObligationsData] = useState<ObligationsResponse | null>(null)
+  const [loadingObligations, setLoadingObligations] = useState(false)
+  const [showObligationPaymentModal, setShowObligationPaymentModal] = useState(false)
+  const [selectedObligation, setSelectedObligation] = useState<PayrollObligation | null>(null)
+  const [recordingObligationPayment, setRecordingObligationPayment] = useState(false)
+  const [obligationPaymentError, setObligationPaymentError] = useState("")
+  const [obligationPaymentForm, setObligationPaymentForm] = useState({
+    payment_date: new Date().toISOString().split("T")[0],
+    amount: "",
+    payment_account_id: "",
+    reference: "",
+    notes: "",
+  })
 
   const loadPayrollRun = useCallback(async () => {
     try {
@@ -184,11 +250,25 @@ export default function PayrollRunViewPage() {
     }
   }, [runId])
 
+  const loadObligations = useCallback(async () => {
+    setLoadingObligations(true)
+    try {
+      const response = await fetch(`/api/payroll/runs/${runId}/obligations`)
+      const data = await response.json()
+      if (response.ok) setObligationsData(data)
+    } catch (err) {
+      console.error("Error loading obligations:", err)
+    } finally {
+      setLoadingObligations(false)
+    }
+  }, [runId])
+
   useEffect(() => {
     loadPayrollRun()
     loadPayslips()
     loadPayrollPayments()
-  }, [loadPayrollRun, loadPayslips, loadPayrollPayments])
+    loadObligations()
+  }, [loadPayrollRun, loadPayslips, loadPayrollPayments, loadObligations])
 
   useEffect(() => {
     const drafts: Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }> = {}
@@ -248,6 +328,12 @@ export default function PayrollRunViewPage() {
       const data = await response.json()
       if (response.ok) {
         loadPayrollRun()
+        loadObligations()
+        if (data.obligationsGenerationError) {
+          toast.showToast(data.obligationsGenerationError, "error")
+        } else if (data.obligationsWarning) {
+          toast.showToast(data.obligationsWarning, "info")
+        }
         toast.showToast("Payroll approved", "success")
       } else {
         toast.showToast(data.error || "Error approving payroll run", "error")
@@ -256,6 +342,109 @@ export default function PayrollRunViewPage() {
       toast.showToast("Error approving payroll run", "error")
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const handleGenerateObligations = async () => {
+    try {
+      const res = await fetch(`/api/payroll/runs/${runId}/obligations/generate`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.showToast(data.error || "Failed to generate obligations", "error")
+        return
+      }
+      await loadObligations()
+      toast.showToast(data.warning || "Payroll obligations generated", "success")
+    } catch {
+      toast.showToast("Failed to generate obligations", "error")
+    }
+  }
+
+  const openObligationPaymentModal = (obligation: PayrollObligation) => {
+    const defaultAccountId = paymentAccounts[0]?.id || ""
+    setSelectedObligation(obligation)
+    setObligationPaymentError("")
+    setObligationPaymentForm({
+      payment_date: new Date().toISOString().split("T")[0],
+      amount: Number(obligation.outstanding_amount || 0).toFixed(2),
+      payment_account_id: defaultAccountId,
+      reference: "",
+      notes: "",
+    })
+    setShowObligationPaymentModal(true)
+  }
+
+  const handleRecordObligationPayment = async () => {
+    if (!selectedObligation) return
+    if (!obligationPaymentForm.payment_date) {
+      setObligationPaymentError("Payment date is required.")
+      return
+    }
+    if (!obligationPaymentForm.payment_account_id) {
+      setObligationPaymentError("Select a paid-from account.")
+      return
+    }
+    const amount = Number(obligationPaymentForm.amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setObligationPaymentError("Amount must be a positive number.")
+      return
+    }
+    setRecordingObligationPayment(true)
+    setObligationPaymentError("")
+    try {
+      const res = await fetch(
+        `/api/payroll/runs/${runId}/obligations/${selectedObligation.id}/payments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payment_date: obligationPaymentForm.payment_date,
+            amount,
+            payment_account_id: obligationPaymentForm.payment_account_id,
+            reference: obligationPaymentForm.reference || null,
+            notes: obligationPaymentForm.notes || null,
+          }),
+        }
+      )
+      const data = await res.json()
+      if (!res.ok) {
+        setObligationPaymentError(data.error || "Failed to record obligation payment.")
+        return
+      }
+      setShowObligationPaymentModal(false)
+      setSelectedObligation(null)
+      await loadObligations()
+      toast.showToast("Obligation payment/remittance recorded", "success")
+    } catch {
+      setObligationPaymentError("Failed to record obligation payment.")
+    } finally {
+      setRecordingObligationPayment(false)
+    }
+  }
+
+  const downloadRunExport = async (path: string, successMessage: string) => {
+    try {
+      const response = await fetch(path)
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        toast.showToast(data?.error || "Failed to download export", "error")
+        return
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get("Content-Disposition") || ""
+      const match = disposition.match(/filename="([^"]+)"/i)
+      const filename = match?.[1] || "payroll-export.csv"
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.showToast(successMessage, "success")
+    } catch {
+      toast.showToast("Failed to download export", "error")
     }
   }
 
@@ -395,6 +584,7 @@ export default function PayrollRunViewPage() {
       setShowPaymentModal(false)
       toast.showToast("Salary payment recorded and posted to ledger", "success")
       await loadPayrollPayments()
+      await loadObligations()
     } catch {
       setPaymentError("Failed to record salary payment. Please try again.")
     } finally {
@@ -681,6 +871,214 @@ export default function PayrollRunViewPage() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {(payrollRun.status === "approved" || payrollRun.status === "locked") && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white">Payroll obligations</h2>
+                {!readOnly && obligationsData?.canGenerateObligations && (
+                  <button
+                    onClick={() => guardWriteAction(handleGenerateObligations)}
+                    className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    Generate Obligations
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Payroll approval records the liabilities. These cards help you track actual payments and remittances.
+              </p>
+              {loadingObligations ? (
+                <p className="text-sm text-gray-500">Loading obligations…</p>
+              ) : (obligationsData?.obligations?.length || 0) === 0 ? (
+                <p className="text-sm text-gray-500">No obligations available for this run yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        <th className="py-2">Obligation</th>
+                        <th className="py-2 text-right">Due</th>
+                        <th className="py-2 text-right">Paid</th>
+                        <th className="py-2 text-right">Outstanding</th>
+                        <th className="py-2">Status</th>
+                        <th className="py-2">Due date</th>
+                        <th className="py-2">Last payment</th>
+                        {!readOnly && <th className="py-2 text-right">Action</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {(obligationsData?.obligations || []).map((o) => (
+                        <tr key={o.id}>
+                          <td className="py-2 text-gray-800 dark:text-gray-200">{o.label}</td>
+                          <td className="py-2 text-right tabular-nums">₵{Number(o.amount_due).toFixed(2)}</td>
+                          <td className="py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                            ₵{Number(o.amount_paid).toFixed(2)}
+                          </td>
+                          <td className="py-2 text-right tabular-nums text-amber-600 dark:text-amber-400">
+                            ₵{Number(o.outstanding_amount).toFixed(2)}
+                          </td>
+                          <td className="py-2">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${
+                                o.status === "paid"
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-400"
+                                  : o.status === "partially_paid"
+                                  ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400"
+                                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                              }`}
+                            >
+                              {String(o.status_display || o.status).replace("_", " ")}
+                            </span>
+                            {o.internal_note ? (
+                              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{o.internal_note}</p>
+                            ) : null}
+                          </td>
+                          <td className="py-2 text-gray-500 dark:text-gray-400">
+                            {o.due_date ? new Date(o.due_date).toLocaleDateString("en-GH") : "—"}
+                          </td>
+                          <td className="py-2 text-gray-500 dark:text-gray-400 text-xs">
+                            {o.latest_payment_date ? (
+                              <>
+                                {new Date(o.latest_payment_date).toLocaleDateString("en-GH")}
+                                {o.latest_payment_reference ? ` · ${o.latest_payment_reference}` : ""}
+                              </>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          {!readOnly && (
+                            <td className="py-2 text-right">
+                              {o.obligation_type === "salary_net" ? (
+                                Number(o.outstanding_amount) <= 0.01 ? (
+                                  <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                    Fully settled
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => guardWriteAction(openPaymentModal)}
+                                    disabled={Number(o.outstanding_amount) <= 0.01 || !isRunPayable}
+                                    className="px-2.5 py-1 text-xs rounded bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
+                                  >
+                                    Record salary payment
+                                  </button>
+                                )
+                              ) : o.is_payable === false ? (
+                                <span className="text-xs text-gray-400 dark:text-gray-500">Cleared on approval</span>
+                              ) : Number(o.outstanding_amount) <= 0.01 ? (
+                                <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                  {obligationSettledActionLabel(o.obligation_type)}
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => guardWriteAction(() => openObligationPaymentModal(o))}
+                                  disabled={!isRunPayable}
+                                  className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                  {o.obligation_type === "paye_gra"
+                                    ? "Pay GRA PAYE"
+                                    : o.obligation_type === "ssnit_tier1"
+                                      ? "Pay SSNIT / Tier 1"
+                                      : o.obligation_type === "tier2_pension"
+                                        ? "Pay Tier 2 trustee"
+                                        : "Record payment"}
+                                </button>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {(payrollRun.status === "approved" || payrollRun.status === "locked") && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-3">
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Reports & exports</h2>
+              <details className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/30 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium text-gray-800 dark:text-gray-200 select-none">
+                  Download CSV files
+                </summary>
+                <div className="mt-2 flex flex-col gap-2 pb-1 sm:grid sm:grid-cols-2 sm:gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/summary`,
+                        "Payroll summary CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                  >
+                    Payroll Summary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/paye-schedule`,
+                        "PAYE schedule CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                  >
+                    PAYE Schedule
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/pension-tier1`,
+                        "Tier 1 CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                  >
+                    SSNIT / Tier 1 Schedule
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/pension-tier2`,
+                        "Tier 2 CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                  >
+                    Tier 2 Schedule
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/obligations`,
+                        "Obligations CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                  >
+                    Obligations Summary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/net-salary`,
+                        "Net salary schedule CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-700 text-white hover:bg-slate-800 sm:text-center"
+                  >
+                    Salary Payment List
+                  </button>
+                </div>
+              </details>
             </div>
           )}
 
@@ -1042,6 +1440,133 @@ export default function PayrollRunViewPage() {
                 className="px-4 py-2 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
               >
                 {recordingPayment ? "Posting..." : "Record Payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showObligationPaymentModal && selectedObligation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white">
+                  Record {selectedObligation.label}
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Use this after you have paid this amount outside Finza. Finza will record the payment in your books.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (!recordingObligationPayment) {
+                    setShowObligationPaymentModal(false)
+                    setSelectedObligation(null)
+                    setObligationPaymentError("")
+                  }
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4 overflow-y-auto">
+              {obligationPaymentError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {obligationPaymentError}
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1 block">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Payment Date</span>
+                  <input
+                    type="date"
+                    value={obligationPaymentForm.payment_date}
+                    onChange={(e) =>
+                      setObligationPaymentForm((f) => ({ ...f, payment_date: e.target.value }))
+                    }
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  />
+                  {isPaymentDateBeforePayrollPeriod(
+                    obligationPaymentForm.payment_date,
+                    payrollRun?.payroll_month
+                  ) ? (
+                    <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
+                      This payment date is before the payroll period date. Check that this is intentional.
+                    </p>
+                  ) : null}
+                </label>
+                <label className="space-y-1">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Amount</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={obligationPaymentForm.amount}
+                    onChange={(e) => setObligationPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  />
+                </label>
+              </div>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Paid from account</span>
+                <select
+                  value={obligationPaymentForm.payment_account_id}
+                  onChange={(e) =>
+                    setObligationPaymentForm((f) => ({ ...f, payment_account_id: e.target.value }))
+                  }
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Select account</option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.code} - {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Reference (optional)</span>
+                <input
+                  type="text"
+                  value={obligationPaymentForm.reference}
+                  onChange={(e) => setObligationPaymentForm((f) => ({ ...f, reference: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Notes (optional)</span>
+                <textarea
+                  value={obligationPaymentForm.notes}
+                  onChange={(e) => setObligationPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  rows={3}
+                />
+              </label>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Outstanding: ₵{Number(selectedObligation.outstanding_amount || 0).toFixed(2)}
+              </div>
+            </div>
+            <div className="sticky bottom-0 z-10 bg-white dark:bg-gray-800 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowObligationPaymentModal(false)
+                  setSelectedObligation(null)
+                }}
+                disabled={recordingObligationPayment}
+                className="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRecordObligationPayment}
+                disabled={recordingObligationPayment}
+                className="px-4 py-2 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {recordingObligationPayment ? "Posting..." : "Record Payment"}
               </button>
             </div>
           </div>

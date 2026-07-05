@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
+import { statusFromAmounts } from "@/lib/payroll/obligations"
 import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
@@ -284,6 +285,36 @@ export async function POST(
         },
         { status: 201 }
       )
+    }
+
+    const { data: salaryNetObligation } = await supabase
+      .from("payroll_obligations")
+      .select("id, amount_due")
+      .eq("business_id", business.id)
+      .eq("payroll_run_id", runId)
+      .eq("obligation_type", "salary_net")
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (salaryNetObligation) {
+      const due = Number(salaryNetObligation.amount_due || 0)
+      const paidTotal = Number(refreshed.summary.paid_amount || 0)
+      const amountPaidForObligation = Math.min(due, paidTotal)
+      const obligationStatus = statusFromAmounts(due, amountPaidForObligation)
+      const latestPay = (refreshed.payments || [])[0] as
+        | { payment_date?: string; reference?: string | null; payment_account_id?: string }
+        | undefined
+
+      await supabase
+        .from("payroll_obligations")
+        .update({
+          amount_paid: amountPaidForObligation,
+          status: obligationStatus,
+          latest_payment_date: latestPay?.payment_date ?? null,
+          latest_payment_reference: latestPay?.reference ?? null,
+          payment_account_id: latestPay?.payment_account_id ?? null,
+        })
+        .eq("id", salaryNetObligation.id)
     }
 
     return NextResponse.json(

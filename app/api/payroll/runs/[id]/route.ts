@@ -9,6 +9,7 @@ import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { generateOrSyncPayrollObligationsForRun } from "@/lib/payroll/obligations"
 
 export async function GET(
   request: NextRequest,
@@ -172,6 +173,8 @@ export async function PUT(
     const body = await request.json()
     const { status, notes } = body
     let journalEntryId: string | null = null
+    let obligationsWarning: string | null = null
+    let obligationsGenerationError: string | null = null
 
     // Get existing payroll run
     const { data: existingRun } = await supabase
@@ -332,6 +335,26 @@ export async function PUT(
       )
     }
 
+    if (
+      status === "approved" &&
+      existingRun.status !== "approved" &&
+      payrollRun?.status === "approved"
+    ) {
+      try {
+        const result = await generateOrSyncPayrollObligationsForRun(
+          supabase as any,
+          business.id,
+          runId,
+          { allowLegacyDerivation: true }
+        )
+        obligationsWarning = result.warning
+      } catch (oblErr: any) {
+        console.error("Payroll obligations generation failed after approval:", oblErr)
+        obligationsGenerationError =
+          oblErr?.message || "Failed to generate payroll obligations after approval."
+      }
+    }
+
     // Audit the status change
     if (status && status !== existingRun.status) {
       const actionType =
@@ -352,7 +375,11 @@ export async function PUT(
       })
     }
 
-    return NextResponse.json({ payrollRun })
+    return NextResponse.json({
+      payrollRun,
+      ...(obligationsWarning ? { obligationsWarning } : {}),
+      ...(obligationsGenerationError ? { obligationsGenerationError } : {}),
+    })
   } catch (error: any) {
     console.error("Error updating payroll run:", error)
     return NextResponse.json(
