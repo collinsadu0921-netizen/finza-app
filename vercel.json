@@ -12,20 +12,5 @@
       "path": "/api/cron/trial-growth-lifecycle",
       "schedule": "0 9 * * *"
     }
-  ],
-  "services": {
-    "frontend": {
-      "root": ".",
-      "framework": "nextjs"
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": {
-        "type": "service",
-        "service": "frontend"
-      }
-    }
   ]
 }
