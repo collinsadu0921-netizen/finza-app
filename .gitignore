@@ -23,3 +23,5 @@ load-tests/results/
 *.curl
 service-metrics.curl
 .vercel
+
+tsconfig.tsbuildinfo
