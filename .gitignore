@@ -22,3 +22,4 @@ load-tests/results/
 # Browser cURL captures for k6 session import (never commit)
 *.curl
 service-metrics.curl
+.vercel
