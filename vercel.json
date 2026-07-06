@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/accounting-snapshots",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/service-subscription-lifecycle",
@@ -11,6 +11,31 @@
     {
       "path": "/api/cron/trial-growth-lifecycle",
       "schedule": "0 9 * * *"
+    }
+  ],
+  "services": {
+    "frontend": {
+      "root": ".",
+      "framework": "nextjs"
+    },
+    "hubtel-status-proxy": {
+      "root": "services/hubtel-status-proxy"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/hubtel-status-proxy(/.*)?",
+      "destination": {
+        "type": "service",
+        "service": "hubtel-status-proxy"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "frontend"
+      }
     }
   ]
 }
