@@ -1,1 +1,2 @@
-services/hubtel-status-proxy/
+services/hubtel-status-proxy
+services/hubtel-status-proxy/**
