@@ -17,19 +17,9 @@
     "frontend": {
       "root": ".",
       "framework": "nextjs"
-    },
-    "hubtel-status-proxy": {
-      "root": "services/hubtel-status-proxy"
     }
   },
   "rewrites": [
-    {
-      "source": "/api/hubtel-status-proxy(/.*)?",
-      "destination": {
-        "type": "service",
-        "service": "hubtel-status-proxy"
-      }
-    },
     {
       "source": "/(.*)",
       "destination": {
