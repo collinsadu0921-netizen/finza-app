@@ -358,12 +358,12 @@ export default function TrendsSection({
 
     const latestPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
 
-    const focusedMonth =
-      focusPeriodStart != null && focusPeriodStart !== ""
-        ? nonFuture.find((p) => p.period_start === focusPeriodStart)
-        : undefined
+    const useFocusPeriod =
+      mode === "monthly" && focusPeriodStart != null && focusPeriodStart !== ""
 
-    const useFocusPeriod = Boolean(focusPeriodStart)
+    const focusedMonth = useFocusPeriod
+      ? nonFuture.find((p) => p.period_start === focusPeriodStart)
+      : undefined
 
     let selectedRevenue: number
     let selectedExpenses: number
@@ -376,11 +376,13 @@ export default function TrendsSection({
         selectedExpenses = focusedMonth.expenses
         selectedNetProfit = focusedMonth.netProfit
         breakdownTitle = `${shortMonthLabel(focusedMonth.period_start)} breakdown`
+        breakdownSubtitle = "Selected month summary"
       } else {
         selectedRevenue = currentRevenue
         selectedExpenses = currentExpenses
         selectedNetProfit = currentNetProfit
         breakdownTitle = `${shortMonthLabel(focusPeriodStart!)} breakdown`
+        breakdownSubtitle = "Selected month summary"
       }
     } else if (latestPoint) {
       selectedRevenue = latestPoint.revenue
@@ -390,17 +392,23 @@ export default function TrendsSection({
         mode === "ytd"
           ? "YTD breakdown"
           : `${latestPoint.label} breakdown`
+      breakdownSubtitle =
+        mode === "ytd"
+          ? "Year-to-date summary"
+          : mode === "quarterly"
+            ? "Latest quarter summary"
+            : "Latest month summary"
     } else {
       selectedRevenue = currentRevenue
       selectedExpenses = currentExpenses
       selectedNetProfit = currentNetProfit
       breakdownTitle = mode === "ytd" ? "YTD breakdown" : "Latest breakdown"
-    }
-
-    if (useFocusPeriod && mode === "ytd") {
-      breakdownTitle = "YTD breakdown"
-    } else if (useFocusPeriod && mode === "quarterly" && !focusedMonth) {
-      breakdownTitle = "Latest quarter summary"
+      breakdownSubtitle =
+        mode === "ytd"
+          ? "Year-to-date summary"
+          : mode === "quarterly"
+            ? "Latest quarter summary"
+            : "Latest month summary"
     }
 
     let footerLabel: string

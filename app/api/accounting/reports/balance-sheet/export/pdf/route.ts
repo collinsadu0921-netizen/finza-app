@@ -10,6 +10,7 @@ import {
   parseBalanceSheetReportQuery,
   toBalanceSheetExportView,
 } from "@/lib/accounting/reports/balanceSheetExportHelpers"
+import { createPdfKitDocument } from "@/lib/pdf/createPdfKitDocument"
 
 /**
  * GET /api/accounting/reports/balance-sheet/export/pdf
@@ -115,15 +116,23 @@ export async function GET(request: NextRequest) {
     const balancingDifference = totals.imbalance
     const isBalanced = totals.is_balanced
 
-    // Generate PDF (simplified - similar structure to trial balance)
-    const PDFDocument = (await import("pdfkit")).default
-    const doc = new PDFDocument({ margin: 50 })
+    const pdfBuffer = await (async () => {
+    const doc = await createPdfKitDocument({ margin: 50 })
 
-    // Collect PDF chunks
     const chunks: Buffer[] = []
     doc.on("data", (chunk: Buffer) => {
       chunks.push(chunk)
     })
+
+    const addFooter = () => {
+      const pageHeight = doc.page.height
+      doc.fontSize(8).font("Helvetica")
+      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
+      doc.text("FINZA — Read-only report", 50, pageHeight - 30, {
+        width: doc.page.width - 100,
+        align: "right",
+      })
+    }
 
     // Title
     doc.fontSize(18).font("Helvetica-Bold").text("Balance Sheet Report", { align: "center" })
@@ -161,12 +170,13 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(9).font("Helvetica")
     if (assets.length === 0) {
-      doc.text("No asset accounts with balances", x, y)
+      doc.text("No asset accounts with balances", 50, y)
       y += rowHeight
     } else {
       for (const account of assets) {
         x = 50
         if (y + rowHeight > doc.page.height - 50) {
+          addFooter()
           doc.addPage()
           y = 50
         }
@@ -184,6 +194,7 @@ export async function GET(request: NextRequest) {
 
     // Total Assets
     if (y + rowHeight > doc.page.height - 50) {
+      addFooter()
       doc.addPage()
       y = 50
     }
@@ -212,12 +223,13 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(9).font("Helvetica")
     if (liabilities.length === 0) {
-      doc.text("No liability accounts with balances", x, y)
+      doc.text("No liability accounts with balances", 50, y)
       y += rowHeight
     } else {
       for (const account of liabilities) {
         x = 50
         if (y + rowHeight > doc.page.height - 50) {
+          addFooter()
           doc.addPage()
           y = 50
         }
@@ -235,6 +247,7 @@ export async function GET(request: NextRequest) {
 
     // Total Liabilities
     if (y + rowHeight > doc.page.height - 50) {
+      addFooter()
       doc.addPage()
       y = 50
     }
@@ -263,12 +276,13 @@ export async function GET(request: NextRequest) {
 
     doc.fontSize(9).font("Helvetica")
     if (equity.length === 0) {
-      doc.text("No equity accounts with balances", x, y)
+      doc.text("No equity accounts with balances", 50, y)
       y += rowHeight
     } else {
       for (const account of equity) {
         x = 50
         if (y + rowHeight > doc.page.height - 50) {
+          addFooter()
           doc.addPage()
           y = 50
         }
@@ -286,6 +300,7 @@ export async function GET(request: NextRequest) {
 
     // Total Equity
     if (y + rowHeight > doc.page.height - 50) {
+      addFooter()
       doc.addPage()
       y = 50
     }
@@ -304,6 +319,7 @@ export async function GET(request: NextRequest) {
     y = doc.y
 
     if (y + rowHeight * 3 > doc.page.height - 50) {
+      addFooter()
       doc.addPage()
       y = 50
     }
@@ -329,20 +345,8 @@ export async function GET(request: NextRequest) {
     doc.text(`Balancing Difference: ${formatNumeric(balancingDifference)}`, 50, y)
     doc.text(`Is Balanced: ${isBalanced ? "Yes" : "No"}`, 50, y + 15)
 
-    // Footer
-    doc.on("pageAdded", () => {
-      const pageHeight = doc.page.height
-      doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-      doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
-    })
+    addFooter()
 
-    const pageHeight = doc.page.height
-    doc.fontSize(8).font("Helvetica")
-    doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-    doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
-
-    // Finalize
     doc.end()
 
     await new Promise<void>((resolve) => {
@@ -351,7 +355,8 @@ export async function GET(request: NextRequest) {
       })
     })
 
-    const pdfBuffer = Buffer.concat(chunks)
+    return Buffer.concat(chunks)
+    })()
 
     const filename = `balance-sheet-as-of-${asOfDate}.pdf`
 
