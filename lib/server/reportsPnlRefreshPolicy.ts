@@ -16,6 +16,7 @@ export type ReportsPnlSource =
   | "fresh_snapshot"
   | "stale_snapshot"
   | "live"
+  | "preparing"
   | "unavailable"
 
 export function isReportsPnlRefreshOnRequestEnabled(): boolean {
@@ -64,15 +65,16 @@ export function reportsPnlResponseHeaders(diagnostics: ReportsPnlDiagnostics): R
 
 export function resolveReportsPnlSource(input: {
   cacheStatus: PnlReportCacheStatus
-  movementSource: "snapshot" | "ledger" | "unavailable"
+  movementSource: "snapshot" | "ledger" | "unavailable" | "preparing" | "zero_initialized"
   snapshotStale: boolean
   servedExpiredCache: boolean
 }): ReportsPnlSource {
   if (input.cacheStatus === "hit") return "cache"
   if (input.cacheStatus === "expired_served" || input.servedExpiredCache) return "expired_cache"
   if (input.movementSource === "ledger") return "live"
+  if (input.movementSource === "preparing") return "preparing"
   if (input.movementSource === "unavailable") return "unavailable"
-  if (input.movementSource === "snapshot") {
+  if (input.movementSource === "snapshot" || input.movementSource === "zero_initialized") {
     return input.snapshotStale ? "stale_snapshot" : "fresh_snapshot"
   }
   return "unavailable"

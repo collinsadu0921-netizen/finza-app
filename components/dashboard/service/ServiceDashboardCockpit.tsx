@@ -466,6 +466,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     setSelectedPeriodStart(null)
   }
 
+  const trendsFocusPeriodStart =
+    selectedPeriodStart != null && selectedPeriodStart !== ""
+      ? selectedPeriodStart
+      : (metrics?.period?.period_start ?? null)
+
   const chartData = timeline.map((t) => ({
     period_start: t.period_start,
     period_end: t.period_end,
@@ -568,6 +573,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       ) : (
         <TrendsSectionLazy
           data={chartData}
+          focusPeriodStart={trendsFocusPeriodStart}
           currencyCode={currencyCode}
           currentRevenue={metrics?.revenue ?? 0}
           currentExpenses={metrics?.expenses ?? 0}

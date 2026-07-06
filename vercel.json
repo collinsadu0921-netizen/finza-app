@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/accounting-snapshots",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/service-subscription-lifecycle",
       "schedule": "0 8 * * *"
     },

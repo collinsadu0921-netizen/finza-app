@@ -33,6 +33,7 @@ import {
   type ServiceDashboardTimelineItem,
 } from "@/lib/server/serviceDashboardTimeline"
 import { createRouteDiag, isRouteDiagnosticsEnabled, type RouteDiagFields } from "@/lib/server/routeDiagnostics"
+import { resolveDashboardDefaultPeriodStart } from "@/lib/server/dashboardDefaultPnlPeriod"
 
 const DEFAULT_PERIODS = 12
 const MAX_PERIODS = 24
@@ -117,8 +118,16 @@ async function loadDashboardCluster(
   devClusterLog(`timeline (${timelineSource})`, tTimeline)
 
   let previousPeriodStart = options.previousPeriodStart
-  if (options.periodStart && !previousPeriodStart) {
-    const idx = timeline.findIndex((t) => t.period_start === options.periodStart)
+  let metricsPeriodStart = options.periodStart
+  if (!metricsPeriodStart) {
+    const defaultStart = await resolveDashboardDefaultPeriodStart(supabase, businessId)
+    if (defaultStart) {
+      metricsPeriodStart = defaultStart
+      diag.step("dashboard_default_pnl_period", { period_start: defaultStart })
+    }
+  }
+  if (metricsPeriodStart && !previousPeriodStart) {
+    const idx = timeline.findIndex((t) => t.period_start === metricsPeriodStart)
     if (idx > 0) {
       previousPeriodStart = timeline[idx - 1].period_start
     }
@@ -131,7 +140,7 @@ async function loadDashboardCluster(
       supabase,
       businessId,
       {
-        periodStart: options.periodStart,
+        periodStart: metricsPeriodStart,
         previousPeriodStart,
       },
       diag,

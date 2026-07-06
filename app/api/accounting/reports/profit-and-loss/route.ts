@@ -212,16 +212,25 @@ export async function GET(request: NextRequest) {
     })
 
     if (
-      loadMeta.movementSource === "unavailable" &&
+      (loadMeta.movementSource === "unavailable" || loadMeta.movementSource === "preparing") &&
       cacheStatus !== "hit" &&
       cacheStatus !== "expired_served"
     ) {
-      diag.fail(503, "PNL_SNAPSHOT_UNAVAILABLE", {
+      const errorCode =
+        loadMeta.movementSource === "preparing"
+          ? "PNL_SNAPSHOT_PREPARING"
+          : "PNL_SNAPSHOT_UNAVAILABLE"
+      diag.fail(503, errorCode, {
         ms_report: Math.round((performance.now() - tReport) * 10) / 10,
         ...reportsDiagnostics,
+        refresh_job_id: loadMeta.refreshJobId ?? null,
       })
       return NextResponse.json(
-        { error: "PNL_SNAPSHOT_UNAVAILABLE", ...reportsDiagnostics },
+        {
+          error: errorCode,
+          ...reportsDiagnostics,
+          refresh_job_id: loadMeta.refreshJobId ?? null,
+        },
         {
           status: 503,
           headers: reportsPnlResponseHeaders(reportsDiagnostics),

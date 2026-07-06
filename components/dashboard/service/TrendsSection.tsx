@@ -30,7 +30,9 @@ export type TimelinePoint = {
 export type TrendsSectionProps = {
   data: TimelinePoint[]
   currencyCode?: string
-  /** Current period totals — used only as a fallback when no timeline exists. */
+  /** Dashboard-selected or backend-resolved period (YYYY-MM-DD). */
+  focusPeriodStart?: string | null
+  /** Current period totals — fallback when focus period is not in timeline. */
   currentRevenue?: number
   currentExpenses?: number
   currentNetProfit?: number
@@ -313,6 +315,7 @@ function PeriodSelector({
 export default function TrendsSection({
   data,
   currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
+  focusPeriodStart = null,
   currentRevenue = 0,
   currentExpenses = 0,
   currentNetProfit = 0,
@@ -355,25 +358,49 @@ export default function TrendsSection({
 
     const latestPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
 
-    // Single selected display point for this mode — the latest visible period:
-    // - monthly  → latest visible month
-    // - quarterly→ latest visible quarter aggregate
-    // - ytd      → final cumulative YTD point (through the latest month)
-    // Hero net profit, margin badge, supporting Revenue/Expenses, and the
-    // breakdown table ALL read from this one object, so margins cannot diverge.
-    // `current*` props are used only as a fallback when there is no visible data.
-    const selectedRevenue = latestPoint ? latestPoint.revenue : currentRevenue
-    const selectedExpenses = latestPoint ? latestPoint.expenses : currentExpenses
-    const selectedNetProfit = latestPoint ? latestPoint.netProfit : currentNetProfit
+    const focusedMonth =
+      focusPeriodStart != null && focusPeriodStart !== ""
+        ? nonFuture.find((p) => p.period_start === focusPeriodStart)
+        : undefined
 
+    const useFocusPeriod = Boolean(focusPeriodStart)
+
+    let selectedRevenue: number
+    let selectedExpenses: number
+    let selectedNetProfit: number
     let breakdownTitle: string
-    if (mode === "ytd") {
-      breakdownTitle = "YTD breakdown"
+
+    if (useFocusPeriod) {
+      if (focusedMonth) {
+        selectedRevenue = focusedMonth.revenue
+        selectedExpenses = focusedMonth.expenses
+        selectedNetProfit = focusedMonth.netProfit
+        breakdownTitle = `${shortMonthLabel(focusedMonth.period_start)} breakdown`
+      } else {
+        selectedRevenue = currentRevenue
+        selectedExpenses = currentExpenses
+        selectedNetProfit = currentNetProfit
+        breakdownTitle = `${shortMonthLabel(focusPeriodStart!)} breakdown`
+      }
     } else if (latestPoint) {
-      // latestPoint.label is "{Month}" (monthly) or "Q{n}" (quarterly).
-      breakdownTitle = `${latestPoint.label} breakdown`
+      selectedRevenue = latestPoint.revenue
+      selectedExpenses = latestPoint.expenses
+      selectedNetProfit = latestPoint.netProfit
+      breakdownTitle =
+        mode === "ytd"
+          ? "YTD breakdown"
+          : `${latestPoint.label} breakdown`
     } else {
-      breakdownTitle = "Latest breakdown"
+      selectedRevenue = currentRevenue
+      selectedExpenses = currentExpenses
+      selectedNetProfit = currentNetProfit
+      breakdownTitle = mode === "ytd" ? "YTD breakdown" : "Latest breakdown"
+    }
+
+    if (useFocusPeriod && mode === "ytd") {
+      breakdownTitle = "YTD breakdown"
+    } else if (useFocusPeriod && mode === "quarterly" && !focusedMonth) {
+      breakdownTitle = "Latest quarter summary"
     }
 
     let footerLabel: string
@@ -404,7 +431,7 @@ export default function TrendsSection({
       footerLabel,
       footerValue,
     }
-  }, [data, mode, currentRevenue, currentExpenses, currentNetProfit])
+  }, [data, mode, focusPeriodStart, currentRevenue, currentExpenses, currentNetProfit])
 
   // Profit/loss badge follows the SAME selected net profit used everywhere else.
   const profitable = view.selectedNetProfit >= 0

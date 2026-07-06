@@ -1,10 +1,17 @@
 /**
  * Ledger-derived P&L movement for a date range (je.date inclusive).
- * Snapshot-first for reports_pnl (512/513); refresh is reports-only, not dashboard.
+ * Metadata-first snapshot reads (522) with async refresh queue fallback.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 
+import {
+  enqueueSnapshotRefreshJob,
+  ensureZeroPnlSnapshotForPeriod,
+  periodHasLivePnlMovement,
+  readPnlSnapshotMetadata,
+  readStalePnlSnapshotMetadata,
+} from "@/lib/server/accountingSnapshotRefresh"
 import { PNL_SNAPSHOT_FRESH_SECONDS } from "@/lib/server/dashboardPeriodSummaryRead"
 import {
   readPnlMovementLinesFromSnapshot,
@@ -20,10 +27,15 @@ export type PnLMovementRow = {
   period_total?: number
 }
 
-export type PnLMovementSource = "snapshot" | "ledger" | "unavailable"
+export type PnLMovementSource =
+  | "snapshot"
+  | "ledger"
+  | "unavailable"
+  | "preparing"
+  | "zero_initialized"
 
 export type PnLMovementFetchOptions = {
-  /** When false, snapshot reads only — no refresh or live get_profit_and_loss_movement RPC. */
+  /** When false, snapshot reads only — no blocking live refresh RPC. */
   refreshOnRequest?: boolean
 }
 
@@ -32,9 +44,10 @@ export type PnLMovementFetchResult = {
   error: string
   source: PnLMovementSource
   snapshotStale: boolean
+  refreshJobId?: string | null
 }
 
-async function loadSnapshotRows(
+async function loadSnapshotLines(
   supabase: SupabaseClient,
   businessId: string,
   startDate: string,
@@ -60,86 +73,79 @@ async function loadSnapshotRows(
   return { rows: data as PnLMovementRow[], error: null }
 }
 
-export async function fetchProfitAndLossMovementRows(
+async function loadStaleSnapshotLines(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string
+): Promise<PnLMovementRow[]> {
+  const { data, error } = await readStalePnlMovementLinesFromSnapshot(
+    supabase,
+    businessId,
+    startDate,
+    endDate
+  )
+  if (error || !Array.isArray(data)) return []
+  return data as PnLMovementRow[]
+}
+
+async function resolveFromMetadata(
   supabase: SupabaseClient,
   businessId: string,
   startDate: string,
   endDate: string,
-  options?: PnLMovementFetchOptions
-): Promise<PnLMovementFetchResult> {
-  const refreshOnRequest = options?.refreshOnRequest !== false
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return { rows: [], error: "Invalid date range", source: "ledger", snapshotStale: false }
-  }
-  if (startDate > endDate) {
+  metadata: { line_count: number; snapshotStale: boolean }
+): Promise<PnLMovementFetchResult | null> {
+  if (metadata.line_count === 0) {
     return {
       rows: [],
-      error: "start_date must be on or before end_date",
-      source: "ledger",
-      snapshotStale: false,
-    }
-  }
-
-  const initialSnapshot = await loadSnapshotRows(
-    supabase,
-    businessId,
-    startDate,
-    endDate,
-    PNL_SNAPSHOT_FRESH_SECONDS
-  )
-  if (initialSnapshot.error) {
-    console.warn("[pnl-movement] snapshot read failed:", initialSnapshot.error)
-  } else if (initialSnapshot.rows.length > 0) {
-    return {
-      rows: initialSnapshot.rows,
       error: "",
       source: "snapshot",
-      snapshotStale: false,
+      snapshotStale: metadata.snapshotStale,
     }
   }
 
-  if (!refreshOnRequest) {
-    const staleSnapshot = await readStalePnlMovementLinesFromSnapshot(
-      supabase,
-      businessId,
-      startDate,
-      endDate
-    )
-    if (staleSnapshot.error) {
-      console.warn("[pnl-movement] stale snapshot read failed:", staleSnapshot.error.message)
-    } else if (Array.isArray(staleSnapshot.data) && staleSnapshot.data.length > 0) {
-      return {
-        rows: staleSnapshot.data as PnLMovementRow[],
-        error: "",
-        source: "snapshot",
-        snapshotStale: true,
-      }
+  const lines = metadata.snapshotStale
+    ? await loadStaleSnapshotLines(supabase, businessId, startDate, endDate)
+    : (
+        await loadSnapshotLines(supabase, businessId, startDate, endDate, PNL_SNAPSHOT_FRESH_SECONDS)
+      ).rows
+
+  if (lines.length > 0) {
+    return {
+      rows: lines,
+      error: "",
+      source: "snapshot",
+      snapshotStale: metadata.snapshotStale,
     }
-    return { rows: [], error: "", source: "unavailable", snapshotStale: false }
   }
 
-  const refresh = await tryRefreshPnlMovementSnapshot(supabase, businessId, startDate, endDate)
-  if (refresh.refreshed) {
-    const afterRefresh = await loadSnapshotRows(
-      supabase,
-      businessId,
-      startDate,
-      endDate,
-      PNL_SNAPSHOT_FRESH_SECONDS
-    )
-    if (!afterRefresh.error && afterRefresh.rows.length > 0) {
-      return {
-        rows: afterRefresh.rows,
-        error: "",
-        source: "snapshot",
-        snapshotStale: false,
-      }
-    }
-  } else if (refresh.lockHeld) {
-    console.info("[pnl-movement] snapshot refresh lock held; using live RPC")
-  }
+  return null
+}
 
+async function isExactAccountingPeriodRange(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("accounting_periods")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("period_start", startDate)
+    .eq("period_end", endDate)
+    .limit(1)
+    .maybeSingle()
+  return !!data
+}
+
+async function fetchLivePnLMovement(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string
+): Promise<PnLMovementFetchResult> {
   const { data, error } = await supabase.rpc("get_profit_and_loss_movement", {
     p_business_id: businessId,
     p_start_date: startDate,
@@ -161,4 +167,101 @@ export async function fetchProfitAndLossMovementRows(
     source: "ledger",
     snapshotStale: false,
   }
+}
+
+export async function fetchProfitAndLossMovementRows(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string,
+  options?: PnLMovementFetchOptions
+): Promise<PnLMovementFetchResult> {
+  const refreshOnRequest = options?.refreshOnRequest !== false
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { rows: [], error: "Invalid date range", source: "ledger", snapshotStale: false }
+  }
+  if (startDate > endDate) {
+    return {
+      rows: [],
+      error: "start_date must be on or before end_date",
+      source: "ledger",
+      snapshotStale: false,
+    }
+  }
+
+  let metadata = await readPnlSnapshotMetadata(supabase, businessId, startDate, endDate)
+  if (metadata) {
+    const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata)
+    if (resolved) return resolved
+  }
+
+  if (!metadata) {
+    metadata = await readStalePnlSnapshotMetadata(supabase, businessId, startDate, endDate)
+    if (metadata) {
+      const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata)
+      if (resolved) return resolved
+    }
+  }
+
+  if (refreshOnRequest) {
+    const refresh = await tryRefreshPnlMovementSnapshot(supabase, businessId, startDate, endDate)
+    if (refresh.refreshed) {
+      metadata = await readPnlSnapshotMetadata(supabase, businessId, startDate, endDate)
+      if (metadata) {
+        const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata)
+        if (resolved) return resolved
+      }
+    } else if (refresh.lockHeld) {
+      console.info("[pnl-movement] snapshot refresh lock held; using live RPC")
+    }
+
+    return fetchLivePnLMovement(supabase, businessId, startDate, endDate)
+  }
+
+  const isExactPeriod = await isExactAccountingPeriodRange(
+    supabase,
+    businessId,
+    startDate,
+    endDate
+  )
+  if (!isExactPeriod) {
+    return fetchLivePnLMovement(supabase, businessId, startDate, endDate)
+  }
+
+  const hasLiveMovement = await periodHasLivePnlMovement(supabase, businessId, startDate, endDate)
+
+  if (hasLiveMovement) {
+    const refreshJobId = await enqueueSnapshotRefreshJob(supabase, {
+      businessId,
+      periodStart: startDate,
+      periodEnd: endDate,
+      jobType: "pnl",
+      reason: "read_path_missing_snapshot",
+    })
+    return {
+      rows: [],
+      error: "",
+      source: "preparing",
+      snapshotStale: false,
+      refreshJobId,
+    }
+  }
+
+  const zeroWritten = await ensureZeroPnlSnapshotForPeriod(
+    supabase,
+    businessId,
+    startDate,
+    endDate
+  )
+  if (zeroWritten) {
+    return {
+      rows: [],
+      error: "",
+      source: "zero_initialized",
+      snapshotStale: false,
+    }
+  }
+
+  return { rows: [], error: "", source: "unavailable", snapshotStale: false }
 }
