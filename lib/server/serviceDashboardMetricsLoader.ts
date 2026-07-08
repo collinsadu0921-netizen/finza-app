@@ -13,10 +13,10 @@ import {
 } from "@/lib/server/dashboardMetricsCache"
 import {
   dashboardPnlSourceForDiag,
-  fetchFreshDashboardPeriodPnl,
   fetchStaleDashboardPeriodPnl,
   isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
+import { SUMMARY_FRESH_SECONDS } from "@/lib/server/serviceDashboardTimeline"
 import {
   enqueueSnapshotRefreshJob,
   periodHasLivePnlMovement,
@@ -123,6 +123,26 @@ export type ServiceDashboardMetricsLoadMeta = {
   source: "summary" | "live" | "degraded"
 }
 
+export type SummaryMetricsMissReason =
+  | "missing_row"
+  | "compare_period_missing"
+  | "rpc_error"
+  | "unknown"
+
+type SummarySnapshotBuildResult =
+  | { ok: true; payload: ServiceDashboardMetricsPayload }
+  | { ok: false; reason: SummaryMetricsMissReason }
+
+type PeriodPnlSummaryReadResult = {
+  row: {
+    revenue: number | string
+    expenses: number | string
+    net_profit: number | string
+    refreshed_at: string
+  } | null
+  reason?: SummaryMetricsMissReason
+}
+
 type PositionRow = {
   cash_balance?: number | string
   accounts_receivable?: number | string
@@ -189,6 +209,48 @@ async function loadCashCollected(
   return num(data)
 }
 
+async function readPeriodPnlSummaryRow(
+  supabase: SupabaseClient,
+  businessId: string,
+  startDate: string,
+  endDate: string,
+  options?: { allowStalePnl?: boolean }
+): Promise<PeriodPnlSummaryReadResult> {
+  const { data: freshData, error: freshError } = await supabase.rpc(
+    "get_fresh_service_dashboard_period_pnl",
+    {
+      p_business_id: businessId,
+      p_start_date: startDate,
+      p_end_date: endDate,
+      p_max_stale_seconds: SUMMARY_FRESH_SECONDS,
+    }
+  )
+
+  if (freshError) {
+    console.warn("[dashboard-period-pnl] fresh summary read failed:", freshError.message)
+    return { row: null, reason: "rpc_error" }
+  }
+
+  const freshRow = Array.isArray(freshData) ? freshData[0] : freshData
+  if (freshRow && typeof freshRow === "object") {
+    return { row: freshRow as PeriodPnlSummaryReadResult["row"] }
+  }
+
+  if (options?.allowStalePnl) {
+    const stalePnl = await fetchStaleDashboardPeriodPnl(
+      supabase,
+      businessId,
+      startDate,
+      endDate
+    )
+    if (stalePnl) {
+      return { row: stalePnl }
+    }
+  }
+
+  return { row: null, reason: "missing_row" }
+}
+
 async function buildMetricsFromSummarySnapshot(
   supabase: SupabaseClient,
   businessId: string,
@@ -201,37 +263,38 @@ async function buildMetricsFromSummarySnapshot(
   compareStart: string | null,
   compareEnd: string | null,
   options?: { allowStalePnl?: boolean; softPositionReads?: boolean }
-): Promise<ServiceDashboardMetricsPayload | null> {
-  let freshPnl = await fetchFreshDashboardPeriodPnl(
+): Promise<SummarySnapshotBuildResult> {
+  const currentPnl = await readPeriodPnlSummaryRow(
     supabase,
     businessId,
     range.movementStart,
-    range.movementEnd
+    range.movementEnd,
+    { allowStalePnl: options?.allowStalePnl }
   )
-  if (!freshPnl && options?.allowStalePnl) {
-    freshPnl = await fetchStaleDashboardPeriodPnl(
-      supabase,
-      businessId,
-      range.movementStart,
-      range.movementEnd
-    )
+  if (!currentPnl.row) {
+    return { ok: false, reason: currentPnl.reason ?? "missing_row" }
   }
-  if (!freshPnl) return null
+  const freshPnl = currentPnl.row
 
   const softReads = options?.softPositionReads === true
 
   let previousPeriod: PreviousPeriodPayload | null = null
   if (compareStart && compareEnd) {
-    let prevPnl = await fetchFreshDashboardPeriodPnl(
+    const prevPnlRead = await readPeriodPnlSummaryRow(
       supabase,
       businessId,
       compareStart,
-      compareEnd
+      compareEnd,
+      { allowStalePnl: options?.allowStalePnl }
     )
-    if (!prevPnl && options?.allowStalePnl) {
-      prevPnl = await fetchStaleDashboardPeriodPnl(supabase, businessId, compareStart, compareEnd)
+    if (!prevPnlRead.row) {
+      return {
+        ok: false,
+        reason:
+          prevPnlRead.reason === "rpc_error" ? "rpc_error" : "compare_period_missing",
+      }
     }
-    if (!prevPnl) return null
+    const prevPnl = prevPnlRead.row
 
     const [prevPositions, prevCash] = await Promise.all([
       loadPositionsAsOf(supabase, businessId, compareEnd, { throwOnError: !softReads }),
@@ -259,35 +322,39 @@ async function buildMetricsFromSummarySnapshot(
     }),
   ])
 
-  return withOperationalUnpaidFields(
-    {
-      period: {
-        period_id: range.period.period_id,
-        period_start: range.movementStart,
-        period_end: range.movementEnd,
-        resolution_reason: range.period.resolution_reason,
+  return {
+    ok: true,
+    payload: withOperationalUnpaidFields(
+      {
+        period: {
+          period_id: range.period.period_id,
+          period_start: range.movementStart,
+          period_end: range.movementEnd,
+          resolution_reason: range.period.resolution_reason,
+        },
+        currency,
+        revenue: num(freshPnl.revenue),
+        expenses: num(freshPnl.expenses),
+        netProfit: num(freshPnl.net_profit),
+        cashCollected,
+        accountsReceivable: num(positions.accounts_receivable),
+        accountsPayable: num(positions.accounts_payable),
+        cashBalance: num(positions.cash_balance),
+        positionBalancesAsOfToday: true,
+        positionAsOfDate,
+        previousPeriod,
       },
-      currency,
-      revenue: num(freshPnl.revenue),
-      expenses: num(freshPnl.expenses),
-      netProfit: num(freshPnl.net_profit),
-      cashCollected,
-      accountsReceivable: num(positions.accounts_receivable),
-      accountsPayable: num(positions.accounts_payable),
-      cashBalance: num(positions.cash_balance),
-      positionBalancesAsOfToday: true,
-      positionAsOfDate,
-      previousPeriod,
-    },
-    emptyOperationalFields()
-  )
+      emptyOperationalFields()
+    ),
+  }
 }
 
 async function buildDegradedMetricsPayload(
   supabase: SupabaseClient,
   businessId: string,
   range: PnLMovementRange | null,
-  positionAsOfDate: string
+  positionAsOfDate: string,
+  options?: { resolutionReason?: string }
 ): Promise<ServiceDashboardMetricsPayload> {
   const currency = await loadBusinessCurrency(supabase, businessId)
   const periodStart = range?.movementStart ?? positionAsOfDate
@@ -299,7 +366,8 @@ async function buildDegradedMetricsPayload(
         period_id: range?.period.period_id,
         period_start: periodStart,
         period_end: periodEnd,
-        resolution_reason: range?.period.resolution_reason ?? "degraded",
+        resolution_reason:
+          options?.resolutionReason ?? range?.period.resolution_reason ?? "degraded",
       },
       currency,
       revenue: 0,
@@ -379,6 +447,8 @@ export async function loadServiceDashboardMetrics(
   })
 
   let usedSummaryFastPath = false
+  let usedDegradedSummaryMissing = false
+  let summaryMissReason: SummaryMetricsMissReason | undefined
 
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
@@ -388,7 +458,7 @@ export async function loadServiceDashboardMetrics(
       }
 
       if (summaryOnly || isDashboardPnlSummaryFastPathEnabled()) {
-        const snapshotPayload = await buildMetricsFromSummarySnapshot(
+        const snapshotResult = await buildMetricsFromSummarySnapshot(
           supabase,
           businessId,
           range,
@@ -397,11 +467,12 @@ export async function loadServiceDashboardMetrics(
           compareEnd,
           summaryOptions
         )
-        if (snapshotPayload) {
+        if (snapshotResult.ok) {
           usedSummaryFastPath = true
-          return snapshotPayload
+          return snapshotResult.payload
         }
         if (summaryOnly) {
+          summaryMissReason = snapshotResult.reason
           const hasLiveMovement = await periodHasLivePnlMovement(
             supabase,
             businessId,
@@ -417,10 +488,20 @@ export async function loadServiceDashboardMetrics(
               reason: "read_path_missing_snapshot",
               sourceType: "dashboard_metrics",
             })
-          } else {
-            return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate)
           }
+          usedDegradedSummaryMissing = true
+          return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate, {
+            resolutionReason: "degraded",
+          })
         }
+      }
+
+      if (summaryOnly) {
+        usedDegradedSummaryMissing = true
+        summaryMissReason = summaryMissReason ?? "unknown"
+        return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate, {
+          resolutionReason: "degraded",
+        })
       }
 
       const tRpc = performance.now()
@@ -510,10 +591,8 @@ export async function loadServiceDashboardMetrics(
       return built
     })
 
-  const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = summaryOnly
-    ? usedSummaryFastPath
-      ? "summary"
-      : "live"
+  const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = usedDegradedSummaryMissing
+    ? "degraded"
     : usedSummaryFastPath
       ? "summary"
       : "live"
@@ -525,8 +604,17 @@ export async function loadServiceDashboardMetrics(
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
     cache_source: cacheSource,
-    dashboard_pnl_source: dashboardPnlSourceForDiag(usedSummaryFastPath),
-    metrics_source: metricsSource,
+    dashboard_pnl_source: usedDegradedSummaryMissing
+      ? "degraded"
+      : dashboardPnlSourceForDiag(usedSummaryFastPath),
+    metrics_source: usedDegradedSummaryMissing
+      ? "degraded_summary_missing"
+      : metricsSource,
+    ...(summaryMissReason ? { summary_metrics_miss_reason: summaryMissReason } : {}),
+    ...(summaryOnly && !usedSummaryFastPath
+      ? { live_metrics_fallback_skipped: true }
+      : {}),
+    ...(usedDegradedSummaryMissing ? { degraded_metrics: true } : {}),
     ...(summaryOnly ? { refresh_skipped: true } : {}),
   })
 

@@ -31,6 +31,7 @@ export function resolveDashboardClusterSource(input: {
 }): DashboardClusterSource {
   if (input.fullyDegraded) return "degraded"
   if (input.cacheSource === "cache_hit") return "cache"
+  if (input.metricsSource === "degraded") return "degraded"
   if (
     input.metricsSource === "live" ||
     input.timelineSource === "live_first_load_fallback"
