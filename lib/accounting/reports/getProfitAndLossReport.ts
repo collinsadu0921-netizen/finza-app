@@ -101,7 +101,7 @@ function buildReportFromMovementRows(
   currency: PnLReportResponse["currency"],
   movementStart: string,
   movementEnd: string,
-  movementSource: "snapshot" | "ledger" = "ledger"
+  movementSource: "snapshot" | "ledger" | "zero_initialized" = "ledger"
 ): PnLReportResponse {
   const sectionMap = new Map<PnLSectionKey, PnLLine[]>()
   const keys: PnLSectionKey[] = [
@@ -161,7 +161,7 @@ function buildReportFromMovementRows(
       resolved_period_reason: resolvedPeriod.resolution_reason,
       resolved_period_start: movementStart,
       resolved_period_end: movementEnd,
-      source: movementSource === "snapshot" ? "snapshot" : "ledger",
+      source: movementSource === "snapshot" || movementSource === "zero_initialized" ? "snapshot" : "ledger",
       version: 2,
     },
   }
@@ -173,8 +173,9 @@ export type PnLReportLoadOptions = {
 }
 
 export type PnLReportLoadMeta = {
-  movementSource: "snapshot" | "ledger" | "unavailable"
+  movementSource: "snapshot" | "ledger" | "unavailable" | "zero_initialized"
   snapshotStale: boolean
+  refreshJobId?: string | null
 }
 
 export async function getProfitAndLossReport(
@@ -195,7 +196,7 @@ export async function getProfitAndLossReport(
 
   const refreshOnRequest = options?.refreshOnRequest !== false
 
-  const { rows, error: fetchError, source: movementSource, snapshotStale } =
+  const { rows, error: fetchError, source: movementSource, snapshotStale, refreshJobId } =
     await fetchProfitAndLossMovementRows(
       supabase,
       businessId,
@@ -207,6 +208,7 @@ export async function getProfitAndLossReport(
   if (loadMeta) {
     loadMeta.movementSource = movementSource
     loadMeta.snapshotStale = snapshotStale
+    loadMeta.refreshJobId = refreshJobId ?? null
   }
 
   if (movementSource === "unavailable") {
