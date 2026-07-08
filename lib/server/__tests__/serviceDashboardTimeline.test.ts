@@ -80,7 +80,7 @@ describe("loadServiceDashboardTimeline", () => {
     expect(tryRefresh).not.toHaveBeenCalled()
   })
 
-  it("returns degraded empty timeline when summary missing and refresh disabled", async () => {
+  it("uses live fallback when summary missing, refresh disabled, and ledger exists", async () => {
     const supabase = mockSupabase({
       get_service_dashboard_timeline_from_summary: jest
         .fn()
@@ -88,12 +88,42 @@ describe("loadServiceDashboardTimeline", () => {
       get_service_dashboard_timeline_stale_summary: jest
         .fn()
         .mockResolvedValue({ data: [], error: null }),
+      get_service_dashboard_business_has_ledger_movement: jest
+        .fn()
+        .mockResolvedValue({ data: true, error: null }),
+      get_service_dashboard_timeline: jest
+        .fn()
+        .mockResolvedValue({ data: [row(1)], error: null }),
     })
 
     const result = await loadServiceDashboardTimeline(supabase, "biz-a", 12, diag, {
       refreshOnRequest: false,
     })
-    expect(result.source).toBe("degraded")
+    expect(result.source).toBe("live_first_load_fallback")
+    expect(result.timeline).toHaveLength(1)
+    expect(supabase.rpc).not.toHaveBeenCalledWith(
+      "refresh_service_dashboard_period_summaries",
+      expect.anything()
+    )
+  })
+
+  it("returns empty when summary missing, refresh disabled, and no ledger", async () => {
+    const supabase = mockSupabase({
+      get_service_dashboard_timeline_from_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [], error: null }),
+      get_service_dashboard_timeline_stale_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [], error: null }),
+      get_service_dashboard_business_has_ledger_movement: jest
+        .fn()
+        .mockResolvedValue({ data: false, error: null }),
+    })
+
+    const result = await loadServiceDashboardTimeline(supabase, "biz-a", 12, diag, {
+      refreshOnRequest: false,
+    })
+    expect(result.source).toBe("empty")
     expect(result.timeline).toHaveLength(0)
     expect(supabase.rpc).not.toHaveBeenCalledWith(
       "refresh_service_dashboard_period_summaries",

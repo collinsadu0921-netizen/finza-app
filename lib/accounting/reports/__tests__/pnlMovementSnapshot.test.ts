@@ -21,6 +21,7 @@ describe("fetchProfitAndLossMovementRows", () => {
       if (name === "get_pnl_movement_lines_from_snapshot") {
         return Promise.resolve({ data: MOVEMENT_ROWS, error: null })
       }
+<<<<<<< Updated upstream
       if (name === "try_refresh_service_pnl_movement_snapshot") {
         return Promise.resolve({ data: { refreshed: true }, error: null })
       }
@@ -28,6 +29,145 @@ describe("fetchProfitAndLossMovementRows", () => {
         return Promise.resolve({ data: [], error: null })
       }
       return Promise.resolve({ data: null, error: null })
+=======
+    }
+    return {}
+  })
+
+  return { rpc, from } as unknown as SupabaseClient
+}
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
+describe("fetchProfitAndLossMovementRows metadata-first", () => {
+  it("returns valid zero P&L when metadata line_count is 0", async () => {
+    mockReadMeta.mockResolvedValue({
+      line_count: 0,
+      revenue: 0,
+      expenses: 0,
+      net_profit: 0,
+      refreshed_at: new Date().toISOString(),
+      source_version: 522,
+      snapshotStale: false,
+    })
+
+    const result = await fetchProfitAndLossMovementRows(
+      buildSupabase({ exactAccountingPeriod: true }),
+      "biz",
+      "2026-05-01",
+      "2026-05-31",
+      {
+      refreshOnRequest: false,
+    })
+
+    expect(result.source).toBe("snapshot")
+    expect(result.rows).toEqual([])
+    expect(result.error).toBe("")
+  })
+
+  it("returns snapshot lines when metadata line_count > 0", async () => {
+    mockReadMeta.mockResolvedValue({
+      line_count: 2,
+      revenue: 100,
+      expenses: 40,
+      net_profit: 60,
+      refreshed_at: new Date().toISOString(),
+      source_version: 522,
+      snapshotStale: false,
+    })
+    mockReadLines.mockResolvedValue({
+      data: [{ account_code: "4000", period_total: 100 }],
+      error: null,
+    } as any)
+
+    const result = await fetchProfitAndLossMovementRows(
+      buildSupabase({ exactAccountingPeriod: true }),
+      "biz",
+      "2026-05-01",
+      "2026-05-31",
+      {
+      refreshOnRequest: false,
+    })
+
+    expect(result.source).toBe("snapshot")
+    expect(result.rows).toHaveLength(1)
+  })
+
+  it("falls back to live ledger when live movement exists but snapshot metadata missing", async () => {
+    mockReadMeta.mockResolvedValue(null)
+    mockReadStaleMeta.mockResolvedValue(null)
+    mockHasLive.mockResolvedValue(true)
+    mockEnqueue.mockResolvedValue("job-1")
+    const supabase = buildSupabase({
+      exactAccountingPeriod: true,
+      movementRows: [{ account_code: "6000", account_type: "expense", period_total: 1130 }],
+    })
+
+    const result = await fetchProfitAndLossMovementRows(
+      supabase,
+      "biz",
+      "2026-05-01",
+      "2026-05-31",
+      { refreshOnRequest: false }
+    )
+
+    expect(result.source).toBe("ledger")
+    expect(result.refreshJobId).toBe("job-1")
+    expect(result.rows).toHaveLength(1)
+    expect(mockEnqueue).toHaveBeenCalled()
+  })
+
+  it("initializes zero snapshot when no live movement and metadata missing", async () => {
+    mockReadMeta.mockResolvedValue(null)
+    mockReadStaleMeta.mockResolvedValue(null)
+    mockHasLive.mockResolvedValue(false)
+    mockEnsureZero.mockResolvedValue(true)
+
+    const result = await fetchProfitAndLossMovementRows(
+      buildSupabase({ exactAccountingPeriod: true }),
+      "biz",
+      "2026-05-01",
+      "2026-05-31",
+      {
+      refreshOnRequest: false,
+    })
+
+    expect(result.source).toBe("zero_initialized")
+    expect(result.rows).toEqual([])
+    expect(mockEnsureZero).toHaveBeenCalled()
+  })
+
+  it("falls back to live RPC when refreshOnRequest enabled", async () => {
+    mockReadMeta.mockResolvedValue(null)
+    mockReadStaleMeta.mockResolvedValue(null)
+    mockTryRefresh.mockResolvedValue({ refreshed: false, lockHeld: false })
+    const supabase = buildSupabase({
+      movementRows: [{ account_code: "6000", period_total: 50 }],
+    })
+
+    const result = await fetchProfitAndLossMovementRows(supabase, "biz", "2026-05-01", "2026-05-31", {
+      refreshOnRequest: true,
+    })
+
+    expect(result.source).toBe("ledger")
+    expect(supabase.rpc).toHaveBeenCalledWith("get_profit_and_loss_movement", expect.any(Object))
+  })
+
+  it("custom range May–July uses live RPC when snapshot misses (not exact period)", async () => {
+    mockReadMeta.mockResolvedValue(null)
+    mockReadStaleMeta.mockResolvedValue(null)
+    const supabase = buildSupabase({
+      exactAccountingPeriod: false,
+      movementRows: [
+        {
+          account_code: "6000",
+          account_type: "expense",
+          period_total: 2260,
+        },
+      ],
+>>>>>>> Stashed changes
     })
 
     const supabase = { rpc } as unknown as SupabaseClient

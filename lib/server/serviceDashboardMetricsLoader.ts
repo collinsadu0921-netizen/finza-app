@@ -17,6 +17,10 @@ import {
   fetchStaleDashboardPeriodPnl,
   isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
+import {
+  enqueueSnapshotRefreshJob,
+  periodHasLivePnlMovement,
+} from "@/lib/server/accountingSnapshotRefresh"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
 import {
   EMPTY_OPERATIONAL_UNPAID_INVOICES,
@@ -398,7 +402,24 @@ export async function loadServiceDashboardMetrics(
           return snapshotPayload
         }
         if (summaryOnly) {
-          return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate)
+          const hasLiveMovement = await periodHasLivePnlMovement(
+            supabase,
+            businessId,
+            range.movementStart,
+            range.movementEnd
+          )
+          if (hasLiveMovement) {
+            void enqueueSnapshotRefreshJob(supabase, {
+              businessId,
+              periodStart: range.movementStart,
+              periodEnd: range.movementEnd,
+              jobType: "both",
+              reason: "read_path_missing_snapshot",
+              sourceType: "dashboard_metrics",
+            })
+          } else {
+            return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate)
+          }
         }
       }
 
@@ -492,7 +513,7 @@ export async function loadServiceDashboardMetrics(
   const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = summaryOnly
     ? usedSummaryFastPath
       ? "summary"
-      : "degraded"
+      : "live"
     : usedSummaryFastPath
       ? "summary"
       : "live"

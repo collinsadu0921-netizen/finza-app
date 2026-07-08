@@ -4,6 +4,7 @@
  */
 
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { enqueueSnapshotRefreshJob } from "@/lib/server/accountingSnapshotRefresh"
 import { supabaseErrorDiag, type createRouteDiag } from "@/lib/server/routeDiagnostics"
 
 export const SUMMARY_FRESH_SECONDS = 300
@@ -206,14 +207,36 @@ function rowsResult(
   }
 }
 
+async function enqueueTimelineSnapshotRefreshJobs(
+  supabase: SupabaseClient,
+  businessId: string,
+  rows: TimelineRpcRow[]
+): Promise<void> {
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const key = `${row.period_start}|${row.period_end}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    void enqueueSnapshotRefreshJob(supabase, {
+      businessId,
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      jobType: "both",
+      reason: "read_path_missing_snapshot",
+      sourceType: "dashboard_timeline",
+    })
+  }
+}
+
 async function resolveEmptyWithLedger(
   supabase: SupabaseClient,
   businessId: string,
   periodsParam: number,
   diag: RouteDiag,
   t0: number,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown> & { refreshOnRequest?: boolean }
 ): Promise<ServiceDashboardTimelineResult> {
+  const refreshOnRequest = extra?.refreshOnRequest !== false
   const hasLedger = await businessHasLedgerMovement(supabase, businessId)
   if (!hasLedger) {
     return finish(diag, t0, periodsParam, {
@@ -225,7 +248,11 @@ async function resolveEmptyWithLedger(
 
   const liveRows = await loadTimelineLiveOnce(supabase, businessId, periodsParam)
   if (liveRows.length > 0) {
-    void blockingRefreshSummary(supabase, businessId, periodsParam)
+    if (refreshOnRequest) {
+      void blockingRefreshSummary(supabase, businessId, periodsParam)
+    } else {
+      void enqueueTimelineSnapshotRefreshJobs(supabase, businessId, liveRows)
+    }
     return finish(
       diag,
       t0,
@@ -276,18 +303,10 @@ export async function loadServiceDashboardTimeline(
   }
 
   if (!refreshOnRequest) {
-    return finish(
-      diag,
-      t0,
-      periodsParam,
-      {
-        timeline: [],
-        source: "degraded",
-        cacheable: true,
-        diagnostic: "summary_missing_refresh_disabled",
-      },
-      { refresh_skipped: true }
-    )
+    return resolveEmptyWithLedger(supabase, businessId, periodsParam, diag, t0, {
+      refresh_skipped: true,
+      refreshOnRequest: false,
+    })
   }
 
   const blockingCount = await blockingRefreshSummary(supabase, businessId, periodsParam)
@@ -320,11 +339,13 @@ export async function loadServiceDashboardTimeline(
     return resolveEmptyWithLedger(supabase, businessId, periodsParam, diag, t0, {
       lock_held: true,
       refresh_period_count: blockingCount,
+      refreshOnRequest: true,
     })
   }
 
   return resolveEmptyWithLedger(supabase, businessId, periodsParam, diag, t0, {
     refresh_period_count: blockingCount || refreshTry.periodCount,
+    refreshOnRequest: true,
   })
 }
 
