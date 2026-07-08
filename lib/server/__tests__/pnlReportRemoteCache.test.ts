@@ -42,11 +42,20 @@ const sampleReport = (): PnLReportResponse => ({
   },
 })
 
-const sampleEntry = () => ({
+const sampleValue = () => ({
   payload: sampleReport(),
   loadMeta: { movementSource: "snapshot" as const, snapshotStale: false },
-  cachedAt: new Date().toISOString(),
 })
+
+function makeStoredEntry(cachedAt: string, hardTtlSec: number, softTtlSec: number) {
+  return {
+    payload: sampleReport(),
+    loadMeta: { movementSource: "snapshot" as const, snapshotStale: false },
+    cachedAt,
+    hardTtlSec,
+    softTtlSec,
+  }
+}
 
 describe("pnlReportRemoteCache", () => {
   const prevRemoteTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
@@ -58,6 +67,7 @@ describe("pnlReportRemoteCache", () => {
 
   afterEach(() => {
     resetPnlReportRemoteCacheForTests()
+    jest.restoreAllMocks()
     if (prevRemoteTtl === undefined) {
       delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
     } else {
@@ -73,6 +83,7 @@ describe("pnlReportRemoteCache", () => {
   it("clamps remote TTL to 15–120 seconds", async () => {
     process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "5"
     const store = new Map<string, unknown>()
+    jest.spyOn(Math, "random").mockReturnValue(0.5)
     setPnlReportRemoteCacheForTests({
       get: async (key) => store.get(key),
       set: async (key, value, options) => {
@@ -81,19 +92,19 @@ describe("pnlReportRemoteCache", () => {
       },
     })
 
-    await setPnlReportRemoteCacheEntry("key-1", sampleEntry(), { businessId: "biz-1" })
+    await setPnlReportRemoteCacheEntry("key-1", sampleValue(), { businessId: "biz-1" })
   })
 
   it("returns disabled when remote cache is off", async () => {
     process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "0"
     const result = await getPnlReportRemoteCacheEntry("key-1")
-    expect(result.status).toBe("disabled")
+    expect(result.status).toBe("miss")
   })
 
   it("returns hit on remote cache get", async () => {
     const store = new Map<string, unknown>()
     const key = "pnl|biz-1|2026-01-01|2026-01-31|||||norefresh"
-    store.set(key, sampleEntry())
+    store.set(key, makeStoredEntry(new Date().toISOString(), 30, 24))
     setPnlReportRemoteCacheForTests({
       get: async (k) => store.get(k),
       set: async () => {},
@@ -104,9 +115,46 @@ describe("pnlReportRemoteCache", () => {
     expect(result.entry?.payload.totals.net_profit).toBe(100)
   })
 
+  it("returns stale_hit when beyond soft TTL but within hard TTL", async () => {
+    const store = new Map<string, unknown>()
+    const key = `pnl|biz-1|stale-${Date.now()}`
+    const hardTtlSec = 30
+    const softTtlSec = 24
+    const cachedAt = new Date(Date.now() - (softTtlSec + 1) * 1000).toISOString()
+    store.set(key, makeStoredEntry(cachedAt, hardTtlSec, softTtlSec))
+
+    setPnlReportRemoteCacheForTests({
+      get: async (k) => store.get(k),
+      set: async () => {},
+    })
+
+    const result = await getPnlReportRemoteCacheEntry(key)
+    expect(result.status).toBe("stale_hit")
+    expect(result.entry?.payload.totals.net_profit).toBe(100)
+  })
+
+  it("returns miss when beyond hard TTL", async () => {
+    const store = new Map<string, unknown>()
+    const key = `pnl|biz-1|expired-${Date.now()}`
+    const hardTtlSec = 30
+    const softTtlSec = 24
+    const cachedAt = new Date(Date.now() - (hardTtlSec + 2) * 1000).toISOString()
+    store.set(key, makeStoredEntry(cachedAt, hardTtlSec, softTtlSec))
+
+    setPnlReportRemoteCacheForTests({
+      get: async (k) => store.get(k),
+      set: async () => {},
+    })
+
+    const result = await getPnlReportRemoteCacheEntry(key)
+    expect(result.status).toBe("miss")
+    expect(result.entry).toBe(undefined)
+  })
+
   it("stores entry on set with business tag", async () => {
     const store = new Map<string, unknown>()
     let savedTags: string[] | undefined
+    jest.spyOn(Math, "random").mockReturnValue(0.5)
     setPnlReportRemoteCacheForTests({
       get: async (key) => store.get(key),
       set: async (key, value, options) => {
@@ -116,7 +164,7 @@ describe("pnlReportRemoteCache", () => {
     })
 
     const key = "pnl|biz-1|2026-01-01|2026-01-31|||||norefresh"
-    const stored = await setPnlReportRemoteCacheEntry(key, sampleEntry(), { businessId: "biz-1" })
+    const stored = await setPnlReportRemoteCacheEntry(key, sampleValue(), { businessId: "biz-1" })
     expect(stored).toBe("stored")
     expect(savedTags).toEqual(["reports_pnl", "business:biz-1"])
   })
@@ -141,7 +189,7 @@ describe("pnlReportRemoteCache", () => {
       },
     })
 
-    const stored = await setPnlReportRemoteCacheEntry("key-1", sampleEntry())
+    const stored = await setPnlReportRemoteCacheEntry("key-1", sampleValue())
     expect(stored).toBe("error")
   })
 
@@ -157,7 +205,6 @@ describe("pnlReportRemoteCache", () => {
     const skipped = await setPnlReportRemoteCacheEntry("key-1", {
       payload: sampleReport(),
       loadMeta: { movementSource: "unavailable", snapshotStale: false },
-      cachedAt: new Date().toISOString(),
     })
     expect(skipped).toBe("skipped")
     expect(setCalls).toBe(0)
@@ -175,7 +222,6 @@ describe("pnlReportRemoteCache", () => {
     const skipped = await setPnlReportRemoteCacheEntry("key-1", {
       payload: { error: "forbidden" },
       loadMeta: { movementSource: "snapshot", snapshotStale: false },
-      cachedAt: new Date().toISOString(),
     })
     expect(skipped).toBe("skipped")
     expect(setCalls).toBe(0)

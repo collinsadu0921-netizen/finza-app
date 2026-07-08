@@ -22,6 +22,9 @@ type CacheEntry = { expiresAt: number; payload: unknown; loadMeta: PnLReportLoad
 const store = new Map<string, CacheEntry>()
 const inflight = new Map<string, Promise<{ payload: unknown; loadMeta: PnLReportLoadMeta }>>()
 
+// Coalesce background refresh triggers per key within one instance.
+const remoteRefreshInFlight = new Map<string, Promise<void>>()
+
 const DEFAULT_TTL_SEC = 30
 
 function ttlMs(): number {
@@ -56,6 +59,7 @@ export type PnlReportCacheResult<T> = {
   cache_enabled: boolean
   servedExpiredCache: boolean
   remoteCacheStatus: PnlReportRemoteCacheStatus
+  remoteRefreshStarted: boolean
   /** @deprecated */
   source: PnlReportCacheSource
 }
@@ -156,10 +160,6 @@ function getEntry(key: string): CacheEntry | undefined {
   return store.get(key)
 }
 
-function remoteCacheStatusWhenL1Hit(): PnlReportRemoteCacheStatus {
-  return isPnlReportRemoteCacheEnabled() ? "miss" : "disabled"
-}
-
 function businessIdFromCacheKey(key: string): string | undefined {
   const parts = key.split("|")
   return parts.length >= 2 && parts[0] === "pnl" ? parts[1] : undefined
@@ -171,7 +171,8 @@ function wrapResult<T>(
   cacheStatus: PnlReportCacheStatus,
   cacheEnabled: boolean,
   servedExpiredCache: boolean,
-  remoteCacheStatus: PnlReportRemoteCacheStatus
+  remoteCacheStatus: PnlReportRemoteCacheStatus,
+  remoteRefreshStarted: boolean
 ): PnlReportCacheResult<T> {
   const source: PnlReportCacheSource =
     cacheStatus === "hit" || cacheStatus === "expired_served"
@@ -186,6 +187,7 @@ function wrapResult<T>(
     cache_enabled: cacheEnabled,
     servedExpiredCache,
     remoteCacheStatus,
+    remoteRefreshStarted,
     source,
   }
 }
@@ -198,18 +200,21 @@ export async function loadOrComputePnlReportCache<T>(
     /** When compute returns null/failure, serve last expired entry if present. */
     serveExpiredOnMiss?: boolean
     businessId?: string
+    cacheRemote?: boolean
   }
 ): Promise<PnlReportCacheResult<T>> {
   const cacheEnabled = isPnlReportCacheEnabled()
   const ms = ttlMs()
   const shouldStore = options?.shouldStore ?? shouldCachePnlReportPayload
   const businessId = options?.businessId ?? businessIdFromCacheKey(key)
-  const now = Date.now()
+  const cacheRemote = options?.cacheRemote ?? true
 
+  const now = Date.now()
   const entry = ms > 0 ? getEntry(key) : undefined
   const isFresh = Boolean(entry && now < entry.expiresAt)
   const isExpired = Boolean(entry && now >= entry.expiresAt)
 
+  // ── L1 hit (process-local) ───────────────────────────────────────────────
   if (ms > 0 && isFresh && entry) {
     return wrapResult(
       entry.payload as T,
@@ -217,10 +222,12 @@ export async function loadOrComputePnlReportCache<T>(
       "hit",
       cacheEnabled,
       false,
-      remoteCacheStatusWhenL1Hit()
+      "miss",
+      false
     )
   }
 
+  // ── L1 inflight singleflight ─────────────────────────────────────────────
   const pending = inflight.get(key)
   if (pending) {
     if (ms > 0 && isExpired && entry) {
@@ -230,7 +237,8 @@ export async function loadOrComputePnlReportCache<T>(
         "expired_served",
         cacheEnabled,
         true,
-        remoteCacheStatusWhenL1Hit()
+        "miss",
+        false
       )
     }
     const built = await pending
@@ -240,19 +248,40 @@ export async function loadOrComputePnlReportCache<T>(
       "singleflight_joined",
       cacheEnabled,
       false,
-      remoteCacheStatusWhenL1Hit()
+      "miss",
+      false
     )
   }
 
-  let remoteCacheStatus: PnlReportRemoteCacheStatus = isPnlReportRemoteCacheEnabled()
-    ? "miss"
-    : "disabled"
-  if (!isPnlReportRemoteCacheEnabled()) {
-    // L2 disabled — skip remote read.
-  } else {
+  // ── Remote (L2) soft TTL + stale-while-revalidate ─────────────────────────
+  const computeTimeoutMs = (() => {
+    const raw = Number(process.env.FINZA_PNL_REPORT_COMPUTE_TIMEOUT_MS ?? "8000")
+    if (!Number.isFinite(raw) || raw <= 0) return 8000
+    return Math.min(Math.max(raw, 2000), 20000)
+  })()
+
+  const computeWithTimeout = async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        compute(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), computeTimeoutMs)
+        }),
+      ])
+    } catch {
+      return null
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  let remoteCacheStatus: PnlReportRemoteCacheStatus = "miss"
+  if (isPnlReportRemoteCacheEnabled()) {
     const remote = await getPnlReportRemoteCacheEntry<T>(key)
     remoteCacheStatus = remote.status
-    if (remote.status === "hit" && remote.entry) {
+
+    if (remote.entry && remote.status === "hit") {
       if (ms > 0) {
         store.set(key, {
           expiresAt: Date.now() + ms,
@@ -260,19 +289,69 @@ export async function loadOrComputePnlReportCache<T>(
           loadMeta: remote.entry.loadMeta,
         })
       }
+
       return wrapResult(
         remote.entry.payload,
         remote.entry.loadMeta,
         "hit",
         cacheEnabled,
         false,
-        "hit"
+        remoteCacheStatus,
+        false
+      )
+    }
+
+    if (remote.entry && remote.status === "stale_hit") {
+      let remoteRefreshStarted = false
+      const existing = remoteRefreshInFlight.get(key)
+      if (!existing) {
+        remoteRefreshStarted = true
+        const p = (async () => {
+          try {
+            const built = await computeWithTimeout()
+            if (!built) return
+
+            if (ms > 0 && shouldStore(built.payload)) {
+              store.set(key, {
+                expiresAt: Date.now() + ms,
+                payload: built.payload,
+                loadMeta: built.loadMeta,
+              })
+            }
+
+            if (cacheRemote && shouldStore(built.payload) && isPnlReportRemoteCacheEnabled()) {
+              await setPnlReportRemoteCacheEntry(
+                key,
+                { payload: built.payload, loadMeta: built.loadMeta },
+                { businessId }
+              )
+            }
+          } finally {
+            remoteRefreshInFlight.delete(key)
+          }
+        })()
+
+        remoteRefreshInFlight.set(key, p)
+        void p.catch(() => {})
+      }
+
+      // Serve stale immediately; rebuild happens async.
+      return wrapResult(
+        remote.entry.payload,
+        remote.entry.loadMeta,
+        "expired_served",
+        cacheEnabled,
+        true,
+        remoteCacheStatus,
+        remoteRefreshStarted
       )
     }
   }
 
+  // ── Compute path (remote miss/error / hard-expired) ──────────────────────
   const promise = (async () => {
-    const built = await compute()
+    const built = await computeWithTimeout()
+
     if (built && ms > 0 && shouldStore(built.payload)) {
       store.set(key, {
         expiresAt: Date.now() + ms,
@@ -286,27 +365,24 @@ export async function loadOrComputePnlReportCache<T>(
         }
       }
     }
-    if (built && shouldStore(built.payload) && isPnlReportRemoteCacheEnabled()) {
+
+    if (built && shouldStore(built.payload) && cacheRemote && isPnlReportRemoteCacheEnabled()) {
       const setStatus = await setPnlReportRemoteCacheEntry(
         key,
-        {
-          payload: built.payload,
-          loadMeta: built.loadMeta,
-          cachedAt: new Date().toISOString(),
-        },
+        { payload: built.payload, loadMeta: built.loadMeta },
         { businessId }
       )
       if (setStatus === "error") {
         remoteCacheStatus = "error"
       }
     }
+
     return built
   })().finally(() => {
     inflight.delete(key)
   })
 
   inflight.set(key, promise as Promise<{ payload: unknown; loadMeta: PnLReportLoadMeta }>)
-
   const built = await promise
 
   if (!built) {
@@ -317,16 +393,19 @@ export async function loadOrComputePnlReportCache<T>(
         "expired_served",
         cacheEnabled,
         true,
-        remoteCacheStatus
+        remoteCacheStatus,
+        false
       )
     }
+
     return wrapResult(
       {} as T,
       { movementSource: "unavailable", snapshotStale: false },
       "miss",
       cacheEnabled,
       false,
-      remoteCacheStatus
+      remoteCacheStatus,
+      false
     )
   }
 
@@ -336,7 +415,8 @@ export async function loadOrComputePnlReportCache<T>(
     isExpired ? "singleflight_owner" : "miss",
     cacheEnabled,
     false,
-    remoteCacheStatus
+    remoteCacheStatus,
+    false
   )
 }
 

@@ -6,18 +6,18 @@
  * for controlled validation or manual priming workflows.
  */
 
-import type { PnlReportCacheStatus } from "@/lib/server/pnlReportCache"
-import type { PnlReportRemoteCacheStatus } from "@/lib/server/pnlReportRemoteCache"
-
 export type ReportsRefreshOnRequestDiag = "enabled" | "disabled"
 
 export type ReportsPnlSource =
   | "cache"
-  | "expired_cache"
+  | "stale_cache"
   | "fresh_snapshot"
   | "stale_snapshot"
-  | "live"
   | "unavailable"
+
+export type ReportsPnlCacheHeader = "fresh_hit" | "stale_hit" | "miss" | "refresh_started"
+
+export type ReportsPnlRemoteCacheHeader = "hit" | "stale_hit" | "miss" | "error"
 
 export function isReportsPnlRefreshOnRequestEnabled(): boolean {
   const raw = String(process.env.FINZA_REPORTS_PNL_REFRESH_ON_REQUEST ?? "").trim()
@@ -35,8 +35,8 @@ export function reportsRefreshSkipped(refreshOnRequest: boolean): boolean {
 export type ReportsPnlDiagnostics = {
   reports_refresh_on_request: ReportsRefreshOnRequestDiag
   reports_source: ReportsPnlSource
-  reports_cache_status: PnlReportCacheStatus
-  reports_remote_cache_status: PnlReportRemoteCacheStatus
+  reports_cache_header: ReportsPnlCacheHeader
+  reports_remote_cache_header: ReportsPnlRemoteCacheHeader
   reports_refresh_skipped: boolean
   reports_snapshot_stale: boolean
 }
@@ -44,15 +44,15 @@ export type ReportsPnlDiagnostics = {
 export function buildReportsPnlDiagnostics(input: {
   refreshOnRequest: boolean
   reportsSource: ReportsPnlSource
-  cacheStatus: PnlReportCacheStatus
-  remoteCacheStatus: PnlReportRemoteCacheStatus
+  cacheHeader: ReportsPnlCacheHeader
+  remoteCacheHeader: ReportsPnlRemoteCacheHeader
   snapshotStale: boolean
 }): ReportsPnlDiagnostics {
   return {
     reports_refresh_on_request: reportsRefreshOnRequestDiag(),
     reports_source: input.reportsSource,
-    reports_cache_status: input.cacheStatus,
-    reports_remote_cache_status: input.remoteCacheStatus,
+    reports_cache_header: input.cacheHeader,
+    reports_remote_cache_header: input.remoteCacheHeader,
     reports_refresh_skipped: reportsRefreshSkipped(input.refreshOnRequest),
     reports_snapshot_stale: input.snapshotStale,
   }
@@ -61,21 +61,17 @@ export function buildReportsPnlDiagnostics(input: {
 export function reportsPnlResponseHeaders(diagnostics: ReportsPnlDiagnostics): Record<string, string> {
   return {
     "x-finza-reports-source": diagnostics.reports_source,
-    "x-finza-reports-cache": diagnostics.reports_cache_status,
-    "x-finza-reports-remote-cache": diagnostics.reports_remote_cache_status,
+    "x-finza-reports-cache": diagnostics.reports_cache_header,
+    "x-finza-reports-remote-cache": diagnostics.reports_remote_cache_header,
     "x-finza-reports-refresh-on-request": diagnostics.reports_refresh_on_request,
   }
 }
 
 export function resolveReportsPnlSource(input: {
-  cacheStatus: PnlReportCacheStatus
   movementSource: "snapshot" | "ledger" | "unavailable" | "zero_initialized"
   snapshotStale: boolean
-  servedExpiredCache: boolean
 }): ReportsPnlSource {
-  if (input.cacheStatus === "hit") return "cache"
-  if (input.cacheStatus === "expired_served" || input.servedExpiredCache) return "expired_cache"
-  if (input.movementSource === "ledger") return "live"
+  if (input.movementSource === "ledger") return "fresh_snapshot"
   if (input.movementSource === "unavailable") return "unavailable"
   if (input.movementSource === "snapshot" || input.movementSource === "zero_initialized") {
     return input.snapshotStale ? "stale_snapshot" : "fresh_snapshot"

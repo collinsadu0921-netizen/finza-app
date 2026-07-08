@@ -25,7 +25,6 @@ import {
   buildReportsPnlDiagnostics,
   isReportsPnlRefreshOnRequestEnabled,
   reportsPnlResponseHeaders,
-  resolveReportsPnlSource,
   type ReportsPnlDiagnostics,
 } from "@/lib/server/reportsPnlRefreshPolicy"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
@@ -171,7 +170,13 @@ export async function GET(request: NextRequest) {
     })
 
     const tReport = performance.now()
-    const { value: cached, cacheStatus, servedExpiredCache, remoteCacheStatus } =
+    const {
+      value: cached,
+      cacheStatus,
+      servedExpiredCache,
+      remoteCacheStatus,
+      remoteRefreshStarted,
+    } =
       await loadOrComputePnlReportCache<PnLReportResponse>(
         cacheKey,
         async () => {
@@ -194,22 +199,53 @@ export async function GET(request: NextRequest) {
           shouldStore: shouldCachePnlReportPayload,
           serveExpiredOnMiss: true,
           businessId,
+          cacheRemote: !refreshOnRequest,
         }
       )
 
     const loadMeta = cached.loadMeta
-    const reportsSource = resolveReportsPnlSource({
-      cacheStatus,
-      movementSource: loadMeta.movementSource,
-      snapshotStale: loadMeta.snapshotStale,
-      servedExpiredCache,
-    })
+
+    const remoteCacheHeader =
+      remoteCacheStatus === "hit"
+        ? "hit"
+        : remoteCacheStatus === "stale_hit"
+          ? "stale_hit"
+          : remoteCacheStatus === "error"
+            ? "error"
+            : "miss"
+
+    const reportsCacheHeader =
+      remoteCacheStatus === "hit"
+        ? "fresh_hit"
+        : remoteCacheStatus === "stale_hit"
+          ? remoteRefreshStarted
+            ? "refresh_started"
+            : "stale_hit"
+          : cacheStatus === "hit"
+            ? "fresh_hit"
+            : cacheStatus === "expired_served" || servedExpiredCache
+              ? "stale_hit"
+              : "miss"
+
+    const reportsSource =
+      remoteCacheStatus === "stale_hit" || cacheStatus === "expired_served" || servedExpiredCache
+        ? "stale_cache"
+        : remoteCacheStatus === "hit" || cacheStatus === "hit"
+          ? "cache"
+          : loadMeta.movementSource === "snapshot" || loadMeta.movementSource === "zero_initialized"
+            ? loadMeta.snapshotStale
+              ? "stale_snapshot"
+              : "fresh_snapshot"
+            : loadMeta.movementSource === "ledger"
+              ? "fresh_snapshot"
+              : // For unavailable, still emit a stable header value (avoid "unavailable" in cache metadata)
+                "fresh_snapshot"
 
     const reportsDiagnostics = buildReportsPnlDiagnostics({
       refreshOnRequest,
       reportsSource,
-      cacheStatus,
-      remoteCacheStatus,
+      cacheHeader: reportsCacheHeader,
+      remoteCacheHeader,
       snapshotStale: loadMeta.snapshotStale || servedExpiredCache,
     })
 

@@ -149,7 +149,7 @@ describe("GET /api/accounting/reports/profit-and-loss", () => {
     expect(first.status).toBe(200)
     expect(second.status).toBe(200)
     expect(mockGetReport).toHaveBeenCalledTimes(1)
-    expect(second.headers.get("x-finza-reports-cache")).toBe("hit")
+    expect(second.headers.get("x-finza-reports-cache")).toBe("fresh_hit")
     expect(second.headers.get("x-finza-reports-source")).toBe("cache")
   })
 

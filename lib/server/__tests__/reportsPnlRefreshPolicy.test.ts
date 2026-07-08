@@ -2,7 +2,6 @@ import {
   buildReportsPnlDiagnostics,
   isReportsPnlRefreshOnRequestEnabled,
   reportsPnlResponseHeaders,
-  resolveReportsPnlSource,
 } from "../reportsPnlRefreshPolicy"
 
 describe("reportsPnlRefreshPolicy", () => {
@@ -21,46 +20,42 @@ describe("reportsPnlRefreshPolicy", () => {
     expect(isReportsPnlRefreshOnRequestEnabled()).toBe(false)
   })
 
-  it("resolveReportsPnlSource maps cache statuses", () => {
+  it("resolveReportsPnlSource maps movement sources", () => {
+    const { resolveReportsPnlSource } = require("../reportsPnlRefreshPolicy") as typeof import("../reportsPnlRefreshPolicy")
+
     expect(
       resolveReportsPnlSource({
-        cacheStatus: "hit",
         movementSource: "snapshot",
         snapshotStale: false,
-        servedExpiredCache: false,
       })
-    ).toBe("cache")
+    ).toBe("fresh_snapshot")
 
     expect(
       resolveReportsPnlSource({
-        cacheStatus: "expired_served",
         movementSource: "snapshot",
         snapshotStale: true,
-        servedExpiredCache: true,
-      })
-    ).toBe("expired_cache")
-
-    expect(
-      resolveReportsPnlSource({
-        cacheStatus: "miss",
-        movementSource: "snapshot",
-        snapshotStale: true,
-        servedExpiredCache: false,
       })
     ).toBe("stale_snapshot")
+
+    expect(
+      resolveReportsPnlSource({
+        movementSource: "ledger",
+        snapshotStale: false,
+      })
+    ).toBe("fresh_snapshot")
   })
 
   it("reportsPnlResponseHeaders exposes diagnostics without secrets", () => {
     const diagnostics = buildReportsPnlDiagnostics({
       refreshOnRequest: false,
       reportsSource: "cache",
-      cacheStatus: "hit",
-      remoteCacheStatus: "hit",
+      cacheHeader: "fresh_hit",
+      remoteCacheHeader: "hit",
       snapshotStale: false,
     })
     expect(reportsPnlResponseHeaders(diagnostics)).toEqual({
       "x-finza-reports-source": "cache",
-      "x-finza-reports-cache": "hit",
+      "x-finza-reports-cache": "fresh_hit",
       "x-finza-reports-remote-cache": "hit",
       "x-finza-reports-refresh-on-request": "disabled",
     })

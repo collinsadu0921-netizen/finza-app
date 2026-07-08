@@ -208,6 +208,8 @@ describe("pnlReportCache", () => {
       payload,
       loadMeta: sampleLoadMeta(),
       cachedAt: new Date().toISOString(),
+      hardTtlSec: 30,
+      softTtlSec: 24,
     })
     setPnlReportRemoteCacheForTests({
       get: async (k) => remoteStore.get(k),
@@ -222,6 +224,7 @@ describe("pnlReportCache", () => {
 
     expect(result.cacheStatus).toBe("hit")
     expect(result.remoteCacheStatus).toBe("hit")
+    expect(result.remoteRefreshStarted).toBe(false)
     expect(computeCalls).toBe(0)
 
     const second = await loadOrComputePnlReportCache(key, async () => {
@@ -230,6 +233,7 @@ describe("pnlReportCache", () => {
     })
     expect(second.cacheStatus).toBe("hit")
     expect(second.remoteCacheStatus).toBe("miss")
+    expect(second.remoteRefreshStarted).toBe(false)
     expect(computeCalls).toBe(0)
   })
 
@@ -252,6 +256,7 @@ describe("pnlReportCache", () => {
 
     expect(result.cacheStatus).toBe("miss")
     expect(result.remoteCacheStatus).toBe("error")
+    expect(result.remoteRefreshStarted).toBe(false)
     expect(computeCalls).toBe(1)
   })
 
@@ -273,5 +278,62 @@ describe("pnlReportCache", () => {
     }))
 
     expect(remoteStore.has(key)).toBe(true)
+  })
+
+  it("serves stale remote entry immediately and starts background refresh", async () => {
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "30"
+    const key = `test-pnl-remote-stale-${Date.now()}-${Math.random()}`
+
+    const hardTtlSec = 30
+    const softTtlSec = 24
+    // Age > softTtlSec but <= hardTtlSec → stale_hit.
+    const cachedAt = new Date(Date.now() - (softTtlSec + 1) * 1000).toISOString()
+
+    const stalePayload = sampleReport()
+    const remoteStore = new Map<string, unknown>()
+    remoteStore.set(key, {
+      payload: stalePayload,
+      loadMeta: sampleLoadMeta(),
+      cachedAt,
+      hardTtlSec,
+      softTtlSec,
+    })
+
+    let computeCalls = 0
+    let releaseCompute!: () => void
+    const computeGate = new Promise<void>((resolve) => {
+      releaseCompute = resolve
+    })
+
+    let setCalls = 0
+    let setResolved!: () => void
+    const setDone = new Promise<void>((resolve) => {
+      setResolved = resolve
+    })
+
+    setPnlReportRemoteCacheForTests({
+      get: async (k) => remoteStore.get(k),
+      set: async (k, _value) => {
+        setCalls += 1
+        setResolved()
+      },
+    })
+
+    const result = await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      await computeGate
+      return { payload: stalePayload, loadMeta: sampleLoadMeta() }
+    })
+
+    expect(result.cacheStatus).toBe("expired_served")
+    expect(result.servedExpiredCache).toBe(true)
+    expect(result.remoteCacheStatus).toBe("stale_hit")
+    expect(result.remoteRefreshStarted).toBe(true)
+    // Background refresh should have started but we are gated, so it should not have set yet.
+    expect(computeCalls).toBe(1)
+    expect(setCalls).toBe(0)
+
+    releaseCompute()
+    await setDone
   })
 })
