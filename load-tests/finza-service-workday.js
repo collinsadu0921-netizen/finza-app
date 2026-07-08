@@ -3,7 +3,7 @@
  *
  * Simulates Ghana SME service workspace API traffic during a workday.
  * Exactly ONE logical scenario runs per invocation — set SCENARIO (never rely on CLI --scenario).
- * Exception: workday_50_plus_reports_5 exports two concurrent k6 scenarios (operational + reports).
+ * Exception: workday_50_plus_reports_5 and workday_100_plus_reports_5 export two concurrent k6 scenarios (operational + reports).
  *
  * Paths in SESSIONS_JSON are relative to this file (load-tests/), e.g.:
  *   -e SESSIONS_JSON=./sessions.staging.json
@@ -36,6 +36,7 @@ const ALLOWED_SCENARIOS = [
   "smoke",
   "workday_50",
   "workday_50_plus_reports_5",
+  "workday_100_plus_reports_5",
   "workday_100",
   "workday_200",
   "stress_500",
@@ -125,9 +126,13 @@ function parseWorkdayReportsEveryN() {
 
 const WORKDAY_REPORTS_EVERY_N = parseWorkdayReportsEveryN()
 
-const MIXED_SCENARIO = selectedScenario === "workday_50_plus_reports_5"
+const MIXED_SCENARIOS = new Set(["workday_50_plus_reports_5", "workday_100_plus_reports_5"])
+const MIXED_SCENARIO = MIXED_SCENARIOS.has(selectedScenario)
 
-/** Concurrent reports VUs for workday_50_plus_reports_5 (separate journey). */
+/** Peak operational VUs for mixed scenarios (reports journey is separate). */
+const MIXED_OPERATIONAL_VUS = selectedScenario === "workday_100_plus_reports_5" ? 100 : 50
+
+/** Concurrent reports VUs for mixed scenarios (separate journey). */
 const REPORTS_VUS = parsePositiveIntEnv("REPORTS_VUS", 5)
 
 /** Seconds between report views in the reports journey (random uniform in range). */
@@ -142,8 +147,8 @@ if (REPORTS_SLEEP_MAX_SEC < REPORTS_SLEEP_MIN_SEC) {
 
 if (MIXED_SCENARIO && ROUTE_FILTER !== "all") {
   throw new Error(
-    `SCENARIO=workday_50_plus_reports_5 requires ROUTE_FILTER=all (got "${ROUTE_FILTER}"). ` +
-      `Use SCENARIO=workday_50 with ROUTE_FILTER=reports for reports isolation.`
+    `SCENARIO=${selectedScenario} requires ROUTE_FILTER=all (got "${ROUTE_FILTER}"). ` +
+      `Use SCENARIO=workday_50 or workday_100 with ROUTE_FILTER=reports for reports isolation.`
   )
 }
 
@@ -610,6 +615,12 @@ const WORKDAY_50_STAGES = [
   { duration: "2m", target: 0 },
 ]
 
+const WORKDAY_100_STAGES = [
+  { duration: "3m", target: 100 },
+  { duration: "5m", target: 100 },
+  { duration: "2m", target: 0 },
+]
+
 function reportsJourneyStages(vus) {
   return [
     { duration: "2m", target: vus },
@@ -649,14 +660,26 @@ const scenarioDefinitions = {
       exec: "reportsJourney",
     },
   },
+  workday_100_plus_reports_5: {
+    operational: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: WORKDAY_100_STAGES,
+      gracefulRampDown: "45s",
+      exec: "operationalWorkdayFlow",
+    },
+    reports: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: reportsJourneyStages(REPORTS_VUS),
+      gracefulRampDown: "30s",
+      exec: "reportsJourney",
+    },
+  },
   workday_100: {
     executor: "ramping-vus",
     startVUs: 0,
-    stages: [
-      { duration: "3m", target: 100 },
-      { duration: "5m", target: 100 },
-      { duration: "2m", target: 0 },
-    ],
+    stages: WORKDAY_100_STAGES,
     gracefulRampDown: "45s",
     exec: "workdayFlow",
   },
@@ -709,6 +732,11 @@ const thresholdsByScenario = {
     // No global http_req_duration — operational and report journeys have different
     // latency profiles; judge health via per-route thresholds below.
   },
+  workday_100_plus_reports_5: {
+    ...defaultThresholds,
+    http_req_failed: ["rate<0.01"],
+    // Same per-route thresholds as workday_50_plus_reports_5 — no global p95.
+  },
   workday_100: {
     ...defaultThresholds,
     http_req_duration: ["p(95)<3000"],
@@ -729,8 +757,8 @@ export const options = buildK6Options()
 function buildK6Options() {
   if (MIXED_SCENARIO) {
     return {
-      scenarios: scenarioDefinitions.workday_50_plus_reports_5,
-      thresholds: thresholdsByScenario.workday_50_plus_reports_5,
+      scenarios: scenarioDefinitions[selectedScenario],
+      thresholds: thresholdsByScenario[selectedScenario],
     }
   }
   return {
@@ -753,8 +781,8 @@ export function setup() {
         ? 1
         : selectedScenario === "workday_50"
           ? 50
-          : selectedScenario === "workday_50_plus_reports_5"
-            ? `50 operational + ${REPORTS_VUS} reports`
+          : MIXED_SCENARIO
+            ? `${MIXED_OPERATIONAL_VUS} operational + ${REPORTS_VUS} reports`
             : selectedScenario === "workday_100"
               ? 100
               : selectedScenario === "workday_200"
@@ -763,7 +791,9 @@ export function setup() {
     }`
   )
   if (MIXED_SCENARIO) {
-    console.log("[finza-k6]   operational VUs:  50 (workday journey, no reports_pnl)")
+    console.log(
+      `[finza-k6]   operational VUs:  ${MIXED_OPERATIONAL_VUS} (workday journey, no reports_pnl)`
+    )
     console.log(`[finza-k6]   reports VUs:      ${REPORTS_VUS} (separate journey)`)
     console.log(
       `[finza-k6]   reports sleep:    ${REPORTS_SLEEP_MIN_SEC}–${REPORTS_SLEEP_MAX_SEC}s between views`
@@ -1113,7 +1143,7 @@ export function workdayFlow() {
   runWorkdayFlow()
 }
 
-/** Operational journey for workday_50_plus_reports_5 — same routes as workday_50 all, no reports. */
+/** Operational journey for mixed scenarios — same routes as workday all, no in-loop reports. */
 export function operationalWorkdayFlow() {
   runWorkdayFlow({ skipReports: true })
   sleep(1 + Math.random() * 3)
