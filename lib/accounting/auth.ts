@@ -27,11 +27,13 @@ export async function checkAccountingAuthority(
   supabase: SupabaseClient,
   userId: string,
   businessId: string,
-  accessLevel: AccountingAuthorityAccess
+  accessLevel: AccountingAuthorityAccess,
+  knownRole?: string | null
 ): Promise<AccountingAuthorityResult> {
   const result: AccountingAuthorityResult = { authorized: false, businessId }
 
-  const role = await getUserRole(supabase, userId, businessId)
+  const role =
+    knownRole !== undefined ? knownRole : await getUserRole(supabase, userId, businessId)
   if (role === "owner") {
     result.authorized = true
     result.authority_source = "owner"

@@ -20,20 +20,27 @@ jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
 jest.mock("@/lib/accounting/auth", () => ({
   checkAccountingAuthority: jest.fn(),
 }))
-jest.mock("@/lib/accounting/readiness", () => ({
-  checkAccountingReadiness: jest.fn().mockResolvedValue({ ready: true }),
+jest.mock("@/lib/server/pnlReportReadinessCache", () => ({
+  checkAccountingReadinessForPnlRoute: jest.fn().mockResolvedValue({
+    ready: true,
+    readinessCacheStatus: "miss",
+  }),
+}))
+jest.mock("@/lib/userRoles", () => ({
+  getUserRole: jest.fn().mockResolvedValue("owner"),
 }))
 jest.mock("@/lib/accounting/bootstrap", () => ({
   canUserInitializeAccounting: jest.fn().mockReturnValue(false),
 }))
-jest.mock("@/lib/accounting/reports/resolvePnLMovementRange", () => ({
-  resolvePnLMovementRange: jest.fn().mockResolvedValue({
+jest.mock("@/lib/server/pnlReportDefaultPeriodCache", () => ({
+  resolvePnLMovementRangeForPnlRoute: jest.fn().mockResolvedValue({
     range: {
       movementStart: "2026-01-01",
       movementEnd: "2026-01-31",
       period: { period_id: "p1", period_start: "2026-01-01", period_end: "2026-01-31" },
     },
     error: "",
+    periodCacheStatus: "miss",
   }),
 }))
 jest.mock("@/lib/accounting/reports/getProfitAndLossReport", () => ({
@@ -51,6 +58,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { getUserRole } from "@/lib/userRoles"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { resetPnlReportCacheForTests } from "@/lib/server/pnlReportCache"
 
@@ -67,6 +75,7 @@ const mockCheckAuthority = checkAccountingAuthority as jest.MockedFunction<
   typeof checkAccountingAuthority
 >
 const mockGetReport = getProfitAndLossReport as jest.MockedFunction<typeof getProfitAndLossReport>
+const mockGetUserRole = getUserRole as jest.MockedFunction<typeof getUserRole>
 
 const sampleReport = {
   period: {
@@ -136,6 +145,28 @@ describe("GET /api/accounting/reports/profit-and-loss", () => {
 
     expect(res.status).toBe(403)
     expect(mockGetReport).not.toHaveBeenCalled()
+  })
+
+  it("dedupes getUserRole for explicit business_id", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
+    )
+    await GET(req)
+
+    expect(mockGetUserRole).toHaveBeenCalledTimes(1)
+    expect(mockResolveScope).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "biz-a",
+      { knownRole: "owner" }
+    )
+    expect(mockCheckAuthority).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "biz-a",
+      "read",
+      "owner"
+    )
   })
 
   it("returns cached final response on repeated same-key request", async () => {

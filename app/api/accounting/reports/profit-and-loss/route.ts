@@ -5,13 +5,14 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
-import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import {
   getProfitAndLossReport,
   type PnLReportLoadMeta,
   type PnLReportResponse,
 } from "@/lib/accounting/reports/getProfitAndLossReport"
-import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
+import { resolvePnLMovementRangeForPnlRoute } from "@/lib/server/pnlReportDefaultPeriodCache"
+import { checkAccountingReadinessForPnlRoute } from "@/lib/server/pnlReportReadinessCache"
+import { getUserRole } from "@/lib/userRoles"
 import {
   buildPnlReportCacheKey,
   buildPnlReportQueryFingerprint,
@@ -74,10 +75,21 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
+    const requestedBusinessId = searchParams.get("business_id") ?? searchParams.get("businessId")
+    const trimmedBusinessId =
+      typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
+    const explicitBusinessId = trimmedBusinessId.length > 0 ? trimmedBusinessId : null
+
+    let knownRole: string | null | undefined = undefined
+    if (explicitBusinessId) {
+      knownRole = await getUserRole(supabase, auth.user.id, explicitBusinessId)
+    }
+
     const scope = await resolveBusinessScopeForUser(
       supabase,
       auth.user.id,
-      searchParams.get("business_id") ?? searchParams.get("businessId")
+      requestedBusinessId,
+      { knownRole }
     )
 
     if (!scope.ok) {
@@ -92,7 +104,13 @@ export async function GET(request: NextRequest) {
     const businessId = scope.businessId
     diag = createRouteDiag("reports_pnl", businessId)
 
-    const authority = await checkAccountingAuthority(supabase, auth.user.id, businessId, "read")
+    const authority = await checkAccountingAuthority(
+      supabase,
+      auth.user.id,
+      businessId,
+      "read",
+      knownRole
+    )
     if (!authority.authorized) {
       diag.fail(403, "forbidden", { auth_failure_stage: "business_access_denied" })
       return NextResponse.json(
@@ -108,7 +126,10 @@ export async function GET(request: NextRequest) {
     })
 
     const tReady = performance.now()
-    const { ready } = await checkAccountingReadiness(supabase, businessId)
+    const { ready, readinessCacheStatus } = await checkAccountingReadinessForPnlRoute(
+      supabase,
+      businessId
+    )
     if (!ready) {
       if (canUserInitializeAccounting(authority.authority_source)) {
         const tBootstrap = performance.now()
@@ -134,6 +155,7 @@ export async function GET(request: NextRequest) {
     diag.step("readiness", {
       ready,
       ms_readiness: timedStepMs(tReady),
+      readiness_cache: readinessCacheStatus,
     })
 
     const reportInput = {
@@ -146,7 +168,11 @@ export async function GET(request: NextRequest) {
     }
 
     const tRange = performance.now()
-    const { range, error: rangeError } = await resolvePnLMovementRange(supabase, reportInput)
+    const {
+      range,
+      error: rangeError,
+      periodCacheStatus,
+    } = await resolvePnLMovementRangeForPnlRoute(supabase, reportInput)
     if (rangeError || !range) {
       diag.fail(500, rangeError ?? "period_unresolved", {
         ms_period: timedStepMs(tRange),
@@ -160,6 +186,7 @@ export async function GET(request: NextRequest) {
       ms_period: timedStepMs(tRange),
       period_start: range.movementStart,
       period_end: range.movementEnd,
+      period_cache: periodCacheStatus,
     })
 
     const cacheKey = buildPnlReportCacheKey({
