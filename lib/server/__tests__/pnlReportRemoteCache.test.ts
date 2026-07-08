@@ -83,7 +83,7 @@ describe("pnlReportRemoteCache", () => {
   it("clamps remote TTL to 15–120 seconds", async () => {
     process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "5"
     const store = new Map<string, unknown>()
-    jest.spyOn(Math, "random").mockReturnValue(0.5)
+    jest.spyOn(Math, "random").mockReturnValue(0)
     setPnlReportRemoteCacheForTests({
       get: async (key) => store.get(key),
       set: async (key, value, options) => {
@@ -154,7 +154,7 @@ describe("pnlReportRemoteCache", () => {
   it("stores entry on set with business tag", async () => {
     const store = new Map<string, unknown>()
     let savedTags: string[] | undefined
-    jest.spyOn(Math, "random").mockReturnValue(0.5)
+    jest.spyOn(Math, "random").mockReturnValue(0)
     setPnlReportRemoteCacheForTests({
       get: async (key) => store.get(key),
       set: async (key, value, options) => {

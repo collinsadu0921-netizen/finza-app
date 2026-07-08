@@ -49,7 +49,9 @@ function remoteCacheBaseTtlSec(): number {
 function remoteCacheTtlWithJitterSec(): number {
   const base = remoteCacheBaseTtlSec()
   if (base <= 0) return 0
-  const jitter = (Math.random() * 2 - 1) * REMOTE_TTL_JITTER_FRACTION
+  // Jitter is positive-only so we never shorten the "hard TTL" below the configured base.
+  // This makes SWR more observable when L1 TTL is similar to the remote TTL.
+  const jitter = Math.random() * REMOTE_TTL_JITTER_FRACTION
   const raw = Math.round(base * (1 + jitter))
   if (!Number.isFinite(raw) || raw <= 0) return 0
   return Math.min(Math.max(raw, 15), 120)
