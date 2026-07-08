@@ -5,6 +5,7 @@ import { getUserRole } from "@/lib/userRoles"
 import { canEditBusinessWideSensitiveSettings } from "@/lib/retail/retailSensitiveSettingsEditors"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 /** Trim; empty / whitespace-only becomes "". */
@@ -47,10 +48,18 @@ export async function GET(request: NextRequest) {
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+    const auth = await resolveAuthenticatedApiUser(supabase, {
+      cookieHeader: request.headers.get("cookie"),
+    })
+    if (!auth.ok) {
+      diag.fail(auth.status, auth.error, { auth_failure_stage: auth.authFailureStage })
+      return NextResponse.json(
+        { error: auth.error, auth_failure_stage: auth.authFailureStage },
+        { status: auth.status }
+      )
+    }
+    const user = auth.user
+    diag.step("auth", { ms_auth: timedStepMs(tAuth), auth_source: auth.authSource })
 
     const preferredId = request.nextUrl.searchParams.get("business_id")?.trim() ?? null
     if (preferredId) {
@@ -58,7 +67,7 @@ export async function GET(request: NextRequest) {
     }
 
     const tProfile = performance.now()
-    const business = await getBusinessForProfile(supabase, user?.id || "", preferredId)
+    const business = await getBusinessForProfile(supabase, user.id, preferredId)
     diag.step("profile_lookup", {
       ms_profile: timedStepMs(tProfile),
       found: Boolean(business),
@@ -69,7 +78,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const authEmail = normStr(user?.email)
+    const authEmail = normStr(user.email)
     const rowEmail = normStr(business.email)
     const displayEmail = rowEmail || authEmail || null
 

@@ -14,15 +14,22 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
   enforceServiceIndustryMinTier: jest.fn().mockResolvedValue(null),
 }))
+jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
+  resolveAuthenticatedApiUser: jest.fn(),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
 >
 const mockResolveScope = resolveBusinessScopeForUser as jest.MockedFunction<
   typeof resolveBusinessScopeForUser
+>
+const mockResolveAuth = resolveAuthenticatedApiUser as jest.MockedFunction<
+  typeof resolveAuthenticatedApiUser
 >
 
 function mockBillsRpc(bills: unknown[], totalCount: number) {
@@ -41,6 +48,11 @@ beforeEach(() => {
   jest.clearAllMocks()
   delete process.env.FINZA_OPERATIONAL_LIST_CACHE_TTL_SEC
   mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+  mockResolveAuth.mockResolvedValue({
+    ok: true,
+    user: { id: "user-001" } as any,
+    authSource: "session",
+  })
 })
 
 describe("GET /api/bills/list", () => {

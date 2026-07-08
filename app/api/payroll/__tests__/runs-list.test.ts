@@ -18,22 +18,34 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
   enforceServiceIndustryMinTier: jest.fn().mockResolvedValue(null),
   enforceServiceIndustryMinTierWrite: jest.fn().mockResolvedValue(null),
 }))
+jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
+  resolveAuthenticatedApiUser: jest.fn(),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
 >
 const mockGetBusiness = getCurrentBusiness as jest.MockedFunction<typeof getCurrentBusiness>
 const mockRequirePermission = requirePermission as jest.MockedFunction<typeof requirePermission>
+const mockResolveAuth = resolveAuthenticatedApiUser as jest.MockedFunction<
+  typeof resolveAuthenticatedApiUser
+>
 
 beforeEach(() => {
   jest.clearAllMocks()
   delete process.env.FINZA_OPERATIONAL_LIST_CACHE_TTL_SEC
   mockGetBusiness.mockResolvedValue({ id: "biz-a" } as any)
   mockRequirePermission.mockResolvedValue({ allowed: true } as any)
+  mockResolveAuth.mockResolvedValue({
+    ok: true,
+    user: { id: "u1" } as any,
+    authSource: "session",
+  })
 })
 
 describe("GET /api/payroll/runs", () => {
@@ -70,12 +82,19 @@ describe("GET /api/payroll/runs", () => {
   })
 
   it("does not cache auth failures", async () => {
+    mockResolveAuth.mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: "Unauthorized",
+      authFailureStage: "get_user_failed",
+    })
     mockCreateSupabase.mockResolvedValue({
-      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: null } }) },
       from: jest.fn(),
     } as any)
 
     const res = await GET(new NextRequest("http://localhost/api/payroll/runs"))
     expect(res.status).toBe(401)
+    const body = await res.json()
+    expect(body.auth_failure_stage).toBe("get_user_failed")
   })
 })

@@ -32,6 +32,7 @@ import {
   shouldCacheDashboardClusterPayload,
   type ServiceDashboardTimelineItem,
 } from "@/lib/server/serviceDashboardTimeline"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { createRouteDiag, isRouteDiagnosticsEnabled, type RouteDiagFields } from "@/lib/server/routeDiagnostics"
 
 const DEFAULT_PERIODS = 12
@@ -200,13 +201,20 @@ export async function GET(request: NextRequest) {
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const sessionAuth = await resolveAuthenticatedApiUser(supabase, {
+      cookieHeader: request.headers.get("cookie"),
+    })
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!sessionAuth.ok) {
+      diag.fail(sessionAuth.status, sessionAuth.error, {
+        auth_failure_stage: sessionAuth.authFailureStage,
+      })
+      return NextResponse.json(
+        { error: sessionAuth.error, auth_failure_stage: sessionAuth.authFailureStage },
+        { status: sessionAuth.status }
+      )
     }
+    const user = sessionAuth.user
 
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")

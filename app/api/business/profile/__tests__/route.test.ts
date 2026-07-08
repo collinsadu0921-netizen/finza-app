@@ -4,7 +4,7 @@
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals"
 import { NextRequest } from "next/server"
-import { PUT } from "../route"
+import { PUT, GET } from "../route"
 
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(),
@@ -18,11 +18,19 @@ jest.mock("@/lib/retail/retailSensitiveSettingsEditors", () => ({
   canEditBusinessWideSensitiveSettings: jest.fn(() => true),
 }))
 
+jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
+  resolveAuthenticatedApiUser: jest.fn(),
+}))
+
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 
 const createClient = createSupabaseServerClient as jest.MockedFunction<typeof createSupabaseServerClient>
 const getUserRoleMock = getUserRole as jest.MockedFunction<typeof getUserRole>
+const mockResolveAuth = resolveAuthenticatedApiUser as jest.MockedFunction<
+  typeof resolveAuthenticatedApiUser
+>
 
 function makeBusinessRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -91,6 +99,60 @@ function jsonRequest(body: unknown) {
     body: JSON.stringify(body),
   })
 }
+
+describe("GET /api/business/profile", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("returns 401 with auth_failure_stage when session auth fails", async () => {
+    mockResolveAuth.mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: "Unauthorized",
+      authFailureStage: "get_user_failed",
+    })
+    createClient.mockResolvedValue({ from: jest.fn() } as any)
+
+    const res = await GET(
+      new NextRequest("http://localhost/api/business/profile?business_id=b1")
+    )
+
+    expect(res.status).toBe(401)
+    const json = (await res.json()) as { error: string; auth_failure_stage: string }
+    expect(json.error).toBe("Unauthorized")
+    expect(json.auth_failure_stage).toBe("get_user_failed")
+  })
+
+  it("returns 404 only when authenticated but business is inaccessible", async () => {
+    mockResolveAuth.mockResolvedValue({
+      ok: true,
+      user: { id: "u1", email: "owner@example.com" } as any,
+      authSource: "session",
+    })
+    createClient.mockResolvedValue({
+      from: jest.fn((table: string) => {
+        if (table === "businesses") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            is: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+          }
+        }
+        return {}
+      }),
+    } as any)
+
+    const res = await GET(
+      new NextRequest("http://localhost/api/business/profile?business_id=b1")
+    )
+
+    expect(res.status).toBe(404)
+    const json = (await res.json()) as { error: string }
+    expect(json.error).toBe("Business not found")
+  })
+})
 
 describe("PUT /api/business/profile", () => {
   beforeEach(() => {
