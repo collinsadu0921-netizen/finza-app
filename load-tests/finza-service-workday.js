@@ -21,7 +21,14 @@
 import http from "k6/http"
 import encoding from "k6/encoding"
 import { check, group, sleep } from "k6"
+import { Counter, Trend } from "k6/metrics"
 import { SharedArray } from "k6/data"
+
+/** reports_pnl response header capture (x-finza-reports-*). */
+const pnlReportsSource = new Counter("finza_reports_pnl_source")
+const pnlReportsCache = new Counter("finza_reports_pnl_cache")
+const pnlReportsRemoteCache = new Counter("finza_reports_pnl_remote_cache")
+const pnlDurationByReportsHeaders = new Trend("finza_reports_pnl_duration_by_headers", true)
 
 // ── Scenario selection (exactly one per run) ────────────────────────────────
 
@@ -889,8 +896,32 @@ function logNon200Response(name, res) {
   )
 }
 
+function headerValue(res, name) {
+  const headers = res.headers || {}
+  const lower = name.toLowerCase()
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === lower) {
+      const value = String(headers[key] ?? "").trim()
+      return value || "missing"
+    }
+  }
+  return "missing"
+}
+
+function recordReportsPnlHeaders(name, res) {
+  if (name !== "reports_pnl") return
+  const source = headerValue(res, "x-finza-reports-source")
+  const cache = headerValue(res, "x-finza-reports-cache")
+  const remoteCache = headerValue(res, "x-finza-reports-remote-cache")
+  pnlReportsSource.add(1, { source })
+  pnlReportsCache.add(1, { cache })
+  pnlReportsRemoteCache.add(1, { remote_cache: remoteCache })
+  pnlDurationByReportsHeaders.add(res.timings.duration, { source, cache, remote_cache: remoteCache })
+}
+
 function getJson(name, url, session, fieldChecks) {
   const res = http.get(url, buildRequestOptions(session, name))
+  recordReportsPnlHeaders(name, res)
 
   if (res.status !== 200) {
     logNon200Response(name, res)
@@ -1113,4 +1144,42 @@ export function reportsJourney() {
     REPORTS_SLEEP_MIN_SEC +
       Math.random() * Math.max(0, REPORTS_SLEEP_MAX_SEC - REPORTS_SLEEP_MIN_SEC)
   )
+}
+
+function formatCounterSubmetrics(metric, tagName) {
+  if (!metric || !metric.values) return []
+  const lines = []
+  for (const key of Object.keys(metric.values)) {
+    const m = metric.values[key]
+    if (!m) continue
+    let tagVal = m.tags?.[tagName]
+    if (!tagVal) {
+      const match = key.match(new RegExp(`${tagName}:([^,}]+)`))
+      tagVal = match ? match[1] : null
+    }
+    if (!tagVal) continue
+    lines.push(`  ${tagVal}: ${m.count}`)
+  }
+  lines.sort()
+  return lines
+}
+
+export function handleSummary(data) {
+  const sourceMetric = data.metrics.finza_reports_pnl_source
+  const cacheMetric = data.metrics.finza_reports_pnl_cache
+  const remoteMetric = data.metrics.finza_reports_pnl_remote_cache
+  const sourceLines = formatCounterSubmetrics(sourceMetric, "source")
+  const cacheLines = formatCounterSubmetrics(cacheMetric, "cache")
+  const remoteLines = formatCounterSubmetrics(remoteMetric, "remote_cache")
+
+  if (sourceLines.length > 0 || cacheLines.length > 0 || remoteLines.length > 0) {
+    console.log("[finza-k6] reports_pnl x-finza-reports-source:")
+    for (const line of sourceLines) console.log(line)
+    console.log("[finza-k6] reports_pnl x-finza-reports-cache:")
+    for (const line of cacheLines) console.log(line)
+    console.log("[finza-k6] reports_pnl x-finza-reports-remote-cache:")
+    for (const line of remoteLines) console.log(line)
+  }
+
+  return {}
 }

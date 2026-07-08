@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
     })
 
     const tReport = performance.now()
-    const { value: cached, cacheStatus, servedExpiredCache } =
+    const { value: cached, cacheStatus, servedExpiredCache, remoteCacheStatus } =
       await loadOrComputePnlReportCache<PnLReportResponse>(
         cacheKey,
         async () => {
@@ -193,6 +193,7 @@ export async function GET(request: NextRequest) {
         {
           shouldStore: shouldCachePnlReportPayload,
           serveExpiredOnMiss: true,
+          businessId,
         }
       )
 
@@ -208,6 +209,7 @@ export async function GET(request: NextRequest) {
       refreshOnRequest,
       reportsSource,
       cacheStatus,
+      remoteCacheStatus,
       snapshotStale: loadMeta.snapshotStale || servedExpiredCache,
     })
 

@@ -7,6 +7,7 @@
  */
 
 import type { PnlReportCacheStatus } from "@/lib/server/pnlReportCache"
+import type { PnlReportRemoteCacheStatus } from "@/lib/server/pnlReportRemoteCache"
 
 export type ReportsRefreshOnRequestDiag = "enabled" | "disabled"
 
@@ -35,6 +36,7 @@ export type ReportsPnlDiagnostics = {
   reports_refresh_on_request: ReportsRefreshOnRequestDiag
   reports_source: ReportsPnlSource
   reports_cache_status: PnlReportCacheStatus
+  reports_remote_cache_status: PnlReportRemoteCacheStatus
   reports_refresh_skipped: boolean
   reports_snapshot_stale: boolean
 }
@@ -43,12 +45,14 @@ export function buildReportsPnlDiagnostics(input: {
   refreshOnRequest: boolean
   reportsSource: ReportsPnlSource
   cacheStatus: PnlReportCacheStatus
+  remoteCacheStatus: PnlReportRemoteCacheStatus
   snapshotStale: boolean
 }): ReportsPnlDiagnostics {
   return {
     reports_refresh_on_request: reportsRefreshOnRequestDiag(),
     reports_source: input.reportsSource,
     reports_cache_status: input.cacheStatus,
+    reports_remote_cache_status: input.remoteCacheStatus,
     reports_refresh_skipped: reportsRefreshSkipped(input.refreshOnRequest),
     reports_snapshot_stale: input.snapshotStale,
   }
@@ -58,6 +62,7 @@ export function reportsPnlResponseHeaders(diagnostics: ReportsPnlDiagnostics): R
   return {
     "x-finza-reports-source": diagnostics.reports_source,
     "x-finza-reports-cache": diagnostics.reports_cache_status,
+    "x-finza-reports-remote-cache": diagnostics.reports_remote_cache_status,
     "x-finza-reports-refresh-on-request": diagnostics.reports_refresh_on_request,
   }
 }

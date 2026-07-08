@@ -55,11 +55,13 @@ describe("reportsPnlRefreshPolicy", () => {
       refreshOnRequest: false,
       reportsSource: "cache",
       cacheStatus: "hit",
+      remoteCacheStatus: "hit",
       snapshotStale: false,
     })
     expect(reportsPnlResponseHeaders(diagnostics)).toEqual({
       "x-finza-reports-source": "cache",
       "x-finza-reports-cache": "hit",
+      "x-finza-reports-remote-cache": "hit",
       "x-finza-reports-refresh-on-request": "disabled",
     })
   })
