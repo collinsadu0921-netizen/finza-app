@@ -55,12 +55,18 @@ const sampleLoadMeta = () => ({
 describe("pnlReportCache", () => {
   const prevTtl = process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC
   const prevRemoteTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+  const prevRemoteHardTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
 
   beforeEach(() => {
     resetPnlReportCacheForTests()
     resetPnlReportRemoteCacheForTests()
     process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = "30"
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
     delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+    setPnlReportRemoteCacheForTests({
+      get: async () => undefined,
+      set: async () => {},
+    })
   })
 
   afterEach(() => {
@@ -75,6 +81,11 @@ describe("pnlReportCache", () => {
       delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
     } else {
       process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = prevRemoteTtl
+    }
+    if (prevRemoteHardTtl === undefined) {
+      delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
+    } else {
+      process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = prevRemoteHardTtl
     }
   })
 
@@ -200,7 +211,6 @@ describe("pnlReportCache", () => {
   })
 
   it("serves from remote L2 on L1 miss and populates L1", async () => {
-    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "30"
     const key = `test-pnl-remote-${Date.now()}-${Math.random()}`
     const payload = sampleReport()
     const remoteStore = new Map<string, unknown>()
@@ -208,8 +218,8 @@ describe("pnlReportCache", () => {
       payload,
       loadMeta: sampleLoadMeta(),
       cachedAt: new Date().toISOString(),
-      hardTtlSec: 30,
-      softTtlSec: 24,
+      hardTtlSec: 900,
+      softTtlSec: 30,
     })
     setPnlReportRemoteCacheForTests({
       get: async (k) => remoteStore.get(k),
@@ -238,7 +248,6 @@ describe("pnlReportCache", () => {
   })
 
   it("falls back to compute when remote cache errors", async () => {
-    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "30"
     const key = `test-pnl-remote-error-${Date.now()}-${Math.random()}`
     const payload = sampleReport()
     setPnlReportRemoteCacheForTests({
@@ -261,7 +270,6 @@ describe("pnlReportCache", () => {
   })
 
   it("writes remote cache after successful compute", async () => {
-    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "30"
     const key = `test-pnl-remote-set-${Date.now()}-${Math.random()}`
     const payload = sampleReport()
     const remoteStore = new Map<string, unknown>()
@@ -280,13 +288,13 @@ describe("pnlReportCache", () => {
     expect(remoteStore.has(key)).toBe(true)
   })
 
-  it("serves stale remote entry immediately and starts background refresh", async () => {
-    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "30"
+  it("serves stale remote entry immediately and schedules background refresh via waitUntil", async () => {
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC = "30"
     const key = `test-pnl-remote-stale-${Date.now()}-${Math.random()}`
 
-    const hardTtlSec = 30
-    const softTtlSec = 24
-    // Age > softTtlSec but <= hardTtlSec → stale_hit.
+    const hardTtlSec = 900
+    const softTtlSec = 30
     const cachedAt = new Date(Date.now() - (softTtlSec + 1) * 1000).toISOString()
 
     const stalePayload = sampleReport()
@@ -305,35 +313,73 @@ describe("pnlReportCache", () => {
       releaseCompute = resolve
     })
 
-    let setCalls = 0
-    let setResolved!: () => void
-    const setDone = new Promise<void>((resolve) => {
-      setResolved = resolve
-    })
-
+    const scheduled: Promise<void>[] = []
     setPnlReportRemoteCacheForTests({
       get: async (k) => remoteStore.get(k),
-      set: async (k, _value) => {
-        setCalls += 1
-        setResolved()
-      },
+      set: async () => {},
     })
 
-    const result = await loadOrComputePnlReportCache(key, async () => {
-      computeCalls += 1
-      await computeGate
-      return { payload: stalePayload, loadMeta: sampleLoadMeta() }
-    })
+    const t0 = performance.now()
+    const result = await loadOrComputePnlReportCache(
+      key,
+      async () => {
+        computeCalls += 1
+        await computeGate
+        return { payload: stalePayload, loadMeta: sampleLoadMeta() }
+      },
+      {
+        scheduleBackground: (promise) => {
+          scheduled.push(promise)
+        },
+      }
+    )
+    const elapsedMs = performance.now() - t0
 
     expect(result.cacheStatus).toBe("expired_served")
     expect(result.servedExpiredCache).toBe(true)
     expect(result.remoteCacheStatus).toBe("stale_hit")
     expect(result.remoteRefreshStarted).toBe(true)
-    // Background refresh should have started but we are gated, so it should not have set yet.
+    expect(result.timing.refreshScheduled).toBe(true)
+    expect(result.timing.refreshAwaited).toBe(false)
+    expect(result.timing.staleReturnMs).toBeGreaterThanOrEqual(0)
+    expect(elapsedMs).toBeLessThan(200)
+    expect(scheduled).toHaveLength(1)
+
+    await new Promise((r) => setImmediate(r))
     expect(computeCalls).toBe(1)
-    expect(setCalls).toBe(0)
 
     releaseCompute()
-    await setDone
+    await scheduled[0]
+    expect(computeCalls).toBe(1)
+  })
+
+  it("skips background refresh when scheduleBackground is unavailable", async () => {
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
+    const key = `test-pnl-remote-stale-skip-${Date.now()}-${Math.random()}`
+    const hardTtlSec = 900
+    const softTtlSec = 30
+    const cachedAt = new Date(Date.now() - 31 * 1000).toISOString()
+
+    setPnlReportRemoteCacheForTests({
+      get: async () => ({
+        payload: sampleReport(),
+        loadMeta: sampleLoadMeta(),
+        cachedAt,
+        hardTtlSec,
+        softTtlSec,
+      }),
+      set: async () => {},
+    })
+
+    let computeCalls = 0
+    const result = await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      return { payload: sampleReport(), loadMeta: sampleLoadMeta() }
+    })
+
+    expect(result.remoteCacheStatus).toBe("stale_hit")
+    expect(result.remoteRefreshStarted).toBe(false)
+    expect(result.timing.refreshScheduled).toBe(false)
+    expect(computeCalls).toBe(0)
   })
 })

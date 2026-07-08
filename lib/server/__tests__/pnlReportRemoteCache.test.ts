@@ -59,10 +59,14 @@ function makeStoredEntry(cachedAt: string, hardTtlSec: number, softTtlSec: numbe
 
 describe("pnlReportRemoteCache", () => {
   const prevRemoteTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+  const prevRemoteHardTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
+  const prevRemoteSoftTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC
 
   beforeEach(() => {
     resetPnlReportRemoteCacheForTests()
-    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "30"
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC = "30"
+    delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
   })
 
   afterEach(() => {
@@ -73,23 +77,33 @@ describe("pnlReportRemoteCache", () => {
     } else {
       process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = prevRemoteTtl
     }
+    if (prevRemoteHardTtl === undefined) {
+      delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
+    } else {
+      process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = prevRemoteHardTtl
+    }
+    if (prevRemoteSoftTtl === undefined) {
+      delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC
+    } else {
+      process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC = prevRemoteSoftTtl
+    }
   })
 
   it("is disabled when env TTL is 0", () => {
+    delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
     process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "0"
     expect(isPnlReportRemoteCacheEnabled()).toBe(false)
   })
 
-  it("clamps remote TTL to 15–120 seconds", async () => {
-    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "5"
-    process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = "30"
+  it("stores hard TTL in 10–15 minute window with positive jitter", async () => {
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
     const store = new Map<string, unknown>()
     jest.spyOn(Math, "random").mockReturnValue(0)
     setPnlReportRemoteCacheForTests({
       get: async (key) => store.get(key),
       set: async (key, value, options) => {
         store.set(key, value)
-        expect(options?.ttl).toBe(45)
+        expect(options?.ttl).toBe(900)
       },
     })
 
@@ -97,15 +111,17 @@ describe("pnlReportRemoteCache", () => {
   })
 
   it("returns disabled when remote cache is off", async () => {
+    delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
     process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "0"
     const result = await getPnlReportRemoteCacheEntry("key-1")
     expect(result.status).toBe("miss")
+    expect(result.readMs).toBe(0)
   })
 
   it("returns hit on remote cache get", async () => {
     const store = new Map<string, unknown>()
     const key = "pnl|biz-1|2026-01-01|2026-01-31|||||norefresh"
-    store.set(key, makeStoredEntry(new Date().toISOString(), 30, 24))
+    store.set(key, makeStoredEntry(new Date().toISOString(), 900, 30))
     setPnlReportRemoteCacheForTests({
       get: async (k) => store.get(k),
       set: async () => {},
@@ -113,14 +129,15 @@ describe("pnlReportRemoteCache", () => {
 
     const result = await getPnlReportRemoteCacheEntry(key)
     expect(result.status).toBe("hit")
+    expect(result.readMs).toBeGreaterThanOrEqual(0)
     expect(result.entry?.payload.totals.net_profit).toBe(100)
   })
 
   it("returns stale_hit when beyond soft TTL but within hard TTL", async () => {
     const store = new Map<string, unknown>()
     const key = `pnl|biz-1|stale-${Date.now()}`
-    const hardTtlSec = 30
-    const softTtlSec = 24
+    const hardTtlSec = 900
+    const softTtlSec = 30
     const cachedAt = new Date(Date.now() - (softTtlSec + 1) * 1000).toISOString()
     store.set(key, makeStoredEntry(cachedAt, hardTtlSec, softTtlSec))
 
@@ -137,8 +154,8 @@ describe("pnlReportRemoteCache", () => {
   it("returns miss when beyond hard TTL", async () => {
     const store = new Map<string, unknown>()
     const key = `pnl|biz-1|expired-${Date.now()}`
-    const hardTtlSec = 30
-    const softTtlSec = 24
+    const hardTtlSec = 900
+    const softTtlSec = 30
     const cachedAt = new Date(Date.now() - (hardTtlSec + 2) * 1000).toISOString()
     store.set(key, makeStoredEntry(cachedAt, hardTtlSec, softTtlSec))
 

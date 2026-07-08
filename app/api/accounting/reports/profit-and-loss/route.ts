@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
@@ -176,6 +177,7 @@ export async function GET(request: NextRequest) {
       servedExpiredCache,
       remoteCacheStatus,
       remoteRefreshStarted,
+      timing: cacheTiming,
     } =
       await loadOrComputePnlReportCache<PnLReportResponse>(
         cacheKey,
@@ -200,6 +202,7 @@ export async function GET(request: NextRequest) {
           serveExpiredOnMiss: true,
           businessId,
           cacheRemote: !refreshOnRequest,
+          scheduleBackground: (promise) => waitUntil(promise),
         }
       )
 
@@ -269,6 +272,10 @@ export async function GET(request: NextRequest) {
 
     diag.step("report", {
       ms_report: Math.round((performance.now() - tReport) * 10) / 10,
+      ms_remote_cache_read: cacheTiming.remoteCacheReadMs,
+      ms_stale_return: cacheTiming.staleReturnMs,
+      reports_refresh_scheduled: cacheTiming.refreshScheduled,
+      reports_refresh_awaited: cacheTiming.refreshAwaited,
       ...reportsDiagnostics,
     })
     diag.finish(200, reportsDiagnostics)

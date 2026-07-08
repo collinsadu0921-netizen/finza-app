@@ -1,8 +1,14 @@
 /**
  * Cross-instance L2 cache for reports_pnl full-response payloads (Vercel Runtime Cache).
  *
- * Enable on staging preview: FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC=30
- * Default 0 = disabled. Clamped to 15–120 seconds when enabled.
+ * Enable on staging preview:
+ *   FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC=900
+ *   FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC=30
+ *
+ * Legacy enable flag (uses default 15m hard window when HARD is unset):
+ *   FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC=1
+ *
+ * Default off when neither HARD nor legacy enable is set.
  */
 
 import { getCache } from "@vercel/functions"
@@ -25,6 +31,12 @@ export type PnlReportRemoteCacheValue<T> = {
   loadMeta: PnLReportLoadMeta
 }
 
+export type PnlReportRemoteCacheGetResult<T> = {
+  status: PnlReportRemoteCacheStatus
+  entry?: PnlReportRemoteCacheEntry<T>
+  readMs: number
+}
+
 type RuntimeCacheLike = {
   get: (key: string) => Promise<unknown>
   set: (
@@ -36,46 +48,48 @@ type RuntimeCacheLike = {
 
 let runtimeCacheOverride: RuntimeCacheLike | null = null
 
-const REMOTE_TTL_SOFT_FRACTION = 0.8
 const REMOTE_TTL_JITTER_FRACTION = 0.1
-/** Hard TTL must exceed L1 TTL so soft-expired remote entries survive L1 expiry. */
-const REMOTE_HARD_TTL_GRACE_OVER_L1_SEC = 15
+const REMOTE_HARD_TTL_MIN_SEC = 600
+const REMOTE_HARD_TTL_MAX_SEC = 900
+const REMOTE_SOFT_TTL_DEFAULT_SEC = 30
+const REMOTE_LEGACY_ENABLE_DEFAULT_HARD_SEC = 900
 
-function remoteCacheBaseTtlSec(): number {
-  const raw = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+function parsePositiveEnvSec(name: string): number {
+  const raw = process.env[name]
   const sec = raw === undefined || raw === "" ? 0 : Number(raw)
   if (!Number.isFinite(sec) || sec <= 0) return 0
-  return Math.min(Math.max(sec, 15), 120)
+  return sec
 }
 
-function l1CacheTtlSec(): number {
-  const raw = process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC
-  const sec = raw === undefined || raw === "" ? 30 : Number(raw)
-  if (!Number.isFinite(sec) || sec <= 0) return 0
-  return Math.min(Math.max(sec, 15), 120)
-}
-
-function remoteCacheTtlWithJitterSec(): number {
-  const base = remoteCacheBaseTtlSec()
-  if (base <= 0) return 0
-  // Jitter is positive-only so we never shorten the "hard TTL" below the configured base.
-  const jitter = Math.random() * REMOTE_TTL_JITTER_FRACTION
-  let raw = Math.round(base * (1 + jitter))
-  const l1 = l1CacheTtlSec()
-  if (l1 > 0) {
-    raw = Math.max(raw, l1 + REMOTE_HARD_TTL_GRACE_OVER_L1_SEC)
+/** Base hard TTL before jitter (0 = disabled). */
+export function remoteCacheHardTtlBaseSec(): number {
+  const hard = parsePositiveEnvSec("FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC")
+  if (hard > 0) {
+    return Math.min(Math.max(hard, REMOTE_HARD_TTL_MIN_SEC), REMOTE_HARD_TTL_MAX_SEC)
   }
-  if (!Number.isFinite(raw) || raw <= 0) return 0
-  return Math.min(Math.max(raw, 15), 120)
+  const legacy = parsePositiveEnvSec("FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC")
+  if (legacy > 0) {
+    return REMOTE_LEGACY_ENABLE_DEFAULT_HARD_SEC
+  }
+  return 0
 }
 
-function remoteCacheSoftTtlSec(hardTtlSec: number): number {
-  if (!Number.isFinite(hardTtlSec) || hardTtlSec <= 0) return 0
-  return Math.max(1, Math.floor(hardTtlSec * REMOTE_TTL_SOFT_FRACTION))
+export function remoteCacheSoftTtlSec(): number {
+  const raw = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC
+  const sec = raw === undefined || raw === "" ? REMOTE_SOFT_TTL_DEFAULT_SEC : Number(raw)
+  if (!Number.isFinite(sec) || sec <= 0) return REMOTE_SOFT_TTL_DEFAULT_SEC
+  return Math.min(Math.max(sec, 15), 120)
+}
+
+function remoteCacheHardTtlSecWithJitter(): number {
+  const base = remoteCacheHardTtlBaseSec()
+  if (base <= 0) return 0
+  const jitter = Math.random() * REMOTE_TTL_JITTER_FRACTION
+  return Math.round(base * (1 + jitter))
 }
 
 export function isPnlReportRemoteCacheEnabled(): boolean {
-  return remoteCacheBaseTtlSec() > 0
+  return remoteCacheHardTtlBaseSec() > 0
 }
 
 function getRuntimeCache(): RuntimeCacheLike {
@@ -105,63 +119,58 @@ function businessTag(businessId: string | undefined): string | null {
 
 export async function getPnlReportRemoteCacheEntry<T>(
   key: string
-): Promise<{ status: PnlReportRemoteCacheStatus; entry?: PnlReportRemoteCacheEntry<T> }> {
+): Promise<PnlReportRemoteCacheGetResult<T>> {
+  const t0 = performance.now()
   if (!isPnlReportRemoteCacheEnabled()) {
-    return { status: "miss" }
+    return { status: "miss", readMs: 0 }
   }
 
   try {
     const cached = await getRuntimeCache().get(key)
+    const readMs = Math.round((performance.now() - t0) * 10) / 10
+
     if (cached === undefined || cached === null) {
-      return { status: "miss" }
+      return { status: "miss", readMs }
     }
     if (!isValidRemoteEntry<T>(cached)) {
-      return { status: "miss" }
+      return { status: "miss", readMs }
     }
 
     const ageMs = Date.now() - new Date(cached.cachedAt).getTime()
-    // If cachedAt parsing fails, treat as miss.
     if (!Number.isFinite(ageMs) || ageMs < 0) {
-      return { status: "miss" }
+      return { status: "miss", readMs }
     }
 
     const ageSec = ageMs / 1000
     const hardTtlSec = cached.hardTtlSec
     const softTtlSec = cached.softTtlSec
 
+    const entry: PnlReportRemoteCacheEntry<T> = {
+      payload: structuredClone(cached.payload),
+      loadMeta: { ...cached.loadMeta },
+      cachedAt: cached.cachedAt,
+      hardTtlSec,
+      softTtlSec,
+    }
+
     if (ageSec <= softTtlSec) {
-      return {
-        status: "hit",
-        entry: {
-          payload: structuredClone(cached.payload),
-          loadMeta: { ...cached.loadMeta },
-          cachedAt: cached.cachedAt,
-          hardTtlSec,
-          softTtlSec,
-        },
-      }
+      return { status: "hit", entry, readMs }
     }
 
     if (ageSec <= hardTtlSec) {
-      return {
-        status: "stale_hit",
-        entry: {
-          payload: structuredClone(cached.payload),
-          loadMeta: { ...cached.loadMeta },
-          cachedAt: cached.cachedAt,
-          hardTtlSec,
-          softTtlSec,
-        },
-      }
+      return { status: "stale_hit", entry, readMs }
     }
 
-    return { status: "miss" }
+    return { status: "miss", readMs }
   } catch (err) {
     console.warn(
       "[pnl-report-remote-cache] get failed:",
       err instanceof Error ? err.message : String(err)
     )
-    return { status: "error" }
+    return {
+      status: "error",
+      readMs: Math.round((performance.now() - t0) * 10) / 10,
+    }
   }
 }
 
@@ -170,18 +179,19 @@ export async function setPnlReportRemoteCacheEntry<T>(
   entry: PnlReportRemoteCacheValue<T>,
   options?: { businessId?: string }
 ): Promise<"stored" | "skipped" | "error"> {
-  const hardTtlSec = remoteCacheTtlWithJitterSec()
+  const hardTtlSec = remoteCacheHardTtlSecWithJitter()
   if (hardTtlSec <= 0) return "skipped"
-  // Only validate the payload + loadMeta (we stamp ttl fields below).
   if (!shouldCachePnlReportPayload(entry.payload)) return "skipped"
   if (entry.loadMeta.movementSource === "unavailable") return "skipped"
+
+  const softTtlSec = remoteCacheSoftTtlSec()
+  if (softTtlSec >= hardTtlSec) return "skipped"
 
   try {
     const tags = ["reports_pnl"]
     const businessTagValue = businessTag(options?.businessId)
     if (businessTagValue) tags.push(businessTagValue)
 
-    const softTtlSec = remoteCacheSoftTtlSec(hardTtlSec)
     const storedEntry: PnlReportRemoteCacheEntry<T> = {
       payload: entry.payload,
       loadMeta: entry.loadMeta,
