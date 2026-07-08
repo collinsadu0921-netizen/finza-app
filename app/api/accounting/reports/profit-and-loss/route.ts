@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { waitUntil } from "@vercel/functions"
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { resolveBusinessScopeForUser } from "@/lib/business"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import {
   getProfitAndLossReport,
@@ -12,7 +10,7 @@ import {
 } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { resolvePnLMovementRangeForPnlRoute } from "@/lib/server/pnlReportDefaultPeriodCache"
 import { checkAccountingReadinessForPnlRoute } from "@/lib/server/pnlReportReadinessCache"
-import { getUserRole } from "@/lib/userRoles"
+import { resolvePnlReportScopeAndAuthority } from "@/lib/server/pnlReportScopeCache"
 import {
   buildPnlReportCacheKey,
   buildPnlReportQueryFingerprint,
@@ -76,53 +74,44 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const requestedBusinessId = searchParams.get("business_id") ?? searchParams.get("businessId")
-    const trimmedBusinessId =
-      typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
-    const explicitBusinessId = trimmedBusinessId.length > 0 ? trimmedBusinessId : null
 
-    let knownRole: string | null | undefined = undefined
-    if (explicitBusinessId) {
-      knownRole = await getUserRole(supabase, auth.user.id, explicitBusinessId)
-    }
-
-    const scope = await resolveBusinessScopeForUser(
+    const gate = await resolvePnlReportScopeAndAuthority(
       supabase,
       auth.user.id,
-      requestedBusinessId,
-      { knownRole }
+      requestedBusinessId
     )
 
-    if (!scope.ok) {
-      const authFailureStage = authFailureStageForScopeError(scope.status)
-      diag.fail(scope.status, scope.error, { auth_failure_stage: authFailureStage })
+    if (!gate.ok && "scope" in gate && !gate.scope.ok) {
+      const authFailureStage = authFailureStageForScopeError(gate.scope.status)
+      diag.fail(gate.scope.status, gate.scope.error, {
+        auth_failure_stage: authFailureStage,
+        pnl_scope_cache: gate.pnlScopeCacheStatus,
+      })
       return NextResponse.json(
-        { error: scope.error, auth_failure_stage: authFailureStage },
-        { status: scope.status }
+        { error: gate.scope.error, auth_failure_stage: authFailureStage },
+        { status: gate.scope.status }
       )
     }
 
-    const businessId = scope.businessId
-    diag = createRouteDiag("reports_pnl", businessId)
-
-    const authority = await checkAccountingAuthority(
-      supabase,
-      auth.user.id,
-      businessId,
-      "read",
-      knownRole
-    )
-    if (!authority.authorized) {
-      diag.fail(403, "forbidden", { auth_failure_stage: "business_access_denied" })
+    if (!gate.ok) {
+      diag.fail(403, "forbidden", {
+        auth_failure_stage: "business_access_denied",
+        pnl_scope_cache: gate.pnlScopeCacheStatus,
+      })
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can view profit & loss." },
         { status: 403 }
       )
     }
 
+    const { businessId, authority } = gate.value
+    diag = createRouteDiag("reports_pnl", businessId)
+
     diag.step("auth", {
       ms_auth: Math.round((performance.now() - tAuth) * 10) / 10,
       auth_source: auth.authSource,
       reports_refresh_on_request: refreshOnRequest ? "enabled" : "disabled",
+      pnl_scope_cache: gate.pnlScopeCacheStatus,
     })
 
     const tReady = performance.now()

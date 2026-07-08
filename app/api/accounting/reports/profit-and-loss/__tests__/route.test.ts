@@ -26,11 +26,11 @@ jest.mock("@/lib/server/pnlReportReadinessCache", () => ({
     readinessCacheStatus: "miss",
   }),
 }))
-jest.mock("@/lib/userRoles", () => ({
-  getUserRole: jest.fn().mockResolvedValue("owner"),
-}))
 jest.mock("@/lib/accounting/bootstrap", () => ({
   canUserInitializeAccounting: jest.fn().mockReturnValue(false),
+}))
+jest.mock("@/lib/userRoles", () => ({
+  getUserRole: jest.fn().mockResolvedValue("owner"),
 }))
 jest.mock("@/lib/server/pnlReportDefaultPeriodCache", () => ({
   resolvePnLMovementRangeForPnlRoute: jest.fn().mockResolvedValue({
@@ -61,6 +61,7 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { getUserRole } from "@/lib/userRoles"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { resetPnlReportCacheForTests } from "@/lib/server/pnlReportCache"
+import { resetPnlScopeCacheForTests } from "@/lib/server/pnlReportScopeCache"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
@@ -104,8 +105,10 @@ const sampleReport = {
 beforeEach(() => {
   jest.clearAllMocks()
   resetPnlReportCacheForTests()
+  resetPnlScopeCacheForTests()
   delete process.env.FINZA_REPORTS_PNL_REFRESH_ON_REQUEST
   process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = "30"
+  process.env.FINZA_PNL_REPORT_SCOPE_CACHE_TTL_SEC = "45"
 
   mockCreateSupabase.mockResolvedValue({
     auth: { getSession: jest.fn(), getUser: jest.fn() },
@@ -147,26 +150,16 @@ describe("GET /api/accounting/reports/profit-and-loss", () => {
     expect(mockGetReport).not.toHaveBeenCalled()
   })
 
-  it("dedupes getUserRole for explicit business_id", async () => {
+  it("caches positive scope checks on repeated explicit business_id requests", async () => {
     const req = new NextRequest(
       "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
     )
     await GET(req)
+    await GET(req)
 
     expect(mockGetUserRole).toHaveBeenCalledTimes(1)
-    expect(mockResolveScope).toHaveBeenCalledWith(
-      expect.anything(),
-      "user-1",
-      "biz-a",
-      { knownRole: "owner" }
-    )
-    expect(mockCheckAuthority).toHaveBeenCalledWith(
-      expect.anything(),
-      "user-1",
-      "biz-a",
-      "read",
-      "owner"
-    )
+    expect(mockResolveScope).toHaveBeenCalledTimes(1)
+    expect(mockCheckAuthority).toHaveBeenCalledTimes(1)
   })
 
   it("returns cached final response on repeated same-key request", async () => {
