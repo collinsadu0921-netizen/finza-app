@@ -8,7 +8,6 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 jest.mock("@/lib/server/accountingSnapshotRefresh", () => ({
   readPnlSnapshotMetadata: jest.fn(),
   readStalePnlSnapshotMetadata: jest.fn(),
-  periodHasLivePnlMovement: jest.fn(),
   enqueueSnapshotRefreshJob: jest.fn(),
   ensureZeroPnlSnapshotForPeriod: jest.fn(),
 }))
@@ -22,7 +21,6 @@ jest.mock("@/lib/server/pnlMovementSnapshotRefresh", () => ({
 import {
   ensureZeroPnlSnapshotForPeriod,
   enqueueSnapshotRefreshJob,
-  periodHasLivePnlMovement,
   readPnlSnapshotMetadata,
   readStalePnlSnapshotMetadata,
 } from "@/lib/server/accountingSnapshotRefresh"
@@ -35,7 +33,6 @@ const mockReadMeta = readPnlSnapshotMetadata as jest.MockedFunction<typeof readP
 const mockReadStaleMeta = readStalePnlSnapshotMetadata as jest.MockedFunction<
   typeof readStalePnlSnapshotMetadata
 >
-const mockHasLive = periodHasLivePnlMovement as jest.MockedFunction<typeof periodHasLivePnlMovement>
 const mockEnqueue = enqueueSnapshotRefreshJob as jest.MockedFunction<typeof enqueueSnapshotRefreshJob>
 const mockEnsureZero = ensureZeroPnlSnapshotForPeriod as jest.MockedFunction<
   typeof ensureZeroPnlSnapshotForPeriod
@@ -133,11 +130,11 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
     expect(result.rows).toHaveLength(1)
   })
 
-  it("falls back to live ledger when live movement exists but snapshot metadata missing", async () => {
+  it("enqueues refresh and returns unavailable when snapshot missing (no live fallback)", async () => {
     mockReadMeta.mockResolvedValue(null)
     mockReadStaleMeta.mockResolvedValue(null)
-    mockHasLive.mockResolvedValue(true)
     mockEnqueue.mockResolvedValue("job-1")
+    mockEnsureZero.mockResolvedValue(false)
     const supabase = buildSupabase({
       exactAccountingPeriod: true,
       movementRows: [{ account_code: "6000", account_type: "expense", period_total: 1130 }],
@@ -151,16 +148,22 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
       { refreshOnRequest: false }
     )
 
-    expect(result.source).toBe("ledger")
+    expect(result.source).toBe("unavailable")
+    expect(result.error).toBe("PNL_SNAPSHOT_UNAVAILABLE")
     expect(result.refreshJobId).toBe("job-1")
-    expect(result.rows).toHaveLength(1)
+    expect(result.liveFallbackSkipped).toBe(true)
     expect(mockEnqueue).toHaveBeenCalled()
+    expect(mockEnsureZero).toHaveBeenCalled()
+    expect(supabase.rpc).not.toHaveBeenCalledWith(
+      "get_profit_and_loss_movement",
+      expect.any(Object)
+    )
   })
 
-  it("initializes zero snapshot when no live movement and metadata missing", async () => {
+  it("initializes zero snapshot when metadata missing and period has no movement", async () => {
     mockReadMeta.mockResolvedValue(null)
     mockReadStaleMeta.mockResolvedValue(null)
-    mockHasLive.mockResolvedValue(false)
+    mockEnqueue.mockResolvedValue("job-2")
     mockEnsureZero.mockResolvedValue(true)
 
     const result = await fetchProfitAndLossMovementRows(
@@ -173,6 +176,9 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
 
     expect(result.source).toBe("zero_initialized")
     expect(result.rows).toEqual([])
+    expect(result.refreshJobId).toBe("job-2")
+    expect(result.liveFallbackSkipped).toBe(true)
+    expect(mockEnqueue).toHaveBeenCalled()
     expect(mockEnsureZero).toHaveBeenCalled()
   })
 
@@ -223,7 +229,6 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
       p_start_date: "2026-05-01",
       p_end_date: "2026-07-31",
     })
-    expect(mockHasLive).not.toHaveBeenCalled()
     expect(mockEnqueue).not.toHaveBeenCalled()
   })
 
