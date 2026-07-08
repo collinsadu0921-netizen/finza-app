@@ -82,13 +82,14 @@ describe("pnlReportRemoteCache", () => {
 
   it("clamps remote TTL to 15–120 seconds", async () => {
     process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = "5"
+    process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = "30"
     const store = new Map<string, unknown>()
     jest.spyOn(Math, "random").mockReturnValue(0)
     setPnlReportRemoteCacheForTests({
       get: async (key) => store.get(key),
       set: async (key, value, options) => {
         store.set(key, value)
-        expect(options?.ttl).toBe(15)
+        expect(options?.ttl).toBe(45)
       },
     })
 

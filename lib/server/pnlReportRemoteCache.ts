@@ -38,6 +38,8 @@ let runtimeCacheOverride: RuntimeCacheLike | null = null
 
 const REMOTE_TTL_SOFT_FRACTION = 0.8
 const REMOTE_TTL_JITTER_FRACTION = 0.1
+/** Hard TTL must exceed L1 TTL so soft-expired remote entries survive L1 expiry. */
+const REMOTE_HARD_TTL_GRACE_OVER_L1_SEC = 15
 
 function remoteCacheBaseTtlSec(): number {
   const raw = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
@@ -46,13 +48,23 @@ function remoteCacheBaseTtlSec(): number {
   return Math.min(Math.max(sec, 15), 120)
 }
 
+function l1CacheTtlSec(): number {
+  const raw = process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC
+  const sec = raw === undefined || raw === "" ? 30 : Number(raw)
+  if (!Number.isFinite(sec) || sec <= 0) return 0
+  return Math.min(Math.max(sec, 15), 120)
+}
+
 function remoteCacheTtlWithJitterSec(): number {
   const base = remoteCacheBaseTtlSec()
   if (base <= 0) return 0
   // Jitter is positive-only so we never shorten the "hard TTL" below the configured base.
-  // This makes SWR more observable when L1 TTL is similar to the remote TTL.
   const jitter = Math.random() * REMOTE_TTL_JITTER_FRACTION
-  const raw = Math.round(base * (1 + jitter))
+  let raw = Math.round(base * (1 + jitter))
+  const l1 = l1CacheTtlSec()
+  if (l1 > 0) {
+    raw = Math.max(raw, l1 + REMOTE_HARD_TTL_GRACE_OVER_L1_SEC)
+  }
   if (!Number.isFinite(raw) || raw <= 0) return 0
   return Math.min(Math.max(raw, 15), 120)
 }
