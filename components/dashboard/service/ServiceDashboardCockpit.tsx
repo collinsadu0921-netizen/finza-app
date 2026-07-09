@@ -52,6 +52,8 @@ type Metrics = {
   metrics_ready?: boolean
   positions_ready?: boolean
   snapshot_status?: string
+  metrics_source?: string
+  live_fallback_used?: boolean
   previousPeriod?: {
     revenue: number
     expenses: number
@@ -538,6 +540,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
   const metricsFinancialReady = metrics?.metrics_ready !== false
   const positionsReady = metrics?.positions_ready !== false
+  const ledgerFallbackActive =
+    metrics?.metrics_source === "ledger_live_fallback" || metrics?.live_fallback_used === true
 
   const handleSwitchToLastActive = () => {
     setSelectedPeriodStart(null)
@@ -608,7 +612,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
         {dashboardStaleUpdating && !anyLoading && (
           <p className="text-xs text-slate-500 dark:text-slate-400" role="status">
-            {metricsFinancialReady ? "Updating dashboard…" : "Loading financial summary…"}
+            {metricsFinancialReady
+              ? ledgerFallbackActive
+                ? "Period summary updating — showing ledger records"
+                : "Updating dashboard…"
+              : "Loading financial summary…"}
           </p>
         )}
 
@@ -656,6 +664,9 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           currentRevenue={metrics?.revenue ?? 0}
           currentExpenses={metrics?.expenses ?? 0}
           currentNetProfit={metrics?.netProfit ?? 0}
+          periodCaption={
+            ledgerFallbackActive ? "Based on ledger records for this period" : undefined
+          }
         />
       )}
 

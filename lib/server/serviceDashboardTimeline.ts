@@ -6,6 +6,10 @@
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { enqueueSnapshotRefreshJob } from "@/lib/server/accountingSnapshotRefresh"
 import { supabaseErrorDiag, type createRouteDiag } from "@/lib/server/routeDiagnostics"
+import {
+  loadLiveTimelineRowsBounded,
+  mergeTimelineWithLiveMissingPeriods,
+} from "@/lib/server/dashboardMetricsLedgerFallback"
 
 export const SUMMARY_FRESH_SECONDS = 300
 
@@ -33,6 +37,7 @@ export type TimelineLoadSource =
   | "summary_stale_lock"
   | "summary_refreshed"
   | "live_first_load_fallback"
+  | "summary_stale_live_patch"
   | "empty_refresh_in_progress"
   | "empty_with_ledger"
   | "empty"
@@ -290,6 +295,34 @@ export async function loadServiceDashboardTimeline(
 
   const staleRows = await readStaleSummary(supabase, businessId, periodsParam)
   if (staleRows.length > 0) {
+    if (!refreshOnRequest) {
+      const liveRead = await loadLiveTimelineRowsBounded(supabase, businessId, periodsParam)
+      if (liveRead.rows.length > 0) {
+        const { rows, patchedPeriods } = mergeTimelineWithLiveMissingPeriods(
+          staleRows,
+          liveRead.rows,
+          periodsParam
+        )
+        if (patchedPeriods.length > 0) {
+          void enqueueTimelineSnapshotRefreshJobs(
+            supabase,
+            businessId,
+            liveRead.rows.filter((r) => patchedPeriods.includes(r.period_start))
+          )
+          return finish(
+            diag,
+            t0,
+            periodsParam,
+            rowsResult(rows, "summary_stale_live_patch"),
+            {
+              refresh_skipped: true,
+              live_patched_periods: patchedPeriods,
+              ...(liveRead.timedOut ? { live_fallback_timeout: true } : {}),
+            }
+          )
+        }
+      }
+    }
     if (refreshOnRequest) {
       void tryRefreshSummary(supabase, businessId, periodsParam)
     }

@@ -48,6 +48,15 @@ describe("resolveDashboardClusterStatus", () => {
     ).toBe("preparing")
   })
 
+  it("maps live fallback metrics to stale when ready", () => {
+    expect(
+      resolveDashboardClusterStatus("miss", {
+        timeline: [{ period_start: "2026-01-01" }],
+        metrics: { metrics_ready: true, snapshot_status: "live_fallback" },
+      })
+    ).toBe("stale")
+  })
+
   it("maps missing snapshot metrics to degraded when timeline exists", () => {
     expect(
       resolveDashboardClusterStatus("fresh_hit", {

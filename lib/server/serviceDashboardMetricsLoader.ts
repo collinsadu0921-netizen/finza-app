@@ -29,6 +29,10 @@ import {
 } from "@/lib/server/operationalUnpaidInvoicesLoader"
 import type { RouteDiagFields } from "@/lib/server/routeDiagnostics"
 import type { createRouteDiag } from "@/lib/server/routeDiagnostics"
+import {
+  dashboardLiveFallbackTimeoutMs,
+  loadLivePeriodPnlFromLedger,
+} from "@/lib/server/dashboardMetricsLedgerFallback"
 
 type SupabaseClient = Awaited<ReturnType<typeof createSupabaseServerClient>>
 type RouteDiag = ReturnType<typeof createRouteDiag>
@@ -61,7 +65,7 @@ type DashboardMetricsRpcResult = {
   previous_accounts_payable?: number | string
 }
 
-export type DashboardSnapshotStatus = "fresh" | "stale" | "missing"
+export type DashboardSnapshotStatus = "fresh" | "stale" | "missing" | "live_fallback"
 
 export type ServiceDashboardMetricsPayload = {
   period: {
@@ -93,6 +97,10 @@ export type ServiceDashboardMetricsPayload = {
   metrics_source?: ServiceDashboardMetricsLoadMeta["source"]
   positions_source?: "live" | "summary" | "missing"
   snapshot_status?: DashboardSnapshotStatus
+  /** True when period KPIs were computed from ledger because snapshot was missing. */
+  live_fallback_used?: boolean
+  live_fallback_timeout?: boolean
+  live_fallback_error?: string
 }
 
 function roundMoney(n: number): number {
@@ -129,7 +137,7 @@ export type ServiceDashboardMetricsLoadOptions = {
 }
 
 export type ServiceDashboardMetricsLoadMeta = {
-  source: "summary" | "live" | "degraded"
+  source: "summary" | "live" | "degraded" | "ledger_live_fallback"
 }
 
 export type SummaryMetricsMissReason =
@@ -380,7 +388,11 @@ async function buildMissingSnapshotMetricsPayload(
   businessId: string,
   range: PnLMovementRange | null,
   positionAsOfDate: string,
-  options?: { resolutionReason?: string }
+  options?: {
+    resolutionReason?: string
+    liveFallbackTimedOut?: boolean
+    liveFallbackError?: string
+  }
 ): Promise<ServiceDashboardMetricsPayload> {
   const currency = await loadBusinessCurrency(supabase, businessId)
   const periodStart = range?.movementStart ?? positionAsOfDate
@@ -415,9 +427,91 @@ async function buildMissingSnapshotMetricsPayload(
       metrics_source: "degraded",
       positions_source: positionsReady ? "live" : "missing",
       snapshot_status: "missing",
+      live_fallback_used: false,
+      live_fallback_timeout: options?.liveFallbackTimedOut === true,
+      ...(options?.liveFallbackError ? { live_fallback_error: options.liveFallbackError } : {}),
     },
     emptyOperationalFields()
   )
+}
+
+type LiveLedgerMetricsBuildResult =
+  | { ok: true; payload: ServiceDashboardMetricsPayload }
+  | { ok: false; timedOut: boolean; error?: string }
+
+/**
+ * Bounded ledger fallback when period summary projection is missing.
+ * Uses finza_dashboard_pnl_totals — same source as P&L reports.
+ */
+async function buildMetricsFromLiveLedgerFallback(
+  supabase: SupabaseClient,
+  businessId: string,
+  range: {
+    movementStart: string
+    movementEnd: string
+    period: { period_id: string; resolution_reason?: string }
+  },
+  positionAsOfDate: string,
+  options?: { softPositionReads?: boolean }
+): Promise<LiveLedgerMetricsBuildResult> {
+  const timeoutMs = dashboardLiveFallbackTimeoutMs()
+  const pnlRead = await loadLivePeriodPnlFromLedger(
+    supabase,
+    businessId,
+    range.movementStart,
+    range.movementEnd,
+    timeoutMs
+  )
+  if (!pnlRead.row) {
+    return {
+      ok: false,
+      timedOut: pnlRead.timedOut,
+      error: pnlRead.error,
+    }
+  }
+
+  const softReads = options?.softPositionReads === true
+  const [currency, positions, cashCollected] = await Promise.all([
+    loadBusinessCurrency(supabase, businessId),
+    loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
+    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+      throwOnError: !softReads,
+    }),
+  ])
+  const positionsReady = positionsPayloadReady(positions)
+
+  return {
+    ok: true,
+    payload: withOperationalUnpaidFields(
+      {
+        period: {
+          period_id: range.period.period_id,
+          period_start: range.movementStart,
+          period_end: range.movementEnd,
+          resolution_reason: range.period.resolution_reason,
+        },
+        currency,
+        revenue: pnlRead.row.revenue,
+        expenses: pnlRead.row.expenses,
+        netProfit: pnlRead.row.net_profit,
+        cashCollected,
+        accountsReceivable: positionsReady ? num(positions.accounts_receivable) : 0,
+        accountsPayable: positionsReady ? num(positions.accounts_payable) : 0,
+        cashBalance: positionsReady ? num(positions.cash_balance) : 0,
+        positionBalancesAsOfToday: true,
+        positionAsOfDate,
+        previousPeriod: null,
+        metrics_ready: true,
+        positions_ready: positionsReady,
+        metrics_source: "ledger_live_fallback",
+        positions_source: positionsReady ? "live" : "missing",
+        snapshot_status: "live_fallback",
+        live_fallback_used: true,
+        live_fallback_timeout: false,
+      },
+      emptyOperationalFields()
+    ),
+  }
 }
 
 export async function loadServiceDashboardMetrics(
@@ -490,7 +584,10 @@ export async function loadServiceDashboardMetrics(
 
   let usedSummaryFastPath = false
   let usedDegradedSummaryMissing = false
+  let usedLiveLedgerFallback = false
   let summaryMissReason: SummaryMetricsMissReason | undefined
+  let liveFallbackTimedOut = false
+  let liveFallbackError: string | undefined
 
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
@@ -515,6 +612,35 @@ export async function loadServiceDashboardMetrics(
         }
         if (summaryOnly) {
           summaryMissReason = snapshotResult.reason
+          const liveFallback = await buildMetricsFromLiveLedgerFallback(
+            supabase,
+            businessId,
+            range,
+            positionAsOfDate,
+            { softPositionReads: true }
+          )
+          if (liveFallback.ok) {
+            usedLiveLedgerFallback = true
+            const hasLiveMovement = await periodHasLivePnlMovement(
+              supabase,
+              businessId,
+              range.movementStart,
+              range.movementEnd
+            )
+            if (hasLiveMovement) {
+              void enqueueSnapshotRefreshJob(supabase, {
+                businessId,
+                periodStart: range.movementStart,
+                periodEnd: range.movementEnd,
+                jobType: "both",
+                reason: "read_path_missing_snapshot",
+                sourceType: "dashboard_metrics",
+              })
+            }
+            return liveFallback.payload
+          }
+          liveFallbackTimedOut = liveFallback.timedOut
+          liveFallbackError = liveFallback.error
           const hasLiveMovement = await periodHasLivePnlMovement(
             supabase,
             businessId,
@@ -534,6 +660,8 @@ export async function loadServiceDashboardMetrics(
           usedDegradedSummaryMissing = true
           return buildMissingSnapshotMetricsPayload(supabase, businessId, range, positionAsOfDate, {
             resolutionReason: "degraded",
+            liveFallbackTimedOut,
+            liveFallbackError,
           })
         }
       }
@@ -638,11 +766,13 @@ export async function loadServiceDashboardMetrics(
       return built
     })
 
-  const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = usedDegradedSummaryMissing
-    ? "degraded"
-    : usedSummaryFastPath
-      ? "summary"
-      : "live"
+  const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = usedLiveLedgerFallback
+    ? "ledger_live_fallback"
+    : usedDegradedSummaryMissing
+      ? "degraded"
+      : usedSummaryFastPath
+        ? "summary"
+        : "live"
 
   if (loadMeta) {
     loadMeta.source = metricsSource
@@ -651,17 +781,26 @@ export async function loadServiceDashboardMetrics(
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
     cache_source: cacheSource,
-    dashboard_pnl_source: usedDegradedSummaryMissing
-      ? "degraded"
-      : dashboardPnlSourceForDiag(usedSummaryFastPath),
-    metrics_source: usedDegradedSummaryMissing
-      ? "degraded_summary_missing"
-      : metricsSource,
+    dashboard_pnl_source: usedLiveLedgerFallback
+      ? "ledger_live_fallback"
+      : usedDegradedSummaryMissing
+        ? "degraded"
+        : dashboardPnlSourceForDiag(usedSummaryFastPath),
+    metrics_source: usedLiveLedgerFallback
+      ? "ledger_live_fallback"
+      : usedDegradedSummaryMissing
+        ? "degraded_summary_missing"
+        : metricsSource,
     metrics_ready: payload.metrics_ready !== false,
-    snapshot_status: payload.snapshot_status ?? (usedDegradedSummaryMissing ? "missing" : "fresh"),
+    snapshot_status:
+      payload.snapshot_status ??
+      (usedLiveLedgerFallback ? "live_fallback" : usedDegradedSummaryMissing ? "missing" : "fresh"),
     positions_source: payload.positions_source,
+    live_fallback_used: payload.live_fallback_used === true,
+    ...(liveFallbackTimedOut ? { live_fallback_timeout: true } : {}),
+    ...(liveFallbackError ? { live_fallback_error: liveFallbackError } : {}),
     ...(summaryMissReason ? { summary_metrics_miss_reason: summaryMissReason } : {}),
-    ...(summaryOnly && !usedSummaryFastPath
+    ...(summaryOnly && !usedSummaryFastPath && !usedLiveLedgerFallback
       ? { live_metrics_fallback_skipped: true }
       : {}),
     ...(usedDegradedSummaryMissing ? { degraded_metrics: true } : {}),

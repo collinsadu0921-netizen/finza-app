@@ -44,6 +44,12 @@ export function resolveDashboardClusterStatus(
     }
     return "preparing"
   }
+  if (
+    payload.metrics?.snapshot_status === "live_fallback" ||
+    payload.metrics?.snapshot_status === "stale"
+  ) {
+    return "stale"
+  }
 
   switch (cacheSource) {
     case "fresh_hit":

@@ -34,6 +34,8 @@ export type TrendsSectionProps = {
   currentRevenue?: number
   currentExpenses?: number
   currentNetProfit?: number
+  /** Optional note when period KPIs come from ledger fallback instead of snapshot. */
+  periodCaption?: string
 }
 
 type PeriodMode = "monthly" | "quarterly" | "ytd"
@@ -316,6 +318,7 @@ export default function TrendsSection({
   currentRevenue = 0,
   currentExpenses = 0,
   currentNetProfit = 0,
+  periodCaption,
 }: TrendsSectionProps) {
   const [mode, setMode] = useState<PeriodMode>("monthly")
 
@@ -419,7 +422,7 @@ export default function TrendsSection({
             Profit performance
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-500">
-            Revenue, expenses, and net profit for the selected period
+            {periodCaption ?? "Revenue, expenses, and net profit for the selected period"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
