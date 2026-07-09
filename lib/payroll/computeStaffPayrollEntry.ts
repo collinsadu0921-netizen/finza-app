@@ -1,5 +1,6 @@
 import { calculatePayroll } from "@/lib/payrollEngine"
 import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
+import { deriveEntryPensionSnapshots } from "@/lib/payroll/deriveEntryPensionSnapshots"
 import { buildGraFilingFieldsForPayrollEntry } from "@/lib/payroll/staffTaxProfile"
 
 export type StaffPayrollInput = {
@@ -72,6 +73,12 @@ export type ComputedPayrollEntryRow = {
   filing_employee_name: string | null
   bonus_concessional_amount: number
   bonus_graduated_amount: number
+  pensionable_base: number
+  employee_pension_contribution: number
+  employer_pension_contribution: number
+  total_mandatory_pension: number
+  tier1_ssnit_remittance: number
+  tier2_pension_remittance: number
 }
 
 function isQualifyingJuniorEmployee(staff: StaffPayrollInput): boolean {
@@ -116,6 +123,12 @@ function zeroEntry(
     bonus_cap_amount: 0,
     overtime_threshold_amount: 0,
     net_salary: 0,
+    pensionable_base: 0,
+    employee_pension_contribution: 0,
+    employer_pension_contribution: 0,
+    total_mandatory_pension: 0,
+    tier1_ssnit_remittance: 0,
+    tier2_pension_remittance: 0,
     ...filing,
   }
 }
@@ -201,6 +214,12 @@ export function computeStaffPayrollEntry(
   const breakdown = payrollResult.complianceBreakdown
   const filing = buildGraFilingFieldsForPayrollEntry({ staff, breakdown: breakdown ?? null })
 
+  const pensionSnapshots = deriveEntryPensionSnapshots({
+    pensionableBase: payrollResult.earnings.basicSalary,
+    employeeContribution: employeeStatutoryContributions,
+    employerContribution: employerStatutoryContributions,
+  })
+
   return {
     staff_id: staff.id,
     is_included: true,
@@ -228,6 +247,7 @@ export function computeStaffPayrollEntry(
     bonus_cap_amount: Number(breakdown?.bonusCapAmount ?? 0),
     overtime_threshold_amount: Number(breakdown?.overtimeThresholdAmount ?? 0),
     net_salary: payrollResult.totals.netSalary,
+    ...pensionSnapshots,
     ...filing,
   }
 }

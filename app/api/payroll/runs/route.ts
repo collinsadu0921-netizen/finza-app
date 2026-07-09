@@ -18,6 +18,14 @@ import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/ro
 import {
   loadOrComputeOperationalListCache,
 } from "@/lib/server/operationalListCache"
+import {
+  resolveCreatePayrollRunPeriod,
+} from "@/lib/payroll/payrollPeriodUtils"
+import { computeStaffScopeFingerprint } from "@/lib/payroll/payrollPeriod"
+import {
+  assertNoDuplicatePayrollRun,
+  DuplicatePayrollRunError,
+} from "@/lib/payroll/payrollDuplicateGuard"
 
 const DEFAULT_PAYROLL_RUNS_LIMIT = 24
 const MAX_PAYROLL_RUNS_LIMIT = 100
@@ -26,6 +34,12 @@ const PAYROLL_RUN_LIST_SELECT = `
   id,
   business_id,
   payroll_month,
+  pay_period_start,
+  pay_period_end,
+  payroll_frequency,
+  run_type,
+  corrects_payroll_run_id,
+  staff_scope_fingerprint,
   status,
   total_gross_salary,
   total_allowances,
@@ -135,7 +149,8 @@ export async function GET(request: NextRequest) {
           .select(PAYROLL_RUN_LIST_SELECT, { count: "exact" })
           .eq("business_id", business.id)
           .is("deleted_at", null)
-          .order("payroll_month", { ascending: false })
+          .order("pay_period_start", { ascending: false })
+          .order("created_at", { ascending: false })
           .range(from, to)
 
         if (error) {
@@ -218,30 +233,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { payroll_month } = body
 
-    if (!payroll_month) {
-      return NextResponse.json(
-        { error: "Missing payroll_month" },
-        { status: 400 }
-      )
+    let periodFields
+    try {
+      periodFields = resolveCreatePayrollRunPeriod(body)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Invalid payroll period"
+      return NextResponse.json({ error: message }, { status: 400 })
     }
 
-    // Check if payroll run already exists for this month
-    const { data: existingRun } = await supabase
-      .from("payroll_runs")
-      .select("id")
-      .eq("business_id", business.id)
-      .eq("payroll_month", payroll_month)
-      .is("deleted_at", null)
-      .single()
-
-    if (existingRun) {
-      return NextResponse.json(
-        { error: "Payroll run already exists for this month" },
-        { status: 400 }
-      )
-    }
+    const { payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type, corrects_payroll_run_id } =
+      periodFields
 
     // Get all active staff
     const { data: staffList, error: staffError } = await supabase
@@ -264,6 +266,39 @@ export async function POST(request: NextRequest) {
         { error: "No active staff found" },
         { status: 400 }
       )
+    }
+
+    const staffScopeFingerprint = computeStaffScopeFingerprint(staffList.map((s) => s.id))
+
+    const { data: existingRuns, error: existingRunsError } = await supabase
+      .from("payroll_runs")
+      .select(
+        "id, business_id, payroll_frequency, run_type, pay_period_start, pay_period_end, staff_scope_fingerprint, status, deleted_at"
+      )
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+
+    if (existingRunsError) {
+      return NextResponse.json({ error: existingRunsError.message }, { status: 500 })
+    }
+
+    try {
+      assertNoDuplicatePayrollRun(
+        {
+          business_id: business.id,
+          payroll_frequency,
+          run_type,
+          pay_period_start,
+          pay_period_end,
+          staff_scope_fingerprint: staffScopeFingerprint,
+        },
+        existingRuns || []
+      )
+    } catch (err: unknown) {
+      if (err instanceof DuplicatePayrollRunError) {
+        return NextResponse.json({ error: err.message, existingRunId: err.existingRunId }, { status: 409 })
+      }
+      throw err
     }
 
     // Get business country for payroll engine resolution
@@ -321,6 +356,12 @@ export async function POST(request: NextRequest) {
       .insert({
         business_id: business.id,
         payroll_month,
+        pay_period_start,
+        pay_period_end,
+        payroll_frequency,
+        run_type,
+        corrects_payroll_run_id: corrects_payroll_run_id || null,
+        staff_scope_fingerprint: staffScopeFingerprint,
         status: "draft",
         total_gross_salary: runTotals.total_gross_salary,
         total_allowances: runTotals.total_allowances,
@@ -369,12 +410,16 @@ export async function POST(request: NextRequest) {
       entityId: payrollRun.id,
       newValues: {
         payroll_month,
+        pay_period_start,
+        pay_period_end,
+        payroll_frequency,
+        run_type,
         total_gross_salary: runTotals.total_gross_salary,
         total_net_salary: runTotals.total_net_salary,
         staff_count: staffList.length,
         status: "draft",
       },
-      description: `Created payroll run for ${payroll_month} (${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
+      description: `Created payroll run for ${pay_period_start} to ${pay_period_end} (${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
       request,
     })
 

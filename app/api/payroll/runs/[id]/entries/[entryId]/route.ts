@@ -10,6 +10,7 @@ import {
   isPayrollEngineCountryError,
 } from "@/lib/payroll/computeStaffPayrollEntry"
 import { rollupPayrollRunTotals } from "@/lib/payroll/rollupPayrollRunTotals"
+import { syncPayrollRunStaffScopeFingerprint } from "@/lib/payroll/syncPayrollRunStaffScope"
 
 async function syncPayrollRunTotals(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -213,6 +214,7 @@ export async function PATCH(
     }
 
     const runTotals = await syncPayrollRunTotals(supabase, runId)
+    await syncPayrollRunStaffScopeFingerprint(supabase, runId)
 
     await logAudit({
       businessId: business.id,

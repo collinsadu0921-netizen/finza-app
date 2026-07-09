@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { formatPayrollRunLabel, formatPayrollRunTypeBadge } from "@/lib/payroll/payrollRunLabels"
 
 type PayrollEntry = {
   id: string
@@ -39,6 +40,10 @@ type PayrollEntry = {
 type PayrollRun = {
   id: string
   payroll_month: string
+  pay_period_start?: string
+  pay_period_end?: string
+  payroll_frequency?: string
+  run_type?: string
   status: string
   total_gross_salary: number
   total_allowances: number
@@ -901,8 +906,7 @@ export default function PayrollRunViewPage() {
   )
   const isDraftRun = payrollRun?.status === "draft"
 
-  const formatMonth = (dateStr: string) =>
-    new Date(dateStr).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
+  const formatMonth = (run: PayrollRun) => formatPayrollRunLabel(run)
 
   if (loading) {
     return (
@@ -937,9 +941,17 @@ export default function PayrollRunViewPage() {
                 Back to Payroll
               </button>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                {formatMonth(payrollRun.payroll_month)}
+                {formatMonth(payrollRun)}
               </h1>
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {(payrollRun.run_type && payrollRun.run_type !== "regular") || (payrollRun.payroll_frequency && payrollRun.payroll_frequency !== "monthly") ? (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {formatPayrollRunTypeBadge(payrollRun.run_type)}
+                    {payrollRun.payroll_frequency && payrollRun.payroll_frequency !== "monthly"
+                      ? ` · ${payrollRun.payroll_frequency}`
+                      : ""}
+                  </span>
+                ) : null}
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                   payrollRun.status === "approved"
                     ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400"
