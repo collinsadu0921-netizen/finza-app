@@ -18,7 +18,11 @@ export type DashboardStatusPayloadHints = {
   dashboard_ready?: boolean
   timelineSource?: string
   timeline?: unknown[]
-  metrics?: { period?: { resolution_reason?: string } } | null
+  metrics?: {
+    period?: { resolution_reason?: string }
+    metrics_ready?: boolean
+    snapshot_status?: string
+  } | null
 }
 
 export function resolveDashboardClusterStatus(
@@ -32,6 +36,12 @@ export function resolveDashboardClusterStatus(
     return "preparing"
   }
   if (payload.metrics?.period?.resolution_reason === "preparing") {
+    return "preparing"
+  }
+  if (payload.metrics?.metrics_ready === false) {
+    if ((payload.timeline?.length ?? 0) > 0) {
+      return "degraded"
+    }
     return "preparing"
   }
 

@@ -49,6 +49,9 @@ type Metrics = {
   unpaidInvoicesCount?: number
   overdueInvoicesTotal?: number
   overdueInvoicesCount?: number
+  metrics_ready?: boolean
+  positions_ready?: boolean
+  snapshot_status?: string
   previousPeriod?: {
     revenue: number
     expenses: number
@@ -441,7 +444,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
             setLoadingMetrics(true)
             setLoadingTimeline(true)
             setLoadingActivity(true)
-            if (shouldPollDashboardCluster(status, ready)) {
+            if (shouldPollDashboardCluster(status, ready, cluster.metrics?.metrics_ready)) {
               scheduleDashboardPoll()
             }
           } else {
@@ -454,7 +457,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
             setMetrics(cluster.metrics)
             setMetricsError(null)
             setActivityItems(cluster.activity.items ?? [])
-            setDashboardStaleUpdating(status === "stale" || status === "degraded")
+            setDashboardStaleUpdating(
+              status === "stale" ||
+                status === "degraded" ||
+                cluster.metrics?.metrics_ready === false
+            )
           }
         } else {
           setLoadingTimeline(false)
@@ -522,11 +529,15 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
   const showEmptyPeriodCta =
     !!metrics &&
+    metrics.metrics_ready !== false &&
     selectedPeriodStart != null &&
     selectedPeriodStart !== "" &&
     metrics.revenue === 0 &&
     metrics.expenses === 0 &&
     metrics.netProfit === 0
+
+  const metricsFinancialReady = metrics?.metrics_ready !== false
+  const positionsReady = metrics?.positions_ready !== false
 
   const handleSwitchToLastActive = () => {
     setSelectedPeriodStart(null)
@@ -597,7 +608,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
         {dashboardStaleUpdating && !anyLoading && (
           <p className="text-xs text-slate-500 dark:text-slate-400" role="status">
-            Updating dashboard…
+            {metricsFinancialReady ? "Updating dashboard…" : "Loading financial summary…"}
           </p>
         )}
 
@@ -630,12 +641,13 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
             overdueInvoicesCount={metrics.overdueInvoicesCount ?? 0}
             currencyCode={currencyCode}
             positionAsOfPrefix={positionAsOfPrefix}
+            positionsReady={positionsReady}
           />
         ) : null}
       </div>
 
       {/* Trends — full-width profit performance panel (chart + breakdown need room) */}
-      {loadingTimeline ? (
+      {loadingTimeline || !metricsFinancialReady ? (
         <ServiceDashboardTrendsPanelSkeleton />
       ) : (
         <TrendsSectionLazy
@@ -647,7 +659,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
         />
       )}
 
-      {loadingMetrics ? (
+      {loadingMetrics || !metricsFinancialReady ? (
         <ServiceDashboardCollectionsFollowUpSkeleton />
       ) : metrics ? (
         <CollectionsFollowUpSection

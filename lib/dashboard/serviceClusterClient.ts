@@ -19,9 +19,10 @@ export function isDashboardClusterRenderable(
 
 export function shouldPollDashboardCluster(
   status: DashboardClusterStatus | undefined,
-  ready: boolean | undefined
+  ready: boolean | undefined,
+  metricsReady?: boolean
 ): boolean {
-  return status === "preparing" || ready === false
+  return status === "preparing" || ready === false || metricsReady === false
 }
 
 /** Backoff delay in ms for preparing-state auto-refetch (2s base, capped at 8s). */

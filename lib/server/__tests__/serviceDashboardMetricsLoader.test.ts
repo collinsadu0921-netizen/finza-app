@@ -74,18 +74,30 @@ beforeEach(() => {
 })
 
 describe("loadServiceDashboardMetrics summary-only", () => {
-  it("returns degraded metrics and skips live RPC when summary row is missing", async () => {
+  it("returns not-ready metrics and skips live RPC when summary row is missing", async () => {
     const rpc = jest.fn().mockImplementation((name: string) => {
       if (name === "get_fresh_service_dashboard_period_pnl") {
         return Promise.resolve({ data: [], error: null })
       }
+      if (name === "finza_dashboard_positions_as_of") {
+        return Promise.resolve({
+          data: [
+            {
+              cash_balance: 420929.8,
+              accounts_receivable: 737654.2,
+              accounts_payable: 78768.41,
+            },
+          ],
+          error: null,
+        })
+      }
       if (name === "get_operational_unpaid_invoices_total") {
         return Promise.resolve({
           data: {
-            unpaid_total: 0,
-            unpaid_count: 0,
-            overdue_total: 0,
-            overdue_count: 0,
+            unpaid_total: 733574.2,
+            unpaid_count: 300,
+            overdue_total: 732554.2,
+            overdue_count: 299,
           },
           error: null,
         })
@@ -109,8 +121,11 @@ describe("loadServiceDashboardMetrics summary-only", () => {
     )
     expect(mockEnqueue).toHaveBeenCalled()
     expect(loadMeta.source).toBe("degraded")
-    expect(payload.revenue).toBe(0)
-    expect(payload.netProfit).toBe(0)
+    expect(payload.metrics_ready).toBe(false)
+    expect(payload.snapshot_status).toBe("missing")
+    expect(payload.positions_ready).toBe(true)
+    expect(payload.accountsReceivable).toBe(737654.2)
+    expect(payload.unpaidInvoicesTotal).toBe(733574.2)
     expect(payload.period.resolution_reason).toBe("degraded")
     expect(payload.period.period_start).toBe("2026-07-01")
   })

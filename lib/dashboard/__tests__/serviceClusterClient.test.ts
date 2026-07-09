@@ -19,6 +19,7 @@ describe("serviceClusterClient", () => {
   it("polls only while preparing", () => {
     expect(shouldPollDashboardCluster("preparing", false)).toBe(true)
     expect(shouldPollDashboardCluster("fresh", true)).toBe(false)
+    expect(shouldPollDashboardCluster("degraded", true, false)).toBe(true)
   })
 
   it("backs off poll delay", () => {

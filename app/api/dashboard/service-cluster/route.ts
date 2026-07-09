@@ -120,6 +120,9 @@ function clusterPayloadShouldStore(payload: ServiceDashboardClusterPayload): boo
   if (payload.dashboard_ready === false || payload.dashboard_status === "preparing") {
     return false
   }
+  if (payload.metrics?.metrics_ready === false) {
+    return false
+  }
   return shouldCacheDashboardClusterPayload(payload)
 }
 

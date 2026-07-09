@@ -61,6 +61,8 @@ type DashboardMetricsRpcResult = {
   previous_accounts_payable?: number | string
 }
 
+export type DashboardSnapshotStatus = "fresh" | "stale" | "missing"
+
 export type ServiceDashboardMetricsPayload = {
   period: {
     period_id?: string
@@ -84,6 +86,13 @@ export type ServiceDashboardMetricsPayload = {
   unpaidInvoicesCount: number
   overdueInvoicesTotal: number
   overdueInvoicesCount: number
+  /** False when period P&L projection is missing — UI must not render period KPIs as zero. */
+  metrics_ready?: boolean
+  /** False when ledger position balances could not be loaded. */
+  positions_ready?: boolean
+  metrics_source?: ServiceDashboardMetricsLoadMeta["source"]
+  positions_source?: "live" | "summary" | "missing"
+  snapshot_status?: DashboardSnapshotStatus
 }
 
 function roundMoney(n: number): number {
@@ -343,13 +352,30 @@ async function buildMetricsFromSummarySnapshot(
         positionBalancesAsOfToday: true,
         positionAsOfDate,
         previousPeriod,
+        metrics_ready: true,
+        positions_ready: true,
+        metrics_source: "summary",
+        positions_source: "live",
+        snapshot_status: options?.allowStalePnl ? "stale" : "fresh",
       },
       emptyOperationalFields()
     ),
   }
 }
 
-async function buildDegradedMetricsPayload(
+function positionsPayloadReady(positions: PositionRow): boolean {
+  return (
+    positions.cash_balance !== undefined ||
+    positions.accounts_receivable !== undefined ||
+    positions.accounts_payable !== undefined
+  )
+}
+
+/**
+ * Missing/stale period snapshot — never emit fake zero financial KPIs as ready.
+ * Loads live ledger positions when available; period P&L left not-ready for UI.
+ */
+async function buildMissingSnapshotMetricsPayload(
   supabase: SupabaseClient,
   businessId: string,
   range: PnLMovementRange | null,
@@ -359,6 +385,10 @@ async function buildDegradedMetricsPayload(
   const currency = await loadBusinessCurrency(supabase, businessId)
   const periodStart = range?.movementStart ?? positionAsOfDate
   const periodEnd = range?.movementEnd ?? positionAsOfDate
+  const positions = await loadPositionsAsOf(supabase, businessId, positionAsOfDate, {
+    throwOnError: false,
+  })
+  const positionsReady = positionsPayloadReady(positions)
 
   return withOperationalUnpaidFields(
     {
@@ -374,12 +404,17 @@ async function buildDegradedMetricsPayload(
       expenses: 0,
       netProfit: 0,
       cashCollected: 0,
-      accountsReceivable: 0,
-      accountsPayable: 0,
-      cashBalance: 0,
+      accountsReceivable: positionsReady ? num(positions.accounts_receivable) : 0,
+      accountsPayable: positionsReady ? num(positions.accounts_payable) : 0,
+      cashBalance: positionsReady ? num(positions.cash_balance) : 0,
       positionBalancesAsOfToday: true,
       positionAsOfDate,
       previousPeriod: null,
+      metrics_ready: false,
+      positions_ready: positionsReady,
+      metrics_source: "degraded",
+      positions_source: positionsReady ? "live" : "missing",
+      snapshot_status: "missing",
     },
     emptyOperationalFields()
   )
@@ -405,10 +440,17 @@ export async function loadServiceDashboardMetrics(
 
   if (rangeError || !range) {
     if (summaryOnly) {
-      const degraded = await buildDegradedMetricsPayload(supabase, businessId, null, positionAsOfDate)
+      const degraded = await buildMissingSnapshotMetricsPayload(
+        supabase,
+        businessId,
+        null,
+        positionAsOfDate
+      )
       loadMeta && (loadMeta.source = "degraded")
       diag.step("metrics", {
         metrics_source: "degraded",
+        metrics_ready: false,
+        snapshot_status: "missing",
         refresh_skipped: true,
         period_resolution_error: rangeError ?? "missing_range",
       })
@@ -490,7 +532,7 @@ export async function loadServiceDashboardMetrics(
             })
           }
           usedDegradedSummaryMissing = true
-          return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate, {
+          return buildMissingSnapshotMetricsPayload(supabase, businessId, range, positionAsOfDate, {
             resolutionReason: "degraded",
           })
         }
@@ -499,7 +541,7 @@ export async function loadServiceDashboardMetrics(
       if (summaryOnly) {
         usedDegradedSummaryMissing = true
         summaryMissReason = summaryMissReason ?? "unknown"
-        return buildDegradedMetricsPayload(supabase, businessId, range, positionAsOfDate, {
+        return buildMissingSnapshotMetricsPayload(supabase, businessId, range, positionAsOfDate, {
           resolutionReason: "degraded",
         })
       }
@@ -572,6 +614,11 @@ export async function loadServiceDashboardMetrics(
           positionBalancesAsOfToday: true,
           positionAsOfDate,
           previousPeriod: null,
+          metrics_ready: true,
+          positions_ready: true,
+          metrics_source: "live",
+          positions_source: "live",
+          snapshot_status: "fresh",
         },
         emptyOperationalFields()
       )
@@ -610,6 +657,9 @@ export async function loadServiceDashboardMetrics(
     metrics_source: usedDegradedSummaryMissing
       ? "degraded_summary_missing"
       : metricsSource,
+    metrics_ready: payload.metrics_ready !== false,
+    snapshot_status: payload.snapshot_status ?? (usedDegradedSummaryMissing ? "missing" : "fresh"),
+    positions_source: payload.positions_source,
     ...(summaryMissReason ? { summary_metrics_miss_reason: summaryMissReason } : {}),
     ...(summaryOnly && !usedSummaryFastPath
       ? { live_metrics_fallback_skipped: true }

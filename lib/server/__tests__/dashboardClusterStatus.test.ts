@@ -48,6 +48,15 @@ describe("resolveDashboardClusterStatus", () => {
     ).toBe("preparing")
   })
 
+  it("maps missing snapshot metrics to degraded when timeline exists", () => {
+    expect(
+      resolveDashboardClusterStatus("fresh_hit", {
+        timeline: [{ period_start: "2026-01-01" }],
+        metrics: { metrics_ready: false, snapshot_status: "missing" },
+      })
+    ).toBe("degraded")
+  })
+
   it("maps degraded with stale timeline to degraded", () => {
     expect(
       resolveDashboardClusterStatus("degraded", {
