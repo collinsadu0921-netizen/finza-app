@@ -18,7 +18,13 @@ import {
   dashboardClusterCacheResponseHeaders,
   loadOrComputeDashboardClusterCache,
   loadOrComputeDashboardActivityCache,
+  type DashboardClusterCacheSource,
 } from "@/lib/server/dashboardClusterCache"
+import {
+  isDashboardClusterReady,
+  resolveDashboardClusterStatus,
+  type DashboardClusterStatus,
+} from "@/lib/server/dashboardClusterStatus"
 import {
   dashboardRefreshOnRequestDiag,
   dashboardRefreshSkipped,
@@ -59,6 +65,62 @@ export type ServiceDashboardClusterPayload = {
   dashboard_refresh_on_request: ReturnType<typeof dashboardRefreshOnRequestDiag>
   dashboard_refresh_skipped: boolean
   dashboard_source: DashboardClusterSource
+  dashboard_status?: DashboardClusterStatus
+  dashboard_ready?: boolean
+}
+
+function preparingClusterPayload(refreshOnRequest: boolean): ServiceDashboardClusterPayload {
+  return {
+    timeline: [],
+    metrics: {
+      period: { period_start: "", period_end: "", resolution_reason: "preparing" },
+      currency: { code: "GHS", symbol: "GH₵", name: "Ghanaian Cedi" },
+      revenue: 0,
+      expenses: 0,
+      netProfit: 0,
+      cashCollected: 0,
+      accountsReceivable: 0,
+      accountsPayable: 0,
+      cashBalance: 0,
+      positionBalancesAsOfToday: true,
+      positionAsOfDate: "",
+      previousPeriod: null,
+      unpaidInvoicesTotal: 0,
+      unpaidInvoicesCount: 0,
+      overdueInvoicesTotal: 0,
+      overdueInvoicesCount: 0,
+    },
+    activity: { items: [] },
+    timelineSource: "preparing",
+    timelineCacheable: false,
+    dashboard_refresh_on_request: dashboardRefreshOnRequestDiag(),
+    dashboard_refresh_skipped: dashboardRefreshSkipped(refreshOnRequest),
+    dashboard_source: "degraded",
+    dashboard_status: "preparing",
+    dashboard_ready: false,
+  }
+}
+
+function attachDashboardClusterMetadata(
+  value: ServiceDashboardClusterPayload,
+  cacheSource: DashboardClusterCacheSource,
+  servedFromCache: boolean
+): ServiceDashboardClusterPayload {
+  const dashboard_status = resolveDashboardClusterStatus(cacheSource, value)
+  const dashboard_ready = isDashboardClusterReady(dashboard_status)
+  return {
+    ...value,
+    dashboard_source: servedFromCache ? "cache" : value.dashboard_source,
+    dashboard_status,
+    dashboard_ready,
+  }
+}
+
+function clusterPayloadShouldStore(payload: ServiceDashboardClusterPayload): boolean {
+  if (payload.dashboard_ready === false || payload.dashboard_status === "preparing") {
+    return false
+  }
+  return shouldCacheDashboardClusterPayload(payload)
 }
 
 function emptyDegradedClusterPayload(
@@ -264,7 +326,7 @@ export async function GET(request: NextRequest) {
     ].join("|")
 
     try {
-      const degradedPayload = () => emptyDegradedClusterPayload(refreshOnRequest)
+      const preparingPayload = () => preparingClusterPayload(refreshOnRequest)
 
       const {
         value,
@@ -283,8 +345,9 @@ export async function GET(request: NextRequest) {
             diag
           ),
         {
-          shouldStore: shouldCacheDashboardClusterPayload,
-          createDegraded: degradedPayload,
+          shouldStore: clusterPayloadShouldStore,
+          createPreparing: preparingPayload,
+          createDegraded: preparingPayload,
           scheduleBackground: (promise) => waitUntil(promise),
         }
       )
@@ -295,16 +358,14 @@ export async function GET(request: NextRequest) {
         cacheSource === "refresh_started" ||
         cacheSource === "refresh_skipped"
 
-      const payload: ServiceDashboardClusterPayload = {
-        ...value,
-        dashboard_source: servedFromCache ? "cache" : value.dashboard_source,
-      }
+      const payload = attachDashboardClusterMetadata(value, cacheSource, servedFromCache)
 
       diag.step("cache", {
         cache_source: legacyCacheSource,
         dashboard_cache_source: cacheSource,
         dashboard_cache_age_ms: Math.round(cache_age_ms),
         dashboard_refresh_mode: refresh_mode,
+        dashboard_status: payload.dashboard_status,
         cache_enabled,
         dashboard_source: payload.dashboard_source,
       })
@@ -315,6 +376,7 @@ export async function GET(request: NextRequest) {
           cacheSource,
           cacheAgeMs: cache_age_ms,
           refreshMode: refresh_mode,
+          dashboardStatus: payload.dashboard_status,
         }),
       })
     } catch (err) {
@@ -323,13 +385,21 @@ export async function GET(request: NextRequest) {
           "[service-cluster] cluster load degraded:",
           err instanceof Error ? err.message : "cluster_load_failed"
         )
-        const degraded = emptyDegradedClusterPayload(refreshOnRequest)
+        const degraded = preparingClusterPayload(refreshOnRequest)
         diag.step("cluster_degraded", {
           error: err instanceof Error ? err.message : "cluster_load_failed",
+          dashboard_status: "preparing",
         })
         diag.finish(200)
-        devClusterLog("total route (degraded)", routeT0)
-        return NextResponse.json(degraded)
+        devClusterLog("total route (preparing)", routeT0)
+        return NextResponse.json(degraded, {
+          headers: dashboardClusterCacheResponseHeaders({
+            cacheSource: "preparing",
+            cacheAgeMs: 0,
+            refreshMode: "skipped",
+            dashboardStatus: "preparing",
+          }),
+        })
       }
 
       const rpcMeta = (err as { rpcMeta?: RouteDiagFields }).rpcMeta
@@ -339,9 +409,16 @@ export async function GET(request: NextRequest) {
     }
   } catch (err) {
     if (!refreshOnRequest) {
-      const degraded = emptyDegradedClusterPayload(refreshOnRequest)
+      const degraded = preparingClusterPayload(refreshOnRequest)
       diag.finish(200)
-      return NextResponse.json(degraded)
+      return NextResponse.json(degraded, {
+        headers: dashboardClusterCacheResponseHeaders({
+          cacheSource: "preparing",
+          cacheAgeMs: 0,
+          refreshMode: "skipped",
+          dashboardStatus: "preparing",
+        }),
+      })
     }
     diag.fail(500, err instanceof Error ? err.message : "Server error")
     console.error("Dashboard service-cluster error:", err)

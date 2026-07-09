@@ -17,6 +17,13 @@ import ServiceDashboardSkeleton, {
 } from "./ServiceDashboardSkeleton"
 import DashboardErrorBanner from "./DashboardErrorBanner"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
+import {
+  isDashboardClusterRenderable,
+  MAX_DASHBOARD_CLUSTER_POLL_ATTEMPTS,
+  nextDashboardPollDelayMs,
+  shouldPollDashboardCluster,
+  type DashboardClusterStatus,
+} from "@/lib/dashboard/serviceClusterClient"
 
 const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
   loading: () => <ServiceDashboardTrendsPanelSkeleton />,
@@ -136,6 +143,8 @@ async function fetchDashboardCluster(
   timeline: TimelineItem[]
   metrics: Metrics
   activity: { items: ActivityItem[] }
+  dashboard_status?: DashboardClusterStatus
+  dashboard_ready?: boolean
 } | null> {
   const params = new URLSearchParams({
     business_id: businessId,
@@ -237,10 +246,14 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const [loadingActivity, setLoadingActivity] = useState(true)
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null)
   const [metricsError, setMetricsError] = useState<string | null>(null)
+  const [dashboardStaleUpdating, setDashboardStaleUpdating] = useState(false)
 
   /** Monotonic generation — stale async completions must not overwrite state. */
   const loadGenerationRef = useRef(0)
   const loadAbortRef = useRef<AbortController | null>(null)
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollAttemptRef = useRef(0)
+  const loadRef = useRef<() => Promise<void>>(async () => {})
 
   const rawMetricsCurrency = metrics?.currency
   const metricsCurrencyCode = typeof rawMetricsCurrency === "object" && rawMetricsCurrency !== null
@@ -248,6 +261,24 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     : rawMetricsCurrency as string | undefined
   const currencyCode =
     business?.default_currency ?? metricsCurrencyCode ?? DEFAULT_PLATFORM_CURRENCY_CODE
+
+  const clearDashboardPoll = useCallback(() => {
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current)
+      pollTimeoutRef.current = null
+    }
+  }, [])
+
+  const scheduleDashboardPoll = useCallback(() => {
+    if (pollAttemptRef.current >= MAX_DASHBOARD_CLUSTER_POLL_ATTEMPTS) return
+    clearDashboardPoll()
+    const delay = nextDashboardPollDelayMs(pollAttemptRef.current)
+    pollAttemptRef.current += 1
+    pollTimeoutRef.current = setTimeout(() => {
+      pollTimeoutRef.current = null
+      void loadRef.current()
+    }, delay)
+  }, [clearDashboardPoll])
 
   const load = useCallback(async () => {
     const businessId = business?.id
@@ -395,27 +426,54 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
         if (!isLatest()) return
 
-        setLoadingTimeline(false)
-        setLoadingMetrics(false)
-        setLoadingActivity(false)
-
         if (clusterSettled.status === "fulfilled" && clusterSettled.value) {
-          setTimeline(clusterSettled.value.timeline)
-          setMetrics(clusterSettled.value.metrics)
-          setMetricsError(null)
-          setActivityItems(clusterSettled.value.activity.items ?? [])
-        } else if (
-          clusterSettled.status === "rejected" &&
-          !isAbortOrCancelled(clusterSettled.reason)
-        ) {
-          setMetrics(null)
-          setTimeline([])
-          setActivityItems([])
-          setMetricsError(
-            clusterSettled.reason instanceof Error
-              ? clusterSettled.reason.message
-              : "Failed to load dashboard"
-          )
+          const cluster = clusterSettled.value
+          const status = cluster.dashboard_status
+          const ready = cluster.dashboard_ready
+          const renderable = isDashboardClusterRenderable(status, ready)
+
+          if (!renderable) {
+            setMetrics(null)
+            setTimeline([])
+            setActivityItems([])
+            setMetricsError(null)
+            setDashboardStaleUpdating(false)
+            setLoadingMetrics(true)
+            setLoadingTimeline(true)
+            setLoadingActivity(true)
+            if (shouldPollDashboardCluster(status, ready)) {
+              scheduleDashboardPoll()
+            }
+          } else {
+            setLoadingTimeline(false)
+            setLoadingMetrics(false)
+            setLoadingActivity(false)
+            clearDashboardPoll()
+            pollAttemptRef.current = 0
+            setTimeline(cluster.timeline)
+            setMetrics(cluster.metrics)
+            setMetricsError(null)
+            setActivityItems(cluster.activity.items ?? [])
+            setDashboardStaleUpdating(status === "stale" || status === "degraded")
+          }
+        } else {
+          setLoadingTimeline(false)
+          setLoadingMetrics(false)
+          setLoadingActivity(false)
+
+          if (
+            clusterSettled.status === "rejected" &&
+            !isAbortOrCancelled(clusterSettled.reason)
+          ) {
+            setMetrics(null)
+            setTimeline([])
+            setActivityItems([])
+            setMetricsError(
+              clusterSettled.reason instanceof Error
+                ? clusterSettled.reason.message
+                : "Failed to load dashboard"
+            )
+          }
         }
       }
     } catch (e) {
@@ -433,13 +491,21 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
         devServiceDashboardLog("total cockpit load", tCockpit)
       }
     }
-  }, [business?.id, selectedPeriodStart])
+  }, [business?.id, selectedPeriodStart, clearDashboardPoll, scheduleDashboardPoll])
+
+  loadRef.current = load
 
   const anyLoading = loadingMetrics || loadingTimeline || loadingActivity
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    return () => {
+      clearDashboardPoll()
+    }
+  }, [clearDashboardPoll])
 
   const periodLabel =
     metrics?.period?.period_start && metrics?.period?.period_end
@@ -527,6 +593,12 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
             }
             onRetry={load}
           />
+        )}
+
+        {dashboardStaleUpdating && !anyLoading && (
+          <p className="text-xs text-slate-500 dark:text-slate-400" role="status">
+            Updating dashboard…
+          </p>
         )}
 
         <DashboardHeader

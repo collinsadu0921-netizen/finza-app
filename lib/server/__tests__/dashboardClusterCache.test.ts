@@ -13,12 +13,14 @@ describe("loadOrComputeDashboardClusterCache shouldStore", () => {
   const prevSoft = process.env.FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC
   const prevHard = process.env.FINZA_DASHBOARD_CLUSTER_CACHE_HARD_TTL_SEC
   const prevTimeout = process.env.FINZA_DASHBOARD_CLUSTER_COMPUTE_TIMEOUT_MS
+  const prevForeground = process.env.FINZA_DASHBOARD_CLUSTER_FOREGROUND_MS
 
   beforeEach(() => {
     resetDashboardClusterCacheForTests()
     process.env.FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC = "30"
     delete process.env.FINZA_DASHBOARD_CLUSTER_CACHE_HARD_TTL_SEC
     delete process.env.FINZA_DASHBOARD_CLUSTER_COMPUTE_TIMEOUT_MS
+    delete process.env.FINZA_DASHBOARD_CLUSTER_FOREGROUND_MS
   })
 
   afterEach(() => {
@@ -37,6 +39,11 @@ describe("loadOrComputeDashboardClusterCache shouldStore", () => {
       delete process.env.FINZA_DASHBOARD_CLUSTER_COMPUTE_TIMEOUT_MS
     } else {
       process.env.FINZA_DASHBOARD_CLUSTER_COMPUTE_TIMEOUT_MS = prevTimeout
+    }
+    if (prevForeground === undefined) {
+      delete process.env.FINZA_DASHBOARD_CLUSTER_FOREGROUND_MS
+    } else {
+      process.env.FINZA_DASHBOARD_CLUSTER_FOREGROUND_MS = prevForeground
     }
   })
 
@@ -134,14 +141,15 @@ describe("loadOrComputeDashboardClusterCache shouldStore", () => {
     expect(computeCalls).toBe(2)
   })
 
-  it("returns degraded fast for waiters when no stale entry exists", async () => {
-    const key = `test-waiter-degraded-${Date.now()}-${Math.random()}`
+  it("returns preparing fast for waiters when no stale entry exists", async () => {
+    const key = `test-waiter-preparing-${Date.now()}-${Math.random()}`
     let releaseCompute!: () => void
     const computeGate = new Promise<void>((resolve) => {
       releaseCompute = resolve
     })
 
-    const degraded = { timeline: [], degraded: true }
+    const preparing = { timeline: [], preparing: true }
+    const scheduled: Promise<void>[] = []
 
     const owner = loadOrComputeDashboardClusterCache(
       key,
@@ -149,7 +157,12 @@ describe("loadOrComputeDashboardClusterCache shouldStore", () => {
         await computeGate
         return { timeline: [{ period_start: "2026-01-01" }], cacheable: true }
       },
-      { shouldStore: () => true }
+      {
+        shouldStore: () => true,
+        scheduleBackground: (p) => {
+          scheduled.push(p)
+        },
+      }
     )
 
     const waiter = await loadOrComputeDashboardClusterCache(
@@ -157,13 +170,50 @@ describe("loadOrComputeDashboardClusterCache shouldStore", () => {
       async () => {
         throw new Error("should not compute")
       },
-      { createDegraded: () => degraded }
+      {
+        createPreparing: () => preparing,
+        scheduleBackground: (p) => {
+          scheduled.push(p)
+        },
+      }
     )
 
-    expect(waiter.cacheSource).toBe("degraded")
-    expect(waiter.value).toEqual(degraded)
+    expect(waiter.cacheSource).toBe("preparing")
+    expect(waiter.value).toEqual(preparing)
+    expect(waiter.refresh_mode).toBe("background")
+    expect(scheduled.length).toBeGreaterThanOrEqual(1)
 
     releaseCompute()
     await owner
   })
+
+  it(
+    "returns preparing on foreground timeout when no stale entry exists",
+    async () => {
+      process.env.FINZA_DASHBOARD_CLUSTER_FOREGROUND_MS = "2000"
+      const key = `test-foreground-preparing-${Date.now()}-${Math.random()}`
+      const preparing = { timeline: [], preparing: true }
+      const scheduled: Promise<void>[] = []
+
+      const result = await loadOrComputeDashboardClusterCache(
+        key,
+        async () => {
+          await new Promise((r) => setTimeout(r, 10000))
+          return { timeline: [{ period_start: "2026-01-01" }], cacheable: true }
+        },
+        {
+          shouldStore: () => true,
+          createPreparing: () => preparing,
+          scheduleBackground: (p) => {
+            scheduled.push(p)
+          },
+        }
+      )
+
+      expect(result.cacheSource).toBe("preparing")
+      expect(result.value).toEqual(preparing)
+      expect(scheduled.length).toBe(1)
+    },
+    10000
+  )
 })

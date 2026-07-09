@@ -38,6 +38,7 @@ const clusterRefreshInFlight = new Map<string, Promise<void>>()
 const DEFAULT_SOFT_TTL_SEC = 30
 const DEFAULT_HARD_TTL_SEC = 120
 const DEFAULT_COMPUTE_TIMEOUT_MS = 8000
+const DEFAULT_FOREGROUND_COMPUTE_MS = 4000
 
 function softTtlMs(): number {
   const raw = process.env.FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC
@@ -65,6 +66,14 @@ function computeTimeoutMs(): number {
   return Math.min(Math.max(raw, 2000), 20000)
 }
 
+function foregroundComputeTimeoutMs(): number {
+  const raw = Number(
+    process.env.FINZA_DASHBOARD_CLUSTER_FOREGROUND_MS ?? DEFAULT_FOREGROUND_COMPUTE_MS
+  )
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_FOREGROUND_COMPUTE_MS
+  return Math.min(Math.max(raw, 2000), 5000)
+}
+
 /** Jitter soft TTL per entry so instances do not expire simultaneously. */
 function jitteredSoftExpiryMs(now: number, baseMs: number): number {
   const jitter = Math.floor(baseMs * 0.15 * Math.random())
@@ -81,6 +90,7 @@ export type DashboardClusterCacheSource =
   | "miss"
   | "refresh_started"
   | "refresh_skipped"
+  | "preparing"
   | "degraded"
 
 export type DashboardClusterRefreshMode = "foreground" | "background" | "skipped"
@@ -111,7 +121,7 @@ function legacySourceFrom(cacheSource: DashboardClusterCacheSource): DashboardCl
   ) {
     return "cache_hit"
   }
-  if (cacheSource === "degraded") return "cache_miss"
+  if (cacheSource === "degraded" || cacheSource === "preparing") return "cache_miss"
   return "cache_miss"
 }
 
@@ -192,9 +202,9 @@ function serveStaleEntry<T>(
 }
 
 async function computeWithTimeout<T>(
-  compute: () => Promise<T>
+  compute: () => Promise<T>,
+  timeoutMs = computeTimeoutMs()
 ): Promise<T | null> {
-  const timeoutMs = computeTimeoutMs()
   let timer: ReturnType<typeof setTimeout> | null = null
   try {
     return await Promise.race([
@@ -251,6 +261,7 @@ export async function loadOrComputeDashboardClusterCache<T>(
   options?: {
     shouldStore?: (value: T) => boolean
     createDegraded?: () => T
+    createPreparing?: () => T
     scheduleBackground?: (promise: Promise<void>) => void
   }
 ): Promise<DashboardClusterCacheResult<T>> {
@@ -258,6 +269,7 @@ export async function loadOrComputeDashboardClusterCache<T>(
   const softMs = softTtlMs()
   const shouldStore = options?.shouldStore ?? (() => true)
   const createDegraded = options?.createDegraded ?? (() => ({}) as T)
+  const createPreparing = options?.createPreparing ?? createDegraded
   const now = Date.now()
   const entry = softMs > 0 ? getClusterEntry(key) : undefined
 
@@ -296,17 +308,21 @@ export async function loadOrComputeDashboardClusterCache<T>(
       return serveStaleEntry<T>(entry, now, false, clusterRefreshInFlight.has(key))
     }
 
+    const refreshInFlight = clusterRefreshInFlight.has(key)
+    const refreshStarted =
+      !refreshInFlight &&
+      scheduleClusterRefresh(key, compute, shouldStore, options?.scheduleBackground)
     return wrapClusterResult(
-      createDegraded(),
-      "degraded",
+      createPreparing(),
+      "preparing",
       entry ? cacheAgeMs(entry, now) : 0,
-      "skipped",
+      refreshStarted ? "background" : "skipped",
       cacheEnabled
     )
   }
 
   const promise = (async (): Promise<T | null> => {
-    const built = await computeWithTimeout(compute)
+    const built = await computeWithTimeout(compute, foregroundComputeTimeoutMs())
     if (built != null && softMs > 0 && shouldStore(built)) {
       storeClusterEntry(key, built, Date.now())
     }
@@ -333,7 +349,20 @@ export async function loadOrComputeDashboardClusterCache<T>(
     return serveStaleEntry<T>(entry, now, refreshStarted, refreshInFlight && !refreshStarted)
   }
 
-  return wrapClusterResult(createDegraded(), "degraded", 0, "skipped", cacheEnabled)
+  const refreshInFlight = clusterRefreshInFlight.has(key)
+  const refreshStarted = scheduleClusterRefresh(
+    key,
+    compute,
+    shouldStore,
+    options?.scheduleBackground
+  )
+  return wrapClusterResult(
+    createPreparing(),
+    "preparing",
+    0,
+    refreshStarted ? "background" : refreshInFlight ? "skipped" : "background",
+    cacheEnabled
+  )
 }
 
 /** Test-only: clear cluster SWR store and inflight maps. */
@@ -355,16 +384,21 @@ export type DashboardClusterCacheHeaders = {
   cacheSource: DashboardClusterCacheSource
   cacheAgeMs: number
   refreshMode: DashboardClusterRefreshMode
+  dashboardStatus?: string
 }
 
 export function dashboardClusterCacheResponseHeaders(
   diag: DashboardClusterCacheHeaders
 ): Record<string, string> {
-  return {
+  const headers: Record<string, string> = {
     "x-finza-dashboard-cache-source": diag.cacheSource,
     "x-finza-dashboard-cache-age-ms": String(Math.round(diag.cacheAgeMs)),
     "x-finza-dashboard-refresh-mode": diag.refreshMode,
   }
+  if (diag.dashboardStatus) {
+    headers["x-finza-dashboard-status"] = diag.dashboardStatus
+  }
+  return headers
 }
 
 // ── Activity sub-cache (unchanged) ──────────────────────────────────────────
