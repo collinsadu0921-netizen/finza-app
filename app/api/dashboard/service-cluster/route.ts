@@ -9,11 +9,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
-import { loadOrComputeDashboardClusterCache, loadOrComputeDashboardActivityCache } from "@/lib/server/dashboardClusterCache"
+import {
+  dashboardClusterCacheResponseHeaders,
+  loadOrComputeDashboardClusterCache,
+  loadOrComputeDashboardActivityCache,
+} from "@/lib/server/dashboardClusterCache"
 import {
   dashboardRefreshOnRequestDiag,
   dashboardRefreshSkipped,
@@ -259,33 +264,59 @@ export async function GET(request: NextRequest) {
     ].join("|")
 
     try {
-      const { value, source: cacheSource, cache_enabled } =
-        await loadOrComputeDashboardClusterCache(
-          cacheKey,
-          () =>
-            loadDashboardCluster(
-              supabase,
-              businessId,
-              { periodsParam, activityLimit, periodStart, previousPeriodStart, refreshOnRequest },
-              diag
-            ),
-          { shouldStore: shouldCacheDashboardClusterPayload }
-        )
+      const degradedPayload = () => emptyDegradedClusterPayload(refreshOnRequest)
+
+      const {
+        value,
+        cacheSource,
+        cache_age_ms,
+        refresh_mode,
+        cache_enabled,
+        source: legacyCacheSource,
+      } = await loadOrComputeDashboardClusterCache(
+        cacheKey,
+        () =>
+          loadDashboardCluster(
+            supabase,
+            businessId,
+            { periodsParam, activityLimit, periodStart, previousPeriodStart, refreshOnRequest },
+            diag
+          ),
+        {
+          shouldStore: shouldCacheDashboardClusterPayload,
+          createDegraded: degradedPayload,
+          scheduleBackground: (promise) => waitUntil(promise),
+        }
+      )
+
+      const servedFromCache =
+        cacheSource === "fresh_hit" ||
+        cacheSource === "stale_hit" ||
+        cacheSource === "refresh_started" ||
+        cacheSource === "refresh_skipped"
 
       const payload: ServiceDashboardClusterPayload = {
         ...value,
-        dashboard_source:
-          cacheSource === "cache_hit" ? "cache" : value.dashboard_source,
+        dashboard_source: servedFromCache ? "cache" : value.dashboard_source,
       }
 
       diag.step("cache", {
-        cache_source: cacheSource,
+        cache_source: legacyCacheSource,
+        dashboard_cache_source: cacheSource,
+        dashboard_cache_age_ms: Math.round(cache_age_ms),
+        dashboard_refresh_mode: refresh_mode,
         cache_enabled,
         dashboard_source: payload.dashboard_source,
       })
       diag.finish(200)
       devClusterLog("total route", routeT0)
-      return NextResponse.json(payload)
+      return NextResponse.json(payload, {
+        headers: dashboardClusterCacheResponseHeaders({
+          cacheSource,
+          cacheAgeMs: cache_age_ms,
+          refreshMode: refresh_mode,
+        }),
+      })
     } catch (err) {
       if (!refreshOnRequest) {
         console.warn(
