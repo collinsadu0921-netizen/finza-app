@@ -1,7 +1,12 @@
 import { calculatePayroll } from "@/lib/payrollEngine"
 import { MissingCountryError, UnsupportedCountryError } from "@/lib/payrollEngine/errors"
 import { deriveEntryPensionSnapshots } from "@/lib/payroll/deriveEntryPensionSnapshots"
-import { buildGraFilingFieldsForPayrollEntry } from "@/lib/payroll/staffTaxProfile"
+import {
+  ghanaPayeInputsFromBreakdown,
+  recalculateGhanaEntryAfterRemovingSsnit,
+} from "@/lib/payroll/ghanaNonPensionableAdjustments"
+import { buildGraFilingFieldsForPayrollEntry, parseStaffIsPensionable } from "@/lib/payroll/staffTaxProfile"
+import { roundPayroll } from "@/lib/payrollEngine/versioning"
 
 export type StaffPayrollInput = {
   id: string
@@ -199,26 +204,64 @@ export function computeStaffPayrollEntry(
     businessCountry
   )
 
-  const employeeStatutoryContributions = payrollResult.statutoryDeductions
+  let employeeStatutoryContributions = payrollResult.statutoryDeductions
     .filter((d) => d.code !== "PAYE" && d.code !== "CBHI")
     .reduce((sum, d) => sum + (Number.isFinite(Number(d.amount)) ? Number(d.amount) : 0), 0)
 
   const payeDeduction = payrollResult.statutoryDeductions.find((d) => d.code === "PAYE")
-  const paye = Number.isFinite(Number(payeDeduction?.amount)) ? Number(payeDeduction?.amount) : 0
+  let paye = Number.isFinite(Number(payeDeduction?.amount)) ? Number(payeDeduction?.amount) : 0
 
-  const employerStatutoryContributions = payrollResult.employerContributions.reduce(
+  let employerStatutoryContributions = payrollResult.employerContributions.reduce(
     (sum, c) => sum + (Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0),
     0
   )
 
   const breakdown = payrollResult.complianceBreakdown
+  const isPensionable = parseStaffIsPensionable(staff.is_pensionable)
+  let taxableIncome = payrollResult.totals.taxableIncome
+  let netSalary = payrollResult.totals.netSalary
+
+  if (!isPensionable) {
+    const priorSsnitEmployee = employeeStatutoryContributions
+    employeeStatutoryContributions = 0
+    employerStatutoryContributions = 0
+
+    const country = String(businessCountry || "").toUpperCase()
+    if (country === "GH" || country === "GHANA") {
+      const payeInputs = ghanaPayeInputsFromBreakdown(
+        breakdown as Record<string, unknown> | null | undefined,
+        payrollResult.earnings.basicSalary
+      )
+      const adjusted = recalculateGhanaEntryAfterRemovingSsnit({
+        grossSalary: payrollResult.earnings.grossSalary,
+        otherDeductions: payrollResult.totals.totalOtherDeductions,
+        ...payeInputs,
+      })
+      paye = adjusted.paye
+      taxableIncome = adjusted.taxableIncome
+      netSalary = adjusted.netSalary
+    } else {
+      taxableIncome = roundPayroll(payrollResult.totals.taxableIncome + priorSsnitEmployee)
+      netSalary = Math.max(
+        0,
+        roundPayroll(taxableIncome - paye - payrollResult.totals.totalOtherDeductions)
+      )
+    }
+  }
+
   const filing = buildGraFilingFieldsForPayrollEntry({ staff, breakdown: breakdown ?? null })
 
-  const pensionSnapshots = deriveEntryPensionSnapshots({
-    pensionableBase: payrollResult.earnings.basicSalary,
-    employeeContribution: employeeStatutoryContributions,
-    employerContribution: employerStatutoryContributions,
-  })
+  const pensionSnapshots = isPensionable
+    ? deriveEntryPensionSnapshots({
+        pensionableBase: payrollResult.earnings.basicSalary,
+        employeeContribution: employeeStatutoryContributions,
+        employerContribution: employerStatutoryContributions,
+      })
+    : deriveEntryPensionSnapshots({
+        pensionableBase: 0,
+        employeeContribution: 0,
+        employerContribution: 0,
+      })
 
   return {
     staff_id: staff.id,
@@ -236,7 +279,7 @@ export function computeStaffPayrollEntry(
     gross_salary: payrollResult.earnings.grossSalary,
     ssnit_employee: employeeStatutoryContributions,
     ssnit_employer: employerStatutoryContributions,
-    taxable_income: payrollResult.totals.taxableIncome,
+    taxable_income: taxableIncome,
     paye,
     bonus_tax_5: Number(breakdown?.bonusTax5 ?? 0),
     bonus_tax_graduated: Number(breakdown?.bonusTaxGraduated ?? 0),
@@ -246,7 +289,7 @@ export function computeStaffPayrollEntry(
     is_qualifying_junior_employee: Boolean(breakdown?.isQualifyingJuniorEmployee ?? false),
     bonus_cap_amount: Number(breakdown?.bonusCapAmount ?? 0),
     overtime_threshold_amount: Number(breakdown?.overtimeThresholdAmount ?? 0),
-    net_salary: payrollResult.totals.netSalary,
+    net_salary: netSalary,
     ...pensionSnapshots,
     ...filing,
   }

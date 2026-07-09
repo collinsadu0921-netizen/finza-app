@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
+import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
@@ -44,6 +45,7 @@ type PayrollRun = {
   pay_period_end?: string
   payroll_frequency?: string
   run_type?: string
+  corrects_payroll_run_id?: string | null
   status: string
   total_gross_salary: number
   total_allowances: number
@@ -179,10 +181,10 @@ type PaymentBatchSummary = {
 
 function isPaymentDateBeforePayrollPeriod(
   paymentDate: string,
-  payrollMonth: string | null | undefined
+  payPeriodStart: string | null | undefined
 ): boolean {
-  if (!paymentDate?.trim() || payrollMonth == null || payrollMonth === "") return false
-  const periodDay = String(payrollMonth).slice(0, 10)
+  if (!paymentDate?.trim() || payPeriodStart == null || payPeriodStart === "") return false
+  const periodDay = String(payPeriodStart).slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDay)) return false
   if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) return false
   return paymentDate < periodDay
@@ -208,6 +210,7 @@ export default function PayrollRunViewPage() {
   const params = useParams()
   const runId = params.id as string
   const toast = useToast()
+  const { openConfirm } = useConfirm()
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("payroll")
 
   const [loading, setLoading] = useState(true)
@@ -215,6 +218,7 @@ export default function PayrollRunViewPage() {
   const [entries, setEntries] = useState<PayrollEntry[]>([])
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [updating, setUpdating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [sendingAll, setSendingAll] = useState(false)
   const [recordingPayment, setRecordingPayment] = useState(false)
@@ -418,6 +422,34 @@ export default function PayrollRunViewPage() {
     } finally {
       setUpdating(false)
     }
+  }
+
+  const runDeleteDraftPayroll = async () => {
+    setDeleting(true)
+    try {
+      const response = await fetch(`/api/payroll/runs/${runId}`, { method: "DELETE" })
+      const data = await response.json()
+      if (!response.ok) {
+        toast.showToast(data.error || "Could not delete draft payroll run", "error")
+        return
+      }
+      toast.showToast("Draft payroll run deleted", "success")
+      router.push(payrollBase)
+    } catch {
+      toast.showToast("Could not delete draft payroll run", "error")
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleDeleteDraft = () => {
+    openConfirm({
+      title: "Delete draft payroll run?",
+      description:
+        "This removes the draft run and all unsaved payroll lines. Approved or paid runs cannot be deleted.",
+      confirmLabel: "Delete draft",
+      onConfirm: () => runDeleteDraftPayroll(),
+    })
   }
 
   const handleGenerateObligations = async () => {
@@ -719,7 +751,7 @@ export default function PayrollRunViewPage() {
           return
         }
         setShowPaymentModal(false)
-        toast.showToast("Salary payment recorded and posted to ledger", "success")
+        toast.showToast("Salary payment recorded in your accounting records", "success")
         await loadPayrollPayments()
         await loadObligations()
       } catch {
@@ -905,6 +937,7 @@ export default function PayrollRunViewPage() {
     { bonus: 0, overtime: 0 }
   )
   const isDraftRun = payrollRun?.status === "draft"
+  const payPeriodStart = payrollRun?.pay_period_start || payrollRun?.payroll_month
 
   const formatMonth = (run: PayrollRun) => formatPayrollRunLabel(run)
 
@@ -943,6 +976,28 @@ export default function PayrollRunViewPage() {
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                 {formatMonth(payrollRun)}
               </h1>
+              {(payrollRun.pay_period_start || payrollRun.pay_period_end) && (
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  Pay period:{" "}
+                  {String(payrollRun.pay_period_start || "").slice(0, 10) || "—"}
+                  {payrollRun.pay_period_end && payrollRun.pay_period_end !== payrollRun.pay_period_start
+                    ? ` – ${String(payrollRun.pay_period_end).slice(0, 10)}`
+                    : ""}
+                </p>
+              )}
+              {payrollRun.corrects_payroll_run_id ? (
+                <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                  Correction run for{" "}
+                  <button
+                    type="button"
+                    onClick={() => router.push(`${payrollBase}/${payrollRun.corrects_payroll_run_id}`)}
+                    className="underline font-medium hover:text-amber-900 dark:hover:text-amber-100"
+                  >
+                    original payroll run
+                  </button>
+                  .
+                </p>
+              ) : null}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {(payrollRun.run_type && payrollRun.run_type !== "regular") || (payrollRun.payroll_frequency && payrollRun.payroll_frequency !== "monthly") ? (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -989,15 +1044,24 @@ export default function PayrollRunViewPage() {
             <div className="flex flex-col gap-3 w-full sm:w-auto sm:items-end">
               {payrollRun.status === "draft" && (
                 <p className="text-sm text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 max-w-xl text-left">
-                  Review each employee line before approval. Exclude staff from this month only, or apply one-off salary adjustments — employee status and base salary are not changed.
+                  Review each employee line before approval. Exclude staff from this pay period only, or apply one-off salary adjustments — employee status and base salary are not changed.
                 </p>
               )}
               {!readOnly && (
               <div className="flex flex-wrap gap-2">
               {payrollRun.status === "draft" && (
                 <button
+                  onClick={() => guardWriteAction(handleDeleteDraft)}
+                  disabled={deleting || updating}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 text-red-700 dark:text-red-300 text-sm font-medium rounded-lg border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
+                >
+                  {deleting ? "Deleting…" : "Delete draft"}
+                </button>
+              )}
+              {payrollRun.status === "draft" && (
+                <button
                   onClick={() => guardWriteAction(handleApprove)}
-                  disabled={updating}
+                  disabled={updating || deleting}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {updating ? "Approving…" : "Approve Payroll"}
@@ -1188,12 +1252,12 @@ export default function PayrollRunViewPage() {
                 )}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Batches help you prepare and track salary payments. They do not send money or post ledger entries.
+                Batches help you prepare and track salary payments. They do not send money or update your books.
               </p>
               {expandedBatchAllPaid && canRecordPayment && (
                 <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
                   All lines in the open batch are marked paid externally. When funds have left your bank account, record
-                  the salary payment to post Dr Net Salaries Payable / Cr bank.
+                  the salary payment to clear net salaries payable against your bank account.
                 </p>
               )}
               {loadingPaymentBatches ? (
@@ -1201,7 +1265,7 @@ export default function PayrollRunViewPage() {
               ) : paymentBatches.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {canCreatePaymentBatch
-                    ? "No batch yet. Create one to snapshot net pay and payout destinations for export."
+                    ? "No batch yet. Create one to save net pay and payout destinations for export."
                     : "No batches for this run."}
                 </p>
               ) : (
@@ -1367,7 +1431,7 @@ export default function PayrollRunViewPage() {
                                                     onClick={() => {
                                                       if (
                                                         !window.confirm(
-                                                          "Confirm this employee was paid outside Finza? This does not post to the ledger."
+                                                          "Confirm this employee was paid outside Finza? This does not update your accounting records."
                                                         )
                                                       )
                                                         return
@@ -1603,7 +1667,7 @@ export default function PayrollRunViewPage() {
                     GRA DT 107A PAYE CSV
                   </button>
                   <p className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 -mt-1">
-                    Uses GRA DT 107A upload column layout. Requires TIN and GRA position code on each employee snapshot.
+                    Uses GRA DT 107A upload column layout. Requires TIN and GRA position code on each employee record.
                     Verify before filing.
                   </p>
                   <button
@@ -1913,7 +1977,7 @@ export default function PayrollRunViewPage() {
               <div>
                 <h2 className="text-base font-bold text-gray-900 dark:text-white">Record Salary Payment</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  This records salary disbursement and posts Dr Net Salaries Payable, Cr selected payment account. It does not change payroll calculations or statutory liabilities.
+                  This records salary disbursement and clears net salaries payable against the selected payment account. It does not change payroll calculations or statutory liabilities.
                 </p>
               </div>
               <button
@@ -1943,7 +2007,7 @@ export default function PayrollRunViewPage() {
                   Remaining net salary to record: ₵{Number(paymentSummary?.outstanding_amount || 0).toFixed(2)}
                 </p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  This is the aggregate amount still to clear against net salaries payable in your ledger.
+                  This is the aggregate amount still to clear against net salaries payable in your books.
                 </p>
               </div>
 
@@ -1970,7 +2034,7 @@ export default function PayrollRunViewPage() {
                     onChange={(e) => setPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
                     className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
                   />
-                  {isPaymentDateBeforePayrollPeriod(paymentForm.payment_date, payrollRun?.payroll_month) ? (
+                  {isPaymentDateBeforePayrollPeriod(paymentForm.payment_date, payPeriodStart) ? (
                     <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
                       This payment date is before the payroll period date. Check that this is intentional.
                     </p>
@@ -2158,7 +2222,7 @@ export default function PayrollRunViewPage() {
                   />
                   {isPaymentDateBeforePayrollPeriod(
                     obligationPaymentForm.payment_date,
-                    payrollRun?.payroll_month
+                    payPeriodStart
                   ) ? (
                     <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
                       This payment date is before the payroll period date. Check that this is intentional.

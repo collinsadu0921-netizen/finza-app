@@ -101,7 +101,7 @@ export async function GET() {
     const { data: repayments, error: repaymentsErr } = advanceIds.length > 0
       ? await supabase
           .from("salary_advance_repayments")
-          .select("id, salary_advance_id, payroll_run_id, payroll_entry_id, amount, status, journal_entry_id, posted_at, created_at, payroll_run:payroll_run_id(id, payroll_month)")
+          .select("id, salary_advance_id, payroll_run_id, payroll_entry_id, amount, status, journal_entry_id, posted_at, created_at, payroll_run:payroll_run_id(id, payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type)")
           .eq("business_id", business.id)
           .in("salary_advance_id", advanceIds)
           .order("created_at", { ascending: false })

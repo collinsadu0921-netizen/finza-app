@@ -1,4 +1,5 @@
 import { resolveNetSalaryExportPayoutFields, type StaffLegacyBankFields } from "@/lib/staffPaymentMethods"
+import { PAYROLL_EXPORT_PERIOD_HEADERS } from "@/lib/payroll/payrollExportMetadata"
 
 /** Full default payment method row as loaded from DB (for snapshots). */
 export type StaffPaymentMethodRowForBatch = {
@@ -295,7 +296,7 @@ export const BATCH_EXPORT_DISCLAIMER =
 export const BATCH_EXPORT_HEADERS = [
   "Batch ID",
   "Payroll Run ID",
-  "Payroll Period",
+  ...PAYROLL_EXPORT_PERIOD_HEADERS,
   "Employee Name",
   "Staff ID",
   "Payroll Entry ID",

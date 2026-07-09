@@ -55,6 +55,10 @@ export async function GET(
         payroll_runs (
           id,
           payroll_month,
+          pay_period_start,
+          pay_period_end,
+          payroll_frequency,
+          run_type,
           status,
           business_id
         )

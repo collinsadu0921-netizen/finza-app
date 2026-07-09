@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollExportPeriodValues,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 import {
   buildGraDt107aPayeCsvRows,
@@ -90,8 +95,13 @@ export async function GET(
     }
 
     const rows = buildGraDt107aPayeCsvRows(joined)
-    const month = String(payrollRun.payroll_month).slice(0, 7)
-    return csvResponse(`gra-dt107a-paye-${month}.csv`, rows)
+    const periodMeta: string[][] = [
+      ["# Pay run metadata"],
+      [...PAYROLL_EXPORT_PERIOD_HEADERS],
+      payrollExportPeriodValues(payrollRun),
+      [],
+    ]
+    return csvResponse(payrollExportFilename("gra-dt107a-paye", payrollRun), [...periodMeta, ...rows])
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }

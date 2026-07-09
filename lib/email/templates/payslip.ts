@@ -10,7 +10,8 @@ function escHtml(text: string): string {
 
 export interface PayslipEmailParams {
   staffName: string
-  payrollMonth: string
+  /** Tenant-facing pay period label (e.g. "3 Jun – 9 Jun 2026"). */
+  payPeriodLabel: string
   businessName: string
   currencySymbol: string
   basicSalary: number
@@ -40,7 +41,7 @@ export function buildPayslipEmailHtml(p: PayslipEmailParams): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>Payslip &mdash; ${escHtml(p.payrollMonth)}</title>
+  <title>Payslip &mdash; ${escHtml(p.payPeriodLabel)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 16px;">
@@ -50,14 +51,14 @@ export function buildPayslipEmailHtml(p: PayslipEmailParams): string {
           <tr>
             <td style="background:linear-gradient(135deg,#0f2d5c 0%,#1d4ed8 100%);border-radius:12px 12px 0 0;padding:32px 36px 28px;">
               <p style="margin:0 0 2px;font-size:11px;font-weight:700;color:#93c5fd;letter-spacing:.1em;text-transform:uppercase;">Payslip</p>
-              <h1 style="margin:0 0 4px;font-size:24px;font-weight:700;color:#ffffff;letter-spacing:-.3px;">${escHtml(p.payrollMonth)}</h1>
+              <h1 style="margin:0 0 4px;font-size:24px;font-weight:700;color:#ffffff;letter-spacing:-.3px;">${escHtml(p.payPeriodLabel)}</h1>
               <p style="margin:0;font-size:13px;color:#bfdbfe;">${escHtml(p.businessName)}</p>
             </td>
           </tr>
           <tr>
             <td style="background:#ffffff;padding:28px 36px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;">
               <p style="margin:0 0 8px;font-size:15px;color:#374151;line-height:1.6;">Hello ${escHtml(p.staffName)},</p>
-              <p style="margin:0 0 20px;font-size:15px;color:#374151;line-height:1.6;">Your payslip for <strong>${escHtml(p.payrollMonth)}</strong> from ${escHtml(p.businessName)} is ready. Open the link below to view your full payslip.</p>
+              <p style="margin:0 0 20px;font-size:15px;color:#374151;line-height:1.6;">Your payslip for <strong>${escHtml(p.payPeriodLabel)}</strong> from ${escHtml(p.businessName)} is ready. Open the link below to view your full payslip.</p>
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
                 <tr>
                   <td align="center">

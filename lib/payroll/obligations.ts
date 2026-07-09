@@ -290,7 +290,7 @@ export async function generateOrSyncPayrollObligationsForRun(
     tier1Due = computed.tier1
     tier2Due = computed.tier2
     if (computed.usedFallback && aggregatePension > 0.01) {
-      warning = "Tier values derived from aggregate pension totals (snapshots missing or inconsistent)"
+      warning = "Tier amounts estimated from pension totals (per-employee pension details missing or inconsistent)"
     }
   } catch (e) {
     throw e instanceof Error ? e : new Error("Pension tier amounts could not be derived for obligations")

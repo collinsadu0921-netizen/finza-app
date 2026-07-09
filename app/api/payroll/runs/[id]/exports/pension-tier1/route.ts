@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse, formatNumeric } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollPeriodCellValue,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 
 export async function GET(
@@ -27,12 +32,15 @@ export async function GET(
       .eq("payroll_run_id", runId)
       .order("staff(name)", { ascending: true })
 
-    const fallbackWarning = (entries || []).some((e: any) =>
-      Number(e.pensionable_base || 0) <= 0 && Number(e.tier1_ssnit_remittance || 0) <= 0
+    const fallbackWarning = (entries || []).some(
+      (e: any) =>
+        Number(e.pensionable_base || 0) <= 0 &&
+        Number(e.tier1_ssnit_remittance || 0) <= 0 &&
+        Number(e.employee_pension_contribution ?? e.ssnit_employee ?? 0) > 0.01
     )
 
-    const month = String(payrollRun.payroll_month).slice(0, 7)
     const rows: string[][] = [[
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
       "Employee Name",
       "SSNIT Number",
       "TIN",
@@ -42,12 +50,20 @@ export async function GET(
       "Employer Pension Contribution 13%",
       "Total Mandatory Pension 18.5%",
       "Tier 1 / SSNIT Remittance 13.5%",
-      "Payroll Period",
     ]]
+
+    const periodValues = [
+      payrollPeriodCellValue(payrollRun),
+      String(payrollRun.pay_period_start || payrollRun.payroll_month || "").slice(0, 10),
+      String(payrollRun.pay_period_end || payrollRun.pay_period_start || payrollRun.payroll_month || "").slice(0, 10),
+      String(payrollRun.payroll_frequency || "monthly"),
+      String(payrollRun.run_type || "regular"),
+    ]
 
     for (const e of entries || []) {
       const staff = (e as any).staff || {}
       rows.push([
+        ...periodValues,
         String(staff.name || ""),
         String(staff.ssnit_number || ""),
         String(staff.tin_number || ""),
@@ -57,15 +73,17 @@ export async function GET(
         formatNumeric((e as any).employer_pension_contribution),
         formatNumeric((e as any).total_mandatory_pension),
         formatNumeric((e as any).tier1_ssnit_remittance),
-        String(payrollRun.payroll_month || ""),
       ])
     }
 
     if (fallbackWarning) {
-      rows.push(["NOTE", "Legacy run may not have complete pension snapshot fields. Use obligations fallback where needed."])
+      rows.push([
+        "NOTE",
+        "Some employee pension details were incomplete on this run. Review totals before filing.",
+      ])
     }
 
-    return csvResponse(`finza-pension-tier1-schedule-${month}.csv`, rows)
+    return csvResponse(payrollExportFilename("finza-pension-tier1-schedule", payrollRun), rows)
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }

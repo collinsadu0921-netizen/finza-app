@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse, formatNumeric } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollPeriodCellValue,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 
 export async function GET(
@@ -33,8 +38,16 @@ export async function GET(
       .eq("payroll_run_id", runId)
       .order("staff(name)", { ascending: true })
 
-    const month = String(payrollRun.payroll_month).slice(0, 7)
+    const periodValues = [
+      payrollPeriodCellValue(payrollRun),
+      String(payrollRun.pay_period_start || payrollRun.payroll_month || "").slice(0, 10),
+      String(payrollRun.pay_period_end || payrollRun.pay_period_start || payrollRun.payroll_month || "").slice(0, 10),
+      String(payrollRun.payroll_frequency || "monthly"),
+      String(payrollRun.run_type || "regular"),
+    ]
+
     const rows: string[][] = [[
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
       "Employee Name",
       "Staff ID",
       "TIN",
@@ -50,13 +63,13 @@ export async function GET(
       "Net Pay",
       "Employment Category",
       "Resident Status",
-      "Payroll Period",
     ]]
 
     for (const e of entries || []) {
       const staff = (e as any).staff || {}
       const profile = (e as any).payroll_tax_profile || {}
       rows.push([
+        ...periodValues,
         String(staff.name || ""),
         String(staff.id || ""),
         String(staff.tin_number || ""),
@@ -72,11 +85,10 @@ export async function GET(
         formatNumeric((e as any).net_salary),
         String(staff.employment_type || ""),
         profile?.is_resident === true ? "Resident" : profile?.is_resident === false ? "Non-resident" : "Not captured",
-        String(payrollRun.payroll_month || ""),
       ])
     }
 
-    return csvResponse(`finza-paye-schedule-${month}.csv`, rows)
+    return csvResponse(payrollExportFilename("finza-paye-schedule", payrollRun), rows)
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }

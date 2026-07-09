@@ -18,6 +18,7 @@ import { inferFinzaWorkspaceFromIndustry } from "@/lib/email/buildFinzaResendTag
 import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { buildPayslipEmailHtml } from "@/lib/email/templates/payslip"
 import { getCurrencySymbol } from "@/lib/currency"
+import { formatPayrollRunLabel } from "@/lib/payroll/payrollRunLabels"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(
@@ -48,7 +49,7 @@ export async function POST(
     // Verify run belongs to business
     const { data: payrollRun } = await supabase
       .from("payroll_runs")
-      .select("id, payroll_month, status")
+      .select("id, payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type, status")
       .eq("id", id)
       .eq("business_id", business.id)
       .single()
@@ -105,10 +106,7 @@ export async function POST(
     const currencyCode = bizProfile?.default_currency ?? null
     const currencySymbol = currencyCode ? (getCurrencySymbol(currencyCode) ?? currencyCode) : "₵"
 
-    const payrollMonth = new Date(payrollRun.payroll_month).toLocaleDateString("en-GH", {
-      month: "long",
-      year: "numeric",
-    })
+    const payPeriodLabel = formatPayrollRunLabel(payrollRun)
 
     let baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
     try {
@@ -139,7 +137,7 @@ export async function POST(
         try {
           const html = buildPayslipEmailHtml({
             staffName: staff?.name ?? "Staff Member",
-            payrollMonth,
+            payPeriodLabel,
             businessName,
             currencySymbol,
             basicSalary: Number(entry?.basic_salary ?? 0),
@@ -157,7 +155,7 @@ export async function POST(
 
           const result = await sendTransactionalEmail({
             to: toEmail,
-            subject: `Your Payslip for ${payrollMonth} — ${businessName}`,
+            subject: `Your Payslip for ${payPeriodLabel} — ${businessName}`,
             html,
             fromName: businessName,
             replyTo: bizProfile?.email ?? undefined,
@@ -199,7 +197,7 @@ export async function POST(
 
           const message =
             `Hello ${staff.name},\n\n` +
-            `Your payslip for *${payrollMonth}* from *${businessName}* is ready.\n\n` +
+            `Your payslip for *${payPeriodLabel}* from *${businessName}* is ready.\n\n` +
             `💰 Gross Pay: ${currencySymbol}${grossSalary}\n` +
             `📋 PAYE Tax: ${currencySymbol}${paye}\n` +
             `📋 SSNIT: ${currencySymbol}${ssnit}\n` +
