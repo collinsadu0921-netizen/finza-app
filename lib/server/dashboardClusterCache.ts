@@ -3,7 +3,7 @@
  * Enable: FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC=30 on preview/staging.
  *
  * L1 only — per-instance. Cross-instance stampede protection is not included;
- * pair with summary tables / remote cache in a follow-up if needed.
+ * refresh scheduling uses a per-key inflight map + cooldown (not shared across instances).
  */
 
 type CacheEntry = { expiresAt: number; payload: unknown }
@@ -34,11 +34,14 @@ type ClusterCacheEntry = {
 const clusterStore = new Map<string, ClusterCacheEntry>()
 const clusterInflight = new Map<string, Promise<unknown | null>>()
 const clusterRefreshInFlight = new Map<string, Promise<void>>()
+/** Per-key cooldown after a refresh is scheduled (L1 only — not cross-instance). */
+const clusterRefreshCooldownUntil = new Map<string, number>()
 
 const DEFAULT_SOFT_TTL_SEC = 30
 const DEFAULT_HARD_TTL_SEC = 120
 const DEFAULT_COMPUTE_TIMEOUT_MS = 8000
 const DEFAULT_FOREGROUND_COMPUTE_MS = 4000
+const DEFAULT_REFRESH_COOLDOWN_MS = 15_000
 
 function softTtlMs(): number {
   const raw = process.env.FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC
@@ -74,6 +77,14 @@ function foregroundComputeTimeoutMs(): number {
   return Math.min(Math.max(raw, 2000), 5000)
 }
 
+function refreshCooldownMs(): number {
+  const raw = Number(
+    process.env.FINZA_DASHBOARD_CLUSTER_REFRESH_COOLDOWN_MS ?? DEFAULT_REFRESH_COOLDOWN_MS
+  )
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_REFRESH_COOLDOWN_MS
+  return Math.min(Math.max(raw, 10_000), 30_000)
+}
+
 /** Jitter soft TTL per entry so instances do not expire simultaneously. */
 function jitteredSoftExpiryMs(now: number, baseMs: number): number {
   const jitter = Math.floor(baseMs * 0.15 * Math.random())
@@ -93,7 +104,19 @@ export type DashboardClusterCacheSource =
   | "preparing"
   | "degraded"
 
-export type DashboardClusterRefreshMode = "foreground" | "background" | "skipped"
+export type DashboardClusterRefreshMode =
+  | "foreground"
+  | "started"
+  | "background"
+  | "skipped"
+  | "skipped_inflight"
+  | "skipped_cooldown"
+
+export type DashboardClusterRefreshScheduleResult =
+  | "started"
+  | "skipped_inflight"
+  | "skipped_cooldown"
+  | "skipped"
 
 /** @deprecated use DashboardClusterCacheSource */
 export type DashboardClusterLegacySource = "cache_hit" | "cache_miss" | "cache_coalesce"
@@ -179,24 +202,33 @@ function wrapClusterResult<T>(
   }
 }
 
-function staleCacheSource(refreshStarted: boolean, refreshAlreadyInFlight: boolean): DashboardClusterCacheSource {
-  if (refreshStarted) return "refresh_started"
-  if (refreshAlreadyInFlight) return "refresh_skipped"
+function staleCacheSource(schedule: DashboardClusterRefreshScheduleResult): DashboardClusterCacheSource {
+  if (schedule === "started") return "refresh_started"
+  if (schedule === "skipped_inflight" || schedule === "skipped_cooldown") {
+    return "refresh_skipped"
+  }
   return "stale_hit"
+}
+
+function refreshModeFromSchedule(
+  schedule: DashboardClusterRefreshScheduleResult
+): DashboardClusterRefreshMode {
+  if (schedule === "started") return "started"
+  if (schedule === "skipped_inflight") return "skipped_inflight"
+  if (schedule === "skipped_cooldown") return "skipped_cooldown"
+  return "skipped"
 }
 
 function serveStaleEntry<T>(
   entry: ClusterCacheEntry,
   now: number,
-  refreshStarted: boolean,
-  refreshAlreadyInFlight = false
+  schedule: DashboardClusterRefreshScheduleResult
 ): DashboardClusterCacheResult<T> {
-  const cacheSource = staleCacheSource(refreshStarted, refreshAlreadyInFlight)
   return wrapClusterResult(
     entry.payload as T,
-    cacheSource,
+    staleCacheSource(schedule),
     cacheAgeMs(entry, now),
-    refreshStarted ? "background" : "skipped",
+    refreshModeFromSchedule(schedule),
     isDashboardClusterCacheEnabled()
   )
 }
@@ -220,15 +252,22 @@ async function computeWithTimeout<T>(
   }
 }
 
-function scheduleClusterRefresh<T>(
+function tryScheduleClusterRefresh<T>(
   key: string,
   compute: () => Promise<T>,
   shouldStore: (value: T) => boolean,
   scheduleBackground?: (promise: Promise<void>) => void
-): boolean {
-  if (!scheduleBackground || clusterRefreshInFlight.has(key)) return false
+): DashboardClusterRefreshScheduleResult {
+  if (!scheduleBackground) return "skipped"
+  if (clusterRefreshInFlight.has(key)) return "skipped_inflight"
 
-  const refreshPromise = new Promise<void>((resolve, reject) => {
+  const now = Date.now()
+  const cooldownUntil = clusterRefreshCooldownUntil.get(key) ?? 0
+  if (now < cooldownUntil) return "skipped_cooldown"
+
+  clusterRefreshCooldownUntil.set(key, now + refreshCooldownMs())
+
+  const refreshPromise = new Promise<void>((resolve) => {
     setImmediate(() => {
       ;(async () => {
         try {
@@ -241,7 +280,6 @@ function scheduleClusterRefresh<T>(
             "[dashboard-cluster-cache] background refresh failed:",
             err instanceof Error ? err.message : "refresh_failed"
           )
-          reject(err)
         } finally {
           clusterRefreshInFlight.delete(key)
           resolve()
@@ -252,7 +290,7 @@ function scheduleClusterRefresh<T>(
 
   clusterRefreshInFlight.set(key, refreshPromise)
   scheduleBackground(refreshPromise)
-  return true
+  return "started"
 }
 
 export async function loadOrComputeDashboardClusterCache<T>(
@@ -284,39 +322,43 @@ export async function loadOrComputeDashboardClusterCache<T>(
   }
 
   if (softMs > 0 && entry && isStaleServable(entry, now)) {
-    const refreshInFlight = clusterRefreshInFlight.has(key)
-    const refreshStarted = scheduleClusterRefresh(
+    const schedule = tryScheduleClusterRefresh(
       key,
       compute,
       shouldStore,
       options?.scheduleBackground
     )
-    return serveStaleEntry<T>(entry, now, refreshStarted, refreshInFlight && !refreshStarted)
+    return serveStaleEntry<T>(entry, now, schedule)
   }
 
   const pending = clusterInflight.get(key)
   if (pending) {
     if (entry && isStaleServable(entry, now)) {
-      const refreshInFlight = clusterRefreshInFlight.has(key)
-      const refreshStarted =
-        !refreshInFlight &&
-        scheduleClusterRefresh(key, compute, shouldStore, options?.scheduleBackground)
-      return serveStaleEntry<T>(entry, now, refreshStarted, refreshInFlight)
+      const schedule = tryScheduleClusterRefresh(
+        key,
+        compute,
+        shouldStore,
+        options?.scheduleBackground
+      )
+      return serveStaleEntry<T>(entry, now, schedule)
     }
 
     if (entry && now < entry.hardExpiresAt) {
-      return serveStaleEntry<T>(entry, now, false, clusterRefreshInFlight.has(key))
+      const schedule: DashboardClusterRefreshScheduleResult = clusterRefreshInFlight.has(key)
+        ? "skipped_inflight"
+        : "skipped"
+      return serveStaleEntry<T>(entry, now, schedule)
     }
 
-    const refreshInFlight = clusterRefreshInFlight.has(key)
-    const refreshStarted =
-      !refreshInFlight &&
-      scheduleClusterRefresh(key, compute, shouldStore, options?.scheduleBackground)
+    // Waiter while owner builds: return preparing quickly; do not schedule refresh.
+    const waiterRefreshMode: DashboardClusterRefreshMode = clusterRefreshInFlight.has(key)
+      ? "skipped_inflight"
+      : "skipped"
     return wrapClusterResult(
       createPreparing(),
       "preparing",
       entry ? cacheAgeMs(entry, now) : 0,
-      refreshStarted ? "background" : "skipped",
+      waiterRefreshMode,
       cacheEnabled
     )
   }
@@ -339,18 +381,16 @@ export async function loadOrComputeDashboardClusterCache<T>(
   }
 
   if (entry && now < entry.hardExpiresAt) {
-    const refreshInFlight = clusterRefreshInFlight.has(key)
-    const refreshStarted = scheduleClusterRefresh(
+    const schedule = tryScheduleClusterRefresh(
       key,
       compute,
       shouldStore,
       options?.scheduleBackground
     )
-    return serveStaleEntry<T>(entry, now, refreshStarted, refreshInFlight && !refreshStarted)
+    return serveStaleEntry<T>(entry, now, schedule)
   }
 
-  const refreshInFlight = clusterRefreshInFlight.has(key)
-  const refreshStarted = scheduleClusterRefresh(
+  const schedule = tryScheduleClusterRefresh(
     key,
     compute,
     shouldStore,
@@ -360,7 +400,7 @@ export async function loadOrComputeDashboardClusterCache<T>(
     createPreparing(),
     "preparing",
     0,
-    refreshStarted ? "background" : refreshInFlight ? "skipped" : "background",
+    refreshModeFromSchedule(schedule),
     cacheEnabled
   )
 }
@@ -370,6 +410,15 @@ export function resetDashboardClusterCacheForTests(): void {
   clusterStore.clear()
   clusterInflight.clear()
   clusterRefreshInFlight.clear()
+  clusterRefreshCooldownUntil.clear()
+}
+
+/** Test-only: force refresh cooldown active for a key. */
+export function setDashboardClusterRefreshCooldownForTests(
+  key: string,
+  cooldownMs: number
+): void {
+  clusterRefreshCooldownUntil.set(key, Date.now() + cooldownMs)
 }
 
 /** Test-only: mark cluster entry soft-expired. */
