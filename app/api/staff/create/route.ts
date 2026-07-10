@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { parseStaffPayrollTaxFieldsFromRequestBody } from "@/lib/payroll/staffTaxProfile"
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,6 +30,16 @@ export async function POST(request: NextRequest) {
     )
     if (tierDenied) return tierDenied
 
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.STAFF_MANAGE
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    }
+
     const body = await request.json()
     const {
       name,
@@ -41,6 +54,10 @@ export async function POST(request: NextRequest) {
       bank_account,
       ssnit_number,
       tin_number,
+      is_tax_resident,
+      is_pensionable,
+      secondary_employment,
+      gra_position_code,
     } = body
 
     if (!name || !basic_salary || !start_date) {
@@ -48,6 +65,16 @@ export async function POST(request: NextRequest) {
         { error: "Missing required fields" },
         { status: 400 }
       )
+    }
+
+    const taxFields = parseStaffPayrollTaxFieldsFromRequestBody({
+      is_tax_resident,
+      is_pensionable,
+      secondary_employment,
+      gra_position_code,
+    })
+    if (!taxFields.ok) {
+      return NextResponse.json({ error: taxFields.error }, { status: 400 })
     }
 
     const { data: staff, error } = await supabase
@@ -67,6 +94,7 @@ export async function POST(request: NextRequest) {
         ssnit_number: ssnit_number?.trim() || null,
         tin_number: tin_number?.trim() || null,
         status: "active",
+        ...taxFields.fields,
       })
       .select()
       .single()
@@ -88,5 +116,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
-

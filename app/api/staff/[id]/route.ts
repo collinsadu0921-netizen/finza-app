@@ -4,7 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { hasPermission, requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { normalizeGraPositionCode } from "@/lib/payroll/staffTaxProfile"
+import { parseStaffPayrollTaxFieldsFromRequestBody } from "@/lib/payroll/staffTaxProfile"
 
 export async function GET(
   request: NextRequest,
@@ -193,29 +193,16 @@ export async function PUT(
     if (tin_number !== undefined) updateData.tin_number = tin_number?.trim() || null
     if (status) updateData.status = status
 
-    if (is_tax_resident !== undefined) {
-      updateData.is_tax_resident = Boolean(is_tax_resident)
+    const taxFields = parseStaffPayrollTaxFieldsFromRequestBody({
+      is_tax_resident,
+      is_pensionable,
+      secondary_employment,
+      gra_position_code,
+    })
+    if (!taxFields.ok) {
+      return NextResponse.json({ error: taxFields.error }, { status: 400 })
     }
-    if (is_pensionable !== undefined) {
-      updateData.is_pensionable = Boolean(is_pensionable)
-    }
-    if (secondary_employment !== undefined) {
-      updateData.secondary_employment = Boolean(secondary_employment)
-    }
-    if (gra_position_code !== undefined) {
-      if (gra_position_code === null || gra_position_code === "") {
-        updateData.gra_position_code = null
-      } else {
-        const normalized = normalizeGraPositionCode(gra_position_code)
-        if (!normalized) {
-          return NextResponse.json(
-            { error: "gra_position_code must be one of EXPT, JUNR, MNGT, OTHR, SENR, or empty" },
-            { status: 400 }
-          )
-        }
-        updateData.gra_position_code = normalized
-      }
-    }
+    Object.assign(updateData, taxFields.fields)
 
     const { data: staff, error } = await supabase
       .from("staff")
