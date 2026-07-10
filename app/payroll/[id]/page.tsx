@@ -8,6 +8,11 @@ import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { formatPayrollRunLabel, formatPayrollRunTypeBadge } from "@/lib/payroll/payrollRunLabels"
+import {
+  PAYROLL_DRAFT_DELETE_CONFIRM,
+  canShowPayrollDraftDelete,
+  requestDeleteDraftPayrollRun,
+} from "@/lib/payroll/payrollDraftDeleteUi"
 
 type PayrollEntry = {
   id: string
@@ -427,13 +432,12 @@ export default function PayrollRunViewPage() {
   const runDeleteDraftPayroll = async () => {
     setDeleting(true)
     try {
-      const response = await fetch(`/api/payroll/runs/${runId}`, { method: "DELETE" })
-      const data = await response.json()
-      if (!response.ok) {
-        toast.showToast(data.error || "Could not delete draft payroll run", "error")
+      const result = await requestDeleteDraftPayrollRun(runId)
+      if (!result.ok) {
+        toast.showToast(result.error, "error")
         return
       }
-      toast.showToast("Draft payroll run deleted", "success")
+      toast.showToast("Draft payroll deleted", "success")
       router.push(payrollBase)
     } catch {
       toast.showToast("Could not delete draft payroll run", "error")
@@ -444,10 +448,7 @@ export default function PayrollRunViewPage() {
 
   const handleDeleteDraft = () => {
     openConfirm({
-      title: "Delete draft payroll run?",
-      description:
-        "This removes the draft run and all unsaved payroll lines. Approved or paid runs cannot be deleted.",
-      confirmLabel: "Delete draft",
+      ...PAYROLL_DRAFT_DELETE_CONFIRM,
       onConfirm: () => runDeleteDraftPayroll(),
     })
   }
@@ -937,6 +938,7 @@ export default function PayrollRunViewPage() {
     { bonus: 0, overtime: 0 }
   )
   const isDraftRun = payrollRun?.status === "draft"
+  const showDraftDelete = payrollRun ? canShowPayrollDraftDelete(payrollRun.status) : false
   const payPeriodStart = payrollRun?.pay_period_start || payrollRun?.payroll_month
 
   const formatMonth = (run: PayrollRun) => formatPayrollRunLabel(run)
@@ -1042,31 +1044,8 @@ export default function PayrollRunViewPage() {
             </div>
 
             <div className="flex flex-col gap-3 w-full sm:w-auto sm:items-end">
-              {payrollRun.status === "draft" && (
-                <p className="text-sm text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 max-w-xl text-left">
-                  Review each employee line before approval. Exclude staff from this pay period only, or apply one-off salary adjustments — employee status and base salary are not changed.
-                </p>
-              )}
               {!readOnly && (
-              <div className="flex flex-wrap gap-2">
-              {payrollRun.status === "draft" && (
-                <button
-                  onClick={() => guardWriteAction(handleDeleteDraft)}
-                  disabled={deleting || updating}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 text-red-700 dark:text-red-300 text-sm font-medium rounded-lg border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
-                >
-                  {deleting ? "Deleting…" : "Delete draft"}
-                </button>
-              )}
-              {payrollRun.status === "draft" && (
-                <button
-                  onClick={() => guardWriteAction(handleApprove)}
-                  disabled={updating || deleting}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {updating ? "Approving…" : "Approve Payroll"}
-                </button>
-              )}
+              <div className="flex flex-wrap gap-2 justify-end">
               <button
                 onClick={() => guardWriteAction(handleGeneratePayslips)}
                 disabled={generating || payrollRun.status === "draft"}
@@ -1111,6 +1090,38 @@ export default function PayrollRunViewPage() {
               )}
             </div>
           </div>
+
+          {showDraftDelete && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">Draft payroll run</p>
+                <p className="text-sm text-amber-900/90 dark:text-amber-200/90 max-w-2xl">
+                  Review each employee line before approval. Exclude staff from this pay period only, or apply
+                  one-off salary adjustments — employee status and base salary are not changed.
+                </p>
+              </div>
+              {!readOnly && (
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => guardWriteAction(handleDeleteDraft)}
+                    disabled={deleting || updating}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-900 text-red-700 dark:text-red-300 text-sm font-medium rounded-lg border border-red-300 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting…" : "Delete draft"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => guardWriteAction(handleApprove)}
+                    disabled={updating || deleting}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {updating ? "Approving…" : "Approve payroll"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {readOnly && <ServiceReadOnlyNotice scope="payroll" className="mb-4" />}
 

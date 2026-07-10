@@ -6,6 +6,13 @@ import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { formatPayrollRunLabel, formatPayrollRunTypeBadge } from "@/lib/payroll/payrollRunLabels"
+import {
+  PAYROLL_DRAFT_DELETE_CONFIRM,
+  canShowPayrollDraftDelete,
+  requestDeleteDraftPayrollRun,
+} from "@/lib/payroll/payrollDraftDeleteUi"
+import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { useToast } from "@/components/ui/ToastProvider"
 type PayrollRun = {
   id: string
   payroll_month: string
@@ -24,8 +31,11 @@ export default function PayrollPage() {
   const router = useRouter()
   const payrollBase = usePayrollBasePath()
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("payroll")
+  const { openConfirm } = useConfirm()
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [runs, setRuns] = useState<PayrollRun[]>([])
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null)
 
   useEffect(() => {
     loadPayrollRuns()
@@ -46,6 +56,30 @@ export default function PayrollPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const runDeleteDraftFromList = async (runId: string) => {
+    setDeletingRunId(runId)
+    try {
+      const result = await requestDeleteDraftPayrollRun(runId)
+      if (!result.ok) {
+        toast.showToast(result.error, "error")
+        return
+      }
+      setRuns((prev) => prev.filter((r) => r.id !== runId))
+      toast.showToast("Draft payroll deleted", "success")
+    } catch {
+      toast.showToast("Could not delete draft payroll run", "error")
+    } finally {
+      setDeletingRunId(null)
+    }
+  }
+
+  const handleDeleteDraftFromList = (run: PayrollRun) => {
+    openConfirm({
+      ...PAYROLL_DRAFT_DELETE_CONFIRM,
+      onConfirm: () => runDeleteDraftFromList(run.id),
+    })
   }
 
   if (loading) {
@@ -151,12 +185,25 @@ export default function PayrollPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <button
-                            onClick={() => router.push(`${payrollBase}/${run.id}`)}
-                            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-                          >
-                            View
-                          </button>
+                          <div className="inline-flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => router.push(`${payrollBase}/${run.id}`)}
+                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+                            >
+                              View
+                            </button>
+                            {!readOnly && canShowPayrollDraftDelete(run.status) ? (
+                              <button
+                                type="button"
+                                disabled={deletingRunId === run.id}
+                                onClick={() => guardWriteAction(() => handleDeleteDraftFromList(run))}
+                                className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 disabled:opacity-50"
+                              >
+                                {deletingRunId === run.id ? "Deleting…" : "Delete draft"}
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))
