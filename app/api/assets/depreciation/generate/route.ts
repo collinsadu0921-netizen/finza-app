@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
+import { revalidatePath } from "next/cache"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { createAuditLog } from "@/lib/auditLog"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { mapBatchRpcError, type BatchDepreciationResult } from "@/lib/assets/batchDepreciationApiErrors"
+import { normalizeDepreciationPostingDate } from "@/lib/assets/depreciationAmount"
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,12 +15,12 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 })
     }
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+      return NextResponse.json({ error: "Business not found", code: "BUSINESS_NOT_FOUND" }, { status: 404 })
     }
 
     const tierDenied = await enforceServiceIndustryMinTierWrite(
@@ -28,160 +32,90 @@ export async function POST(request: NextRequest) {
     if (tierDenied) return tierDenied
 
     const body = await request.json()
-    const { month, year } = body
+    const { month, year, posting_date, idempotency_prefix } = body as {
+      month?: number
+      year?: number
+      posting_date?: string
+      idempotency_prefix?: string
+    }
 
-    // Determine depreciation date (first day of the month)
     let depreciationDate: string
-    if (month && year) {
+    if (posting_date) {
+      depreciationDate = normalizeDepreciationPostingDate(posting_date)
+    } else if (month && year) {
       depreciationDate = `${year}-${String(month).padStart(2, "0")}-01`
     } else {
-      // Default to first day of current month
       const now = new Date()
       depreciationDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
     }
 
-    // Get all active assets
-    const { data: assets, error: assetsError } = await supabase
-      .from("assets")
-      .select("*")
-      .eq("business_id", business.id)
-      .eq("status", "active")
-      .is("deleted_at", null)
+    const batchPrefix =
+      idempotency_prefix ??
+      (typeof crypto !== "undefined" && crypto.randomUUID
+        ? `batch-${crypto.randomUUID()}`
+        : `batch-${Date.now()}`)
 
-    if (assetsError) {
-      console.error("Error fetching assets:", assetsError)
-      return NextResponse.json(
-        { error: assetsError.message },
-        { status: 500 }
-      )
-    }
-
-    const results = []
-    const errors = []
-
-    for (const asset of assets || []) {
-      // Check if depreciation already exists for this month
-      const { data: existingDep } = await supabase
-        .from("depreciation_entries")
-        .select("id")
-        .eq("asset_id", asset.id)
-        .eq("date", depreciationDate)
-        .is("deleted_at", null)
-        .single()
-
-      if (existingDep) {
-        errors.push({
-          asset_id: asset.id,
-          asset_name: asset.name,
-          error: "Depreciation already recorded for this month",
-        })
-        continue
-      }
-
-      // Calculate monthly depreciation
-      const { data: monthlyDep } = await supabase.rpc(
-        "calculate_monthly_depreciation",
-        {
-          p_purchase_amount: asset.purchase_amount,
-          p_salvage_value: asset.salvage_value,
-          p_useful_life_years: asset.useful_life_years,
-        }
-      )
-
-      const depreciationAmount = Number(monthlyDep || 0)
-
-      if (depreciationAmount <= 0) {
-        continue // Skip assets with zero depreciation
-      }
-
-      // Check if asset is fully depreciated
-      const newAccumulatedDep = Number(asset.accumulated_depreciation || 0) + depreciationAmount
-      const maxDepreciation = Number(asset.purchase_amount) - Number(asset.salvage_value)
-
-      if (newAccumulatedDep > maxDepreciation) {
-        errors.push({
-          asset_id: asset.id,
-          asset_name: asset.name,
-          error: "Asset is fully depreciated",
-        })
-        continue
-      }
-
-      try {
-        // Create depreciation entry
-        const { data: depEntry, error: depError } = await supabase
-          .from("depreciation_entries")
-          .insert({
-            asset_id: asset.id,
-            business_id: business.id,
-            date: depreciationDate,
-            amount: depreciationAmount,
-          })
-          .select()
-          .single()
-
-        if (depError) {
-          errors.push({
-            asset_id: asset.id,
-            asset_name: asset.name,
-            error: depError.message,
-          })
-          continue
-        }
-
-        // Post to ledger
-        try {
-          const { data: journalEntryId } = await supabase.rpc(
-            "post_depreciation_to_ledger",
-            {
-              p_depreciation_entry_id: depEntry.id,
-            }
-          )
-
-          if (journalEntryId) {
-            console.log("Depreciation posted to ledger:", journalEntryId)
-          }
-        } catch (ledgerError: any) {
-          console.error("Error posting depreciation to ledger:", ledgerError)
-          // Continue even if ledger posting fails
-        }
-
-        // Update asset
-        const newCurrentValue = Number(asset.purchase_amount) - newAccumulatedDep
-        await supabase
-          .from("assets")
-          .update({
-            accumulated_depreciation: newAccumulatedDep,
-            current_value: newCurrentValue,
-          })
-          .eq("id", asset.id)
-
-        results.push({
-          asset_id: asset.id,
-          asset_name: asset.name,
-          depreciation_amount: depreciationAmount,
-        })
-      } catch (error: any) {
-        errors.push({
-          asset_id: asset.id,
-          asset_name: asset.name,
-          error: error.message,
-        })
-      }
-    }
-
-    return NextResponse.json({
-      message: `Generated depreciation for ${results.length} assets`,
-      results,
-      errors: errors.length > 0 ? errors : undefined,
+    const { data: rpcResult, error: rpcError } = await supabase.rpc("post_asset_depreciation_batch", {
+      p_business_id: business.id,
+      p_posting_date: depreciationDate,
+      p_posted_by: user.id,
+      p_idempotency_prefix: batchPrefix,
+      p_max_assets: 200,
     })
-  } catch (error: any) {
-    console.error("Error generating depreciation:", error)
+
+    if (rpcError) {
+      const mapped = mapBatchRpcError(rpcError.message)
+      return NextResponse.json({ error: mapped.error, code: mapped.code }, { status: mapped.status })
+    }
+
+    if (!rpcResult || typeof rpcResult !== "object") {
+      return NextResponse.json({ error: "Bulk depreciation failed", code: "BATCH_FAILED" }, { status: 500 })
+    }
+
+    const result = rpcResult as BatchDepreciationResult
+
+    await createAuditLog({
+      businessId: business.id,
+      userId: user.id,
+      actionType: "asset.depreciation.batch",
+      entityType: "business",
+      entityId: business.id,
+      newValues: {
+        posting_date: result.posting_date,
+        posted_count: result.posted_count,
+        skipped_count: result.skipped_count,
+        failed_count: result.failed_count,
+      },
+      request,
+    })
+
+    revalidatePath("/assets")
+    revalidatePath("/reports/profit-loss")
+    revalidatePath("/reports/balance-sheet")
+
+    const httpStatus = result.failed_count > 0 ? 207 : 200
+
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
+      {
+        posting_date: result.posting_date,
+        posted: result.posted ?? [],
+        skipped: result.skipped ?? [],
+        failed: result.failed ?? [],
+        posted_count: result.posted_count ?? 0,
+        skipped_count: result.skipped_count ?? 0,
+        failed_count: result.failed_count ?? 0,
+        partial_success: result.partial_success ?? false,
+        success: result.success ?? result.failed_count === 0,
+        message:
+          result.failed_count > 0
+            ? `Bulk depreciation completed with ${result.failed_count} failure(s).`
+            : `Bulk depreciation completed: ${result.posted_count} posted, ${result.skipped_count} skipped.`,
+      },
+      { status: httpStatus }
     )
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Internal server error"
+    console.error("Error generating depreciation:", error)
+    return NextResponse.json({ error: message, code: "INTERNAL_ERROR" }, { status: 500 })
   }
 }
-
-

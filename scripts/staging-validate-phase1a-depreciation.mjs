@@ -551,6 +551,34 @@ async function main() {
     record("reconciliation diagnostic RPC (527)", true, `issue_count=${rpcDiag?.issue_count ?? "?"}`)
   }
 
+  // Mark dedicated Phase1A validation assets as disposed after run (cleanup without deleting history)
+  const { data: validationAssets } = await adminSb
+    .from("assets")
+    .select("id,name,status")
+    .eq("business_id", LOAD_BUSINESS_ID)
+    .ilike("name", "Phase1A Validate%")
+    .eq("status", "active")
+    .is("deleted_at", null)
+
+  for (const va of validationAssets || []) {
+    for (const entry of (
+      await adminSb
+        .from("depreciation_entries")
+        .select("id")
+        .eq("asset_id", va.id)
+        .in("status", ["posted", "adjusted"])
+        .is("deleted_at", null)
+    ).data || []) {
+      await userSb.rpc("reverse_asset_depreciation", {
+        p_depreciation_entry_id: entry.id,
+        p_reversal_date: postingDate,
+        p_reason: "Phase1A validation fixture cleanup",
+        p_reversed_by: userSession.user?.id ?? null,
+      })
+    }
+    await adminSb.from("assets").update({ status: "disposed", updated_at: new Date().toISOString() }).eq("id", va.id)
+  }
+
   const failed = results.tests.filter((t) => !t.pass).length
   console.log(`\n[phase1a-validate] Summary: ${results.tests.length - failed}/${results.tests.length} passed`)
   console.log(JSON.stringify(results, null, 2))
