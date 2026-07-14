@@ -36,20 +36,28 @@ async function mintUserSession() {
     },
     body: JSON.stringify({ type: "magiclink", email: LOAD_EMAIL }),
   })
+  if (!genRes.ok) throw new Error(`generate_link failed: ${genRes.status}`)
   const link = await genRes.json()
+  if (!link.email_otp) throw new Error("generate_link missing email_otp")
+
   const verifyRes = await fetch(`${STAGING_URL}/auth/v1/verify`, {
     method: "POST",
     headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
     body: JSON.stringify({ type: "email", email: LOAD_EMAIL, token: link.email_otp }),
   })
-  return verifyRes.json()
+  if (!verifyRes.ok) throw new Error(`verify failed: ${verifyRes.status}`)
+  const session = await verifyRes.json()
+  if (!session.access_token || session.access_token.split(".").length !== 3) {
+    throw new Error(`verify missing valid access_token: ${JSON.stringify(session).slice(0, 200)}`)
+  }
+  return session
 }
 
 async function main() {
   const adminSb = createClient(STAGING_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } })
   const session = await mintUserSession()
   const userSb = createClient(STAGING_URL, ANON_KEY, {
-    auth: { persistSession: false },
+    auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${session.access_token}` } },
   })
 
@@ -59,7 +67,11 @@ async function main() {
     p_proceeds: 0,
     p_disposal_type: "scrap",
   })
-  record("post_asset_disposal RPC present", !probeErr?.message?.includes("Could not find the function"), probeErr?.message)
+  record(
+    "post_asset_disposal RPC present",
+    !probeErr?.message?.includes("Could not find the function") && !probeErr?.message?.includes("Expected 3 parts in JWT"),
+    probeErr?.message
+  )
 
   const { data: sqlTests, error: sqlErr } = await adminSb.rpc("test_asset_phase1b")
   if (sqlErr) {
@@ -70,10 +82,10 @@ async function main() {
     }
   }
 
-  const { data: diag } = await userSb.rpc("finza_diagnose_asset_depreciation_reconciliation", {
+  const { data: diag, error: diagErr } = await userSb.rpc("finza_diagnose_asset_depreciation_reconciliation", {
     p_business_id: LOAD_BUSINESS_ID,
   })
-  record("diagnostics issue_count", true, String(diag?.issue_count ?? "?"))
+  record("diagnostics issue_count", !diagErr, diagErr?.message || String(diag?.issue_count ?? 0))
 
   const { data: payAcct } = await adminSb
     .from("accounts")
@@ -104,12 +116,14 @@ async function main() {
   if (!asset?.id) process.exit(1)
 
   await adminSb.rpc("post_asset_purchase_to_ledger", { p_asset_id: asset.id, p_payment_account_id: null })
-  await userSb.rpc("post_asset_depreciation", {
-    p_asset_id: asset.id,
-    p_posting_date: "2026-06-01",
-    p_idempotency_key: randomUUID(),
-    p_posted_by: session.user?.id,
-  })
+  for (const m of ["2026-06-01", "2026-07-01"]) {
+    await userSb.rpc("post_asset_depreciation", {
+      p_asset_id: asset.id,
+      p_posting_date: m,
+      p_idempotency_key: randomUUID(),
+      p_posted_by: session.user?.id,
+    })
+  }
 
   const idem = randomUUID()
   const { data: disp1, error: dispErr } = await userSb.rpc("post_asset_disposal", {
@@ -132,9 +146,9 @@ async function main() {
     p_idempotency_key: idem,
     p_disposed_by: session.user?.id,
   })
-  record("disposal idempotent retry", dispIdem?.idempotent === true)
+  record("disposal idempotent retry", dispIdem?.idempotent === true && dispIdem?.journal_entry_id === disp1?.journal_entry_id)
 
-  const { data: batch } = await userSb.rpc("post_asset_depreciation_batch", {
+  const { data: batch, error: batchErr } = await userSb.rpc("post_asset_depreciation_batch", {
     p_business_id: LOAD_BUSINESS_ID,
     p_posting_date: "2026-08-01",
     p_posted_by: session.user?.id,
@@ -143,8 +157,8 @@ async function main() {
   })
   record(
     "batch depreciation",
-    batch && typeof batch.posted_count === "number",
-    `posted=${batch?.posted_count} skipped=${batch?.skipped_count} failed=${batch?.failed_count}`
+    !batchErr && typeof batch.posted_count === "number",
+    batchErr?.message || `posted=${batch?.posted_count} skipped=${batch?.skipped_count} failed=${batch?.failed_count}`
   )
 
   const failed = results.filter((r) => !r.pass).length
