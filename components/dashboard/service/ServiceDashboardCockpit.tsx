@@ -42,6 +42,8 @@ type Metrics = {
   unpaidInvoicesCount?: number
   overdueInvoicesTotal?: number
   overdueInvoicesCount?: number
+  metrics_source?: string
+  live_fallback_used?: boolean
   previousPeriod?: {
     revenue: number
     expenses: number
@@ -517,6 +519,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   }
 
   const routes = getDashboardRoutes(business.id)
+  const ledgerFallbackActive =
+    metrics?.metrics_source === "ledger_live_fallback" || metrics?.live_fallback_used === true
 
   return (
     <div className="space-y-5" data-tour="service-dashboard-overview">
@@ -573,7 +577,6 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       ) : (
         <TrendsSectionLazy
           data={chartData}
-          focusPeriodStart={trendsFocusPeriodStart}
           currencyCode={currencyCode}
           currentRevenue={metrics?.revenue ?? 0}
           currentExpenses={metrics?.expenses ?? 0}
@@ -581,6 +584,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           businessId={business.id}
           fallbackPeriodStart={metrics?.period?.period_start}
           fallbackPeriodEnd={metrics?.period?.period_end}
+          dashboardPeriodStart={metrics?.period?.period_start ?? null}
+          dashboardPeriodEnd={metrics?.period?.period_end ?? null}
           periodCaption={
             ledgerFallbackActive ? "Based on ledger records for this period" : undefined
           }
@@ -595,7 +600,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           overdueCount={metrics.overdueInvoicesCount ?? 0}
           overdueTotal={metrics.overdueInvoicesTotal ?? 0}
           currencyCode={currencyCode}
-          cashReportHref={`/service/payments?business_id=${encodeURIComponent(business.id)}`}
+          cashReportHref={
+            metrics.period?.period_start && metrics.period?.period_end
+              ? `/service/payments?business_id=${encodeURIComponent(business.id)}&start_date=${encodeURIComponent(metrics.period.period_start)}&end_date=${encodeURIComponent(metrics.period.period_end)}`
+              : `/service/payments?business_id=${encodeURIComponent(business.id)}`
+          }
           overdueReportHref={`/service/invoices?business_id=${encodeURIComponent(business.id)}&status=overdue`}
         />
       ) : null}

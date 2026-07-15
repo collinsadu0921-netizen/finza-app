@@ -31,9 +31,7 @@ export type TimelinePoint = {
 export type TrendsSectionProps = {
   data: TimelinePoint[]
   currencyCode?: string
-  /** Dashboard-selected or backend-resolved period (YYYY-MM-DD). */
-  focusPeriodStart?: string | null
-  /** Current period totals — fallback when focus period is not in timeline. */
+  /** Current period totals — used only as a fallback when no timeline exists. */
   currentRevenue?: number
   currentExpenses?: number
   currentNetProfit?: number
@@ -44,6 +42,9 @@ export type TrendsSectionProps = {
   /** Fallback period when timeline has no visible point (metrics period). */
   fallbackPeriodStart?: string
   fallbackPeriodEnd?: string
+  /** Dashboard period picker — monthly hero/breakdown follow this when set. */
+  dashboardPeriodStart?: string | null
+  dashboardPeriodEnd?: string | null
 }
 
 type PeriodMode = "monthly" | "quarterly" | "ytd"
@@ -339,7 +340,6 @@ function PeriodSelector({
 export default function TrendsSection({
   data,
   currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
-  focusPeriodStart = null,
   currentRevenue = 0,
   currentExpenses = 0,
   currentNetProfit = 0,
@@ -347,6 +347,8 @@ export default function TrendsSection({
   businessId,
   fallbackPeriodStart,
   fallbackPeriodEnd,
+  dashboardPeriodStart,
+  dashboardPeriodEnd,
 }: TrendsSectionProps) {
   const [mode, setMode] = useState<PeriodMode>("monthly")
 
@@ -363,10 +365,19 @@ export default function TrendsSection({
 
     if (mode === "monthly") {
       const windowMonths = nonFuture.slice(-MONTHLY_WINDOW)
-      const latestMonth = windowMonths.length > 0 ? windowMonths[windowMonths.length - 1] : null
+      const dashboardMonth =
+        dashboardPeriodStart != null && dashboardPeriodStart !== ""
+          ? nonFuture.find((m) => m.period_start === dashboardPeriodStart) ?? null
+          : null
+      const latestMonth =
+        dashboardMonth ??
+        (windowMonths.length > 0 ? windowMonths[windowMonths.length - 1] : null)
       if (latestMonth) {
         selectedPeriodStart = latestMonth.period_start
         selectedPeriodEnd = latestMonth.period_end
+      } else if (dashboardPeriodStart && dashboardPeriodEnd) {
+        selectedPeriodStart = dashboardPeriodStart
+        selectedPeriodEnd = dashboardPeriodEnd
       }
       chartData = windowMonths.map((m) => ({
         label: shortMonthLabel(m.period_start),
@@ -375,7 +386,9 @@ export default function TrendsSection({
         netProfit: m.netProfit,
       }))
       profitLaneLabel = "Net profit by month"
-      breakdownSubtitle = "Latest month summary"
+      breakdownSubtitle = dashboardMonth
+        ? `${shortMonthLabel(dashboardMonth.period_start)} summary`
+        : "Latest month summary"
       scopeLabel = "Monthly"
       operatingCaption = "Revenue and expenses by month"
     } else if (mode === "quarterly") {
@@ -413,57 +426,47 @@ export default function TrendsSection({
 
     const latestPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
 
-    const useFocusPeriod =
-      mode === "monthly" && focusPeriodStart != null && focusPeriodStart !== ""
+    const dashboardTimelineMonth =
+      mode === "monthly" && dashboardPeriodStart
+        ? nonFuture.find((m) => m.period_start === dashboardPeriodStart)
+        : null
 
-    const focusedMonth = useFocusPeriod
-      ? nonFuture.find((p) => p.period_start === focusPeriodStart)
-      : undefined
+    // Single selected display point for this mode — the latest visible period,
+    // or the dashboard-selected month when the picker is set:
+    // - monthly  → dashboard period month when set, else latest visible month
+    // - quarterly→ latest visible quarter aggregate
+    // - ytd      → final cumulative YTD point (through the latest month)
+    // Hero net profit, margin badge, supporting Revenue/Expenses, and the
+    // breakdown table ALL read from this one object, so margins cannot diverge.
+    // `current*` props are used when the selected period is outside the chart window.
+    const selectedRevenue = dashboardTimelineMonth
+      ? dashboardTimelineMonth.revenue
+      : latestPoint
+        ? latestPoint.revenue
+        : currentRevenue
+    const selectedExpenses = dashboardTimelineMonth
+      ? dashboardTimelineMonth.expenses
+      : latestPoint
+        ? latestPoint.expenses
+        : currentExpenses
+    const selectedNetProfit = dashboardTimelineMonth
+      ? dashboardTimelineMonth.netProfit
+      : latestPoint
+        ? latestPoint.netProfit
+        : currentNetProfit
 
-    let selectedRevenue: number
-    let selectedExpenses: number
-    let selectedNetProfit: number
     let breakdownTitle: string
-
-    if (useFocusPeriod) {
-      if (focusedMonth) {
-        selectedRevenue = focusedMonth.revenue
-        selectedExpenses = focusedMonth.expenses
-        selectedNetProfit = focusedMonth.netProfit
-        breakdownTitle = `${shortMonthLabel(focusedMonth.period_start)} breakdown`
-        breakdownSubtitle = "Selected month summary"
-      } else {
-        selectedRevenue = currentRevenue
-        selectedExpenses = currentExpenses
-        selectedNetProfit = currentNetProfit
-        breakdownTitle = `${shortMonthLabel(focusPeriodStart!)} breakdown`
-        breakdownSubtitle = "Selected month summary"
-      }
+    if (mode === "ytd") {
+      breakdownTitle = "YTD breakdown"
+    } else if (dashboardTimelineMonth) {
+      breakdownTitle = `${shortMonthLabel(dashboardTimelineMonth.period_start)} breakdown`
     } else if (latestPoint) {
-      selectedRevenue = latestPoint.revenue
-      selectedExpenses = latestPoint.expenses
-      selectedNetProfit = latestPoint.netProfit
-      breakdownTitle =
-        mode === "ytd"
-          ? "YTD breakdown"
-          : `${latestPoint.label} breakdown`
-      breakdownSubtitle =
-        mode === "ytd"
-          ? "Year-to-date summary"
-          : mode === "quarterly"
-            ? "Latest quarter summary"
-            : "Latest month summary"
+      // latestPoint.label is "{Month}" (monthly) or "Q{n}" (quarterly).
+      breakdownTitle = `${latestPoint.label} breakdown`
+    } else if (dashboardPeriodStart) {
+      breakdownTitle = `${shortMonthLabel(dashboardPeriodStart)} breakdown`
     } else {
-      selectedRevenue = currentRevenue
-      selectedExpenses = currentExpenses
-      selectedNetProfit = currentNetProfit
-      breakdownTitle = mode === "ytd" ? "YTD breakdown" : "Latest breakdown"
-      breakdownSubtitle =
-        mode === "ytd"
-          ? "Year-to-date summary"
-          : mode === "quarterly"
-            ? "Latest quarter summary"
-            : "Latest month summary"
+      breakdownTitle = "Latest breakdown"
     }
 
     let footerLabel: string
@@ -496,10 +499,20 @@ export default function TrendsSection({
       selectedPeriodStart,
       selectedPeriodEnd,
     }
-  }, [data, mode, focusPeriodStart, currentRevenue, currentExpenses, currentNetProfit])
+  }, [
+    data,
+    mode,
+    currentRevenue,
+    currentExpenses,
+    currentNetProfit,
+    dashboardPeriodStart,
+    dashboardPeriodEnd,
+  ])
 
-  const breakdownPeriodStart = view.selectedPeriodStart ?? fallbackPeriodStart
-  const breakdownPeriodEnd = view.selectedPeriodEnd ?? fallbackPeriodEnd
+  const breakdownPeriodStart =
+    dashboardPeriodStart ?? view.selectedPeriodStart ?? fallbackPeriodStart
+  const breakdownPeriodEnd =
+    dashboardPeriodEnd ?? view.selectedPeriodEnd ?? fallbackPeriodEnd
 
   const expensesInfo = (
     <DashboardExpensesInfo
@@ -524,7 +537,7 @@ export default function TrendsSection({
             Profit performance
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-500">
-            Revenue, expenses, and net profit for the selected period
+            {periodCaption ?? "Revenue, expenses, and net profit for the selected period"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

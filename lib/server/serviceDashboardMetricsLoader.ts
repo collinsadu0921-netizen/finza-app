@@ -17,6 +17,7 @@ import {
   fetchStaleDashboardPeriodPnl,
   isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
+import { loadCustomerPaymentsCollectedTotal } from "@/lib/server/customerPaymentsCollected"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
 import {
   EMPTY_OPERATIONAL_UNPAID_INVOICES,
@@ -170,19 +171,13 @@ async function loadCashCollected(
   endDate: string,
   options?: { throwOnError?: boolean }
 ): Promise<number> {
-  const { data, error } = await supabase.rpc("get_cash_collected_total", {
-    p_business_id: businessId,
-    p_start_date: startDate,
-    p_end_date: endDate,
-  })
-  if (error) {
-    if (options?.throwOnError === false) {
-      console.warn("[dashboard-metrics] cash collected read failed:", error.message)
-      return 0
-    }
-    throw error
-  }
-  return num(data)
+  return loadCustomerPaymentsCollectedTotal(
+    supabase,
+    businessId,
+    startDate,
+    endDate,
+    options
+  )
 }
 
 async function buildMetricsFromSummarySnapshot(
@@ -451,6 +446,17 @@ export async function loadServiceDashboardMetrics(
         name: getCurrencyName(currencyCode) || currencyCode,
       }
 
+      const [cashCollected, previousCashCollected] = await Promise.all([
+        loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+          throwOnError: true,
+        }),
+        compareStart && compareEnd
+          ? loadCashCollected(supabase, businessId, compareStart, compareEnd, {
+              throwOnError: true,
+            })
+          : Promise.resolve(null),
+      ])
+
       const built = withOperationalUnpaidFields(
         {
           period: {
@@ -463,7 +469,7 @@ export async function loadServiceDashboardMetrics(
           revenue: num(metrics.revenue),
           expenses: num(metrics.expenses),
           netProfit: num(metrics.net_profit),
-          cashCollected: num(metrics.cash_collected),
+          cashCollected,
           accountsReceivable: num(metrics.accounts_receivable),
           accountsPayable: num(metrics.accounts_payable),
           cashBalance: num(metrics.cash_balance),
@@ -479,7 +485,7 @@ export async function loadServiceDashboardMetrics(
           revenue: num(metrics.previous_revenue),
           expenses: num(metrics.previous_expenses),
           netProfit: num(metrics.previous_net_profit),
-          cashCollected: num(metrics.previous_cash_collected),
+          cashCollected: previousCashCollected ?? 0,
           accountsReceivable: num(metrics.previous_accounts_receivable),
           accountsPayable: num(metrics.previous_accounts_payable),
           cashBalance: num(metrics.previous_cash_balance),

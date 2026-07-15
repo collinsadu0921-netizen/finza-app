@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { loadCustomerPaymentsCollectedTotal } from "@/lib/server/customerPaymentsCollected"
 
 export async function GET(request: NextRequest) {
   try {
@@ -72,6 +73,14 @@ export async function GET(request: NextRequest) {
     }
 
     const totalCount = count ?? 0
+    const totalAmount = await loadCustomerPaymentsCollectedTotal(
+      supabase,
+      business.id,
+      startDate,
+      endDate,
+      { invoiceId }
+    )
+
     return NextResponse.json({
       payments: payments || [],
       pagination: {
@@ -79,6 +88,10 @@ export async function GET(request: NextRequest) {
         pageSize: limit,
         totalCount,
         totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      },
+      totals: {
+        totalAmount,
+        totalCount,
       },
     })
   } catch (error: any) {
