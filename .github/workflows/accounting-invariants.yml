@@ -34,8 +34,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install ts-node
-        run: npm install --save-dev ts-node @types/node typescript
+      - name: Install tsx
+        run: npm install --save-dev tsx
 
       - name: Run accounting invariant audit
         env:
@@ -43,15 +43,15 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BUSINESS_ID: ${{ github.event.inputs.business_id || secrets.CI_TEST_BUSINESS_ID }}
           LIMIT_PERIODS: 3
-        run: npx ts-node scripts/accounting-ci-audit.ts
+        run: npx tsx scripts/accounting-ci-audit.ts
         continue-on-error: false
 
       - name: Report bypass detection
-        run: npx ts-node scripts/detect-report-bypass.ts
+        run: npx tsx scripts/detect-report-bypass.ts
         continue-on-error: false
 
       - name: Detect non-ledger report aggregations
-        run: npx ts-node scripts/detect-non-ledger-reports.ts
+        run: npx tsx scripts/detect-non-ledger-reports.ts
         continue-on-error: false
 
   summary:

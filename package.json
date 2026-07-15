@@ -15,9 +15,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:install": "playwright install chromium",
-    "ci:accounting-audit": "ts-node scripts/accounting-ci-audit.ts",
-    "ci:detect-bypass": "ts-node scripts/detect-report-bypass.ts",
-    "ci:detect-non-ledger": "ts-node scripts/detect-non-ledger-reports.ts",
+    "ci:accounting-audit": "npx tsx scripts/accounting-ci-audit.ts",
+    "ci:detect-bypass": "npx tsx scripts/detect-report-bypass.ts",
+    "ci:detect-non-ledger": "npx tsx scripts/detect-non-ledger-reports.ts",
     "ci:accounting": "npm run ci:accounting-audit && npm run ci:detect-bypass && npm run ci:detect-non-ledger",
     "check:boundaries": "node scripts/check-boundaries.js"
   },
