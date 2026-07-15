@@ -1,7 +1,21 @@
 "use client"
 
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
+import { createPortal } from "react-dom"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
+import {
+  computeExpenseBreakdownPopoverPosition,
+  EXPENSE_BREAKDOWN_POPOVER_WIDTH,
+  isExpenseBreakdownMobileViewport,
+} from "@/lib/dashboard/expenseBreakdownPopoverPosition"
 import { formatMoney } from "@/lib/money"
 
 type BreakdownLine = {
@@ -25,10 +39,8 @@ export type DashboardExpensesInfoProps = {
   /** Displayed expenses figure beside this icon (for context only). */
   displayTotal: number
   currencyCode?: string
-  /** Optional class for the trigger button. */
+  /** Optional class for the trigger wrapper. */
   className?: string
-  /** Popover horizontal anchor relative to the icon. */
-  popoverAlign?: "left" | "right"
 }
 
 function formatPeriodRange(start: string, end: string): string {
@@ -43,12 +55,7 @@ function formatPeriodRange(start: string, end: string): string {
 
 function InfoIcon({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden
-      className={className}
-    >
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden className={className}>
       <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.25" />
       <path
         d="M8 7.1V11"
@@ -61,6 +68,188 @@ function InfoIcon({ className }: { className?: string }) {
   )
 }
 
+function ExpenseBreakdownContent({
+  periodLabel,
+  loading,
+  error,
+  payload,
+  breakdownTotal,
+  currencyCode,
+}: {
+  periodLabel: string
+  loading: boolean
+  error: string | null
+  payload: BreakdownPayload | null
+  breakdownTotal: number
+  currencyCode: string
+}) {
+  const visibleLines = payload?.lines.filter((line) => line.amount !== 0) ?? []
+  const linesToShow = visibleLines.length > 0 ? visibleLines : (payload?.lines ?? [])
+
+  return (
+    <>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+        Expenses breakdown
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        Ledger P&amp;L for {periodLabel}. Input VAT is posted to liabilities and is not included
+        here.
+      </p>
+
+      {loading ? (
+        <div className="mt-4 space-y-2" aria-busy="true">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-4 animate-pulse rounded bg-slate-100" aria-hidden />
+          ))}
+        </div>
+      ) : error ? (
+        <p className="mt-4 text-sm text-red-600">{error}</p>
+      ) : (
+        <div className="mt-4 space-y-0">
+          {linesToShow.map((line) => (
+            <div
+              key={line.key}
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0 border-b border-slate-100 py-2.5 last:border-b-0"
+            >
+              <span
+                className="min-w-0 text-sm leading-snug text-slate-600 [overflow-wrap:normal] [word-break:normal]"
+                title={line.hint}
+              >
+                {line.label}
+              </span>
+              <span className="whitespace-nowrap text-right text-sm font-medium tabular-nums text-slate-800">
+                {formatMoney(line.amount, currencyCode)}
+              </span>
+            </div>
+          ))}
+          <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 border-t border-slate-200 pt-2.5">
+            <span className="text-sm font-semibold text-slate-700">Total</span>
+            <span className="whitespace-nowrap text-right text-sm font-semibold tabular-nums text-slate-900">
+              {formatMoney(breakdownTotal, currencyCode)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-4 text-xs leading-relaxed text-slate-400">
+        Supplier bills count in the month they are issued (Open). Paying a bill later does not add
+        expense again.
+      </p>
+    </>
+  )
+}
+
+function MobileExpenseBreakdownSheet({
+  open,
+  onClose,
+  titleId,
+  children,
+}: {
+  open: boolean
+  onClose: () => void
+  titleId: string
+  children: ReactNode
+}) {
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-[55] flex items-end">
+      <button
+        type="button"
+        aria-label="Close expenses breakdown"
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+      <div className="relative z-[1] w-full px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div
+          role="dialog"
+          aria-labelledby={titleId}
+          className="mx-auto max-h-[min(85vh,640px)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-slate-200/90 bg-white p-4 shadow-2xl ring-1 ring-black/[0.04]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200" aria-hidden />
+          <div className="sr-only" id={titleId}>
+            Expenses breakdown
+          </div>
+          {children}
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+function DesktopExpenseBreakdownPopover({
+  open,
+  popoverId,
+  titleId,
+  coords,
+  panelRef,
+  onClose,
+  children,
+}: {
+  open: boolean
+  popoverId: string
+  titleId: string
+  coords: { top: number; left: number; width: number } | null
+  panelRef: React.RefObject<HTMLDivElement | null>
+  onClose: () => void
+  children: ReactNode
+}) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [open, onClose])
+
+  if (!open || !coords) return null
+
+  return createPortal(
+    <div
+      id={popoverId}
+      ref={panelRef}
+      role="dialog"
+      aria-labelledby={titleId}
+      className="fixed z-[55] rounded-xl border border-slate-200/90 bg-white p-4 shadow-xl ring-1 ring-black/[0.04]"
+      style={{
+        top: coords.top,
+        left: coords.left,
+        width: coords.width,
+        maxWidth: "calc(100vw - 32px)",
+        maxHeight: "calc(100vh - 32px - 96px)",
+        overflowY: "auto",
+      }}
+    >
+      <div className="sr-only" id={titleId}>
+        Expenses breakdown
+      </div>
+      {children}
+    </div>,
+    document.body
+  )
+}
+
 export default function DashboardExpensesInfo({
   businessId,
   periodStart,
@@ -68,11 +257,14 @@ export default function DashboardExpensesInfo({
   displayTotal,
   currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
   className = "",
-  popoverAlign = "left",
 }: DashboardExpensesInfoProps) {
   const popoverId = useId()
-  const rootRef = useRef<HTMLSpanElement>(null)
+  const titleId = useId()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
+  const [useMobileSheet, setUseMobileSheet] = useState(false)
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [payload, setPayload] = useState<BreakdownPayload | null>(null)
@@ -110,6 +302,24 @@ export default function DashboardExpensesInfo({
     }
   }, [businessId, canFetch, periodEnd, periodStart])
 
+  const close = useCallback(() => {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }, [])
+
+  const repositionPopover = useCallback(() => {
+    if (useMobileSheet || !open || !triggerRef.current) return
+    const triggerRect = triggerRef.current.getBoundingClientRect()
+    const panelHeight = panelRef.current?.offsetHeight ?? 320
+    setCoords(
+      computeExpenseBreakdownPopoverPosition(
+        triggerRect,
+        panelHeight,
+        EXPENSE_BREAKDOWN_POPOVER_WIDTH
+      )
+    )
+  }, [open, useMobileSheet])
+
   useEffect(() => {
     if (!open || !canFetch) return
     void fetchBreakdown()
@@ -117,100 +327,104 @@ export default function DashboardExpensesInfo({
 
   useEffect(() => {
     if (!open) return
-    const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false)
-      }
+    setUseMobileSheet(isExpenseBreakdownMobileViewport())
+    const onResize = () => {
+      const mobile = isExpenseBreakdownMobileViewport()
+      setUseMobileSheet(mobile)
+      if (!mobile) repositionPopover()
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [open, repositionPopover])
+
+  useLayoutEffect(() => {
+    if (!open || useMobileSheet) {
+      setCoords(null)
+      return
+    }
+    repositionPopover()
+  }, [open, useMobileSheet, repositionPopover, loading, error, payload])
+
+  useEffect(() => {
+    if (!open || useMobileSheet) return
+    const onScroll = () => repositionPopover()
+    window.addEventListener("scroll", onScroll, true)
+    window.addEventListener("resize", onScroll)
+    return () => {
+      window.removeEventListener("scroll", onScroll, true)
+      window.removeEventListener("resize", onScroll)
+    }
+  }, [open, useMobileSheet, repositionPopover])
+
+  useEffect(() => {
+    if (!open || useMobileSheet) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (panelRef.current?.contains(target)) return
+      close()
     }
     document.addEventListener("mousedown", onPointerDown)
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown)
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
+    return () => document.removeEventListener("mousedown", onPointerDown)
+  }, [open, useMobileSheet, close])
+
+  useEffect(() => {
+    if (!open || !useMobileSheet) return
+    panelRef.current?.focus()
+  }, [open, useMobileSheet, loading])
 
   if (!canFetch) return null
 
   const periodLabel = formatPeriodRange(periodStart!, periodEnd!)
   const breakdownTotal = payload?.total ?? displayTotal
-  const visibleLines = payload?.lines.filter((line) => line.amount !== 0) ?? []
+
+  const content = (
+    <ExpenseBreakdownContent
+      periodLabel={periodLabel}
+      loading={loading}
+      error={error}
+      payload={payload}
+      breakdownTotal={breakdownTotal}
+      currencyCode={currencyCode}
+    />
+  )
 
   return (
-    <span ref={rootRef} className={`relative inline-flex items-center ${className}`}>
+    <>
       <button
+        ref={triggerRef}
         type="button"
         aria-label="How this expenses total is calculated"
         aria-expanded={open}
-        aria-controls={popoverId}
+        aria-controls={open ? popoverId : undefined}
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 ${className}`}
       >
         <InfoIcon className="h-3.5 w-3.5" />
       </button>
 
-      {open ? (
-        <div
-          id={popoverId}
-          role="dialog"
-          aria-label="Expenses breakdown"
-          className={`absolute top-[calc(100%+6px)] z-50 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-slate-200/90 bg-white p-3 shadow-lg ring-1 ring-black/[0.04] ${
-            popoverAlign === "right" ? "right-0" : "left-0"
-          }`}
+      {useMobileSheet ? (
+        <MobileExpenseBreakdownSheet
+          open={open}
+          onClose={close}
+          titleId={titleId}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Expenses breakdown
-          </p>
-          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-            Ledger P&amp;L for {periodLabel}. Input VAT is posted to liabilities and is not
-            included here.
-          </p>
-
-          {loading ? (
-            <div className="mt-3 space-y-2" aria-busy="true">
-              {[1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="h-4 animate-pulse rounded bg-slate-100"
-                  aria-hidden
-                />
-              ))}
-            </div>
-          ) : error ? (
-            <p className="mt-3 text-xs text-red-600">{error}</p>
-          ) : (
-            <div className="mt-3 space-y-0">
-              {(visibleLines.length > 0 ? visibleLines : (payload?.lines ?? [])).map((line) => (
-                <div
-                  key={line.key}
-                  className="flex items-baseline justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0"
-                >
-                  <span className="min-w-0 text-xs text-slate-600" title={line.hint}>
-                    {line.label}
-                  </span>
-                  <span className="shrink-0 text-xs font-medium tabular-nums text-slate-800">
-                    {formatMoney(line.amount, currencyCode)}
-                  </span>
-                </div>
-              ))}
-              <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-slate-200 pt-2">
-                <span className="text-xs font-semibold text-slate-700">Total</span>
-                <span className="text-xs font-semibold tabular-nums text-slate-900">
-                  {formatMoney(breakdownTotal, currencyCode)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          <p className="mt-3 text-[10px] leading-relaxed text-slate-400">
-            Supplier bills count in the month they are issued (Open). Paying a bill later does
-            not add expense again.
-          </p>
-        </div>
-      ) : null}
-    </span>
+          <div ref={panelRef as React.RefObject<HTMLDivElement>} tabIndex={-1} className="outline-none">
+            {content}
+          </div>
+        </MobileExpenseBreakdownSheet>
+      ) : (
+        <DesktopExpenseBreakdownPopover
+          open={open}
+          popoverId={popoverId}
+          titleId={titleId}
+          coords={coords}
+          panelRef={panelRef}
+          onClose={close}
+        >
+          {content}
+        </DesktopExpenseBreakdownPopover>
+      )}
+    </>
   )
 }

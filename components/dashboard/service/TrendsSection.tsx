@@ -476,17 +476,6 @@ export default function TrendsSection({
     />
   )
 
-  const breakdownExpensesInfo = (
-    <DashboardExpensesInfo
-      businessId={businessId}
-      periodStart={breakdownPeriodStart}
-      periodEnd={breakdownPeriodEnd}
-      displayTotal={view.selectedExpenses}
-      currencyCode={currencyCode}
-      popoverAlign="right"
-    />
-  )
-
   // Profit/loss badge follows the SAME selected net profit used everywhere else.
   const profitable = view.selectedNetProfit >= 0
   const quarterly = mode === "quarterly"
@@ -739,7 +728,7 @@ export default function TrendsSection({
                 <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 py-2.5">
                   <span className="flex items-center gap-1 text-xs text-slate-500">
                     <span>Expenses</span>
-                    {breakdownExpensesInfo}
+                    {expensesInfo}
                   </span>
                   <span className="text-right text-sm font-medium tabular-nums text-slate-800">
                     {formatMoney(view.selectedExpenses, currencyCode)}
