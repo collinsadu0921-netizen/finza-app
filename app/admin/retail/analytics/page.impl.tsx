@@ -1160,7 +1160,10 @@ export default function AnalyticsPage() {
                         <Cell key={`cell-${entry.method}-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={chartTooltipStyle} formatter={(value: number) => format(value)} />
+                    <Tooltip
+                      contentStyle={chartTooltipStyle}
+                      formatter={(value) => format(Number(value ?? 0))}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <ul className="mt-2 space-y-1.5 border-t border-slate-100 pt-3">
