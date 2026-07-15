@@ -12,7 +12,7 @@ import {
   CartesianGrid,
   ReferenceLine,
   Cell,
-  TooltipProps,
+  type TooltipContentProps,
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
@@ -176,18 +176,12 @@ function buildYtdCumulative(months: TimelinePoint[]): ChartPoint[] {
   })
 }
 
-type OperatingTooltipProps = TooltipProps<number, string> & {
-  payload?: Array<{ name?: string; value?: number }>
-  label?: string
-  currencyCode: string
-}
-
 function OperatingTooltip({
   active,
   payload,
   label,
   currencyCode,
-}: OperatingTooltipProps) {
+}: TooltipContentProps & { currencyCode: string }) {
   if (!active || !payload?.length) return null
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-md ring-1 ring-black/[0.03]">
@@ -197,7 +191,7 @@ function OperatingTooltip({
       <div className="space-y-1">
         {payload.map((entry) => (
           <div
-            key={entry.name}
+            key={String(entry.name)}
             className="flex items-center justify-between gap-6 text-[11px]"
           >
             <span className="text-slate-500">{entry.name}</span>
@@ -211,13 +205,12 @@ function OperatingTooltip({
   )
 }
 
-type ProfitTooltipProps = TooltipProps<number, string> & {
-  payload?: Array<{ value?: number }>
-  label?: string
-  currencyCode: string
-}
-
-function ProfitTooltip({ active, payload, label, currencyCode }: ProfitTooltipProps) {
+function ProfitTooltip({
+  active,
+  payload,
+  label,
+  currencyCode,
+}: TooltipContentProps & { currencyCode: string }) {
   if (!active || !payload?.length) return null
   const value = Number(payload[0]?.value ?? 0)
   return (
@@ -762,7 +755,7 @@ export default function TrendsSection({
                       tickFormatter={(v: number) => formatCompactMoney(v, currencyCode)}
                     />
                     <Tooltip
-                      content={(props: TooltipProps<number, string>) => (
+                      content={(props: TooltipContentProps) => (
                         <OperatingTooltip {...props} currencyCode={currencyCode} />
                       )}
                       cursor={{ fill: "rgba(15,23,42,0.03)" }}
@@ -862,7 +855,7 @@ export default function TrendsSection({
                         tickFormatter={(v: number) => formatCompactMoney(v, currencyCode)}
                       />
                       <Tooltip
-                        content={(props: TooltipProps<number, string>) => (
+                        content={(props: TooltipContentProps) => (
                           <ProfitTooltip {...props} currencyCode={currencyCode} />
                         )}
                         cursor={{ fill: "rgba(79,70,229,0.04)" }}

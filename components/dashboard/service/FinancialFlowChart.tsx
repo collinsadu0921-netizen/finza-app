@@ -10,7 +10,7 @@ import {
   Tooltip,
   CartesianGrid,
   Legend,
-  TooltipProps,
+  type TooltipContentProps,
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
@@ -31,19 +31,16 @@ export type FinancialFlowChartProps = {
   showCash?: boolean
 }
 
-type FinancialFlowTooltipProps = TooltipProps<number, string> & {
-  payload?: Array<{ payload?: Record<string, unknown> }>
-  label?: string
-  currencyCode: string
-  showCash: boolean
-}
 function FinancialFlowTooltip({
   active,
   payload,
   label,
   currencyCode,
   showCash,
-}: FinancialFlowTooltipProps) {
+}: TooltipContentProps & {
+  currencyCode: string
+  showCash: boolean
+}) {
   if (!active || !payload?.length || label == null) return null
   const p = payload[0]?.payload as Record<string, unknown>
   if (!p) return null
@@ -154,7 +151,7 @@ export default function FinancialFlowChart({
               width={48}
             />
             <Tooltip
-              content={(props: TooltipProps<number, string>) => (
+              content={(props: TooltipContentProps) => (
                 <FinancialFlowTooltip
                   {...props}
                   currencyCode={currencyCode}
