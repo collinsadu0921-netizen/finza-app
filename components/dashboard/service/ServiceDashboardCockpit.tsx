@@ -578,6 +578,12 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           currentRevenue={metrics?.revenue ?? 0}
           currentExpenses={metrics?.expenses ?? 0}
           currentNetProfit={metrics?.netProfit ?? 0}
+          businessId={business.id}
+          fallbackPeriodStart={metrics?.period?.period_start}
+          fallbackPeriodEnd={metrics?.period?.period_end}
+          periodCaption={
+            ledgerFallbackActive ? "Based on ledger records for this period" : undefined
+          }
         />
       )}
 
