@@ -16,6 +16,7 @@ import {
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
+import DashboardExpensesInfo from "./DashboardExpensesInfo"
 
 export type TimelinePoint = {
   period_start: string
@@ -36,6 +37,11 @@ export type TrendsSectionProps = {
   currentNetProfit?: number
   /** Optional note when period KPIs come from ledger fallback instead of snapshot. */
   periodCaption?: string
+  /** For expense-breakdown info popover (lazy-loaded). */
+  businessId?: string
+  /** Fallback period when timeline has no visible point (metrics period). */
+  fallbackPeriodStart?: string
+  fallbackPeriodEnd?: string
 }
 
 type PeriodMode = "monthly" | "quarterly" | "ytd"
@@ -176,6 +182,22 @@ function buildQuarterlyPoints(months: TimelinePoint[]): ChartPoint[] {
  * Builds a cumulative year-to-date progression from the available months of the
  * latest year present in the timeline. Uses only real periods.
  */
+function quarterDateRange(
+  months: TimelinePoint[],
+  year: number,
+  quarter: number
+): { start: string; end: string } | null {
+  const inQuarter = months.filter((m) => {
+    const q = quarterOf(m.period_start)
+    return q.year === year && q.quarter === quarter
+  })
+  if (inQuarter.length === 0) return null
+  return {
+    start: inQuarter[0].period_start,
+    end: inQuarter[inQuarter.length - 1].period_end,
+  }
+}
+
 function buildYtdCumulative(months: TimelinePoint[]): ChartPoint[] {
   if (months.length === 0) return []
   const latestYear = months[months.length - 1].period_start.slice(0, 4)
@@ -319,6 +341,9 @@ export default function TrendsSection({
   currentExpenses = 0,
   currentNetProfit = 0,
   periodCaption,
+  businessId,
+  fallbackPeriodStart,
+  fallbackPeriodEnd,
 }: TrendsSectionProps) {
   const [mode, setMode] = useState<PeriodMode>("monthly")
 
@@ -330,9 +355,17 @@ export default function TrendsSection({
     let breakdownSubtitle: string
     let scopeLabel: string
     let operatingCaption: string
+    let selectedPeriodStart: string | undefined
+    let selectedPeriodEnd: string | undefined
 
     if (mode === "monthly") {
-      chartData = nonFuture.slice(-MONTHLY_WINDOW).map((m) => ({
+      const windowMonths = nonFuture.slice(-MONTHLY_WINDOW)
+      const latestMonth = windowMonths.length > 0 ? windowMonths[windowMonths.length - 1] : null
+      if (latestMonth) {
+        selectedPeriodStart = latestMonth.period_start
+        selectedPeriodEnd = latestMonth.period_end
+      }
+      chartData = windowMonths.map((m) => ({
         label: shortMonthLabel(m.period_start),
         revenue: m.revenue,
         expenses: m.expenses,
@@ -344,12 +377,31 @@ export default function TrendsSection({
       operatingCaption = "Revenue and expenses by month"
     } else if (mode === "quarterly") {
       chartData = buildQuarterlyPoints(nonFuture)
+      if (chartData.length > 0 && nonFuture.length > 0) {
+        const latestMonth = nonFuture[nonFuture.length - 1]
+        const { year, quarter } = quarterOf(latestMonth.period_start)
+        const range = quarterDateRange(nonFuture, year, quarter)
+        if (range) {
+          selectedPeriodStart = range.start
+          selectedPeriodEnd = range.end
+        }
+      }
       profitLaneLabel = "Net profit by quarter"
       breakdownSubtitle = "Latest quarter summary"
       scopeLabel = "Quarterly"
       operatingCaption = "Revenue and expenses by quarter"
     } else {
       chartData = buildYtdCumulative(nonFuture)
+      if (nonFuture.length > 0) {
+        const latestYear = nonFuture[nonFuture.length - 1].period_start.slice(0, 4)
+        const yearMonths = nonFuture.filter(
+          (m) => m.period_start.slice(0, 4) === latestYear
+        )
+        if (yearMonths.length > 0) {
+          selectedPeriodStart = yearMonths[0].period_start
+          selectedPeriodEnd = yearMonths[yearMonths.length - 1].period_end
+        }
+      }
       profitLaneLabel = "Cumulative net profit"
       breakdownSubtitle = "Year-to-date summary"
       scopeLabel = "YTD"
@@ -406,8 +458,34 @@ export default function TrendsSection({
       operatingCaption,
       footerLabel,
       footerValue,
+      selectedPeriodStart,
+      selectedPeriodEnd,
     }
   }, [data, mode, currentRevenue, currentExpenses, currentNetProfit])
+
+  const breakdownPeriodStart = view.selectedPeriodStart ?? fallbackPeriodStart
+  const breakdownPeriodEnd = view.selectedPeriodEnd ?? fallbackPeriodEnd
+
+  const expensesInfo = (
+    <DashboardExpensesInfo
+      businessId={businessId}
+      periodStart={breakdownPeriodStart}
+      periodEnd={breakdownPeriodEnd}
+      displayTotal={view.selectedExpenses}
+      currencyCode={currencyCode}
+    />
+  )
+
+  const breakdownExpensesInfo = (
+    <DashboardExpensesInfo
+      businessId={businessId}
+      periodStart={breakdownPeriodStart}
+      periodEnd={breakdownPeriodEnd}
+      displayTotal={view.selectedExpenses}
+      currencyCode={currencyCode}
+      popoverAlign="right"
+    />
+  )
 
   // Profit/loss badge follows the SAME selected net profit used everywhere else.
   const profitable = view.selectedNetProfit >= 0
@@ -487,8 +565,9 @@ export default function TrendsSection({
                   </div>
                 </div>
                 <div className="px-4 py-2.5">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Expenses
+                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    <span>Expenses</span>
+                    {expensesInfo}
                   </div>
                   <div className="mt-0.5 text-base font-semibold tabular-nums text-slate-800">
                     {formatMoney(view.selectedExpenses, currencyCode)}
@@ -657,10 +736,15 @@ export default function TrendsSection({
                   label="Revenue"
                   value={formatMoney(view.selectedRevenue, currencyCode)}
                 />
-                <BreakdownRow
-                  label="Expenses"
-                  value={formatMoney(view.selectedExpenses, currencyCode)}
-                />
+                <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 py-2.5">
+                  <span className="flex items-center gap-1 text-xs text-slate-500">
+                    <span>Expenses</span>
+                    {breakdownExpensesInfo}
+                  </span>
+                  <span className="text-right text-sm font-medium tabular-nums text-slate-800">
+                    {formatMoney(view.selectedExpenses, currencyCode)}
+                  </span>
+                </div>
                 <BreakdownRow
                   label="Net profit"
                   value={formatMoney(view.selectedNetProfit, currencyCode)}
