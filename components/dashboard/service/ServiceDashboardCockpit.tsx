@@ -24,6 +24,7 @@ import {
   shouldPollDashboardCluster,
   type DashboardClusterStatus,
 } from "@/lib/dashboard/serviceClusterClient"
+import { formatAccountingPeriodLabel } from "@/lib/dashboard/formatAccountingPeriodLabel"
 
 const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
   loading: () => <ServiceDashboardTrendsPanelSkeleton />,
@@ -92,20 +93,6 @@ export type ServiceDashboardCockpitProps = {
   business: Business
   /** Workspace identity (logo + title); date + Refresh align to the right when set. */
   headerLead?: ReactNode
-}
-
-/** Returns "Mar '26" for same-month periods, "Jan '26 – Mar '26" for ranges. */
-function formatPeriodLabel(start: string, end: string): string {
-  // Compare year-month directly on the ISO string to avoid timezone issues
-  const sYM = start.slice(0, 7)
-  const eYM = end.slice(0, 7)
-  const s = new Date(start + "T12:00:00")
-  const e = new Date(end + "T12:00:00")
-  const opts: Intl.DateTimeFormatOptions = { month: "short", year: "2-digit" }
-  if (sYM === eYM) {
-    return s.toLocaleDateString(undefined, opts)
-  }
-  return `${s.toLocaleDateString(undefined, opts)} – ${e.toLocaleDateString(undefined, opts)}`
 }
 
 function formatShortIsoDate(iso: string): string {
@@ -518,14 +505,14 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
   const periodLabel =
     metrics?.period?.period_start && metrics?.period?.period_end
-      ? formatPeriodLabel(metrics.period.period_start, metrics.period.period_end)
+      ? formatAccountingPeriodLabel(metrics.period.period_start, metrics.period.period_end)
       : "—"
 
   const periodOptions: { value: string; label: string }[] = [
     { value: "", label: "Latest period" },
     ...timeline.map((t) => ({
       value: t.period_start,
-      label: formatPeriodLabel(t.period_start, t.period_end),
+      label: formatAccountingPeriodLabel(t.period_start, t.period_end),
     })),
   ]
 
@@ -550,7 +537,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const chartData = timeline.map((t) => ({
     period_start: t.period_start,
     period_end: t.period_end,
-    label: formatPeriodLabel(t.period_start, t.period_end),
+    label: formatAccountingPeriodLabel(t.period_start, t.period_end),
     revenue: t.revenue,
     expenses: t.expenses,
     netProfit: t.netProfit,
