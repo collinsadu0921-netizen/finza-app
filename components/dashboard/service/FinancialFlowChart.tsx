@@ -11,9 +11,12 @@ import {
   CartesianGrid,
   Legend,
   type TooltipContentProps,
+  type TooltipValueType,
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
+
+type ChartTooltipProps = TooltipContentProps<TooltipValueType, string | number>
 
 export type TimelinePoint = {
   period_start: string
@@ -37,7 +40,7 @@ function FinancialFlowTooltip({
   label,
   currencyCode,
   showCash,
-}: TooltipContentProps & {
+}: ChartTooltipProps & {
   currencyCode: string
   showCash: boolean
 }) {
@@ -151,7 +154,7 @@ export default function FinancialFlowChart({
               width={48}
             />
             <Tooltip
-              content={(props: TooltipContentProps) => (
+              content={(props: ChartTooltipProps) => (
                 <FinancialFlowTooltip
                   {...props}
                   currencyCode={currencyCode}

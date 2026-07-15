@@ -13,9 +13,12 @@ import {
   ReferenceLine,
   Cell,
   type TooltipContentProps,
+  type TooltipValueType,
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
+
+type ChartTooltipProps = TooltipContentProps<TooltipValueType, string | number>
 import {
   buildQuarterlyChartPoints,
   formatShortDisplayDate,
@@ -181,7 +184,7 @@ function OperatingTooltip({
   payload,
   label,
   currencyCode,
-}: TooltipContentProps & { currencyCode: string }) {
+}: ChartTooltipProps & { currencyCode: string }) {
   if (!active || !payload?.length) return null
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-md ring-1 ring-black/[0.03]">
@@ -210,7 +213,7 @@ function ProfitTooltip({
   payload,
   label,
   currencyCode,
-}: TooltipContentProps & { currencyCode: string }) {
+}: ChartTooltipProps & { currencyCode: string }) {
   if (!active || !payload?.length) return null
   const value = Number(payload[0]?.value ?? 0)
   return (
@@ -755,7 +758,7 @@ export default function TrendsSection({
                       tickFormatter={(v: number) => formatCompactMoney(v, currencyCode)}
                     />
                     <Tooltip
-                      content={(props: TooltipContentProps) => (
+                      content={(props: ChartTooltipProps) => (
                         <OperatingTooltip {...props} currencyCode={currencyCode} />
                       )}
                       cursor={{ fill: "rgba(15,23,42,0.03)" }}
@@ -855,7 +858,7 @@ export default function TrendsSection({
                         tickFormatter={(v: number) => formatCompactMoney(v, currencyCode)}
                       />
                       <Tooltip
-                        content={(props: TooltipContentProps) => (
+                        content={(props: ChartTooltipProps) => (
                           <ProfitTooltip {...props} currencyCode={currencyCode} />
                         )}
                         cursor={{ fill: "rgba(79,70,229,0.04)" }}
