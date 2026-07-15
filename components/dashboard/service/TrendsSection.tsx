@@ -19,8 +19,10 @@ import { formatMoney } from "@/lib/money"
 import {
   buildQuarterlyChartPoints,
   formatShortDisplayDate,
+  quarterAccessibleLabel,
   quarterMonthRangeLabel,
   resolveSelectedQuarterKey,
+  type QuarterlyChartPoint,
 } from "@/lib/dashboard/trendsQuarterUtils"
 import DashboardExpensesInfo from "./DashboardExpensesInfo"
 
@@ -293,6 +295,61 @@ function PeriodSelector({
   )
 }
 
+/**
+ * Accessible quarter controls synchronized with chart bar selection.
+ * Recharts bars remain mouse/tooltip targets; these buttons provide keyboard + a11y.
+ */
+function AccessibleQuarterSelector({
+  quarters,
+  activeQuarterKey,
+  onSelect,
+}: {
+  quarters: QuarterlyChartPoint[]
+  activeQuarterKey: string | null
+  onSelect: (key: string) => void
+}) {
+  if (quarters.length === 0) return null
+
+  return (
+    <div
+      className="mt-2 flex flex-wrap gap-1.5"
+      role="group"
+      aria-label="Select quarter for breakdown"
+    >
+      {quarters.map((q) => {
+        const selected = q.key === activeQuarterKey
+        return (
+          <button
+            key={q.key}
+            type="button"
+            tabIndex={0}
+            aria-label={quarterAccessibleLabel(q.year, q.quarter)}
+            aria-pressed={selected}
+            onClick={() => onSelect(q.key)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                onSelect(q.key)
+              } else if (event.key === " ") {
+                event.preventDefault()
+                onSelect(q.key)
+              }
+            }}
+            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 ${
+              selected
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+            }`}
+          >
+            {q.label} {q.year}
+            {q.isQuarterToDate ? " · QTD" : ""}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function TrendsSection({
   data,
   currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
@@ -311,6 +368,8 @@ export default function TrendsSection({
 
   const handleModeChange = (next: PeriodMode) => {
     setMode(next)
+    // Clear explicit quarter selection when leaving Quarterly so re-entry
+    // re-seeds from the current dashboard period.
     if (next !== "quarterly") {
       setSelectedQuarterKey(null)
     }
@@ -365,7 +424,11 @@ export default function TrendsSection({
       scopeLabel = "Monthly"
       operatingCaption = "Revenue and expenses by month"
     } else if (mode === "quarterly") {
-      activeQuarterKey = resolveSelectedQuarterKey(quarterlyPoints, selectedQuarterKey)
+      activeQuarterKey = resolveSelectedQuarterKey(
+        quarterlyPoints,
+        selectedQuarterKey,
+        dashboardPeriodStart
+      )
       const selectedQuarter =
         quarterlyPoints.find((q) => q.key === activeQuarterKey) ??
         quarterlyPoints[quarterlyPoints.length - 1] ??
@@ -380,13 +443,14 @@ export default function TrendsSection({
       }))
 
       if (selectedQuarter) {
-        selectedPeriodStart = selectedQuarter.calendarStart
-        selectedPeriodEnd = selectedQuarter.calendarEnd
+        // Popover + breakdown use effective range (QTD → latest timeline end).
+        selectedPeriodStart = selectedQuarter.effectiveStart
+        selectedPeriodEnd = selectedQuarter.effectiveEnd
       }
 
       profitLaneLabel = "Net profit by quarter"
       scopeLabel = "Quarterly"
-      operatingCaption = "Click a quarter to inspect · revenue and expenses by quarter"
+      operatingCaption = "Select a quarter to inspect · revenue and expenses by quarter"
 
       if (selectedQuarter) {
         breakdownTitle = `Q${selectedQuarter.quarter} breakdown`
@@ -498,6 +562,7 @@ export default function TrendsSection({
       selectedPeriodEnd,
       breakdownSubtitleExtra,
       activeQuarterKey,
+      quarterlyPoints,
     }
   }, [
     data,
@@ -519,10 +584,15 @@ export default function TrendsSection({
       ? view.selectedPeriodEnd ?? fallbackPeriodEnd
       : dashboardPeriodEnd ?? view.selectedPeriodEnd ?? fallbackPeriodEnd
 
+  const selectQuarter = (quarterKey: string) => {
+    if (mode !== "quarterly") return
+    setSelectedQuarterKey(quarterKey)
+  }
+
   const handleQuarterBarClick = (barData: { payload?: ChartPoint }) => {
     const entry = barData?.payload
-    if (mode !== "quarterly" || !entry?.quarterKey) return
-    setSelectedQuarterKey(entry.quarterKey)
+    if (!entry?.quarterKey) return
+    selectQuarter(entry.quarterKey)
   }
 
   const quarterBarOpacity = (quarterKey?: string) => {
@@ -656,6 +726,14 @@ export default function TrendsSection({
                 <span className="text-[11px] text-slate-400">{view.operatingCaption}</span>
               </div>
 
+              {quarterly ? (
+                <AccessibleQuarterSelector
+                  quarters={view.quarterlyPoints}
+                  activeQuarterKey={view.activeQuarterKey}
+                  onSelect={selectQuarter}
+                />
+              ) : null}
+
               <div className="h-[156px] w-full min-w-0 sm:h-[168px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
@@ -747,7 +825,9 @@ export default function TrendsSection({
                     {view.profitLaneLabel}
                   </span>
                   <span className="hidden text-[10px] text-slate-400 sm:inline">
-                    {quarterly ? "Click a bar to select a quarter" : "Hover a bar for the amount"}
+                    {quarterly
+                      ? "Select a quarter above or click a bar"
+                      : "Hover a bar for the amount"}
                   </span>
                 </div>
                 <div className="h-[120px] w-full min-w-0 sm:h-[132px]">

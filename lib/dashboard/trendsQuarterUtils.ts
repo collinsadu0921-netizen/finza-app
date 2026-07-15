@@ -16,11 +16,18 @@ export type QuarterlyChartPoint = {
   revenue: number
   expenses: number
   netProfit: number
-  /** Full calendar quarter bounds for expense-breakdown queries. */
+  /** Full calendar quarter bounds (labeling / completed-quarter queries). */
   calendarStart: string
   calendarEnd: string
   /** Latest month period_end present in timeline for this quarter. */
   dataThroughEnd: string
+  /**
+   * Effective query range shared by chart aggregates and expense popover.
+   * Completed quarters: full calendar bounds.
+   * Incomplete current quarter: calendar start → latest available timeline end.
+   */
+  effectiveStart: string
+  effectiveEnd: string
   isQuarterToDate: boolean
 }
 
@@ -31,6 +38,12 @@ export function quarterOfPeriodStart(periodStart: string): { year: number; quart
   const year = Number(periodStart.slice(0, 4))
   const month = Number(periodStart.slice(5, 7))
   return { year, quarter: Math.floor((month - 1) / 3) + 1 }
+}
+
+/** Stable quarter key from a period start, e.g. "2026-Q2". */
+export function quarterKeyFromPeriodStart(periodStart: string): string {
+  const { year, quarter } = quarterOfPeriodStart(periodStart)
+  return `${year}-Q${quarter}`
 }
 
 /** Inclusive calendar quarter bounds (month is 1–4). */
@@ -68,6 +81,15 @@ export function quarterMonthRangeLabel(year: number, quarter: number): string {
   return `${MONTH_NAMES_SHORT[startMonth - 1]}–${MONTH_NAMES_SHORT[endMonth - 1]} ${year}`
 }
 
+/** Accessible control label, e.g. "View Q2 2026 breakdown". */
+export function quarterAccessibleLabel(year: number, quarter: number): string {
+  return `View Q${quarter} ${year} breakdown`
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
 /** Today as YYYY-MM-DD in local time. */
 export function localTodayIso(): string {
   const now = new Date()
@@ -88,6 +110,10 @@ export function formatShortDisplayDate(isoDate: string): string {
 /**
  * Aggregates timeline months into calendar quarters. Sums only existing months;
  * does not invent missing months. Marks incomplete current quarters as QTD.
+ *
+ * `todayIso` is only used to decide whether a quarter is still open (QTD).
+ * The effective end date always comes from the latest available timeline
+ * period end in that quarter — not inventing Sep 30 when only July exists.
  */
 export function buildQuarterlyChartPoints(
   months: TrendsTimelineMonth[],
@@ -139,30 +165,45 @@ export function buildQuarterlyChartPoints(
       const dataThroughEnd = sortedMonths[sortedMonths.length - 1]?.period_end ?? calendarStart
       const inCurrentQuarter = todayIso >= calendarStart && todayIso <= calendarEnd
       const isQuarterToDate = inCurrentQuarter && dataThroughEnd < calendarEnd
+      const effectiveStart = calendarStart
+      const effectiveEnd = isQuarterToDate ? dataThroughEnd : calendarEnd
 
       return {
         key,
         label: `Q${bucket.quarter}`,
         year: bucket.year,
         quarter: bucket.quarter,
-        revenue: bucket.revenue,
-        expenses: bucket.expenses,
-        netProfit: bucket.netProfit,
+        revenue: roundMoney(bucket.revenue),
+        expenses: roundMoney(bucket.expenses),
+        netProfit: roundMoney(bucket.netProfit),
         calendarStart,
         calendarEnd,
         dataThroughEnd,
+        effectiveStart,
+        effectiveEnd,
         isQuarterToDate,
       }
     })
 }
 
+/**
+ * Resolve which quarter is selected.
+ * Priority: explicit user selection → dashboard period's quarter → latest.
+ */
 export function resolveSelectedQuarterKey(
   quarterlyPoints: QuarterlyChartPoint[],
-  selectedQuarterKey: string | null
+  selectedQuarterKey: string | null,
+  dashboardPeriodStart?: string | null
 ): string | null {
   if (quarterlyPoints.length === 0) return null
   if (selectedQuarterKey && quarterlyPoints.some((q) => q.key === selectedQuarterKey)) {
     return selectedQuarterKey
+  }
+  if (dashboardPeriodStart) {
+    const fromDashboard = quarterKeyFromPeriodStart(dashboardPeriodStart)
+    if (quarterlyPoints.some((q) => q.key === fromDashboard)) {
+      return fromDashboard
+    }
   }
   return quarterlyPoints[quarterlyPoints.length - 1]?.key ?? null
 }
