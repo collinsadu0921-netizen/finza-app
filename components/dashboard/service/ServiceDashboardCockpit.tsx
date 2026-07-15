@@ -667,6 +667,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           businessId={business.id}
           fallbackPeriodStart={metrics?.period?.period_start}
           fallbackPeriodEnd={metrics?.period?.period_end}
+          dashboardPeriodStart={metrics?.period?.period_start ?? null}
+          dashboardPeriodEnd={metrics?.period?.period_end ?? null}
           periodCaption={
             ledgerFallbackActive ? "Based on ledger records for this period" : undefined
           }
@@ -681,7 +683,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           overdueCount={metrics.overdueInvoicesCount ?? 0}
           overdueTotal={metrics.overdueInvoicesTotal ?? 0}
           currencyCode={currencyCode}
-          cashReportHref={`/service/payments?business_id=${encodeURIComponent(business.id)}`}
+          cashReportHref={
+            metrics.period?.period_start && metrics.period?.period_end
+              ? `/service/payments?business_id=${encodeURIComponent(business.id)}&start_date=${encodeURIComponent(metrics.period.period_start)}&end_date=${encodeURIComponent(metrics.period.period_end)}`
+              : `/service/payments?business_id=${encodeURIComponent(business.id)}`
+          }
           overdueReportHref={`/service/invoices?business_id=${encodeURIComponent(business.id)}&status=overdue`}
         />
       ) : null}

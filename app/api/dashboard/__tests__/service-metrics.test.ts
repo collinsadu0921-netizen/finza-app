@@ -17,10 +17,14 @@ jest.mock("@/lib/accounting/businessDate", () => ({
 jest.mock("@/lib/accounting/reports/resolvePnLMovementRange", () => ({
   resolvePnLMovementRange: jest.fn(),
 }))
+jest.mock("@/lib/server/customerPaymentsCollected", () => ({
+  loadCustomerPaymentsCollectedTotal: jest.fn().mockResolvedValue(2500.5),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
+import { loadCustomerPaymentsCollectedTotal } from "@/lib/server/customerPaymentsCollected"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
@@ -30,6 +34,9 @@ const mockCheckAuth = checkAccountingAuthority as jest.MockedFunction<
 >
 const mockResolveRange = resolvePnLMovementRange as jest.MockedFunction<
   typeof resolvePnLMovementRange
+>
+const mockLoadCustomerPayments = loadCustomerPaymentsCollectedTotal as jest.MockedFunction<
+  typeof loadCustomerPaymentsCollectedTotal
 >
 
 const defaultRange = {
@@ -86,6 +93,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockCheckAuth.mockResolvedValue({ authorized: true } as any)
   mockResolveRange.mockResolvedValue({ range: defaultRange, error: "" })
+  mockLoadCustomerPayments.mockResolvedValue(2500.5)
 })
 
 describe("GET /api/dashboard/service-metrics", () => {
@@ -146,7 +154,7 @@ describe("GET /api/dashboard/service-metrics", () => {
     expect(body.previousPeriod).toBeNull()
   })
 
-  it("does not call get_cash_collected_total or fetch journal_entry_lines directly", async () => {
+  it("loads cash collected from operational payments, not ledger cash debits", async () => {
     const rpc = mockDashboardRpc()
     const from = jest.fn()
     mockCreateSupabase.mockResolvedValue({
@@ -157,12 +165,16 @@ describe("GET /api/dashboard/service-metrics", () => {
       from,
     } as any)
 
-    await GET(
+    const res = await GET(
       new NextRequest("http://localhost/api/dashboard/service-metrics?business_id=biz-a")
     )
+    expect(res.status).toBe(200)
 
     expect(rpc.mock.calls.some(([name]) => name === "get_cash_collected_total")).toBe(false)
     expect(from).not.toHaveBeenCalledWith("journal_entry_lines")
+
+    const body = await res.json()
+    expect(body.cashCollected).toBe(2500.5)
   })
 
   it("includes previousPeriod when previous_period_start resolves and RPC returns compare fields", async () => {
@@ -206,6 +218,10 @@ describe("GET /api/dashboard/service-metrics", () => {
       })
     )
 
+    mockLoadCustomerPayments
+      .mockResolvedValueOnce(2500.5)
+      .mockResolvedValueOnce(1800)
+
     const res = await GET(
       new NextRequest(
         "http://localhost/api/dashboard/service-metrics?business_id=biz-a&previous_period_start=2026-05-01"
@@ -226,7 +242,7 @@ describe("GET /api/dashboard/service-metrics", () => {
       revenue: 8000,
       expenses: 3000,
       netProfit: 5000,
-      cashCollected: 0,
+      cashCollected: 1800,
       cashBalance: 4500,
       accountsReceivable: 900,
       accountsPayable: 700,
@@ -234,6 +250,7 @@ describe("GET /api/dashboard/service-metrics", () => {
   })
 
   it("returns zero metrics when RPC returns zeros", async () => {
+    mockLoadCustomerPayments.mockResolvedValue(0)
     const rpc = mockDashboardRpc(
       jest.fn().mockImplementation((name: string) => {
         if (name === "get_service_dashboard_metrics") {

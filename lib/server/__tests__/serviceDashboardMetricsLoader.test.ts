@@ -15,6 +15,9 @@ jest.mock("@/lib/server/accountingSnapshotRefresh", () => ({
   enqueueSnapshotRefreshJob: jest.fn().mockResolvedValue("job-1"),
   periodHasLivePnlMovement: jest.fn().mockResolvedValue(true),
 }))
+jest.mock("@/lib/server/customerPaymentsCollected", () => ({
+  loadCustomerPaymentsCollectedTotal: jest.fn().mockResolvedValue(0),
+}))
 jest.mock("@/lib/server/dashboardMetricsCache", () => ({
   dashboardMetricsCacheKey: jest.fn().mockReturnValue("metrics-cache-key"),
   isDashboardMetricsCacheEnabled: jest.fn().mockReturnValue(false),
@@ -112,9 +115,6 @@ describe("loadServiceDashboardMetrics summary-only", () => {
         })
       }
       if (name === "finza_dashboard_positions_as_of") return positionsRpc()
-      if (name === "get_cash_collected_total") {
-        return Promise.resolve({ data: 0, error: null })
-      }
       if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
       return Promise.resolve({ data: null, error: null })
     })

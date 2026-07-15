@@ -5,6 +5,10 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import {
+  getLastCalendarMonthRange,
+  getThisCalendarMonthRange,
+} from "@/lib/accounting/calendarDateRange"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate } from "@/lib/exportUtils"
 import Button from "@/components/ui/Button"
 import { Money } from "@/components/ui/Money"
@@ -46,15 +50,21 @@ export default function ServicePaymentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
+  const [businessTimezone, setBusinessTimezone] = useState("UTC")
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
-  const [dateRange, setDateRange] = useState<DateRange>("this_month")
-  const [customStartDate, setCustomStartDate] = useState("")
-  const [customEndDate, setCustomEndDate] = useState("")
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    const start = searchParams.get("start_date")
+    const end = searchParams.get("end_date")
+    return start && end ? "custom" : "this_month"
+  })
+  const [customStartDate, setCustomStartDate] = useState(() => searchParams.get("start_date") ?? "")
+  const [customEndDate, setCustomEndDate] = useState(() => searchParams.get("end_date") ?? "")
   const [page, setPage] = useState(() => {
     const p = Number.parseInt(searchParams.get("page") || "1", 10)
     return Number.isFinite(p) && p > 0 ? p : 1
   })
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
+  const [rangeTotals, setRangeTotals] = useState({ totalAmount: 0, totalCount: 0 })
 
   useEffect(() => {
     loadBusiness()
@@ -64,7 +74,7 @@ export default function ServicePaymentsPage() {
     if (businessId) {
       loadPayments()
     }
-  }, [businessId, dateRange, customStartDate, customEndDate, page])
+  }, [businessId, dateRange, customStartDate, customEndDate, page, businessTimezone])
 
   const loadBusiness = async () => {
     try {
@@ -86,6 +96,7 @@ export default function ServicePaymentsPage() {
       }
 
       setBusinessId(business.id)
+      setBusinessTimezone((business.timezone ?? "UTC").trim() || "UTC")
       setCurrencyCode(business.default_currency ?? null)
     } catch (err: any) {
       console.error("Error loading business:", err)
@@ -94,27 +105,16 @@ export default function ServicePaymentsPage() {
     }
   }
 
-  const getDateRange = () => {
-    const today = new Date()
-    let startDate: string
-    let endDate: string
-
+  const getDateRange = (): { startDate: string; endDate: string } => {
     if (dateRange === "this_month") {
-      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-      startDate = startOfMonth.toISOString().split("T")[0]
-      endDate = today.toISOString().split("T")[0]
-    } else if (dateRange === "last_month") {
-      const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-      const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0)
-      startDate = startOfLastMonth.toISOString().split("T")[0]
-      endDate = endOfLastMonth.toISOString().split("T")[0]
-    } else {
-      // Custom range
-      startDate = customStartDate
-      endDate = customEndDate
+      const { start, end } = getThisCalendarMonthRange(businessTimezone)
+      return { startDate: start, endDate: end }
     }
-
-    return { startDate, endDate }
+    if (dateRange === "last_month") {
+      const { start, end } = getLastCalendarMonthRange(businessTimezone)
+      return { startDate: start, endDate: end }
+    }
+    return { startDate: customStartDate, endDate: customEndDate }
   }
 
   const loadPayments = async () => {
@@ -148,6 +148,12 @@ export default function ServicePaymentsPage() {
       const data = await response.json()
       setPayments(data.payments || [])
       setPagination(data.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
+      setRangeTotals(
+        data.totals ?? {
+          totalAmount: 0,
+          totalCount: data.pagination?.totalCount ?? 0,
+        }
+      )
     } catch (err: any) {
       console.error("Error loading payments:", err)
       setError(err.message || "Failed to load payments")
@@ -251,8 +257,8 @@ export default function ServicePaymentsPage() {
     }
   }
 
-  const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
-  const paymentCount = payments.length
+  const totalCollected = rangeTotals.totalAmount
+  const paymentCount = rangeTotals.totalCount
 
   useEffect(() => {
     const params = new URLSearchParams(searchParamsString)

@@ -210,7 +210,7 @@ function DesktopExpenseBreakdownPopover({
   popoverId: string
   titleId: string
   coords: { top: number; left: number; width: number } | null
-  panelRef: React.RefObject<HTMLDivElement | null>
+  panelRef: React.Ref<HTMLDivElement>
   onClose: () => void
   children: ReactNode
 }) {
