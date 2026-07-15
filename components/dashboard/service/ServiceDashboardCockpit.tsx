@@ -17,6 +17,7 @@ import ServiceDashboardSkeleton, {
 } from "./ServiceDashboardSkeleton"
 import DashboardErrorBanner from "./DashboardErrorBanner"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
+import { formatAccountingPeriodLabel } from "@/lib/dashboard/formatAccountingPeriodLabel"
 
 const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
   loading: () => <ServiceDashboardTrendsPanelSkeleton />,
@@ -42,6 +43,8 @@ type Metrics = {
   unpaidInvoicesCount?: number
   overdueInvoicesTotal?: number
   overdueInvoicesCount?: number
+  metrics_source?: string
+  live_fallback_used?: boolean
   previousPeriod?: {
     revenue: number
     expenses: number
@@ -80,20 +83,6 @@ export type ServiceDashboardCockpitProps = {
   business: Business
   /** Workspace identity (logo + title); date + Refresh align to the right when set. */
   headerLead?: ReactNode
-}
-
-/** Returns "Mar '26" for same-month periods, "Jan '26 – Mar '26" for ranges. */
-function formatPeriodLabel(start: string, end: string): string {
-  // Compare year-month directly on the ISO string to avoid timezone issues
-  const sYM = start.slice(0, 7)
-  const eYM = end.slice(0, 7)
-  const s = new Date(start + "T12:00:00")
-  const e = new Date(end + "T12:00:00")
-  const opts: Intl.DateTimeFormatOptions = { month: "short", year: "2-digit" }
-  if (sYM === eYM) {
-    return s.toLocaleDateString(undefined, opts)
-  }
-  return `${s.toLocaleDateString(undefined, opts)} – ${e.toLocaleDateString(undefined, opts)}`
 }
 
 function formatShortIsoDate(iso: string): string {
@@ -443,14 +432,14 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
 
   const periodLabel =
     metrics?.period?.period_start && metrics?.period?.period_end
-      ? formatPeriodLabel(metrics.period.period_start, metrics.period.period_end)
+      ? formatAccountingPeriodLabel(metrics.period.period_start, metrics.period.period_end)
       : "—"
 
   const periodOptions: { value: string; label: string }[] = [
     { value: "", label: "Latest period" },
     ...timeline.map((t) => ({
       value: t.period_start,
-      label: formatPeriodLabel(t.period_start, t.period_end),
+      label: formatAccountingPeriodLabel(t.period_start, t.period_end),
     })),
   ]
 
@@ -474,7 +463,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const chartData = timeline.map((t) => ({
     period_start: t.period_start,
     period_end: t.period_end,
-    label: formatPeriodLabel(t.period_start, t.period_end),
+    label: formatAccountingPeriodLabel(t.period_start, t.period_end),
     revenue: t.revenue,
     expenses: t.expenses,
     netProfit: t.netProfit,
@@ -517,6 +506,8 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   }
 
   const routes = getDashboardRoutes(business.id)
+  const ledgerFallbackActive =
+    metrics?.metrics_source === "ledger_live_fallback" || metrics?.live_fallback_used === true
 
   return (
     <div className="space-y-5" data-tour="service-dashboard-overview">
@@ -573,11 +564,18 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       ) : (
         <TrendsSectionLazy
           data={chartData}
-          focusPeriodStart={trendsFocusPeriodStart}
           currencyCode={currencyCode}
           currentRevenue={metrics?.revenue ?? 0}
           currentExpenses={metrics?.expenses ?? 0}
           currentNetProfit={metrics?.netProfit ?? 0}
+          businessId={business.id}
+          fallbackPeriodStart={metrics?.period?.period_start}
+          fallbackPeriodEnd={metrics?.period?.period_end}
+          dashboardPeriodStart={metrics?.period?.period_start ?? null}
+          dashboardPeriodEnd={metrics?.period?.period_end ?? null}
+          periodCaption={
+            ledgerFallbackActive ? "Based on ledger records for this period" : undefined
+          }
         />
       )}
 
@@ -589,7 +587,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           overdueCount={metrics.overdueInvoicesCount ?? 0}
           overdueTotal={metrics.overdueInvoicesTotal ?? 0}
           currencyCode={currencyCode}
-          cashReportHref={`/service/payments?business_id=${encodeURIComponent(business.id)}`}
+          cashReportHref={
+            metrics.period?.period_start && metrics.period?.period_end
+              ? `/service/payments?business_id=${encodeURIComponent(business.id)}&start_date=${encodeURIComponent(metrics.period.period_start)}&end_date=${encodeURIComponent(metrics.period.period_end)}`
+              : `/service/payments?business_id=${encodeURIComponent(business.id)}`
+          }
           overdueReportHref={`/service/invoices?business_id=${encodeURIComponent(business.id)}&status=overdue`}
         />
       ) : null}

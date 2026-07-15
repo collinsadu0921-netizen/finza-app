@@ -256,7 +256,7 @@ export default function AnalyticsPage() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis type="number" />
                   <YAxis dataKey="rider_name" type="category" width={80} />
-                  <Tooltip formatter={(value: number) => formatAmount(value)} />
+                  <Tooltip formatter={(value) => formatAmount(Number(value ?? 0))} />
                   <Legend />
                   <Bar
                     dataKey="earnings"

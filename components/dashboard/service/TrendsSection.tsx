@@ -12,10 +12,25 @@ import {
   CartesianGrid,
   ReferenceLine,
   Cell,
-  TooltipProps,
+  type TooltipContentProps,
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
+
+/** Explicit generics: Vercel/Next typecheck requires args; defaults are not always preserved on re-export. */
+type ChartTooltipProps = TooltipContentProps<
+  number | string | ReadonlyArray<number | string>,
+  string | number
+>
+import {
+  buildQuarterlyChartPoints,
+  formatShortDisplayDate,
+  quarterAccessibleLabel,
+  quarterMonthRangeLabel,
+  resolveSelectedQuarterKey,
+  type QuarterlyChartPoint,
+} from "@/lib/dashboard/trendsQuarterUtils"
+import DashboardExpensesInfo from "./DashboardExpensesInfo"
 
 export type TimelinePoint = {
   period_start: string
@@ -30,12 +45,20 @@ export type TimelinePoint = {
 export type TrendsSectionProps = {
   data: TimelinePoint[]
   currencyCode?: string
-  /** Dashboard-selected or backend-resolved period (YYYY-MM-DD). */
-  focusPeriodStart?: string | null
-  /** Current period totals — fallback when focus period is not in timeline. */
+  /** Current period totals — used only as a fallback when no timeline exists. */
   currentRevenue?: number
   currentExpenses?: number
   currentNetProfit?: number
+  /** Optional note when period KPIs come from ledger fallback instead of snapshot. */
+  periodCaption?: string
+  /** For expense-breakdown info popover (lazy-loaded). */
+  businessId?: string
+  /** Fallback period when timeline has no visible point (metrics period). */
+  fallbackPeriodStart?: string
+  fallbackPeriodEnd?: string
+  /** Dashboard period picker — monthly hero/breakdown follow this when set. */
+  dashboardPeriodStart?: string | null
+  dashboardPeriodEnd?: string | null
 }
 
 type PeriodMode = "monthly" | "quarterly" | "ytd"
@@ -45,6 +68,8 @@ type ChartPoint = {
   revenue: number
   expenses: number
   netProfit: number
+  /** Present in quarterly mode — used for bar selection. */
+  quarterKey?: string
 }
 
 const PERIOD_MODES: { id: PeriodMode; label: string }[] = [
@@ -95,14 +120,6 @@ function shortMonthLabel(periodStart: string): string {
   return d.toLocaleDateString(undefined, { month: "short" })
 }
 
-/** Calendar year + quarter (1-4) derived from a period's ISO start date. */
-function quarterOf(periodStart: string): { year: number; quarter: number } {
-  const ym = periodStart.slice(0, 7)
-  const year = Number(ym.slice(0, 4))
-  const month = Number(ym.slice(5, 7))
-  return { year, quarter: Math.floor((month - 1) / 3) + 1 }
-}
-
 /** Revenue below this is too small for a meaningful margin percentage. */
 const MIN_MEANINGFUL_MARGIN_REVENUE = 1
 
@@ -145,34 +162,6 @@ function getNetMarginDisplay(revenue: number, netProfit: number): NetMarginDispl
 }
 
 /**
- * Aggregates available monthly periods into calendar quarters in chronological
- * order. Only periods that exist are used; missing months are never invented.
- */
-function buildQuarterlyPoints(months: TimelinePoint[]): ChartPoint[] {
-  const buckets = new Map<string, ChartPoint>()
-  for (const m of months) {
-    const { year, quarter } = quarterOf(m.period_start)
-    const key = `${year}-Q${quarter}`
-    const existing = buckets.get(key)
-    if (existing) {
-      existing.revenue += m.revenue
-      existing.expenses += m.expenses
-      existing.netProfit += m.netProfit
-    } else {
-      buckets.set(key, {
-        label: `Q${quarter}`,
-        revenue: m.revenue,
-        expenses: m.expenses,
-        netProfit: m.netProfit,
-      })
-    }
-  }
-  return [...buckets.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([, point]) => point)
-}
-
-/**
  * Builds a cumulative year-to-date progression from the available months of the
  * latest year present in the timeline. Uses only real periods.
  */
@@ -193,18 +182,12 @@ function buildYtdCumulative(months: TimelinePoint[]): ChartPoint[] {
   })
 }
 
-type OperatingTooltipProps = TooltipProps<number, string> & {
-  payload?: Array<{ name?: string; value?: number }>
-  label?: string
-  currencyCode: string
-}
-
 function OperatingTooltip({
   active,
   payload,
   label,
   currencyCode,
-}: OperatingTooltipProps) {
+}: ChartTooltipProps & { currencyCode: string }) {
   if (!active || !payload?.length) return null
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-md ring-1 ring-black/[0.03]">
@@ -214,7 +197,7 @@ function OperatingTooltip({
       <div className="space-y-1">
         {payload.map((entry) => (
           <div
-            key={entry.name}
+            key={String(entry.name)}
             className="flex items-center justify-between gap-6 text-[11px]"
           >
             <span className="text-slate-500">{entry.name}</span>
@@ -228,13 +211,12 @@ function OperatingTooltip({
   )
 }
 
-type ProfitTooltipProps = TooltipProps<number, string> & {
-  payload?: Array<{ value?: number }>
-  label?: string
-  currencyCode: string
-}
-
-function ProfitTooltip({ active, payload, label, currencyCode }: ProfitTooltipProps) {
+function ProfitTooltip({
+  active,
+  payload,
+  label,
+  currencyCode,
+}: ChartTooltipProps & { currencyCode: string }) {
   if (!active || !payload?.length) return null
   const value = Number(payload[0]?.value ?? 0)
   return (
@@ -312,45 +294,189 @@ function PeriodSelector({
   )
 }
 
+/**
+ * Accessible quarter controls synchronized with chart bar selection.
+ * Recharts bars remain mouse/tooltip targets; these buttons provide keyboard + a11y.
+ */
+function AccessibleQuarterSelector({
+  quarters,
+  activeQuarterKey,
+  onSelect,
+}: {
+  quarters: QuarterlyChartPoint[]
+  activeQuarterKey: string | null
+  onSelect: (key: string) => void
+}) {
+  if (quarters.length === 0) return null
+
+  return (
+    <div
+      className="mt-2 flex flex-wrap gap-1.5"
+      role="group"
+      aria-label="Select quarter for breakdown"
+    >
+      {quarters.map((q) => {
+        const selected = q.key === activeQuarterKey
+        return (
+          <button
+            key={q.key}
+            type="button"
+            tabIndex={0}
+            aria-label={quarterAccessibleLabel(q.year, q.quarter)}
+            aria-pressed={selected}
+            onClick={() => onSelect(q.key)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                onSelect(q.key)
+              } else if (event.key === " ") {
+                event.preventDefault()
+                onSelect(q.key)
+              }
+            }}
+            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 ${
+              selected
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+            }`}
+          >
+            {q.label} {q.year}
+            {q.isQuarterToDate ? " · QTD" : ""}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function TrendsSection({
   data,
   currencyCode = DEFAULT_PLATFORM_CURRENCY_CODE,
-  focusPeriodStart = null,
   currentRevenue = 0,
   currentExpenses = 0,
   currentNetProfit = 0,
+  periodCaption,
+  businessId,
+  fallbackPeriodStart,
+  fallbackPeriodEnd,
+  dashboardPeriodStart,
+  dashboardPeriodEnd,
 }: TrendsSectionProps) {
   const [mode, setMode] = useState<PeriodMode>("monthly")
+  const [selectedQuarterKey, setSelectedQuarterKey] = useState<string | null>(null)
+
+  const handleModeChange = (next: PeriodMode) => {
+    setMode(next)
+    // Clear explicit quarter selection when leaving Quarterly so re-entry
+    // re-seeds from the current dashboard period.
+    if (next !== "quarterly") {
+      setSelectedQuarterKey(null)
+    }
+  }
 
   const view = useMemo(() => {
     const nonFuture = sortedNonFuture(data)
 
     let chartData: ChartPoint[]
     let profitLaneLabel: string
+    let breakdownTitle: string
     let breakdownSubtitle: string
     let scopeLabel: string
     let operatingCaption: string
+    let breakdownSubtitleExtra: string | undefined
+    let activeQuarterKey: string | null = null
+
+    let selectedPeriodStart: string | undefined
+    let selectedPeriodEnd: string | undefined
+
+    const quarterlyPoints = buildQuarterlyChartPoints(nonFuture)
 
     if (mode === "monthly") {
-      chartData = nonFuture.slice(-MONTHLY_WINDOW).map((m) => ({
+      const windowMonths = nonFuture.slice(-MONTHLY_WINDOW)
+      const dashboardMonth =
+        dashboardPeriodStart != null && dashboardPeriodStart !== ""
+          ? nonFuture.find((m) => m.period_start === dashboardPeriodStart) ?? null
+          : null
+      const latestMonth =
+        dashboardMonth ??
+        (windowMonths.length > 0 ? windowMonths[windowMonths.length - 1] : null)
+      if (latestMonth) {
+        selectedPeriodStart = latestMonth.period_start
+        selectedPeriodEnd = latestMonth.period_end
+      } else if (dashboardPeriodStart && dashboardPeriodEnd) {
+        selectedPeriodStart = dashboardPeriodStart
+        selectedPeriodEnd = dashboardPeriodEnd
+      }
+      chartData = windowMonths.map((m) => ({
         label: shortMonthLabel(m.period_start),
         revenue: m.revenue,
         expenses: m.expenses,
         netProfit: m.netProfit,
       }))
       profitLaneLabel = "Net profit by month"
-      breakdownSubtitle = "Latest month summary"
+      breakdownTitle = dashboardMonth
+        ? `${shortMonthLabel(dashboardMonth.period_start)} breakdown`
+        : "Latest breakdown"
+      breakdownSubtitle = dashboardMonth
+        ? `${shortMonthLabel(dashboardMonth.period_start)} summary`
+        : "Latest month summary"
       scopeLabel = "Monthly"
       operatingCaption = "Revenue and expenses by month"
     } else if (mode === "quarterly") {
-      chartData = buildQuarterlyPoints(nonFuture)
+      activeQuarterKey = resolveSelectedQuarterKey(
+        quarterlyPoints,
+        selectedQuarterKey,
+        dashboardPeriodStart
+      )
+      const selectedQuarter =
+        quarterlyPoints.find((q) => q.key === activeQuarterKey) ??
+        quarterlyPoints[quarterlyPoints.length - 1] ??
+        null
+
+      chartData = quarterlyPoints.map((q) => ({
+        label: q.label,
+        revenue: q.revenue,
+        expenses: q.expenses,
+        netProfit: q.netProfit,
+        quarterKey: q.key,
+      }))
+
+      if (selectedQuarter) {
+        // Popover + breakdown use effective range (QTD → latest timeline end).
+        selectedPeriodStart = selectedQuarter.effectiveStart
+        selectedPeriodEnd = selectedQuarter.effectiveEnd
+      }
+
       profitLaneLabel = "Net profit by quarter"
-      breakdownSubtitle = "Latest quarter summary"
       scopeLabel = "Quarterly"
-      operatingCaption = "Revenue and expenses by quarter"
+      operatingCaption = "Select a quarter to inspect · revenue and expenses by quarter"
+
+      if (selectedQuarter) {
+        breakdownTitle = `Q${selectedQuarter.quarter} breakdown`
+        if (selectedQuarter.isQuarterToDate) {
+          breakdownSubtitle = `Quarter to date · ${quarterMonthRangeLabel(selectedQuarter.year, selectedQuarter.quarter)}`
+          breakdownSubtitleExtra = `Data through ${formatShortDisplayDate(selectedQuarter.dataThroughEnd)}`
+        } else {
+          breakdownSubtitle = `${quarterMonthRangeLabel(selectedQuarter.year, selectedQuarter.quarter)} summary`
+        }
+      } else {
+        breakdownTitle = "Latest breakdown"
+        breakdownSubtitle = "Latest quarter summary"
+      }
     } else {
       chartData = buildYtdCumulative(nonFuture)
+      if (nonFuture.length > 0) {
+        const latestYear = nonFuture[nonFuture.length - 1].period_start.slice(0, 4)
+        const yearMonths = nonFuture.filter(
+          (m) => m.period_start.slice(0, 4) === latestYear
+        )
+        if (yearMonths.length > 0) {
+          selectedPeriodStart = yearMonths[0].period_start
+          selectedPeriodEnd = yearMonths[yearMonths.length - 1].period_end
+        }
+      }
       profitLaneLabel = "Cumulative net profit"
+      breakdownTitle = "YTD breakdown"
       breakdownSubtitle = "Year-to-date summary"
       scopeLabel = "YTD"
       operatingCaption = "Cumulative revenue and expenses"
@@ -358,57 +484,50 @@ export default function TrendsSection({
 
     const latestPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
 
-    const useFocusPeriod =
-      mode === "monthly" && focusPeriodStart != null && focusPeriodStart !== ""
+    const dashboardTimelineMonth =
+      mode === "monthly" && dashboardPeriodStart
+        ? nonFuture.find((m) => m.period_start === dashboardPeriodStart)
+        : null
 
-    const focusedMonth = useFocusPeriod
-      ? nonFuture.find((p) => p.period_start === focusPeriodStart)
-      : undefined
+    const selectedQuarter =
+      mode === "quarterly" && activeQuarterKey
+        ? quarterlyPoints.find((q) => q.key === activeQuarterKey) ?? null
+        : null
 
-    let selectedRevenue: number
-    let selectedExpenses: number
-    let selectedNetProfit: number
-    let breakdownTitle: string
+    const selectedRevenue = dashboardTimelineMonth
+      ? dashboardTimelineMonth.revenue
+      : selectedQuarter
+        ? selectedQuarter.revenue
+        : latestPoint
+          ? latestPoint.revenue
+          : currentRevenue
+    const selectedExpenses = dashboardTimelineMonth
+      ? dashboardTimelineMonth.expenses
+      : selectedQuarter
+        ? selectedQuarter.expenses
+        : latestPoint
+          ? latestPoint.expenses
+          : currentExpenses
+    const selectedNetProfit = dashboardTimelineMonth
+      ? dashboardTimelineMonth.netProfit
+      : selectedQuarter
+        ? selectedQuarter.netProfit
+        : latestPoint
+          ? latestPoint.netProfit
+          : currentNetProfit
 
-    if (useFocusPeriod) {
-      if (focusedMonth) {
-        selectedRevenue = focusedMonth.revenue
-        selectedExpenses = focusedMonth.expenses
-        selectedNetProfit = focusedMonth.netProfit
-        breakdownTitle = `${shortMonthLabel(focusedMonth.period_start)} breakdown`
-        breakdownSubtitle = "Selected month summary"
-      } else {
-        selectedRevenue = currentRevenue
-        selectedExpenses = currentExpenses
-        selectedNetProfit = currentNetProfit
-        breakdownTitle = `${shortMonthLabel(focusPeriodStart!)} breakdown`
-        breakdownSubtitle = "Selected month summary"
+    if (mode === "monthly") {
+      if (dashboardTimelineMonth) {
+        breakdownTitle = `${shortMonthLabel(dashboardTimelineMonth.period_start)} breakdown`
+      } else if (latestPoint) {
+        breakdownTitle = `${latestPoint.label} breakdown`
+      } else if (dashboardPeriodStart) {
+        breakdownTitle = `${shortMonthLabel(dashboardPeriodStart)} breakdown`
       }
-    } else if (latestPoint) {
-      selectedRevenue = latestPoint.revenue
-      selectedExpenses = latestPoint.expenses
-      selectedNetProfit = latestPoint.netProfit
-      breakdownTitle =
-        mode === "ytd"
-          ? "YTD breakdown"
-          : `${latestPoint.label} breakdown`
-      breakdownSubtitle =
-        mode === "ytd"
-          ? "Year-to-date summary"
-          : mode === "quarterly"
-            ? "Latest quarter summary"
-            : "Latest month summary"
-    } else {
-      selectedRevenue = currentRevenue
-      selectedExpenses = currentExpenses
-      selectedNetProfit = currentNetProfit
-      breakdownTitle = mode === "ytd" ? "YTD breakdown" : "Latest breakdown"
-      breakdownSubtitle =
-        mode === "ytd"
-          ? "Year-to-date summary"
-          : mode === "quarterly"
-            ? "Latest quarter summary"
-            : "Latest month summary"
+    } else if (mode === "ytd") {
+      // breakdownTitle set in branch above
+    } else if (!breakdownTitle) {
+      breakdownTitle = latestPoint ? `${latestPoint.label} breakdown` : "Latest breakdown"
     }
 
     let footerLabel: string
@@ -438,8 +557,57 @@ export default function TrendsSection({
       operatingCaption,
       footerLabel,
       footerValue,
+      selectedPeriodStart,
+      selectedPeriodEnd,
+      breakdownSubtitleExtra,
+      activeQuarterKey,
+      quarterlyPoints,
     }
-  }, [data, mode, focusPeriodStart, currentRevenue, currentExpenses, currentNetProfit])
+  }, [
+    data,
+    mode,
+    selectedQuarterKey,
+    currentRevenue,
+    currentExpenses,
+    currentNetProfit,
+    dashboardPeriodStart,
+    dashboardPeriodEnd,
+  ])
+
+  const breakdownPeriodStart =
+    mode === "quarterly"
+      ? view.selectedPeriodStart ?? fallbackPeriodStart
+      : dashboardPeriodStart ?? view.selectedPeriodStart ?? fallbackPeriodStart
+  const breakdownPeriodEnd =
+    mode === "quarterly"
+      ? view.selectedPeriodEnd ?? fallbackPeriodEnd
+      : dashboardPeriodEnd ?? view.selectedPeriodEnd ?? fallbackPeriodEnd
+
+  const selectQuarter = (quarterKey: string) => {
+    if (mode !== "quarterly") return
+    setSelectedQuarterKey(quarterKey)
+  }
+
+  const handleQuarterBarClick = (barData: { payload?: ChartPoint }) => {
+    const entry = barData?.payload
+    if (!entry?.quarterKey) return
+    selectQuarter(entry.quarterKey)
+  }
+
+  const quarterBarOpacity = (quarterKey?: string) => {
+    if (mode !== "quarterly" || !quarterKey) return 1
+    return quarterKey === view.activeQuarterKey ? 1 : 0.42
+  }
+
+  const expensesInfo = (
+    <DashboardExpensesInfo
+      businessId={businessId}
+      periodStart={breakdownPeriodStart}
+      periodEnd={breakdownPeriodEnd}
+      displayTotal={view.selectedExpenses}
+      currencyCode={currencyCode}
+    />
+  )
 
   // Profit/loss badge follows the SAME selected net profit used everywhere else.
   const profitable = view.selectedNetProfit >= 0
@@ -454,11 +622,11 @@ export default function TrendsSection({
             Profit performance
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-500">
-            Revenue, expenses, and net profit for the selected period
+            {periodCaption ?? "Revenue, expenses, and net profit for the selected period"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <PeriodSelector mode={mode} onChange={setMode} />
+          <PeriodSelector mode={mode} onChange={handleModeChange} />
           {view.hasData ? (
             <span
               className={`rounded-md border px-2.5 py-1 text-[11px] font-medium ${
@@ -519,8 +687,9 @@ export default function TrendsSection({
                   </div>
                 </div>
                 <div className="px-4 py-2.5">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Expenses
+                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    <span>Expenses</span>
+                    {expensesInfo}
                   </div>
                   <div className="mt-0.5 text-base font-semibold tabular-nums text-slate-800">
                     {formatMoney(view.selectedExpenses, currencyCode)}
@@ -556,6 +725,14 @@ export default function TrendsSection({
                 <span className="text-[11px] text-slate-400">{view.operatingCaption}</span>
               </div>
 
+              {quarterly ? (
+                <AccessibleQuarterSelector
+                  quarters={view.quarterlyPoints}
+                  activeQuarterKey={view.activeQuarterKey}
+                  onSelect={selectQuarter}
+                />
+              ) : null}
+
               <div className="h-[156px] w-full min-w-0 sm:h-[168px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
@@ -584,7 +761,7 @@ export default function TrendsSection({
                       tickFormatter={(v: number) => formatCompactMoney(v, currencyCode)}
                     />
                     <Tooltip
-                      content={(props: TooltipProps<number, string>) => (
+                      content={(props: ChartTooltipProps) => (
                         <OperatingTooltip {...props} currencyCode={currencyCode} />
                       )}
                       cursor={{ fill: "rgba(15,23,42,0.03)" }}
@@ -596,14 +773,46 @@ export default function TrendsSection({
                       fill={COLORS.revenue}
                       radius={[3, 3, 0, 0]}
                       maxBarSize={quarterly ? 44 : 36}
-                    />
+                      onClick={quarterly ? handleQuarterBarClick : undefined}
+                    >
+                      {quarterly
+                        ? view.chartData.map((entry, index) => (
+                            <Cell
+                              key={`rev-${entry.quarterKey ?? index}`}
+                              fill={COLORS.revenue}
+                              fillOpacity={quarterBarOpacity(entry.quarterKey)}
+                              stroke={
+                                entry.quarterKey === view.activeQuarterKey ? "#047857" : "transparent"
+                              }
+                              strokeWidth={entry.quarterKey === view.activeQuarterKey ? 2 : 0}
+                              cursor="pointer"
+                            />
+                          ))
+                        : null}
+                    </Bar>
                     <Bar
                       dataKey="expenses"
                       name="Expenses"
                       fill={COLORS.expenses}
                       radius={[3, 3, 0, 0]}
                       maxBarSize={quarterly ? 44 : 36}
-                    />
+                      onClick={quarterly ? handleQuarterBarClick : undefined}
+                    >
+                      {quarterly
+                        ? view.chartData.map((entry, index) => (
+                            <Cell
+                              key={`exp-${entry.quarterKey ?? index}`}
+                              fill={COLORS.expenses}
+                              fillOpacity={quarterBarOpacity(entry.quarterKey)}
+                              stroke={
+                                entry.quarterKey === view.activeQuarterKey ? "#334155" : "transparent"
+                              }
+                              strokeWidth={entry.quarterKey === view.activeQuarterKey ? 2 : 0}
+                              cursor="pointer"
+                            />
+                          ))
+                        : null}
+                    </Bar>
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -615,7 +824,9 @@ export default function TrendsSection({
                     {view.profitLaneLabel}
                   </span>
                   <span className="hidden text-[10px] text-slate-400 sm:inline">
-                    Hover a bar for the amount
+                    {quarterly
+                      ? "Select a quarter above or click a bar"
+                      : "Hover a bar for the amount"}
                   </span>
                 </div>
                 <div className="h-[120px] w-full min-w-0 sm:h-[132px]">
@@ -650,7 +861,7 @@ export default function TrendsSection({
                         tickFormatter={(v: number) => formatCompactMoney(v, currencyCode)}
                       />
                       <Tooltip
-                        content={(props: TooltipProps<number, string>) => (
+                        content={(props: ChartTooltipProps) => (
                           <ProfitTooltip {...props} currencyCode={currencyCode} />
                         )}
                         cursor={{ fill: "rgba(79,70,229,0.04)" }}
@@ -661,11 +872,24 @@ export default function TrendsSection({
                         name="Net profit"
                         radius={[2, 2, 2, 2]}
                         maxBarSize={quarterly ? 40 : 30}
+                        onClick={quarterly ? handleQuarterBarClick : undefined}
                       >
                         {view.chartData.map((entry, index) => (
                           <Cell
                             key={`${entry.label}-${index}`}
                             fill={entry.netProfit >= 0 ? COLORS.profitPos : COLORS.profitNeg}
+                            fillOpacity={quarterBarOpacity(entry.quarterKey)}
+                            stroke={
+                              quarterly && entry.quarterKey === view.activeQuarterKey
+                                ? entry.netProfit >= 0
+                                  ? "#3730a3"
+                                  : "#b91c1c"
+                                : "transparent"
+                            }
+                            strokeWidth={
+                              quarterly && entry.quarterKey === view.activeQuarterKey ? 2 : 0
+                            }
+                            cursor={quarterly ? "pointer" : "default"}
                           />
                         ))}
                       </Bar>
@@ -682,6 +906,9 @@ export default function TrendsSection({
                   {view.breakdownTitle}
                 </h3>
                 <p className="mt-0.5 text-[11px] text-slate-400">{view.breakdownSubtitle}</p>
+                {view.breakdownSubtitleExtra ? (
+                  <p className="mt-0.5 text-[11px] text-slate-400">{view.breakdownSubtitleExtra}</p>
+                ) : null}
               </div>
 
               <div className="rounded-lg border border-slate-200/70 bg-white px-4 py-1">
@@ -689,10 +916,15 @@ export default function TrendsSection({
                   label="Revenue"
                   value={formatMoney(view.selectedRevenue, currencyCode)}
                 />
-                <BreakdownRow
-                  label="Expenses"
-                  value={formatMoney(view.selectedExpenses, currencyCode)}
-                />
+                <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 py-2.5">
+                  <span className="flex items-center gap-1 text-xs text-slate-500">
+                    <span>Expenses</span>
+                    {expensesInfo}
+                  </span>
+                  <span className="text-right text-sm font-medium tabular-nums text-slate-800">
+                    {formatMoney(view.selectedExpenses, currencyCode)}
+                  </span>
+                </div>
                 <BreakdownRow
                   label="Net profit"
                   value={formatMoney(view.selectedNetProfit, currencyCode)}
