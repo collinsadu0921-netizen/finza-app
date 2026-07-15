@@ -13,12 +13,15 @@ import {
   ReferenceLine,
   Cell,
   type TooltipContentProps,
-  type TooltipValueType,
 } from "recharts"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
 
-type ChartTooltipProps = TooltipContentProps<TooltipValueType, string | number>
+/** Explicit generics: Vercel/Next typecheck requires args; defaults are not always preserved on re-export. */
+type ChartTooltipProps = TooltipContentProps<
+  number | string | ReadonlyArray<number | string>,
+  string | number
+>
 import {
   buildQuarterlyChartPoints,
   formatShortDisplayDate,
