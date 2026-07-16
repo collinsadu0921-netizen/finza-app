@@ -102,8 +102,12 @@ Counts print at end of run via `handleSummary`. Use before mixed gates to confir
 
 **Prime July snapshot (staging load-test business) before mixed gate:**
 
+Requires `.env.staging` with `NEXT_PUBLIC_SUPABASE_URL` (staging ref `adonhhtooawkeemdqqeo`) and `SUPABASE_SERVICE_ROLE_KEY`. Copy from `.env.staging.example` — never commit real keys.
+
 ```powershell
 node scripts/prime-staging-pnl-snapshot.mjs
+# optional overrides:
+# node scripts/prime-staging-pnl-snapshot.mjs --period-start=2026-07-01 --period-end=2026-07-31
 ```
 
 ## Session file format

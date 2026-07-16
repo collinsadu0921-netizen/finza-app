@@ -21,4 +21,8 @@ load-tests/sessions.*.json
 load-tests/results/
 # Browser cURL captures for k6 session import (never commit)
 *.curl
+*.curl.txt
 service-metrics.curl
+
+# Ephemeral dashboard probe outputs
+load-tests/probe-cluster*.json

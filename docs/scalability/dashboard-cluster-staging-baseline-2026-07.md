@@ -139,7 +139,7 @@ $env:REPORTS_VUS = "10"
 3. Refresh session: `node scripts/refresh-staging-load-session.mjs`
 4. Prime `dashboard_cluster` until `fresh` / `fresh_hit`.
 5. Wait 2–3 minutes for instance warmth.
-6. Optional: `node scripts/prime-staging-pnl-snapshot.mjs` before mixed gates involving `reports_pnl`.
+6. Optional: `node scripts/prime-staging-pnl-snapshot.mjs` before mixed gates involving `reports_pnl` (requires `.env.staging` with staging `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`).
 
 ---
 
