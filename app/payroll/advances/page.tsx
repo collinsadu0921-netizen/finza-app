@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
+import { formatPayrollRunLabel } from "@/lib/payroll/payrollRunLabels"
 
 type Advance = {
   id: string
@@ -36,7 +37,14 @@ type Repayment = {
   journal_entry_id: string | null
   posted_at: string | null
   created_at: string
-  payroll_run?: { id: string; payroll_month: string } | null
+  payroll_run?: {
+    id: string
+    payroll_month: string
+    pay_period_start?: string
+    pay_period_end?: string
+    payroll_frequency?: string
+    run_type?: string
+  } | null
 }
 
 type StaffMember = {
@@ -287,7 +295,9 @@ export default function SalaryAdvancesPage() {
                                   <div className="space-y-2">
                                     {repayments.map((repayment) => {
                                       const repaymentMeta = repaymentStatusMeta(repayment.status)
-                                      const runMonth = repayment.payroll_run?.payroll_month
+                                      const runLabel = repayment.payroll_run
+                                        ? formatPayrollRunLabel(repayment.payroll_run)
+                                        : null
                                       return (
                                         <div
                                           key={repayment.id}
@@ -295,7 +305,7 @@ export default function SalaryAdvancesPage() {
                                         >
                                           <div className="text-xs text-gray-600 dark:text-gray-300">
                                             <div>
-                                              Payroll: {runMonth ? fmtDate(runMonth) : "—"}
+                                              Payroll: {runLabel ?? "—"}
                                             </div>
                                             <div>
                                               Posted: {repayment.posted_at ? fmtDate(repayment.posted_at.slice(0, 10)) : "—"}

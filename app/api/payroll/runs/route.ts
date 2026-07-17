@@ -13,10 +13,26 @@ import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 import {
   loadOrComputeOperationalListCache,
 } from "@/lib/server/operationalListCache"
+import {
+  resolveCreatePayrollRunPeriod,
+} from "@/lib/payroll/payrollPeriodUtils"
+import { computeStaffScopeFingerprint } from "@/lib/payroll/payrollPeriod"
+import {
+  assertNoDuplicatePayrollRun,
+  DuplicatePayrollRunError,
+} from "@/lib/payroll/payrollDuplicateGuard"
+import { filterPayrollItemsForRun } from "@/lib/payroll/periodPayrollItems"
+import {
+  assertPhase1BPayrollFrequency,
+  exclusionReasonForSalaryBasisMismatch,
+  parseSalaryBasis,
+  salaryBasisMatchesFrequency,
+} from "@/lib/payroll/salaryBasis"
 
 const DEFAULT_PAYROLL_RUNS_LIMIT = 24
 const MAX_PAYROLL_RUNS_LIMIT = 100
@@ -25,6 +41,12 @@ const PAYROLL_RUN_LIST_SELECT = `
   id,
   business_id,
   payroll_month,
+  pay_period_start,
+  pay_period_end,
+  payroll_frequency,
+  run_type,
+  corrects_payroll_run_id,
+  staff_scope_fingerprint,
   status,
   total_gross_salary,
   total_allowances,
@@ -48,12 +70,12 @@ async function fetchStaffAllowancesAndDeductions(
   const [{ data: allowances }, { data: deductions }] = await Promise.all([
     supabase
       .from("allowances")
-      .select("type, amount, recurring")
+      .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
       .eq("staff_id", staffId)
       .is("deleted_at", null),
     supabase
       .from("deductions")
-      .select("amount")
+      .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
       .eq("staff_id", staffId)
       .is("deleted_at", null),
   ])
@@ -65,14 +87,18 @@ export async function GET(request: NextRequest) {
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const auth = await resolveAuthenticatedApiUser(supabase, {
+      cookieHeader: request.headers.get("cookie"),
+    })
 
-    if (!user) {
-      diag.fail(401, "Unauthorized")
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!auth.ok) {
+      diag.fail(auth.status, auth.error, { auth_failure_stage: auth.authFailureStage })
+      return NextResponse.json(
+        { error: auth.error, auth_failure_stage: auth.authFailureStage },
+        { status: auth.status }
+      )
     }
+    const user = auth.user
 
     const business = await getCurrentBusiness(supabase, user.id)
     diag.step("auth", { ms_auth: timedStepMs(tAuth) })
@@ -130,7 +156,8 @@ export async function GET(request: NextRequest) {
           .select(PAYROLL_RUN_LIST_SELECT, { count: "exact" })
           .eq("business_id", business.id)
           .is("deleted_at", null)
-          .order("payroll_month", { ascending: false })
+          .order("pay_period_start", { ascending: false })
+          .order("created_at", { ascending: false })
           .range(from, to)
 
         if (error) {
@@ -213,30 +240,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { payroll_month } = body
 
-    if (!payroll_month) {
-      return NextResponse.json(
-        { error: "Missing payroll_month" },
-        { status: 400 }
-      )
+    let periodFields
+    try {
+      periodFields = resolveCreatePayrollRunPeriod(body)
+      assertPhase1BPayrollFrequency(periodFields.payroll_frequency)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Invalid payroll period"
+      return NextResponse.json({ error: message }, { status: 400 })
     }
 
-    // Check if payroll run already exists for this month
-    const { data: existingRun } = await supabase
-      .from("payroll_runs")
-      .select("id")
-      .eq("business_id", business.id)
-      .eq("payroll_month", payroll_month)
-      .is("deleted_at", null)
-      .single()
-
-    if (existingRun) {
-      return NextResponse.json(
-        { error: "Payroll run already exists for this month" },
-        { status: 400 }
-      )
-    }
+    const { payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type, corrects_payroll_run_id } =
+      periodFields
 
     // Get all active staff
     const { data: staffList, error: staffError } = await supabase
@@ -261,6 +276,53 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const eligibleStaff = staffList.filter((staff) =>
+      salaryBasisMatchesFrequency(parseSalaryBasis(staff.salary_basis), payroll_frequency)
+    )
+
+    if (eligibleStaff.length === 0) {
+      return NextResponse.json(
+        {
+          error: `No eligible employees for ${payroll_frequency} payroll. Employees must have matching salary basis (${payroll_frequency}).`,
+          code: "NO_ELIGIBLE_EMPLOYEES",
+        },
+        { status: 400 }
+      )
+    }
+
+    const staffScopeFingerprint = computeStaffScopeFingerprint(eligibleStaff.map((s) => s.id))
+
+    const { data: existingRuns, error: existingRunsError } = await supabase
+      .from("payroll_runs")
+      .select(
+        "id, business_id, payroll_frequency, run_type, pay_period_start, pay_period_end, staff_scope_fingerprint, status, deleted_at"
+      )
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+
+    if (existingRunsError) {
+      return NextResponse.json({ error: existingRunsError.message }, { status: 500 })
+    }
+
+    try {
+      assertNoDuplicatePayrollRun(
+        {
+          business_id: business.id,
+          payroll_frequency,
+          run_type,
+          pay_period_start,
+          pay_period_end,
+          staff_scope_fingerprint: staffScopeFingerprint,
+        },
+        existingRuns || []
+      )
+    } catch (err: unknown) {
+      if (err instanceof DuplicatePayrollRunError) {
+        return NextResponse.json({ error: err.message, existingRunId: err.existingRunId }, { status: 409 })
+      }
+      throw err
+    }
+
     // Get business country for payroll engine resolution
     const businessCountry = business.address_country || business.country_code || null
 
@@ -276,18 +338,55 @@ export async function POST(request: NextRequest) {
 
     // Calculate payroll for each staff using payroll engine
     const payrollEntries = []
+    const legacyItemWarnings: Array<{ staff_id: string; reason: string }> = []
 
     for (const staff of staffList) {
+      const salaryBasis = parseSalaryBasis(staff.salary_basis)
+      const eligible = salaryBasisMatchesFrequency(salaryBasis, payroll_frequency)
       const { allowances, deductions } = await fetchStaffAllowancesAndDeductions(supabase, staff.id)
 
+      // Run id is unknown until insert; exact-run one-offs are applied after create / on entry refresh.
+      const filtered = filterPayrollItemsForRun({
+        allowances,
+        deductions,
+        payrollRunId: null,
+        payrollFrequency: payroll_frequency,
+        payrollMonth: payroll_month,
+      })
+      for (const skipped of filtered.legacySkipped) {
+        legacyItemWarnings.push({
+          staff_id: staff.id,
+          reason: skipped.reason,
+        })
+      }
+
       try {
+        if (!eligible) {
+          payrollEntries.push(
+            computeStaffPayrollEntry({
+              staff,
+              businessCountry,
+              effectiveDate,
+              allowances: [],
+              deductions: [],
+              isIncluded: false,
+              exclusionReason: exclusionReasonForSalaryBasisMismatch(salaryBasis, payroll_frequency),
+              salaryBasisSnapshot: salaryBasis,
+              oneOffItemsSnapshot: [],
+            })
+          )
+          continue
+        }
+
         const computed = computeStaffPayrollEntry({
           staff,
           businessCountry,
           effectiveDate,
-          allowances,
-          deductions,
+          allowances: filtered.includedAllowances,
+          deductions: filtered.includedDeductions,
           isIncluded: true,
+          salaryBasisSnapshot: salaryBasis,
+          oneOffItemsSnapshot: filtered.oneOffSnapshots,
         })
 
         const allowancesTotal = computed.allowances_total
@@ -316,6 +415,12 @@ export async function POST(request: NextRequest) {
       .insert({
         business_id: business.id,
         payroll_month,
+        pay_period_start,
+        pay_period_end,
+        payroll_frequency,
+        run_type,
+        corrects_payroll_run_id: corrects_payroll_run_id || null,
+        staff_scope_fingerprint: staffScopeFingerprint,
         status: "draft",
         total_gross_salary: runTotals.total_gross_salary,
         total_allowances: runTotals.total_allowances,
@@ -364,16 +469,28 @@ export async function POST(request: NextRequest) {
       entityId: payrollRun.id,
       newValues: {
         payroll_month,
+        pay_period_start,
+        pay_period_end,
+        payroll_frequency,
+        run_type,
         total_gross_salary: runTotals.total_gross_salary,
         total_net_salary: runTotals.total_net_salary,
         staff_count: staffList.length,
         status: "draft",
       },
-      description: `Created payroll run for ${payroll_month} (${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
+      description: `Created payroll run for ${pay_period_start} to ${pay_period_end} (${eligibleStaff.length} eligible / ${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
       request,
     })
 
-    return NextResponse.json({ payrollRun }, { status: 201 })
+    return NextResponse.json(
+      {
+        payrollRun,
+        eligible_count: eligibleStaff.length,
+        excluded_count: staffList.length - eligibleStaff.length,
+        legacy_item_warnings: legacyItemWarnings.slice(0, 50),
+      },
+      { status: 201 }
+    )
   } catch (error: any) {
     console.error("Error creating payroll run:", error)
     return NextResponse.json(

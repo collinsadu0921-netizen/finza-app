@@ -6,6 +6,10 @@ import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { csvResponse, formatNumeric } from "@/lib/payroll/csvExport"
 import { BATCH_EXPORT_DISCLAIMER, BATCH_EXPORT_HEADERS } from "@/lib/payroll/paymentBatchItems"
+import {
+  payrollExportFilename,
+  payrollExportPeriodValues,
+} from "@/lib/payroll/payrollExportMetadata"
 
 export async function GET(
   _request: NextRequest,
@@ -35,7 +39,7 @@ export async function GET(
 
     const { data: payrollRun, error: runErr } = await supabase
       .from("payroll_runs")
-      .select("id, payroll_month")
+      .select("id, payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type")
       .eq("id", runId)
       .eq("business_id", business.id)
       .is("deleted_at", null)
@@ -71,7 +75,7 @@ export async function GET(
       return NextResponse.json({ error: iErr.message }, { status: 500 })
     }
 
-    const period = String(payrollRun.payroll_month || "").slice(0, 7)
+    const periodValues = payrollExportPeriodValues(payrollRun)
     const rows: string[][] = [[BATCH_EXPORT_DISCLAIMER], [...BATCH_EXPORT_HEADERS]]
 
     for (const it of items || []) {
@@ -79,7 +83,7 @@ export async function GET(
       rows.push([
         String(batch.id),
         String(batch.payroll_run_id),
-        period,
+        ...periodValues,
         String(r.employee_name ?? ""),
         String(r.staff_id ?? ""),
         String(r.payroll_entry_id ?? ""),
@@ -100,10 +104,9 @@ export async function GET(
       ])
     }
 
-    const safePeriod = period.replace(/[^\d-]/g, "") || "period"
     const filename =
       (batch.export_filename && String(batch.export_filename).trim()) ||
-      `payroll-salary-batch-${String(batch.id).slice(0, 8)}-${safePeriod}.csv`
+      payrollExportFilename(`payroll-salary-batch-${String(batch.id).slice(0, 8)}`, payrollRun)
 
     const res = csvResponse(filename, rows)
 

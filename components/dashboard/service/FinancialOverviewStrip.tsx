@@ -15,6 +15,8 @@ export type FinancialOverviewStripProps = {
   currencyCode: string
   /** e.g. `As of Jun 1, 2026 · ` when position balances are as-of today. */
   positionAsOfPrefix?: string
+  /** When false, ledger position cards show updating state (not fake zeros). */
+  positionsReady?: boolean
 }
 
 type OverviewCardConfig = {
@@ -34,6 +36,7 @@ function OverviewCard({
   note,
   currencyCode,
   valueTone = "default",
+  preparing = false,
 }: {
   label: string
   value: number
@@ -42,6 +45,7 @@ function OverviewCard({
   note?: string
   currencyCode: string
   valueTone?: "default" | "negative"
+  preparing?: boolean
 }) {
   return (
     <div className="relative min-w-0 overflow-hidden rounded-xl border border-slate-200/80 bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700/80 dark:bg-slate-900/40">
@@ -54,18 +58,28 @@ function OverviewCard({
         <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
           {label}
         </div>
-        <div
-          className={`mt-0.5 text-base font-semibold tracking-tight tabular-nums ${
-            valueTone === "negative"
-              ? "text-red-600 dark:text-red-400"
-              : "text-slate-900 dark:text-white"
-          }`}
-        >
-          {formatMoney(value, currencyCode)}
-        </div>
+        {preparing ? (
+          <div
+            className="mt-1 h-5 w-24 animate-pulse rounded bg-slate-200/80 dark:bg-slate-700/80"
+            aria-label={`${label} updating`}
+            role="status"
+          />
+        ) : (
+          <div
+            className={`mt-0.5 text-base font-semibold tracking-tight tabular-nums ${
+              valueTone === "negative"
+                ? "text-red-600 dark:text-red-400"
+                : "text-slate-900 dark:text-white"
+            }`}
+          >
+            {formatMoney(value, currencyCode)}
+          </div>
+        )}
         <div className="mt-0.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
-          <span className="text-[10px] text-slate-400 dark:text-slate-500">{caption}</span>
-          {note ? (
+          <span className="text-[10px] text-slate-400 dark:text-slate-500">
+            {preparing ? "Updating…" : caption}
+          </span>
+          {!preparing && note ? (
             <span className="text-[10px] font-medium text-amber-600 dark:text-amber-500">
               {note}
             </span>
@@ -100,6 +114,7 @@ export default function FinancialOverviewStrip({
   overdueInvoicesCount = 0,
   currencyCode,
   positionAsOfPrefix = "",
+  positionsReady = true,
 }: FinancialOverviewStripProps) {
   const asOf = positionAsOfPrefix
 
@@ -168,6 +183,7 @@ export default function FinancialOverviewStrip({
             note={card.note}
             currencyCode={currencyCode}
             valueTone={card.valueTone}
+            preparing={card.key !== "unpaid" && !positionsReady}
           />
         ))}
       </div>

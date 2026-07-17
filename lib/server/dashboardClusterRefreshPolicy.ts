@@ -26,14 +26,17 @@ export function dashboardRefreshSkipped(refreshOnRequest: boolean): boolean {
 export function resolveDashboardClusterSource(input: {
   cacheSource: "cache_hit" | "cache_miss" | "cache_coalesce"
   timelineSource: string
-  metricsSource: "summary" | "live" | "degraded"
+  metricsSource: "summary" | "live" | "degraded" | "ledger_live_fallback"
   fullyDegraded: boolean
 }): DashboardClusterSource {
   if (input.fullyDegraded) return "degraded"
   if (input.cacheSource === "cache_hit") return "cache"
+  if (input.metricsSource === "degraded") return "degraded"
   if (
     input.metricsSource === "live" ||
-    input.timelineSource === "live_first_load_fallback"
+    input.metricsSource === "ledger_live_fallback" ||
+    input.timelineSource === "live_first_load_fallback" ||
+    input.timelineSource === "summary_stale_live_patch"
   ) {
     return "live"
   }

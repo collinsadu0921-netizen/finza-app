@@ -66,5 +66,14 @@ describe("dashboardClusterRefreshPolicy", () => {
         fullyDegraded: true,
       })
     ).toBe("degraded")
+
+    expect(
+      resolveDashboardClusterSource({
+        cacheSource: "cache_miss",
+        timelineSource: "summary_stale",
+        metricsSource: "degraded",
+        fullyDegraded: false,
+      })
+    ).toBe("degraded")
   })
 })

@@ -225,17 +225,26 @@ export type ResolveBusinessScopeResult =
  * membership and uses it; otherwise falls back to {@link getCurrentBusiness}
  * (server cannot read localStorage, so multi-business users need the param).
  */
+export type ResolveBusinessScopeOptions = {
+  /** Request-local role from an earlier getUserRole call (skips duplicate lookup). */
+  knownRole?: string | null
+}
+
 export async function resolveBusinessScopeForUser(
   supabase: SupabaseClient,
   userId: string,
-  requestedBusinessId: string | null | undefined
+  requestedBusinessId: string | null | undefined,
+  options?: ResolveBusinessScopeOptions
 ): Promise<ResolveBusinessScopeResult> {
   const trimmed =
     typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
   const explicit = trimmed.length > 0 ? trimmed : null
 
   if (explicit) {
-    const role = await getUserRole(supabase, userId, explicit)
+    const role =
+      options?.knownRole !== undefined
+        ? options.knownRole
+        : await getUserRole(supabase, userId, explicit)
     if (!role) {
       return { ok: false, status: 403, error: "Forbidden" }
     }

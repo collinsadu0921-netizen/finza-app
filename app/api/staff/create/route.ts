@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { requirePermission } from "@/lib/userPermissions"
+import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { parseStaffPayrollTaxFieldsFromRequestBody } from "@/lib/payroll/staffTaxProfile"
+import { parseSalaryBasis } from "@/lib/payroll/salaryBasis"
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,6 +31,16 @@ export async function POST(request: NextRequest) {
     )
     if (tierDenied) return tierDenied
 
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.STAFF_MANAGE
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    }
+
     const body = await request.json()
     const {
       name,
@@ -35,17 +49,42 @@ export async function POST(request: NextRequest) {
       whatsapp_phone,
       email,
       basic_salary,
+      salary_basis,
       start_date,
       employment_type,
       bank_name,
       bank_account,
       ssnit_number,
       tin_number,
+      is_tax_resident,
+      is_pensionable,
+      secondary_employment,
+      gra_position_code,
     } = body
 
     if (!name || !basic_salary || !start_date) {
       return NextResponse.json(
         { error: "Missing required fields" },
+        { status: 400 }
+      )
+    }
+
+    const taxFields = parseStaffPayrollTaxFieldsFromRequestBody({
+      is_tax_resident,
+      is_pensionable,
+      secondary_employment,
+      gra_position_code,
+    })
+    if (!taxFields.ok) {
+      return NextResponse.json({ error: taxFields.error }, { status: 400 })
+    }
+
+    let resolvedSalaryBasis = "monthly"
+    try {
+      resolvedSalaryBasis = parseSalaryBasis(salary_basis ?? "monthly")
+    } catch (err: unknown) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Invalid salary_basis" },
         { status: 400 }
       )
     }
@@ -60,6 +99,7 @@ export async function POST(request: NextRequest) {
         whatsapp_phone: whatsapp_phone?.trim() || null,
         email: email?.trim() || null,
         basic_salary: Number(basic_salary),
+        salary_basis: resolvedSalaryBasis,
         start_date,
         employment_type: employment_type || "full_time",
         bank_name: bank_name?.trim() || null,
@@ -67,6 +107,7 @@ export async function POST(request: NextRequest) {
         ssnit_number: ssnit_number?.trim() || null,
         tin_number: tin_number?.trim() || null,
         status: "active",
+        ...taxFields.fields,
       })
       .select()
       .single()
@@ -88,5 +129,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
-

@@ -10,6 +10,10 @@ import {
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { generateOrSyncPayrollObligationsForRun } from "@/lib/payroll/obligations"
+import {
+  isGhanaMonthlyStatutoryEngine,
+  nonMonthlyApprovalBlockedMessage,
+} from "@/lib/payroll/salaryBasis"
 
 export async function GET(
   request: NextRequest,
@@ -53,6 +57,7 @@ export async function GET(
       .from("payroll_runs")
       .select("*")
       .eq("id", runId)
+      .is("deleted_at", null)
       .single()
 
     if (runError || !payrollRun) {
@@ -179,7 +184,7 @@ export async function PUT(
     // Get existing payroll run
     const { data: existingRun } = await supabase
       .from("payroll_runs")
-      .select("status, journal_entry_id")
+      .select("status, journal_entry_id, payroll_frequency")
       .eq("id", runId)
       .single()
 
@@ -224,6 +229,21 @@ export async function PUT(
 
     // If approving, post to ledger (must succeed or approval fails)
     if (status === "approved" && existingRun.status !== "approved") {
+      const frequency = String(existingRun.payroll_frequency || "monthly").toLowerCase()
+      const businessCountry = business.address_country || business.country_code || null
+      if (
+        frequency !== "monthly" &&
+        isGhanaMonthlyStatutoryEngine(businessCountry)
+      ) {
+        return NextResponse.json(
+          {
+            error: nonMonthlyApprovalBlockedMessage(frequency),
+            code: "NON_MONTHLY_STATUTORY_APPROVAL_BLOCKED",
+          },
+          { status: 400 }
+        )
+      }
+
       // Check if already posted
       if (existingRun.journal_entry_id) {
         return NextResponse.json(
@@ -389,4 +409,139 @@ export async function PUT(
   }
 }
 
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> | { id: string } }
+) {
+  try {
+    const resolvedParams = await Promise.resolve(params)
+    const runId = resolvedParams.id
+
+    const supabase = await createSupabaseServerClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const business = await getCurrentBusiness(supabase, user.id)
+    if (!business) {
+      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    }
+
+    const tierDeniedDelete = await enforceServiceIndustryMinTierWrite(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
+    if (tierDeniedDelete) return tierDeniedDelete
+
+    const { allowed } = await requirePermission(
+      supabase,
+      user.id,
+      business.id,
+      PERMISSIONS.PAYROLL_CREATE
+    )
+    if (!allowed) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    }
+
+    const { data: existingRun, error: fetchError } = await supabase
+      .from("payroll_runs")
+      .select("id, business_id, status, journal_entry_id")
+      .eq("id", runId)
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (fetchError || !existingRun) {
+      return NextResponse.json({ error: "Payroll run not found" }, { status: 404 })
+    }
+
+    if (existingRun.status !== "draft") {
+      return NextResponse.json(
+        { error: "Only draft payroll runs can be deleted." },
+        { status: 400 }
+      )
+    }
+
+    if (existingRun.journal_entry_id) {
+      return NextResponse.json(
+        { error: "This payroll run has accounting records and cannot be deleted." },
+        { status: 400 }
+      )
+    }
+
+    const { count: paymentCount, error: paymentsError } = await supabase
+      .from("payroll_payments")
+      .select("id", { count: "exact", head: true })
+      .eq("business_id", business.id)
+      .eq("payroll_run_id", runId)
+      .is("deleted_at", null)
+
+    if (paymentsError) {
+      return NextResponse.json({ error: paymentsError.message }, { status: 500 })
+    }
+
+    if ((paymentCount ?? 0) > 0) {
+      return NextResponse.json(
+        { error: "Payroll runs with salary payments cannot be deleted." },
+        { status: 400 }
+      )
+    }
+
+    const deletedAt = new Date().toISOString()
+
+    const { error: entriesDeleteError } = await supabase
+      .from("payroll_entries")
+      .delete()
+      .eq("payroll_run_id", runId)
+
+    if (entriesDeleteError) {
+      return NextResponse.json({ error: entriesDeleteError.message }, { status: 500 })
+    }
+
+    await supabase
+      .from("payroll_payment_batches")
+      .update({ deleted_at: deletedAt })
+      .eq("payroll_run_id", runId)
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+
+    await supabase.from("payslips").delete().eq("payroll_run_id", runId)
+
+    const { error: deleteError } = await supabase
+      .from("payroll_runs")
+      .update({ deleted_at: deletedAt })
+      .eq("id", runId)
+      .eq("business_id", business.id)
+
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 })
+    }
+
+    await logAudit({
+      businessId: business.id,
+      userId: user.id,
+      actionType: "payroll.run_deleted",
+      entityType: "payroll_run",
+      entityId: runId,
+      oldValues: { status: existingRun.status },
+      newValues: { deleted_at: deletedAt },
+      description: `Deleted draft payroll run ${runId}`,
+      request,
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
+    console.error("Error deleting payroll run:", error)
+    return NextResponse.json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    )
+  }
+}
 

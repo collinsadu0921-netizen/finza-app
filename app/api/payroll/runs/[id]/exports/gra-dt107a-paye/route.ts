@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollExportPeriodValues,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 import {
+  GRA_DT107A_REQUIRES_APPROVAL_MESSAGE,
   buildGraDt107aPayeCsvRows,
+  filterIncludedGraDt107aRows,
+  isGraDt107aExportStatusAllowed,
   validateGraDt107aPayeExport,
   type GraDt107aJoinedRow,
 } from "@/lib/payroll/graDt107aPayeExport"
@@ -18,9 +26,20 @@ export async function GET(
     if ("error" in auth) return auth.error
     const { supabase, payrollRun } = auth
 
+    if (!isGraDt107aExportStatusAllowed(payrollRun.status)) {
+      return NextResponse.json(
+        { error: GRA_DT107A_REQUIRES_APPROVAL_MESSAGE, code: "GRA_EXPORT_REQUIRES_APPROVAL" },
+        { status: 400 }
+      )
+    }
+
+    const modeParam = request.nextUrl.searchParams.get("mode")
+    const mode = modeParam === "audit" ? "audit" : "gra-ready"
+
     const { data: entries, error: entriesError } = await supabase
       .from("payroll_entries")
       .select(`
+        is_included,
         basic_salary,
         regular_allowances_amount,
         bonus_amount,
@@ -50,6 +69,7 @@ export async function GET(
     }
 
     const joined: GraDt107aJoinedRow[] = (entries || []).map((e: any) => ({
+      is_included: e.is_included,
       staff: {
         id: String(e.staff?.id ?? ""),
         name: e.staff?.name ?? null,
@@ -89,9 +109,23 @@ export async function GET(
       )
     }
 
-    const rows = buildGraDt107aPayeCsvRows(joined)
-    const month = String(payrollRun.payroll_month).slice(0, 7)
-    return csvResponse(`gra-dt107a-paye-${month}.csv`, rows)
+    const included = filterIncludedGraDt107aRows(joined)
+    const rows = buildGraDt107aPayeCsvRows(included)
+
+    if (mode === "audit") {
+      const periodMeta: string[][] = [
+        ["# Pay run metadata (Finza audit export — not for GRA portal upload)"],
+        [...PAYROLL_EXPORT_PERIOD_HEADERS],
+        payrollExportPeriodValues(payrollRun),
+        [],
+      ]
+      return csvResponse(
+        payrollExportFilename("gra-dt107a-paye-audit", payrollRun),
+        [...periodMeta, ...rows]
+      )
+    }
+
+    return csvResponse(payrollExportFilename("gra-dt107a-paye-gra-ready", payrollRun), rows)
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }

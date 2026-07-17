@@ -3,9 +3,18 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
+import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { formatPayrollRunLabel, formatPayrollRunTypeBadge } from "@/lib/payroll/payrollRunLabels"
+import {
+  PAYROLL_DRAFT_DELETE_CONFIRM,
+  canShowPayrollDraftDelete,
+  requestDeleteDraftPayrollRun,
+} from "@/lib/payroll/payrollDraftDeleteUi"
+import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
+import { assessGraFilingReadiness } from "@/lib/payroll/graDt107aPayeExport"
 
 type PayrollEntry = {
   id: string
@@ -14,6 +23,8 @@ type PayrollEntry = {
   adjustment_amount?: number
   adjustment_reason?: string | null
   exclusion_reason?: string | null
+  salary_basis?: string | null
+  period_basic_pay?: number | null
   is_included?: boolean
   allowances_total: number
   regular_allowances_amount?: number
@@ -26,6 +37,9 @@ type PayrollEntry = {
   taxable_income: number
   paye: number
   net_salary: number
+  filing_tin?: string | null
+  filing_employee_name?: string | null
+  payroll_tax_profile?: Record<string, unknown> | null
   staff: {
     id: string
     name: string
@@ -33,12 +47,18 @@ type PayrollEntry = {
     phone: string | null
     whatsapp_phone: string | null
     email: string | null
+    tin_number?: string | null
   }
 }
 
 type PayrollRun = {
   id: string
   payroll_month: string
+  pay_period_start?: string
+  pay_period_end?: string
+  payroll_frequency?: string
+  run_type?: string
+  corrects_payroll_run_id?: string | null
   status: string
   total_gross_salary: number
   total_allowances: number
@@ -174,10 +194,10 @@ type PaymentBatchSummary = {
 
 function isPaymentDateBeforePayrollPeriod(
   paymentDate: string,
-  payrollMonth: string | null | undefined
+  payPeriodStart: string | null | undefined
 ): boolean {
-  if (!paymentDate?.trim() || payrollMonth == null || payrollMonth === "") return false
-  const periodDay = String(payrollMonth).slice(0, 10)
+  if (!paymentDate?.trim() || payPeriodStart == null || payPeriodStart === "") return false
+  const periodDay = String(payPeriodStart).slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDay)) return false
   if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) return false
   return paymentDate < periodDay
@@ -203,6 +223,7 @@ export default function PayrollRunViewPage() {
   const params = useParams()
   const runId = params.id as string
   const toast = useToast()
+  const { openConfirm } = useConfirm()
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("payroll")
 
   const [loading, setLoading] = useState(true)
@@ -210,6 +231,7 @@ export default function PayrollRunViewPage() {
   const [entries, setEntries] = useState<PayrollEntry[]>([])
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [updating, setUpdating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [sendingAll, setSendingAll] = useState(false)
   const [recordingPayment, setRecordingPayment] = useState(false)
@@ -251,6 +273,14 @@ export default function PayrollRunViewPage() {
   const [entryDrafts, setEntryDrafts] = useState<
     Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }>
   >({})
+  const [oneOffForm, setOneOffForm] = useState({
+    staff_id: "",
+    kind: "allowance" as "allowance" | "deduction",
+    type: "other",
+    amount: "",
+    description: "",
+  })
+  const [savingOneOff, setSavingOneOff] = useState(false)
   const [obligationsData, setObligationsData] = useState<ObligationsResponse | null>(null)
   const [loadingObligations, setLoadingObligations] = useState(false)
   const [showObligationPaymentModal, setShowObligationPaymentModal] = useState(false)
@@ -413,6 +443,78 @@ export default function PayrollRunViewPage() {
     } finally {
       setUpdating(false)
     }
+  }
+
+  const handleAssignOneOff = async () => {
+    if (!oneOffForm.staff_id) {
+      toast.showToast("Select an employee for the one-off item.", "error")
+      return
+    }
+    const amount = Number(oneOffForm.amount)
+    if (!Number.isFinite(amount) || amount === 0) {
+      toast.showToast("Enter a non-zero amount.", "error")
+      return
+    }
+    setSavingOneOff(true)
+    try {
+      const path =
+        oneOffForm.kind === "allowance"
+          ? `/api/staff/${oneOffForm.staff_id}/allowances`
+          : `/api/staff/${oneOffForm.staff_id}/deductions`
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: oneOffForm.type,
+          amount,
+          recurring: false,
+          description: oneOffForm.description.trim() || null,
+          payroll_run_id: runId,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        toast.showToast(data.error || "Failed to assign one-off item", "error")
+        return
+      }
+      toast.showToast("One-off item assigned to this draft run", "success")
+      setOneOffForm({
+        staff_id: "",
+        kind: "allowance",
+        type: "other",
+        amount: "",
+        description: "",
+      })
+      await loadPayrollRun()
+    } catch {
+      toast.showToast("Failed to assign one-off item", "error")
+    } finally {
+      setSavingOneOff(false)
+    }
+  }
+
+  const runDeleteDraftPayroll = async () => {
+    setDeleting(true)
+    try {
+      const result = await requestDeleteDraftPayrollRun(runId)
+      if (!result.ok) {
+        toast.showToast(result.error, "error")
+        return
+      }
+      toast.showToast("Draft payroll deleted", "success")
+      router.push(payrollBase)
+    } catch {
+      toast.showToast("Could not delete draft payroll run", "error")
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleDeleteDraft = () => {
+    openConfirm({
+      ...PAYROLL_DRAFT_DELETE_CONFIRM,
+      onConfirm: () => runDeleteDraftPayroll(),
+    })
   }
 
   const handleGenerateObligations = async () => {
@@ -714,7 +816,7 @@ export default function PayrollRunViewPage() {
           return
         }
         setShowPaymentModal(false)
-        toast.showToast("Salary payment recorded and posted to ledger", "success")
+        toast.showToast("Salary payment recorded in your accounting records", "success")
         await loadPayrollPayments()
         await loadObligations()
       } catch {
@@ -900,9 +1002,10 @@ export default function PayrollRunViewPage() {
     { bonus: 0, overtime: 0 }
   )
   const isDraftRun = payrollRun?.status === "draft"
+  const showDraftDelete = payrollRun ? canShowPayrollDraftDelete(payrollRun.status) : false
+  const payPeriodStart = payrollRun?.pay_period_start || payrollRun?.payroll_month
 
-  const formatMonth = (dateStr: string) =>
-    new Date(dateStr).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
+  const formatMonth = (run: PayrollRun) => formatPayrollRunLabel(run)
 
   if (loading) {
     return (
@@ -937,9 +1040,39 @@ export default function PayrollRunViewPage() {
                 Back to Payroll
               </button>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                {formatMonth(payrollRun.payroll_month)}
+                {formatMonth(payrollRun)}
               </h1>
-              <div className="flex items-center gap-2 mt-1">
+              {(payrollRun.pay_period_start || payrollRun.pay_period_end) && (
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  Pay period:{" "}
+                  {String(payrollRun.pay_period_start || "").slice(0, 10) || "—"}
+                  {payrollRun.pay_period_end && payrollRun.pay_period_end !== payrollRun.pay_period_start
+                    ? ` – ${String(payrollRun.pay_period_end).slice(0, 10)}`
+                    : ""}
+                </p>
+              )}
+              {payrollRun.corrects_payroll_run_id ? (
+                <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                  Correction run for{" "}
+                  <button
+                    type="button"
+                    onClick={() => router.push(`${payrollBase}/${payrollRun.corrects_payroll_run_id}`)}
+                    className="underline font-medium hover:text-amber-900 dark:hover:text-amber-100"
+                  >
+                    original payroll run
+                  </button>
+                  .
+                </p>
+              ) : null}
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {(payrollRun.run_type && payrollRun.run_type !== "regular") || (payrollRun.payroll_frequency && payrollRun.payroll_frequency !== "monthly") ? (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {formatPayrollRunTypeBadge(payrollRun.run_type)}
+                    {payrollRun.payroll_frequency && payrollRun.payroll_frequency !== "monthly"
+                      ? ` · ${payrollRun.payroll_frequency}`
+                      : ""}
+                  </span>
+                ) : null}
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                   payrollRun.status === "approved"
                     ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400"
@@ -975,22 +1108,8 @@ export default function PayrollRunViewPage() {
             </div>
 
             <div className="flex flex-col gap-3 w-full sm:w-auto sm:items-end">
-              {payrollRun.status === "draft" && (
-                <p className="text-sm text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 max-w-xl text-left">
-                  Review each employee line before approval. Exclude staff from this month only, or apply one-off salary adjustments — employee status and base salary are not changed.
-                </p>
-              )}
               {!readOnly && (
-              <div className="flex flex-wrap gap-2">
-              {payrollRun.status === "draft" && (
-                <button
-                  onClick={() => guardWriteAction(handleApprove)}
-                  disabled={updating}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {updating ? "Approving…" : "Approve Payroll"}
-                </button>
-              )}
+              <div className="flex flex-wrap gap-2 justify-end">
               <button
                 onClick={() => guardWriteAction(handleGeneratePayslips)}
                 disabled={generating || payrollRun.status === "draft"}
@@ -1036,7 +1155,184 @@ export default function PayrollRunViewPage() {
             </div>
           </div>
 
+          {showDraftDelete && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">Draft payroll run</p>
+                <p className="text-sm text-amber-900/90 dark:text-amber-200/90 max-w-2xl">
+                  Review each employee line before approval. Exclude staff from this pay period only, or apply
+                  one-off salary adjustments — employee status and base salary are not changed.
+                </p>
+              </div>
+              {!readOnly && (
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => guardWriteAction(handleDeleteDraft)}
+                    disabled={deleting || updating}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-900 text-red-700 dark:text-red-300 text-sm font-medium rounded-lg border border-red-300 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting…" : "Delete draft"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => guardWriteAction(handleApprove)}
+                    disabled={
+                      updating ||
+                      deleting ||
+                      (String(payrollRun.payroll_frequency || "monthly") !== "monthly")
+                    }
+                    title={
+                      String(payrollRun.payroll_frequency || "monthly") !== "monthly"
+                        ? "Approval blocked: Ghana statutory calculations use monthly PAYE bands"
+                        : undefined
+                    }
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {updating ? "Approving…" : "Approve payroll"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {readOnly && <ServiceReadOnlyNotice scope="payroll" className="mb-4" />}
+
+          {String(payrollRun.payroll_frequency || "monthly") !== "monthly" && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+              This {payrollRun.payroll_frequency} draft can be reviewed, but approval is blocked while
+              Ghana PAYE/SSNIT use monthly statutory bands.
+            </div>
+          )}
+
+          {entries.some((e) => e.is_included === false) && (
+            <div className="mb-4 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              {entries.filter((e) => e.is_included === false).length} employee
+              {entries.filter((e) => e.is_included === false).length === 1 ? "" : "s"} excluded
+              (salary basis mismatch or manual exclusion). Excluded rows show the reason below.
+            </div>
+          )}
+
+          {(() => {
+            const readiness = assessGraFilingReadiness(
+              entries.map((e) => ({
+                is_included: e.is_included,
+                staff: {
+                  id: e.staff.id,
+                  name: e.staff.name,
+                  tin_number: e.staff.tin_number ?? null,
+                },
+                entry: {
+                  basic_salary: e.basic_salary,
+                  regular_allowances_amount: e.regular_allowances_amount ?? null,
+                  bonus_amount: e.bonus_amount ?? null,
+                  overtime_amount: e.overtime_amount ?? null,
+                  gross_salary: e.gross_salary,
+                  employee_pension_contribution: null,
+                  ssnit_employee: e.ssnit_employee,
+                  taxable_income: e.taxable_income,
+                  paye: e.paye,
+                  bonus_tax_5: null,
+                  bonus_tax_graduated: null,
+                  overtime_tax_5: null,
+                  overtime_tax_10: null,
+                  overtime_tax_graduated: null,
+                  payroll_tax_profile: e.payroll_tax_profile ?? null,
+                  filing_tin: e.filing_tin ?? null,
+                  filing_employee_name: e.filing_employee_name ?? null,
+                },
+              }))
+            )
+            if (readiness.included_count === 0 || readiness.ready) return null
+            return (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 whitespace-pre-line">
+                <p className="font-medium mb-1">GRA filing readiness</p>
+                <p>{readiness.summary}</p>
+                <p className="mt-2 text-xs opacity-90">
+                  You can still approve monthly payroll if needed. GRA DT 107A export stays blocked until
+                  every included employee has a filing TIN and a supported GRA position code.
+                </p>
+              </div>
+            )
+          })()}
+
+          {!readOnly && payrollRun.status === "draft" && (
+            <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                Assign one-off allowance or deduction
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Linked to this draft run only. Amount and description are snapshotted on the entry.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <select
+                  value={oneOffForm.staff_id}
+                  onChange={(e) => setOneOffForm((prev) => ({ ...prev, staff_id: e.target.value }))}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                >
+                  <option value="">Employee</option>
+                  {entries
+                    .filter((e) => e.is_included !== false)
+                    .map((e) => (
+                      <option key={e.id} value={e.staff.id}>
+                        {e.staff?.name || e.staff.id}
+                      </option>
+                    ))}
+                </select>
+                <select
+                  value={oneOffForm.kind}
+                  onChange={(e) =>
+                    setOneOffForm((prev) => ({
+                      ...prev,
+                      kind: e.target.value as "allowance" | "deduction",
+                      type: "other",
+                    }))
+                  }
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                >
+                  <option value="allowance">Allowance</option>
+                  <option value="deduction">Deduction</option>
+                </select>
+                <select
+                  value={oneOffForm.type}
+                  onChange={(e) => setOneOffForm((prev) => ({ ...prev, type: e.target.value }))}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                >
+                  {(oneOffForm.kind === "allowance"
+                    ? ALLOWANCE_TYPE_OPTIONS
+                    : DEDUCTION_TYPE_OPTIONS
+                  ).map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Amount"
+                  value={oneOffForm.amount}
+                  onChange={(e) => setOneOffForm((prev) => ({ ...prev, amount: e.target.value }))}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  disabled={savingOneOff}
+                  onClick={() => guardWriteAction(handleAssignOneOff)}
+                  className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {savingOneOff ? "Saving…" : "Assign"}
+                </button>
+              </div>
+              <input
+                type="text"
+                placeholder="Description (optional)"
+                value={oneOffForm.description}
+                onChange={(e) => setOneOffForm((prev) => ({ ...prev, description: e.target.value }))}
+                className="mt-3 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+              />
+            </div>
+          )}
 
           {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">
@@ -1176,12 +1472,12 @@ export default function PayrollRunViewPage() {
                 )}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Batches help you prepare and track salary payments. They do not send money or post ledger entries.
+                Batches help you prepare and track salary payments. They do not send money or update your books.
               </p>
               {expandedBatchAllPaid && canRecordPayment && (
                 <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
                   All lines in the open batch are marked paid externally. When funds have left your bank account, record
-                  the salary payment to post Dr Net Salaries Payable / Cr bank.
+                  the salary payment to clear net salaries payable against your bank account.
                 </p>
               )}
               {loadingPaymentBatches ? (
@@ -1189,7 +1485,7 @@ export default function PayrollRunViewPage() {
               ) : paymentBatches.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {canCreatePaymentBatch
-                    ? "No batch yet. Create one to snapshot net pay and payout destinations for export."
+                    ? "No batch yet. Create one to save net pay and payout destinations for export."
                     : "No batches for this run."}
                 </p>
               ) : (
@@ -1355,7 +1651,7 @@ export default function PayrollRunViewPage() {
                                                     onClick={() => {
                                                       if (
                                                         !window.confirm(
-                                                          "Confirm this employee was paid outside Finza? This does not post to the ledger."
+                                                          "Confirm this employee was paid outside Finza? This does not update your accounting records."
                                                         )
                                                       )
                                                         return
@@ -1527,7 +1823,7 @@ export default function PayrollRunViewPage() {
                                   className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                                 >
                                   {o.obligation_type === "paye_gra"
-                                    ? "Pay GRA PAYE"
+                                    ? "Record GRA remittance"
                                     : o.obligation_type === "ssnit_tier1"
                                       ? "Pay SSNIT / Tier 1"
                                       : o.obligation_type === "tier2_pension"
@@ -1582,18 +1878,37 @@ export default function PayrollRunViewPage() {
                     type="button"
                     onClick={() =>
                       downloadRunExport(
-                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye`,
-                        "GRA DT 107A PAYE CSV downloaded"
+                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=gra-ready`,
+                        "GRA-ready DT 107A CSV downloaded"
                       )
                     }
                     className="px-3 py-2 text-left text-xs rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 sm:text-center sm:col-span-2"
                   >
-                    GRA DT 107A PAYE CSV
+                    GRA-ready DT 107A CSV
                   </button>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 -mt-1">
-                    Uses GRA DT 107A upload column layout. Requires TIN and GRA position code on each employee snapshot.
-                    Verify before filing.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=audit`,
+                        "Finza DT 107A audit CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-600 text-white hover:bg-slate-700 sm:text-center sm:col-span-2"
+                  >
+                    Finza DT 107A audit CSV
+                  </button>
+                  <div className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 space-y-1.5 -mt-1">
+                    <p>
+                      Use the GRA-ready DT 107A CSV for portal filing. Employer return forms and the actual tax
+                      payment are completed outside Finza. Keep the GRA acknowledgement for your records.
+                    </p>
+                    <p>
+                      DT 107A is the employee schedule only. Employer TIN/profile details and cover forms
+                      (DT107 / DT107C / DT108) are entered in the GRA portal — Finza does not generate those yet.
+                    </p>
+                    <p>The audit CSV includes Finza period metadata and is for reference, not portal upload.</p>
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1714,6 +2029,27 @@ export default function PayrollRunViewPage() {
                           {!included && entry.exclusion_reason && (
                             <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">Excluded: {entry.exclusion_reason}</p>
                           )}
+                          {!included && entry.exclusion_reason && (
+                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                              {entry.exclusion_reason}
+                            </p>
+                          )}
+                          {included && entry.salary_basis && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              Salary basis: {entry.salary_basis}
+                              {entry.base_salary_snapshot != null && (
+                                <> · Original ₵{Number(entry.base_salary_snapshot).toFixed(2)}</>
+                              )}
+                              {Number(entry.adjustment_amount) !== 0 && (
+                                <>
+                                  {" "}
+                                  · Adj {Number(entry.adjustment_amount) > 0 ? "+" : ""}
+                                  {Number(entry.adjustment_amount).toFixed(2)} · Final ₵
+                                  {Number(entry.period_basic_pay ?? entry.basic_salary).toFixed(2)}
+                                </>
+                              )}
+                            </p>
+                          )}
                           {included && entry.adjustment_reason && Number(entry.adjustment_amount) !== 0 && (
                             <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">{entry.adjustment_reason}</p>
                           )}
@@ -1791,13 +2127,22 @@ export default function PayrollRunViewPage() {
                                 <button
                                   type="button"
                                   disabled={savingEntryId === entry.id}
-                                  onClick={() =>
+                                  onClick={() => {
+                                    const adj = Number(draft?.adjustment_amount || 0)
+                                    const reason = draft?.adjustment_reason?.trim() || ""
+                                    if (Math.abs(adj) > 0.0001 && !reason) {
+                                      toast.showToast(
+                                        "Adjustment reason is required when the amount is not zero.",
+                                        "error"
+                                      )
+                                      return
+                                    }
                                     void handleUpdateEntry(entry, {
                                       is_included: true,
-                                      adjustment_amount: Number(draft?.adjustment_amount || 0),
-                                      adjustment_reason: draft?.adjustment_reason?.trim() || null,
+                                      adjustment_amount: adj,
+                                      adjustment_reason: reason || null,
                                     })
-                                  }
+                                  }}
                                   className="self-start rounded bg-slate-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
                                 >
                                   {savingEntryId === entry.id ? "Saving…" : "Apply"}
@@ -1896,12 +2241,12 @@ export default function PayrollRunViewPage() {
 
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <div>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="shrink-0 flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="min-w-0">
                 <h2 className="text-base font-bold text-gray-900 dark:text-white">Record Salary Payment</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  This records salary disbursement and posts Dr Net Salaries Payable, Cr selected payment account. It does not change payroll calculations or statutory liabilities.
+                  This records salary disbursement and clears net salaries payable against the selected payment account. It does not change payroll calculations or statutory liabilities.
                 </p>
               </div>
               <button
@@ -1911,7 +2256,7 @@ export default function PayrollRunViewPage() {
                     setPaymentError("")
                   }
                 }}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1919,7 +2264,7 @@ export default function PayrollRunViewPage() {
               </button>
             </div>
 
-            <div className="px-6 py-5 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
               {paymentError && (
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   {paymentError}
@@ -1931,7 +2276,7 @@ export default function PayrollRunViewPage() {
                   Remaining net salary to record: ₵{Number(paymentSummary?.outstanding_amount || 0).toFixed(2)}
                 </p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  This is the aggregate amount still to clear against net salaries payable in your ledger.
+                  This is the aggregate amount still to clear against net salaries payable in your books.
                 </p>
               </div>
 
@@ -1958,7 +2303,7 @@ export default function PayrollRunViewPage() {
                     onChange={(e) => setPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
                     className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
                   />
-                  {isPaymentDateBeforePayrollPeriod(paymentForm.payment_date, payrollRun?.payroll_month) ? (
+                  {isPaymentDateBeforePayrollPeriod(paymentForm.payment_date, payPeriodStart) ? (
                     <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
                       This payment date is before the payroll period date. Check that this is intentional.
                     </p>
@@ -2010,7 +2355,7 @@ export default function PayrollRunViewPage() {
                   value={paymentForm.notes}
                   onChange={(e) => setPaymentForm((f) => ({ ...f, notes: e.target.value }))}
                   className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
-                  rows={3}
+                  rows={2}
                 />
               </label>
 
@@ -2076,7 +2421,7 @@ export default function PayrollRunViewPage() {
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+            <div className="shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2 bg-white dark:bg-gray-800">
               <button
                 onClick={() => setShowPaymentModal(false)}
                 disabled={recordingPayment}
@@ -2106,10 +2451,14 @@ export default function PayrollRunViewPage() {
             <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="text-base font-bold text-gray-900 dark:text-white">
-                  Record {selectedObligation.label}
+                  {selectedObligation.obligation_type === "paye_gra"
+                    ? "Record GRA remittance"
+                    : `Record ${selectedObligation.label}`}
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Use this after you have paid this amount outside Finza. Finza will record the payment in your books.
+                  {selectedObligation.obligation_type === "paye_gra"
+                    ? "File and pay through the GRA portal first. Then record the remittance here to update Finza’s books."
+                    : "Use this after you have paid this amount outside Finza. Finza will record the payment in your books."}
                 </p>
               </div>
               <button
@@ -2146,7 +2495,7 @@ export default function PayrollRunViewPage() {
                   />
                   {isPaymentDateBeforePayrollPeriod(
                     obligationPaymentForm.payment_date,
-                    payrollRun?.payroll_month
+                    payPeriodStart
                   ) ? (
                     <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1.5 mt-1.5">
                       This payment date is before the payroll period date. Check that this is intentional.

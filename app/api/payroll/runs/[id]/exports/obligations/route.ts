@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse, formatNumeric } from "@/lib/payroll/csvExport"
 import { computePayrollObligationDisplayFields } from "@/lib/payroll/obligations"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollExportPeriodValues,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 
 export async function GET(
@@ -46,8 +51,9 @@ export async function GET(
       0
     )
 
-    const month = String(payrollRun.payroll_month).slice(0, 7)
+    const periodValues = payrollExportPeriodValues(payrollRun)
     const rows: string[][] = [[
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
       "Obligation Type",
       "Label",
       "Amount Due",
@@ -67,6 +73,7 @@ export async function GET(
         salaryAdvanceRecoveredOnApproval,
       })
       rows.push([
+        ...periodValues,
         String((o as Record<string, unknown>).obligation_type ?? ""),
         v.label,
         formatNumeric(v.amount_due),
@@ -81,7 +88,7 @@ export async function GET(
       ])
     }
 
-    return csvResponse(`finza-payroll-obligations-${month}.csv`, rows)
+    return csvResponse(payrollExportFilename("finza-payroll-obligations", payrollRun), rows)
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }

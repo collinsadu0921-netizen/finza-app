@@ -8,7 +8,6 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   enqueueSnapshotRefreshJob,
   ensureZeroPnlSnapshotForPeriod,
-  periodHasLivePnlMovement,
   readPnlSnapshotMetadata,
   readStalePnlSnapshotMetadata,
 } from "@/lib/server/accountingSnapshotRefresh"
@@ -31,7 +30,6 @@ export type PnLMovementSource =
   | "snapshot"
   | "ledger"
   | "unavailable"
-  | "preparing"
   | "zero_initialized"
 
 export type PnLMovementFetchOptions = {
@@ -45,6 +43,8 @@ export type PnLMovementFetchResult = {
   source: PnLMovementSource
   snapshotStale: boolean
   refreshJobId?: string | null
+  /** True when refresh-on-request is off and live ledger RPC was not used. */
+  liveFallbackSkipped?: boolean
 }
 
 async function loadSnapshotLines(
@@ -229,24 +229,14 @@ export async function fetchProfitAndLossMovementRows(
     return fetchLivePnLMovement(supabase, businessId, startDate, endDate)
   }
 
-  const hasLiveMovement = await periodHasLivePnlMovement(supabase, businessId, startDate, endDate)
-
-  if (hasLiveMovement) {
-    const refreshJobId = await enqueueSnapshotRefreshJob(supabase, {
-      businessId,
-      periodStart: startDate,
-      periodEnd: endDate,
-      jobType: "pnl",
-      reason: "read_path_missing_snapshot",
-    })
-    return {
-      rows: [],
-      error: "",
-      source: "preparing",
-      snapshotStale: false,
-      refreshJobId,
-    }
-  }
+  // Exact period, refresh off: enqueue async rebuild; never block on live ledger RPC.
+  const refreshJobId = await enqueueSnapshotRefreshJob(supabase, {
+    businessId,
+    periodStart: startDate,
+    periodEnd: endDate,
+    jobType: "both",
+    reason: "read_path_missing_snapshot",
+  })
 
   const zeroWritten = await ensureZeroPnlSnapshotForPeriod(
     supabase,
@@ -255,13 +245,37 @@ export async function fetchProfitAndLossMovementRows(
     endDate
   )
   if (zeroWritten) {
+    console.info("[pnl-movement] zero snapshot initialized (refresh-on-request off)", {
+      businessId,
+      startDate,
+      endDate,
+      refreshJobId,
+      live_fallback_skipped: true,
+    })
     return {
       rows: [],
       error: "",
       source: "zero_initialized",
       snapshotStale: false,
+      refreshJobId,
+      liveFallbackSkipped: true,
     }
   }
 
-  return { rows: [], error: "", source: "unavailable", snapshotStale: false }
+  console.info("[pnl-movement] snapshot missing; live fallback skipped (refresh-on-request off)", {
+    businessId,
+    startDate,
+    endDate,
+    refreshJobId,
+    snapshot_missing: true,
+    live_fallback_skipped: true,
+  })
+  return {
+    rows: [],
+    error: "PNL_SNAPSHOT_UNAVAILABLE",
+    source: "unavailable",
+    snapshotStale: false,
+    refreshJobId,
+    liveFallbackSkipped: true,
+  }
 }

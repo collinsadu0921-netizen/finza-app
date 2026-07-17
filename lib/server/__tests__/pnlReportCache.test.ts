@@ -11,6 +11,10 @@ import {
   resetPnlReportCacheForTests,
   shouldCachePnlReportPayload,
 } from "../pnlReportCache"
+import {
+  resetPnlReportRemoteCacheForTests,
+  setPnlReportRemoteCacheForTests,
+} from "../pnlReportRemoteCache"
 
 const sampleReport = (): PnLReportResponse => ({
   period: {
@@ -50,18 +54,38 @@ const sampleLoadMeta = () => ({
 
 describe("pnlReportCache", () => {
   const prevTtl = process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC
+  const prevRemoteTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+  const prevRemoteHardTtl = process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
 
   beforeEach(() => {
     resetPnlReportCacheForTests()
+    resetPnlReportRemoteCacheForTests()
     process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = "30"
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
+    delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+    setPnlReportRemoteCacheForTests({
+      get: async () => undefined,
+      set: async () => {},
+    })
   })
 
   afterEach(() => {
     resetPnlReportCacheForTests()
+    resetPnlReportRemoteCacheForTests()
     if (prevTtl === undefined) {
       delete process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC
     } else {
       process.env.FINZA_PNL_REPORT_CACHE_TTL_SEC = prevTtl
+    }
+    if (prevRemoteTtl === undefined) {
+      delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC
+    } else {
+      process.env.FINZA_PNL_REPORT_REMOTE_CACHE_TTL_SEC = prevRemoteTtl
+    }
+    if (prevRemoteHardTtl === undefined) {
+      delete process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC
+    } else {
+      process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = prevRemoteHardTtl
     }
   })
 
@@ -184,5 +208,178 @@ describe("pnlReportCache", () => {
 
     expect(stale.cacheStatus).toBe("expired_served")
     expect(stale.value.data).toEqual(payload)
+  })
+
+  it("serves from remote L2 on L1 miss and populates L1", async () => {
+    const key = `test-pnl-remote-${Date.now()}-${Math.random()}`
+    const payload = sampleReport()
+    const remoteStore = new Map<string, unknown>()
+    remoteStore.set(key, {
+      payload,
+      loadMeta: sampleLoadMeta(),
+      cachedAt: new Date().toISOString(),
+      hardTtlSec: 900,
+      softTtlSec: 30,
+    })
+    setPnlReportRemoteCacheForTests({
+      get: async (k) => remoteStore.get(k),
+      set: async () => {},
+    })
+
+    let computeCalls = 0
+    const result = await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      return { payload, loadMeta: sampleLoadMeta() }
+    })
+
+    expect(result.cacheStatus).toBe("hit")
+    expect(result.remoteCacheStatus).toBe("hit")
+    expect(result.remoteRefreshStarted).toBe(false)
+    expect(computeCalls).toBe(0)
+
+    const second = await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      return { payload, loadMeta: sampleLoadMeta() }
+    })
+    expect(second.cacheStatus).toBe("hit")
+    expect(second.remoteCacheStatus).toBe("miss")
+    expect(second.remoteRefreshStarted).toBe(false)
+    expect(computeCalls).toBe(0)
+  })
+
+  it("falls back to compute when remote cache errors", async () => {
+    const key = `test-pnl-remote-error-${Date.now()}-${Math.random()}`
+    const payload = sampleReport()
+    setPnlReportRemoteCacheForTests({
+      get: async () => {
+        throw new Error("runtime cache down")
+      },
+      set: async () => {},
+    })
+
+    let computeCalls = 0
+    const result = await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      return { payload, loadMeta: sampleLoadMeta() }
+    })
+
+    expect(result.cacheStatus).toBe("miss")
+    expect(result.remoteCacheStatus).toBe("error")
+    expect(result.remoteRefreshStarted).toBe(false)
+    expect(computeCalls).toBe(1)
+  })
+
+  it("writes remote cache after successful compute", async () => {
+    const key = `test-pnl-remote-set-${Date.now()}-${Math.random()}`
+    const payload = sampleReport()
+    const remoteStore = new Map<string, unknown>()
+    setPnlReportRemoteCacheForTests({
+      get: async (k) => remoteStore.get(k),
+      set: async (k, value) => {
+        remoteStore.set(k, value)
+      },
+    })
+
+    await loadOrComputePnlReportCache(key, async () => ({
+      payload,
+      loadMeta: sampleLoadMeta(),
+    }))
+
+    expect(remoteStore.has(key)).toBe(true)
+  })
+
+  it("serves stale remote entry immediately and schedules background refresh via waitUntil", async () => {
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_SOFT_TTL_SEC = "30"
+    const key = `test-pnl-remote-stale-${Date.now()}-${Math.random()}`
+
+    const hardTtlSec = 900
+    const softTtlSec = 30
+    const cachedAt = new Date(Date.now() - (softTtlSec + 1) * 1000).toISOString()
+
+    const stalePayload = sampleReport()
+    const remoteStore = new Map<string, unknown>()
+    remoteStore.set(key, {
+      payload: stalePayload,
+      loadMeta: sampleLoadMeta(),
+      cachedAt,
+      hardTtlSec,
+      softTtlSec,
+    })
+
+    let computeCalls = 0
+    let releaseCompute!: () => void
+    const computeGate = new Promise<void>((resolve) => {
+      releaseCompute = resolve
+    })
+
+    const scheduled: Promise<void>[] = []
+    setPnlReportRemoteCacheForTests({
+      get: async (k) => remoteStore.get(k),
+      set: async () => {},
+    })
+
+    const t0 = performance.now()
+    const result = await loadOrComputePnlReportCache(
+      key,
+      async () => {
+        computeCalls += 1
+        await computeGate
+        return { payload: stalePayload, loadMeta: sampleLoadMeta() }
+      },
+      {
+        scheduleBackground: (promise) => {
+          scheduled.push(promise)
+        },
+      }
+    )
+    const elapsedMs = performance.now() - t0
+
+    expect(result.cacheStatus).toBe("expired_served")
+    expect(result.servedExpiredCache).toBe(true)
+    expect(result.remoteCacheStatus).toBe("stale_hit")
+    expect(result.remoteRefreshStarted).toBe(true)
+    expect(result.timing.refreshScheduled).toBe(true)
+    expect(result.timing.refreshAwaited).toBe(false)
+    expect(result.timing.staleReturnMs).toBeGreaterThanOrEqual(0)
+    expect(elapsedMs).toBeLessThan(200)
+    expect(scheduled).toHaveLength(1)
+
+    await new Promise((r) => setImmediate(r))
+    expect(computeCalls).toBe(1)
+
+    releaseCompute()
+    await scheduled[0]
+    expect(computeCalls).toBe(1)
+  })
+
+  it("skips background refresh when scheduleBackground is unavailable", async () => {
+    process.env.FINZA_PNL_REPORT_REMOTE_CACHE_HARD_TTL_SEC = "900"
+    const key = `test-pnl-remote-stale-skip-${Date.now()}-${Math.random()}`
+    const hardTtlSec = 900
+    const softTtlSec = 30
+    const cachedAt = new Date(Date.now() - 31 * 1000).toISOString()
+
+    setPnlReportRemoteCacheForTests({
+      get: async () => ({
+        payload: sampleReport(),
+        loadMeta: sampleLoadMeta(),
+        cachedAt,
+        hardTtlSec,
+        softTtlSec,
+      }),
+      set: async () => {},
+    })
+
+    let computeCalls = 0
+    const result = await loadOrComputePnlReportCache(key, async () => {
+      computeCalls += 1
+      return { payload: sampleReport(), loadMeta: sampleLoadMeta() }
+    })
+
+    expect(result.remoteCacheStatus).toBe("stale_hit")
+    expect(result.remoteRefreshStarted).toBe(false)
+    expect(result.timing.refreshScheduled).toBe(false)
+    expect(computeCalls).toBe(0)
   })
 })

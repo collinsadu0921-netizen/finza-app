@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse, formatNumeric } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollPeriodCellValue,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 
 function staffPayoutFields(staff: {
@@ -42,9 +47,17 @@ export async function GET(
       .eq("payroll_run_id", runId)
       .order("staff(name)", { ascending: true })
 
-    const month = String(payrollRun.payroll_month).slice(0, 7)
+    const periodValues = [
+      payrollPeriodCellValue(payrollRun),
+      String(payrollRun.pay_period_start || payrollRun.payroll_month || "").slice(0, 10),
+      String(payrollRun.pay_period_end || payrollRun.pay_period_start || payrollRun.payroll_month || "").slice(0, 10),
+      String(payrollRun.payroll_frequency || "monthly"),
+      String(payrollRun.run_type || "regular"),
+    ]
+
     const rows: string[][] = [
       [
+        ...PAYROLL_EXPORT_PERIOD_HEADERS,
         "Employee Name",
         "Bank Name",
         "Bank Account Number",
@@ -56,7 +69,6 @@ export async function GET(
         "Employee Pension Contribution",
         "Other Deductions",
         "Net Pay",
-        "Payroll Period",
       ],
     ]
 
@@ -77,6 +89,7 @@ export async function GET(
         phone: staffRecord.phone as string | null | undefined,
       })
       rows.push([
+        ...periodValues,
         String(staffRecord.name || ""),
         payout.bankName,
         payout.bankAccountNumber,
@@ -91,11 +104,10 @@ export async function GET(
         ),
         formatNumeric((e as { deductions_total?: unknown }).deductions_total),
         formatNumeric((e as { net_salary?: unknown }).net_salary),
-        String(payrollRun.payroll_month || ""),
       ])
     }
 
-    return csvResponse(`finza-net-salary-schedule-${month}.csv`, rows)
+    return csvResponse(payrollExportFilename("finza-net-salary-schedule", payrollRun), rows)
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }

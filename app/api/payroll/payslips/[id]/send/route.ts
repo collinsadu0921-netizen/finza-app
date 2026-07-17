@@ -9,6 +9,7 @@ import { buildPayslipEmailHtml } from "@/lib/email/templates/payslip"
 import { getCurrencySymbol } from "@/lib/currency"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
+import { formatPayrollRunLabel } from "@/lib/payroll/payrollRunLabels"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 export async function POST(
@@ -97,6 +98,10 @@ export async function POST(
         payroll_runs (
           id,
           payroll_month,
+          pay_period_start,
+          pay_period_end,
+          payroll_frequency,
+          run_type,
           status,
           business_id
         )
@@ -146,9 +151,8 @@ export async function POST(
     const currencyCode = bizProfile?.default_currency ?? null
     const currencySymbol = currencyCode ? (getCurrencySymbol(currencyCode) ?? currencyCode) : "₵"
 
-    // Payroll month label
-    const payrollMonth = run?.payroll_month
-      ? new Date(run.payroll_month).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
+    const payPeriodLabel = run
+      ? formatPayrollRunLabel(run)
       : "N/A"
 
     const now = new Date().toISOString()
@@ -167,7 +171,7 @@ export async function POST(
 
       const message =
         `Hello ${staff.name},\n\n` +
-        `Your payslip for *${payrollMonth}* from *${businessName}* is ready.\n\n` +
+        `Your payslip for *${payPeriodLabel}* from *${businessName}* is ready.\n\n` +
         `View your full payslip here:\n${publicUrl}\n\n` +
         `Thank you,\n${businessName}`
 
@@ -201,10 +205,10 @@ export async function POST(
           actionType: "payslip.sent_whatsapp",
           entityType: "payslip",
           entityId: id,
-          newValues: { staff_name: staff.name, recipient_phone: phone, payroll_month: payrollMonth },
+          newValues: { staff_name: staff.name, recipient_phone: phone, payroll_month: payPeriodLabel },
           ipAddress: getIpAddress(request),
           userAgent: getUserAgent(request),
-          description: `Payslip sent via WhatsApp to ${staff.name} for ${payrollMonth}`,
+          description: `Payslip sent via WhatsApp to ${staff.name} for ${payPeriodLabel}`,
         })
       } catch (_) {}
 
@@ -242,7 +246,7 @@ export async function POST(
 
       const html = buildPayslipEmailHtml({
         staffName: staff?.name ?? "Staff Member",
-        payrollMonth,
+        payPeriodLabel,
         businessName,
         currencySymbol,
         basicSalary: Number(entry?.basic_salary ?? 0),
@@ -268,7 +272,7 @@ export async function POST(
 
       const result = await sendTransactionalEmail({
         to: toEmail,
-        subject: `Your Payslip for ${payrollMonth} — ${businessName}`,
+        subject: `Your Payslip for ${payPeriodLabel} — ${businessName}`,
         html,
         fromName: businessName,
         replyTo: bizProfile?.email ?? undefined,
@@ -317,10 +321,10 @@ export async function POST(
           actionType: "payslip.sent_email",
           entityType: "payslip",
           entityId: id,
-          newValues: { staff_name: staff.name, recipient_email: toEmail, payroll_month: payrollMonth },
+          newValues: { staff_name: staff.name, recipient_email: toEmail, payroll_month: payPeriodLabel },
           ipAddress: getIpAddress(request),
           userAgent: getUserAgent(request),
-          description: `Payslip emailed to ${staff.name} (${toEmail}) for ${payrollMonth}`,
+          description: `Payslip emailed to ${staff.name} (${toEmail}) for ${payPeriodLabel}`,
         })
       } catch (_) {}
 

@@ -3,7 +3,7 @@
  *
  * Simulates Ghana SME service workspace API traffic during a workday.
  * Exactly ONE logical scenario runs per invocation — set SCENARIO (never rely on CLI --scenario).
- * Exception: workday_50_plus_reports_5 exports two concurrent k6 scenarios (operational + reports).
+ * Exception: workday_50_plus_reports_5 and workday_100_plus_reports_5 export two concurrent k6 scenarios (operational + reports).
  *
  * Paths in SESSIONS_JSON are relative to this file (load-tests/), e.g.:
  *   -e SESSIONS_JSON=./sessions.staging.json
@@ -21,7 +21,14 @@
 import http from "k6/http"
 import encoding from "k6/encoding"
 import { check, group, sleep } from "k6"
+import { Counter, Trend } from "k6/metrics"
 import { SharedArray } from "k6/data"
+
+/** reports_pnl response header capture (x-finza-reports-*). */
+const pnlReportsSource = new Counter("finza_reports_pnl_source")
+const pnlReportsCache = new Counter("finza_reports_pnl_cache")
+const pnlReportsRemoteCache = new Counter("finza_reports_pnl_remote_cache")
+const pnlDurationByReportsHeaders = new Trend("finza_reports_pnl_duration_by_headers", true)
 
 // ── Scenario selection (exactly one per run) ────────────────────────────────
 
@@ -29,6 +36,7 @@ const ALLOWED_SCENARIOS = [
   "smoke",
   "workday_50",
   "workday_50_plus_reports_5",
+  "workday_100_plus_reports_5",
   "workday_100",
   "workday_200",
   "stress_500",
@@ -118,9 +126,13 @@ function parseWorkdayReportsEveryN() {
 
 const WORKDAY_REPORTS_EVERY_N = parseWorkdayReportsEveryN()
 
-const MIXED_SCENARIO = selectedScenario === "workday_50_plus_reports_5"
+const MIXED_SCENARIOS = new Set(["workday_50_plus_reports_5", "workday_100_plus_reports_5"])
+const MIXED_SCENARIO = MIXED_SCENARIOS.has(selectedScenario)
 
-/** Concurrent reports VUs for workday_50_plus_reports_5 (separate journey). */
+/** Peak operational VUs for mixed scenarios (reports journey is separate). */
+const MIXED_OPERATIONAL_VUS = selectedScenario === "workday_100_plus_reports_5" ? 100 : 50
+
+/** Concurrent reports VUs for mixed scenarios (separate journey). */
 const REPORTS_VUS = parsePositiveIntEnv("REPORTS_VUS", 5)
 
 /** Seconds between report views in the reports journey (random uniform in range). */
@@ -135,8 +147,8 @@ if (REPORTS_SLEEP_MAX_SEC < REPORTS_SLEEP_MIN_SEC) {
 
 if (MIXED_SCENARIO && ROUTE_FILTER !== "all") {
   throw new Error(
-    `SCENARIO=workday_50_plus_reports_5 requires ROUTE_FILTER=all (got "${ROUTE_FILTER}"). ` +
-      `Use SCENARIO=workday_50 with ROUTE_FILTER=reports for reports isolation.`
+    `SCENARIO=${selectedScenario} requires ROUTE_FILTER=all (got "${ROUTE_FILTER}"). ` +
+      `Use SCENARIO=workday_50 or workday_100 with ROUTE_FILTER=reports for reports isolation.`
   )
 }
 
@@ -603,6 +615,12 @@ const WORKDAY_50_STAGES = [
   { duration: "2m", target: 0 },
 ]
 
+const WORKDAY_100_STAGES = [
+  { duration: "3m", target: 100 },
+  { duration: "5m", target: 100 },
+  { duration: "2m", target: 0 },
+]
+
 function reportsJourneyStages(vus) {
   return [
     { duration: "2m", target: vus },
@@ -642,14 +660,26 @@ const scenarioDefinitions = {
       exec: "reportsJourney",
     },
   },
+  workday_100_plus_reports_5: {
+    operational: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: WORKDAY_100_STAGES,
+      gracefulRampDown: "45s",
+      exec: "operationalWorkdayFlow",
+    },
+    reports: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: reportsJourneyStages(REPORTS_VUS),
+      gracefulRampDown: "30s",
+      exec: "reportsJourney",
+    },
+  },
   workday_100: {
     executor: "ramping-vus",
     startVUs: 0,
-    stages: [
-      { duration: "3m", target: 100 },
-      { duration: "5m", target: 100 },
-      { duration: "2m", target: 0 },
-    ],
+    stages: WORKDAY_100_STAGES,
     gracefulRampDown: "45s",
     exec: "workdayFlow",
   },
@@ -702,6 +732,11 @@ const thresholdsByScenario = {
     // No global http_req_duration — operational and report journeys have different
     // latency profiles; judge health via per-route thresholds below.
   },
+  workday_100_plus_reports_5: {
+    ...defaultThresholds,
+    http_req_failed: ["rate<0.01"],
+    // Same per-route thresholds as workday_50_plus_reports_5 — no global p95.
+  },
   workday_100: {
     ...defaultThresholds,
     http_req_duration: ["p(95)<3000"],
@@ -722,8 +757,8 @@ export const options = buildK6Options()
 function buildK6Options() {
   if (MIXED_SCENARIO) {
     return {
-      scenarios: scenarioDefinitions.workday_50_plus_reports_5,
-      thresholds: thresholdsByScenario.workday_50_plus_reports_5,
+      scenarios: scenarioDefinitions[selectedScenario],
+      thresholds: thresholdsByScenario[selectedScenario],
     }
   }
   return {
@@ -746,8 +781,8 @@ export function setup() {
         ? 1
         : selectedScenario === "workday_50"
           ? 50
-          : selectedScenario === "workday_50_plus_reports_5"
-            ? `50 operational + ${REPORTS_VUS} reports`
+          : MIXED_SCENARIO
+            ? `${MIXED_OPERATIONAL_VUS} operational + ${REPORTS_VUS} reports`
             : selectedScenario === "workday_100"
               ? 100
               : selectedScenario === "workday_200"
@@ -756,7 +791,9 @@ export function setup() {
     }`
   )
   if (MIXED_SCENARIO) {
-    console.log("[finza-k6]   operational VUs:  50 (workday journey, no reports_pnl)")
+    console.log(
+      `[finza-k6]   operational VUs:  ${MIXED_OPERATIONAL_VUS} (workday journey, no reports_pnl)`
+    )
     console.log(`[finza-k6]   reports VUs:      ${REPORTS_VUS} (separate journey)`)
     console.log(
       `[finza-k6]   reports sleep:    ${REPORTS_SLEEP_MIN_SEC}–${REPORTS_SLEEP_MAX_SEC}s between views`
@@ -889,8 +926,32 @@ function logNon200Response(name, res) {
   )
 }
 
+function headerValue(res, name) {
+  const headers = res.headers || {}
+  const lower = name.toLowerCase()
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === lower) {
+      const value = String(headers[key] ?? "").trim()
+      return value || "missing"
+    }
+  }
+  return "missing"
+}
+
+function recordReportsPnlHeaders(name, res) {
+  if (name !== "reports_pnl") return
+  const source = headerValue(res, "x-finza-reports-source")
+  const cache = headerValue(res, "x-finza-reports-cache")
+  const remoteCache = headerValue(res, "x-finza-reports-remote-cache")
+  pnlReportsSource.add(1, { source })
+  pnlReportsCache.add(1, { cache })
+  pnlReportsRemoteCache.add(1, { remote_cache: remoteCache })
+  pnlDurationByReportsHeaders.add(res.timings.duration, { source, cache, remote_cache: remoteCache })
+}
+
 function getJson(name, url, session, fieldChecks) {
   const res = http.get(url, buildRequestOptions(session, name))
+  recordReportsPnlHeaders(name, res)
 
   if (res.status !== 200) {
     logNon200Response(name, res)
@@ -1082,7 +1143,7 @@ export function workdayFlow() {
   runWorkdayFlow()
 }
 
-/** Operational journey for workday_50_plus_reports_5 — same routes as workday_50 all, no reports. */
+/** Operational journey for mixed scenarios — same routes as workday all, no in-loop reports. */
 export function operationalWorkdayFlow() {
   runWorkdayFlow({ skipReports: true })
   sleep(1 + Math.random() * 3)
@@ -1113,4 +1174,42 @@ export function reportsJourney() {
     REPORTS_SLEEP_MIN_SEC +
       Math.random() * Math.max(0, REPORTS_SLEEP_MAX_SEC - REPORTS_SLEEP_MIN_SEC)
   )
+}
+
+function formatCounterSubmetrics(metric, tagName) {
+  if (!metric || !metric.values) return []
+  const lines = []
+  for (const key of Object.keys(metric.values)) {
+    const m = metric.values[key]
+    if (!m) continue
+    let tagVal = m.tags?.[tagName]
+    if (!tagVal) {
+      const match = key.match(new RegExp(`${tagName}:([^,}]+)`))
+      tagVal = match ? match[1] : null
+    }
+    if (!tagVal) continue
+    lines.push(`  ${tagVal}: ${m.count}`)
+  }
+  lines.sort()
+  return lines
+}
+
+export function handleSummary(data) {
+  const sourceMetric = data.metrics.finza_reports_pnl_source
+  const cacheMetric = data.metrics.finza_reports_pnl_cache
+  const remoteMetric = data.metrics.finza_reports_pnl_remote_cache
+  const sourceLines = formatCounterSubmetrics(sourceMetric, "source")
+  const cacheLines = formatCounterSubmetrics(cacheMetric, "cache")
+  const remoteLines = formatCounterSubmetrics(remoteMetric, "remote_cache")
+
+  if (sourceLines.length > 0 || cacheLines.length > 0 || remoteLines.length > 0) {
+    console.log("[finza-k6] reports_pnl x-finza-reports-source:")
+    for (const line of sourceLines) console.log(line)
+    console.log("[finza-k6] reports_pnl x-finza-reports-cache:")
+    for (const line of cacheLines) console.log(line)
+    console.log("[finza-k6] reports_pnl x-finza-reports-remote-cache:")
+    for (const line of remoteLines) console.log(line)
+  }
+
+  return {}
 }

@@ -27,6 +27,7 @@
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.38.0",
     "@types/pdfkit": "^0.17.4",
+    "@vercel/functions": "^3.7.5",
     "@vercel/speed-insights": "^2.0.0",
     "@zxing/browser": "^0.1.5",
     "ai": "^6.0.141",

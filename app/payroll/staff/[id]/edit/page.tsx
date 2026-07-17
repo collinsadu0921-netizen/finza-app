@@ -45,6 +45,7 @@ export default function EditStaffPage() {
     whatsapp_phone: "",
     email: "",
     basic_salary: "",
+    salary_basis: "monthly" as "monthly" | "weekly" | "fortnightly",
     employment_type: "full_time" as "full_time" | "part_time" | "casual",
     bank_name: "",
     bank_account: "",
@@ -77,6 +78,10 @@ export default function EditStaffPage() {
           whatsapp_phone: data.staff.whatsapp_phone || "",
           email: data.staff.email || "",
           basic_salary: data.staff.basic_salary?.toString() || "",
+          salary_basis:
+            data.staff.salary_basis === "weekly" || data.staff.salary_basis === "fortnightly"
+              ? data.staff.salary_basis
+              : "monthly",
           employment_type: data.staff.employment_type || "full_time",
           bank_name: data.staff.bank_name || "",
           bank_account: data.staff.bank_account || "",
@@ -116,6 +121,7 @@ export default function EditStaffPage() {
           whatsapp_phone: formData.whatsapp_phone.trim() || null,
           email: formData.email.trim() || null,
           basic_salary: parseFloat(formData.basic_salary) || 0,
+          salary_basis: formData.salary_basis,
           employment_type: formData.employment_type,
           bank_name: formData.bank_name.trim() || null,
           bank_account: formData.bank_account.trim() || null,
@@ -257,7 +263,7 @@ export default function EditStaffPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Basic Salary (₵) *
+                  Basic salary amount (₵) *
                 </label>
                 <input
                   type="number"
@@ -267,6 +273,29 @@ export default function EditStaffPage() {
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Amount for the selected salary basis (no automatic conversion between frequencies).
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Salary basis *
+                </label>
+                <select
+                  value={formData.salary_basis}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      salary_basis: e.target.value as "monthly" | "weekly" | "fortnightly",
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="fortnightly">Fortnightly</option>
+                </select>
               </div>
 
               <div>

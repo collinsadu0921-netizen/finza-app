@@ -173,7 +173,7 @@ export type PnLReportLoadOptions = {
 }
 
 export type PnLReportLoadMeta = {
-  movementSource: "snapshot" | "ledger" | "unavailable" | "preparing" | "zero_initialized"
+  movementSource: "snapshot" | "ledger" | "unavailable" | "zero_initialized"
   snapshotStale: boolean
   refreshJobId?: string | null
 }
@@ -209,10 +209,6 @@ export async function getProfitAndLossReport(
     loadMeta.movementSource = movementSource
     loadMeta.snapshotStale = snapshotStale
     loadMeta.refreshJobId = refreshJobId ?? null
-  }
-
-  if (movementSource === "preparing") {
-    return { data: null, error: "PNL_SNAPSHOT_PREPARING" }
   }
 
   if (movementSource === "unavailable") {

@@ -20,6 +20,7 @@ Exactly **one** logical scenario runs per invocation. Set `SCENARIO` — do **no
 | `smoke` | 1 | 1 iteration | 5000 ms (global) |
 | `workday_50` | 50 | 9 min | 2000 ms (global) |
 | `workday_50_plus_reports_5` | 50 + 5 reports | 9 min | per-route only (see below) |
+| `workday_100_plus_reports_5` | 100 + 5 reports | 10 min | per-route only (see below) |
 | `workday_100` | 100 | 10 min | 3000 ms |
 | `workday_200` | 200 | 18 min | 5000 ms |
 | `stress_500` | 500 | 12 min | 8000 ms |
@@ -65,13 +66,19 @@ $env:SCENARIO = "workday_50"
 
 Replace `workday_50` with `workday_100`, `workday_200`, or `stress_500` as needed. Run **one scenario at a time**.
 
-> **Safety:** The harness exports one k6 scenario per run (two for `workday_50_plus_reports_5`). It refuses `sessions.example.json` and placeholder cookies. Do not edit the script to run multiple unrelated scenarios.
+> **Safety:** The harness exports one k6 scenario per run (two for `workday_50_plus_reports_5` and `workday_100_plus_reports_5`). It refuses `sessions.example.json` and placeholder cookies. Do not edit the script to run multiple unrelated scenarios.
+
+### Staging performance baseline (July 2026)
+
+Current passing mixed gate: **`workday_100_plus_reports_5`** at commit `2c8c722` — dashboard SWR, first-load preparing UX, and background-refresh guard. Full problem/fix/gate write-up: [`docs/scalability/dashboard-cluster-staging-baseline-2026-07.md`](../docs/scalability/dashboard-cluster-staging-baseline-2026-07.md).
+
+**Do not** use legacy in-loop `reports_pnl` (`WORKDAY_REPORTS_EVERY_N` unset on `ROUTE_FILTER=all`) as the readiness gate. Use the separate operational + reports journey scenarios above.
 
 ## Environment variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SCENARIO` | No | `smoke` | One of: `smoke`, `workday_50`, `workday_50_plus_reports_5`, `workday_100`, `workday_200`, `stress_500` |
+| `SCENARIO` | No | `smoke` | One of: `smoke`, `workday_50`, `workday_50_plus_reports_5`, `workday_100_plus_reports_5`, `workday_100`, `workday_200`, `stress_500` |
 | `ROUTE_FILTER` | No | `all` | Isolate routes: `all`, `business_profile`, `dashboard_metrics`, `dashboard_timeline`, `dashboard_activity`, `dashboard`, `reports`, `lists`, `invoices`, `bills`, `payroll`. `workday_50_plus_reports_5` requires `all`. |
 | `WORKDAY_SKIP_REPORTS` | No | — | When `1`, skip `reports_pnl` in workday scenarios (not smoke; not when `ROUTE_FILTER=reports`). Takes precedence over `WORKDAY_REPORTS_EVERY_N`. |
 | `WORKDAY_REPORTS_EVERY_N` | No | unset | Legacy in-loop sampling for `ROUTE_FILTER=all`. Prefer `workday_50_plus_reports_5` for realistic mixed load. Unset = every iteration (backward compatible). `0` = skip. `N>=2` = `__ITER % N === 0` per VU. |
@@ -81,6 +88,27 @@ Replace `workday_50` with `workday_100`, `workday_200`, or `stress_500` as neede
 | `BASE_URL` | **Yes** | — | Finza app origin, no trailing slash |
 | `SESSIONS_JSON` | Yes (real runs) | `./sessions.example.json` | Path relative to this script file |
 | `SOFT_P95_MS` | No | `10000` | Per-request check warning threshold (ms) |
+
+### `reports_pnl` response headers (k6 capture)
+
+For `reports_pnl` requests only, the harness records:
+
+| Header | k6 counter |
+|--------|------------|
+| `x-finza-reports-source` | `finza_reports_pnl_source{source:…}` |
+| `x-finza-reports-cache` | `finza_reports_pnl_cache{cache:…}` |
+
+Counts print at end of run via `handleSummary`. Use before mixed gates to confirm cache vs snapshot paths.
+
+**Prime July snapshot (staging load-test business) before mixed gate:**
+
+Requires `.env.staging` with `NEXT_PUBLIC_SUPABASE_URL` (staging ref `adonhhtooawkeemdqqeo`) and `SUPABASE_SERVICE_ROLE_KEY`. Copy from `.env.staging.example` — never commit real keys.
+
+```powershell
+node scripts/prime-staging-pnl-snapshot.mjs
+# optional overrides:
+# node scripts/prime-staging-pnl-snapshot.mjs --period-start=2026-07-01 --period-end=2026-07-31
+```
 
 ## Session file format
 
@@ -214,7 +242,7 @@ Remove-Item Env:WORKDAY_REPORTS_EVERY_N -ErrorAction SilentlyContinue
   load-tests/finza-service-workday.js
 ```
 
-### Thresholds for `workday_50_plus_reports_5`
+### Thresholds for `workday_50_plus_reports_5` and `workday_100_plus_reports_5`
 
 No **global** `http_req_duration` threshold — operational and report requests have different latency profiles, so a single global p95 would either hide report regressions or fail on normal report latency. Per-route thresholds apply instead:
 

@@ -32,6 +32,42 @@ export function parseStaffSecondaryEmployment(value: unknown): boolean {
   return value === true
 }
 
+export const GRA_POSITION_CODE_VALIDATION_ERROR =
+  "gra_position_code must be one of EXPT, JUNR, MNGT, OTHR, SENR, or empty"
+
+/** Parse optional payroll tax profile fields from staff create/update API bodies. */
+export function parseStaffPayrollTaxFieldsFromRequestBody(body: {
+  is_tax_resident?: unknown
+  is_pensionable?: unknown
+  secondary_employment?: unknown
+  gra_position_code?: unknown
+}): { ok: true; fields: Record<string, boolean | string | null> } | { ok: false; error: string } {
+  const fields: Record<string, boolean | string | null> = {}
+
+  if (body.is_tax_resident !== undefined) {
+    fields.is_tax_resident = Boolean(body.is_tax_resident)
+  }
+  if (body.is_pensionable !== undefined) {
+    fields.is_pensionable = Boolean(body.is_pensionable)
+  }
+  if (body.secondary_employment !== undefined) {
+    fields.secondary_employment = Boolean(body.secondary_employment)
+  }
+  if (body.gra_position_code !== undefined) {
+    if (body.gra_position_code === null || body.gra_position_code === "") {
+      fields.gra_position_code = null
+    } else {
+      const normalized = normalizeGraPositionCode(body.gra_position_code)
+      if (!normalized) {
+        return { ok: false, error: GRA_POSITION_CODE_VALIDATION_ERROR }
+      }
+      fields.gra_position_code = normalized
+    }
+  }
+
+  return { ok: true, fields }
+}
+
 export type StaffFilingProfileInput = {
   name?: string | null
   tin_number?: string | null

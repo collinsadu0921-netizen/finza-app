@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeDeductionType, DEDUCTION_TYPES } from "@/lib/payrollTypes"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { recalcPayrollEntryForStaffOnDraftRun } from "@/lib/payroll/recalcPayrollEntryForStaff"
 
 export async function POST(
   request: NextRequest,
@@ -34,28 +35,22 @@ export async function POST(
     )
     if (denied) return denied
 
-    // Verify staff exists
     const { data: staff } = await supabase
       .from("staff")
       .select("id")
       .eq("id", staffId)
+      .eq("business_id", business.id)
       .single()
 
     if (!staff) {
-      return NextResponse.json(
-        { error: "Staff not found" },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Staff not found" }, { status: 404 })
     }
 
     const body = await request.json()
-    const { type, amount, recurring, description } = body
+    const { type, amount, recurring, description, payroll_run_id } = body
 
     if (amount === undefined) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
     const normalizedType = normalizeDeductionType(type)
@@ -70,24 +65,91 @@ export async function POST(
       )
     }
 
+    const isRecurring = recurring !== undefined ? Boolean(recurring) : true
+    const runId =
+      payroll_run_id != null && String(payroll_run_id).trim()
+        ? String(payroll_run_id).trim()
+        : null
+
+    if (isRecurring && runId) {
+      return NextResponse.json(
+        { error: "Recurring deductions cannot be linked to a payroll run." },
+        { status: 400 }
+      )
+    }
+
+    if (!isRecurring && !runId) {
+      return NextResponse.json(
+        {
+          error:
+            "One-off deductions must be assigned to an exact draft payroll run (payroll_run_id).",
+          code: "ONE_OFF_REQUIRES_PAYROLL_RUN",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (runId) {
+      const { data: run } = await supabase
+        .from("payroll_runs")
+        .select("id, status, business_id")
+        .eq("id", runId)
+        .eq("business_id", business.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+      if (!run) {
+        return NextResponse.json({ error: "Payroll run not found" }, { status: 404 })
+      }
+      if (run.status !== "draft") {
+        return NextResponse.json(
+          { error: "One-off deductions can only be assigned to draft payroll runs." },
+          { status: 400 }
+        )
+      }
+    }
+
     const { data: deduction, error } = await supabase
       .from("deductions")
       .insert({
         staff_id: staffId,
         type: normalizedType,
         amount: Number(amount),
-        recurring: recurring !== undefined ? recurring : true,
+        recurring: isRecurring,
         description: description?.trim() || null,
+        payroll_run_id: runId,
       })
       .select()
       .single()
 
     if (error) {
       console.error("Error creating deduction:", error)
+      if (error.code === "23505") {
+        return NextResponse.json(
+          { error: "This one-off deduction is already assigned to that payroll run." },
+          { status: 409 }
+        )
+      }
       return NextResponse.json(
         { error: error.message || "Failed to create deduction" },
         { status: 500 }
       )
+    }
+
+    if (runId) {
+      const businessCountry = business.address_country || business.country_code || null
+      if (businessCountry) {
+        const recalc = await recalcPayrollEntryForStaffOnDraftRun({
+          supabase,
+          businessId: business.id,
+          businessCountry,
+          runId,
+          staffId,
+        })
+        if (!recalc.ok) {
+          await supabase.from("deductions").delete().eq("id", deduction.id)
+          return NextResponse.json({ error: recalc.error }, { status: recalc.status })
+        }
+      }
     }
 
     return NextResponse.json({ deduction }, { status: 201 })
@@ -99,5 +161,3 @@ export async function POST(
     )
   }
 }
-
-

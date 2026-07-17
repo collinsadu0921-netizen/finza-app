@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { getCurrencySymbol } from "@/lib/currency"
+import { formatPayrollRunLabel } from "@/lib/payroll/payrollRunLabels"
 
 type PayslipData = {
   id: string
@@ -38,6 +39,10 @@ type PayslipData = {
   }
   payroll_runs: {
     payroll_month: string
+    pay_period_start?: string
+    pay_period_end?: string
+    payroll_frequency?: string
+    run_type?: string
     status: string
   }
 }
@@ -57,8 +62,8 @@ function fmt(amount: number, sym: string) {
   return `${sym}${Number(amount).toFixed(2)}`
 }
 
-function formatMonth(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
+function payPeriodLabelFromRun(run: PayslipData["payroll_runs"]) {
+  return formatPayrollRunLabel(run)
 }
 
 export default function PublicPayslipPage() {
@@ -120,7 +125,7 @@ export default function PublicPayslipPage() {
   const businessName = business?.trading_name || business?.legal_name || "Your Employer"
   const currencyCode = business?.default_currency ?? null
   const sym = currencyCode ? (getCurrencySymbol(currencyCode) ?? currencyCode) : "₵"
-  const payrollMonth = run?.payroll_month ? formatMonth(run.payroll_month) : "N/A"
+  const payPeriodLabel = run ? payPeriodLabelFromRun(run) : "N/A"
   const totalStatDeductions = Number(entry.paye ?? 0) + Number(entry.ssnit_employee ?? 0)
   const totalDeductions = totalStatDeductions + Number(entry.deductions_total ?? 0)
   const bonusAmount = Number(entry.bonus_amount ?? 0)
@@ -157,7 +162,7 @@ export default function PublicPayslipPage() {
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-blue-200 text-xs font-semibold uppercase tracking-wider mb-1">Payslip</p>
-                <h1 className="text-2xl font-bold">{payrollMonth}</h1>
+                <h1 className="text-2xl font-bold">{payPeriodLabel}</h1>
                 <p className="text-blue-200 text-sm mt-1">{businessName}</p>
               </div>
               <div className="text-right">

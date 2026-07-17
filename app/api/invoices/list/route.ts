@@ -4,6 +4,7 @@ import { resolveBusinessScopeForUser } from "@/lib/business"
 import {
   loadOrComputeOperationalListCache,
 } from "@/lib/server/operationalListCache"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 import { isCustomerApprovalStatus } from "@/lib/invoices/customerApproval"
 
@@ -197,14 +198,18 @@ export async function GET(request: NextRequest) {
   try {
     const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const auth = await resolveAuthenticatedApiUser(supabase, {
+      cookieHeader: request.headers.get("cookie"),
+    })
 
-    if (!user) {
-      diag.fail(401, "Unauthorized")
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!auth.ok) {
+      diag.fail(auth.status, auth.error, { auth_failure_stage: auth.authFailureStage })
+      return NextResponse.json(
+        { error: auth.error, auth_failure_stage: auth.authFailureStage },
+        { status: auth.status }
+      )
     }
+    const user = auth.user
 
     const scope = await resolveBusinessScopeForUser(
       supabase,

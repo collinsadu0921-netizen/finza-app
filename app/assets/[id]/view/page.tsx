@@ -1,12 +1,23 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import {
+  calculateMonthlyDepreciation,
+  normalizeDepreciationPostingDate,
+  remainingDepreciableAmount,
+  resolvePostingAmount,
+} from "@/lib/assets/depreciationAmount"
+import {
+  carryingValue,
+  disposalGainLoss,
+  normalizeDisposalProceeds,
+  type DisposalType,
+} from "@/lib/assets/disposalAmount"
+import { missingDepreciationMonths } from "@/lib/assets/disposalCompleteness"
 
 type Asset = {
   id: string
@@ -23,6 +34,10 @@ type Asset = {
   status: string
   disposal_date: string | null
   disposal_amount: number | null
+  disposal_type?: string | null
+  disposal_gain_loss?: number | null
+  disposal_journal_entry_id?: string | null
+  disposal_buyer?: string | null
   notes: string | null
 }
 
@@ -30,6 +45,26 @@ type DepreciationEntry = {
   id: string
   date: string
   amount: number
+  status?: string
+  journal_entry_id?: string | null
+  adjustment_reason?: string | null
+  reverses_entry_id?: string | null
+  reversed_by_entry_id?: string | null
+}
+
+function statusBadgeClass(status: string | undefined): string {
+  switch (status) {
+    case "posted":
+      return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+    case "adjusted":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+    case "reversed":
+      return "bg-gray-100 text-gray-500 line-through dark:bg-gray-700 dark:text-gray-400"
+    case "reversal":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+    default:
+      return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
+  }
 }
 
 export default function AssetViewPage() {
@@ -39,21 +74,93 @@ export default function AssetViewPage() {
   const toast = useToast()
   const { readOnly } = useServiceFinancialWrite("accounting")
   const [loading, setLoading] = useState(true)
+  const [posting, setPosting] = useState(false)
+  const [reversing, setReversing] = useState(false)
   const [asset, setAsset] = useState<Asset | null>(null)
   const [depreciationEntries, setDepreciationEntries] = useState<DepreciationEntry[]>([])
   const [showDepreciationModal, setShowDepreciationModal] = useState(false)
+  const [showReverseModal, setShowReverseModal] = useState(false)
+  const [reverseTarget, setReverseTarget] = useState<DepreciationEntry | null>(null)
   const [showDisposalModal, setShowDisposalModal] = useState(false)
   const [depreciationDate, setDepreciationDate] = useState(new Date().toISOString().split("T")[0])
+  const [postAmount, setPostAmount] = useState<string>("")
+  const [adjustmentReason, setAdjustmentReason] = useState("")
+  const [useCustomAmount, setUseCustomAmount] = useState(false)
+  const [reversalDate, setReversalDate] = useState(new Date().toISOString().split("T")[0])
+  const [reversalReason, setReversalReason] = useState("")
   const [disposalData, setDisposalData] = useState({
     disposal_date: new Date().toISOString().split("T")[0],
+    disposal_type: "cash" as DisposalType,
     disposal_amount: "",
+    payment_account_id: "",
     disposal_buyer: "",
     disposal_notes: "",
   })
+  const [disposing, setDisposing] = useState(false)
+  const [cashAccounts, setCashAccounts] = useState<Array<{ id: string; name: string; code: string }>>([])
 
   useEffect(() => {
     loadAsset()
   }, [assetId])
+
+  const postedAccumFromEntries = useMemo(() => {
+    return depreciationEntries
+      .filter((e) => e.status === "posted" || e.status === "adjusted" || (!e.status && !e.reverses_entry_id))
+      .reduce((sum, e) => sum + Number(e.amount), 0)
+  }, [depreciationEntries])
+
+  const disposalPreview = useMemo(() => {
+    if (!asset) return null
+    const accum = postedAccumFromEntries
+    const carrying = carryingValue(Number(asset.purchase_amount), Number(asset.salvage_value), accum)
+    const type = disposalData.disposal_type
+    const proceeds = normalizeDisposalProceeds(type, disposalData.disposal_amount ? Number(disposalData.disposal_amount) : 0)
+    const gainLoss = disposalGainLoss(proceeds, carrying)
+    const missing = missingDepreciationMonths(
+      asset.purchase_date,
+      disposalData.disposal_date,
+      depreciationEntries.filter((e) => e.status !== "reversed" && e.status !== "reversal")
+    )
+    const lastPosted = depreciationEntries
+      .filter((e) => e.status === "posted" || e.status === "adjusted")
+      .map((e) => e.date)
+      .sort()
+      .pop()
+    return { carrying, proceeds, gainLoss, missing, lastPosted, accum }
+  }, [asset, postedAccumFromEntries, disposalData, depreciationEntries])
+
+  useEffect(() => {
+    if (!showDisposalModal) return
+    fetch("/api/accounts/list")
+      .then((r) => r.json())
+      .then((d) => {
+        const all = d.accounts || d || []
+        setCashAccounts(
+          all.filter((a: { code?: string }) => String(a.code || "").startsWith("1010"))
+        )
+      })
+      .catch(() => setCashAccounts([]))
+  }, [showDisposalModal])
+
+  const preview = useMemo(() => {
+    if (!asset) return null
+    const purchase = Number(asset.purchase_amount)
+    const salvage = Number(asset.salvage_value)
+    const life = Number(asset.useful_life_years)
+    const postedAccum = postedAccumFromEntries
+    const remaining = remainingDepreciableAmount(purchase, salvage, postedAccum)
+    const expected = calculateMonthlyDepreciation(purchase, salvage, life)
+    const resolved = resolvePostingAmount(
+      purchase,
+      salvage,
+      life,
+      postedAccum,
+      useCustomAmount && postAmount ? Number(postAmount) : null
+    )
+    const carryingBefore = Number(asset.current_value)
+    const carryingAfter = Math.max(salvage, carryingBefore - resolved.amount)
+    return { remaining, expected, resolved, carryingBefore, carryingAfter }
+  }, [asset, postedAccumFromEntries, useCustomAmount, postAmount])
 
   const loadAsset = async () => {
     try {
@@ -76,63 +183,176 @@ export default function AssetViewPage() {
     }
   }
 
-  const handleRecordDepreciation = async () => {
+  const handlePostDepreciation = async () => {
+    if (!asset || !preview) return
+
+    if (preview.resolved.isAdjusted && !adjustmentReason.trim()) {
+      toast.showToast("Adjustment reason is required when amount differs from calculated depreciation.", "warning")
+      return
+    }
+
+    if (preview.resolved.amount <= 0) {
+      toast.showToast("No depreciable amount remaining for this asset.", "warning")
+      return
+    }
+
     try {
+      setPosting(true)
+      const idempotencyKey =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `dep-${Date.now()}`
+
+      const body: Record<string, unknown> = {
+        date: depreciationDate,
+        idempotency_key: idempotencyKey,
+      }
+      if (useCustomAmount) {
+        body.amount = preview.resolved.amount
+        if (preview.resolved.isAdjusted) {
+          body.adjustment_reason = adjustmentReason.trim()
+        }
+      }
+
       const response = await fetch(`/api/assets/${assetId}/depreciation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: depreciationDate }),
+        body: JSON.stringify(body),
       })
 
       const data = await response.json()
 
       if (response.ok) {
         setShowDepreciationModal(false)
-        setDepreciationDate(new Date().toISOString().split("T")[0]) // Reset date
+        setDepreciationDate(new Date().toISOString().split("T")[0])
+        setPostAmount("")
+        setAdjustmentReason("")
+        setUseCustomAmount(false)
+        toast.showToast(
+          data.idempotent
+            ? "Depreciation already posted (idempotent retry)."
+            : `Depreciation posted. Journal ${data.journal_entry_id?.slice(0, 8) ?? ""}…`,
+          "success"
+        )
         loadAsset()
       } else {
-        console.error("Error recording depreciation:", data.error)
-        // Show user-friendly error message
-        let errorMessage = data.error || "Error recording depreciation. Please try again."
-        
-        // If depreciation already exists, provide helpful guidance
-        if (data.error && data.error.includes("already recorded")) {
-          toast.showToast("Depreciation already recorded for this month.", "warning")
+        if (data.code === "DUPLICATE_POSTING") {
+          toast.showToast("Depreciation already posted for this month.", "warning")
           return
         }
-        toast.showToast(errorMessage, "error")
+        toast.showToast(data.error || "Error posting depreciation.", "error")
       }
-    } catch (error: any) {
-      console.error("Error recording depreciation:", error)
-      toast.showToast(`Error recording depreciation: ${error.message || "Please check your connection and try again."}`, "error")
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Please check your connection and try again."
+      toast.showToast(`Error posting depreciation: ${message}`, "error")
+    } finally {
+      setPosting(false)
     }
   }
 
-  const handleDisposeAsset = async () => {
-    if (!disposalData.disposal_amount) {
-      toast.showToast("Please enter disposal amount", "warning")
+  const handleReverseDepreciation = async () => {
+    if (!reverseTarget) return
+    if (!reversalReason.trim()) {
+      toast.showToast("Reversal reason is required.", "warning")
       return
     }
 
     try {
-      const response = await fetch(`/api/assets/${assetId}/dispose`, {
+      setReversing(true)
+      const response = await fetch(`/api/assets/${assetId}/depreciation/reverse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(disposalData),
+        body: JSON.stringify({
+          depreciation_entry_id: reverseTarget.id,
+          reversal_date: reversalDate,
+          reason: reversalReason.trim(),
+        }),
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        setShowDisposalModal(false)
+        setShowReverseModal(false)
+        setReverseTarget(null)
+        setReversalReason("")
+        toast.showToast("Depreciation reversed successfully.", "success")
         loadAsset()
       } else {
-        console.error("Error disposing asset:", data.error)
-        toast.showToast(data.error || "Error disposing asset. Please try again.", "error")
+        toast.showToast(data.error || "Error reversing depreciation.", "error")
       }
-    } catch (error: any) {
-      console.error("Error disposing asset:", error)
-      toast.showToast(`Error disposing asset: ${error.message || "Please check your connection and try again."}`, "error")
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Please try again."
+      toast.showToast(`Error reversing depreciation: ${message}`, "error")
+    } finally {
+      setReversing(false)
+    }
+  }
+
+  const openReverseModal = (entry: DepreciationEntry) => {
+    setReverseTarget(entry)
+    setReversalDate(new Date().toISOString().split("T")[0])
+    setReversalReason("")
+    setShowReverseModal(true)
+  }
+
+  const handleDisposeAsset = async () => {
+    if (!asset || !disposalPreview) return
+
+    if (disposalPreview.missing.length > 0) {
+      toast.showToast(
+        `Post ${disposalPreview.missing.length} missing depreciation period(s) before disposal.`,
+        "warning"
+      )
+      return
+    }
+
+    if (disposalData.disposal_type === "cash" && !disposalData.payment_account_id) {
+      toast.showToast("Select a payment account for cash disposal.", "warning")
+      return
+    }
+
+    try {
+      setDisposing(true)
+      const idempotencyKey =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `dispose-${Date.now()}`
+
+      const response = await fetch(`/api/assets/${assetId}/dispose`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          disposal_date: disposalData.disposal_date,
+          disposal_type: disposalData.disposal_type,
+          proceeds: disposalPreview.proceeds,
+          payment_account_id: disposalData.payment_account_id || null,
+          disposal_buyer: disposalData.disposal_buyer || null,
+          disposal_notes: disposalData.disposal_notes || null,
+          idempotency_key: idempotencyKey,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok || response.status === 201) {
+        setShowDisposalModal(false)
+        toast.showToast(
+          data.idempotent
+            ? "Disposal already recorded (idempotent retry)."
+            : `Asset disposed. Journal ${data.journal_entry_id?.slice(0, 8) ?? ""}… Gain/loss: ₵${Number(data.gain_loss ?? 0).toFixed(2)}`,
+          "success"
+        )
+        loadAsset()
+      } else if (data.code === "DEPRECIATION_REQUIRED_BEFORE_DISPOSAL") {
+        toast.showToast(data.error || "Required depreciation must be posted first.", "error")
+      } else {
+        toast.showToast(data.error || "Error disposing asset.", "error")
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Please check your connection and try again."
+      toast.showToast(`Error disposing asset: ${message}`, "error")
+    } finally {
+      setDisposing(false)
     }
   }
 
@@ -146,43 +366,41 @@ export default function AssetViewPage() {
 
   if (!asset) {
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-          <div className="max-w-4xl mx-auto">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-200 dark:border-gray-700 text-center">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-                Fixed asset not found
-              </h2>
-              <p className="text-gray-600 dark:text-gray-400 mb-6">
-                This fixed asset could not be loaded. Please refresh or return to the list.
-              </p>
-              <div className="flex gap-4 justify-center">
-                <button
-                  onClick={() => router.push("/assets")}
-                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
-                >
-                  Back to Fixed Assets
-                </button>
-                <button
-                  onClick={() => loadAsset()}
-                  className="border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  Refresh
-                </button>
-              </div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-200 dark:border-gray-700 text-center">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Fixed asset not found</h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              This fixed asset could not be loaded. Please refresh or return to the list.
+            </p>
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => router.push("/assets")}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
+              >
+                Back to Fixed Assets
+              </button>
+              <button
+                onClick={() => loadAsset()}
+                className="border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Refresh
+              </button>
             </div>
           </div>
         </div>
+      </div>
     )
   }
 
-  const annualDepreciation = (Number(asset.purchase_amount) - Number(asset.salvage_value)) / Number(asset.useful_life_years)
+  const annualDepreciation =
+    (Number(asset.purchase_amount) - Number(asset.salvage_value)) / Number(asset.useful_life_years)
   const monthlyDepreciation = annualDepreciation / 12
 
   return (
     <>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
         <div className="max-w-7xl mx-auto">
-          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div>
               <button
@@ -203,7 +421,7 @@ export default function AssetViewPage() {
                     onClick={() => setShowDepreciationModal(true)}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
                   >
-                    Record Depreciation
+                    Post depreciation
                   </button>
                   <button
                     onClick={() => router.push(`/assets/${assetId}/edit`)}
@@ -225,7 +443,6 @@ export default function AssetViewPage() {
           {readOnly && <ServiceReadOnlyNotice scope="accounting" className="mb-6" />}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Asset Details */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Fixed asset details</h2>
@@ -252,12 +469,6 @@ export default function AssetViewPage() {
                       ₵{Number(asset.salvage_value).toFixed(2)}
                     </p>
                   </div>
-                  {asset.supplier_name && (
-                    <div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Supplier</p>
-                      <p className="text-lg font-semibold text-gray-900 dark:text-white">{asset.supplier_name}</p>
-                    </div>
-                  )}
                   <div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                     <span
@@ -270,6 +481,40 @@ export default function AssetViewPage() {
                       {asset.status}
                     </span>
                   </div>
+                  {asset.status === "disposed" && (
+                    <>
+                      <div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Disposal date</p>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                          {asset.disposal_date ? new Date(asset.disposal_date).toLocaleDateString() : "—"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Proceeds</p>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                          ₵{Number(asset.disposal_amount ?? 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Gain / (loss)</p>
+                        <p
+                          className={`text-lg font-semibold ${
+                            Number(asset.disposal_gain_loss ?? 0) >= 0 ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          ₵{Number(asset.disposal_gain_loss ?? 0).toFixed(2)}
+                        </p>
+                      </div>
+                      {asset.disposal_journal_entry_id && (
+                        <div className="col-span-2">
+                          <p className="text-sm text-gray-500 dark:text-gray-400">Disposal journal</p>
+                          <p className="text-xs font-mono text-gray-600 dark:text-gray-400">
+                            {asset.disposal_journal_entry_id}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
                 {asset.notes && (
                   <div className="mt-4">
@@ -279,22 +524,20 @@ export default function AssetViewPage() {
                 )}
               </div>
 
-              {/* Depreciation History */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Depreciation History</h2>
                 {depreciationEntries.length === 0 ? (
-                  <p className="text-gray-500 dark:text-gray-400">No depreciation recorded yet</p>
+                  <p className="text-gray-500 dark:text-gray-400">No depreciation posted yet</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead className="bg-gray-50 dark:bg-gray-700">
                         <tr>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
-                            Date
-                          </th>
-                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
-                            Amount
-                          </th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Date</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Amount</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Journal</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -306,6 +549,30 @@ export default function AssetViewPage() {
                             <td className="px-4 py-2 text-sm text-right text-gray-900 dark:text-white">
                               ₵{Number(entry.amount).toFixed(2)}
                             </td>
+                            <td className="px-4 py-2 text-sm">
+                              <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusBadgeClass(entry.status)}`}>
+                                {entry.status || "posted"}
+                              </span>
+                              {entry.adjustment_reason && (
+                                <p className="text-xs text-gray-500 mt-1">{entry.adjustment_reason}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-2 text-xs font-mono text-gray-600 dark:text-gray-400">
+                              {entry.journal_entry_id ? entry.journal_entry_id.slice(0, 8) + "…" : "—"}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-right">
+                              {!readOnly &&
+                                (entry.status === "posted" || entry.status === "adjusted") &&
+                                !entry.reversed_by_entry_id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openReverseModal(entry)}
+                                    className="text-red-600 hover:underline dark:text-red-400"
+                                  >
+                                    Reverse
+                                  </button>
+                                )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -315,7 +582,6 @@ export default function AssetViewPage() {
               </div>
             </div>
 
-            {/* Valuation Summary */}
             <div className="space-y-6">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Valuation Summary</h2>
@@ -345,16 +611,12 @@ export default function AssetViewPage() {
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Depreciation Schedule</h2>
                 <div className="space-y-2">
                   <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Annual Depreciation</p>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                      ₵{annualDepreciation.toFixed(2)}
-                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Calculated monthly amount</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-white">₵{monthlyDepreciation.toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Monthly Depreciation</p>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                      ₵{monthlyDepreciation.toFixed(2)}
-                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Annual Depreciation</p>
+                    <p className="text-lg font-semibold text-gray-900 dark:text-white">₵{annualDepreciation.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
@@ -363,32 +625,103 @@ export default function AssetViewPage() {
         </div>
       </div>
 
-      {/* Depreciation Modal */}
-      {showDepreciationModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Record Depreciation</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Depreciation Date *
+      {showDepreciationModal && preview && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Post depreciation</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{asset.name}</p>
+
+            <div className="space-y-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Posting date *</label>
+                <input
+                  type="date"
+                  value={depreciationDate}
+                  onChange={(e) => setDepreciationDate(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Normalized to {normalizeDepreciationPostingDate(depreciationDate)} (first of month).
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-900 p-4 text-sm space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Calculated monthly amount</span>
+                  <span className="font-medium">₵{preview.expected.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Remaining depreciable</span>
+                  <span className="font-medium">₵{preview.remaining.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Carrying value before</span>
+                  <span className="font-medium">₵{preview.carryingBefore.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Carrying value after</span>
+                  <span className="font-medium text-green-600">₵{preview.carryingAfter.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Amount to post</span>
+                  <span className="font-bold">₵{preview.resolved.amount.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={useCustomAmount}
+                  onChange={(e) => setUseCustomAmount(e.target.checked)}
+                />
+                Use adjusted amount
               </label>
-              <input
-                type="date"
-                value={depreciationDate}
-                onChange={(e) => setDepreciationDate(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Note: Only one depreciation entry is allowed per month. Select the first day of the month you want to record depreciation for (e.g., 2024-01-01 for January 2024).
-              </p>
+
+              {useCustomAmount && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Adjusted amount (₵)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={postAmount}
+                      onChange={(e) => setPostAmount(e.target.value)}
+                      placeholder={preview.expected.toFixed(2)}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  {preview.resolved.isAdjusted && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Adjustment reason *
+                      </label>
+                      <textarea
+                        value={adjustmentReason}
+                        onChange={(e) => setAdjustmentReason(e.target.value)}
+                        rows={2}
+                        className="w-full px-4 py-2 border border-amber-400 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="Explain why this amount differs from calculated depreciation"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="rounded border border-gray-200 dark:border-gray-600 p-3 text-xs text-gray-600 dark:text-gray-400">
+                <p className="font-medium text-gray-800 dark:text-gray-200 mb-1">Journal preview</p>
+                <p>DR Depreciation Expense (5700) ₵{preview.resolved.amount.toFixed(2)}</p>
+                <p>CR Accumulated Depreciation (1650) ₵{preview.resolved.amount.toFixed(2)}</p>
+              </div>
             </div>
+
             <div className="flex gap-3">
               <button
-                onClick={handleRecordDepreciation}
-                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                onClick={handlePostDepreciation}
+                disabled={posting || preview.resolved.amount <= 0}
+                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                Record
+                {posting ? "Posting…" : "Confirm post"}
               </button>
               <button
                 onClick={() => setShowDepreciationModal(false)}
@@ -401,14 +734,88 @@ export default function AssetViewPage() {
         </div>
       )}
 
-      {/* Disposal Modal */}
-      {showDisposalModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4">
+      {showReverseModal && reverseTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Reverse depreciation</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Reverse ₵{Number(reverseTarget.amount).toFixed(2)} posted on{" "}
+              {new Date(reverseTarget.date).toLocaleDateString()}
+            </p>
+            <div className="space-y-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Reversal date *</label>
+                <input
+                  type="date"
+                  value={reversalDate}
+                  onChange={(e) => setReversalDate(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Reason *</label>
+                <textarea
+                  value={reversalReason}
+                  onChange={(e) => setReversalReason(e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleReverseDepreciation}
+                disabled={reversing}
+                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {reversing ? "Reversing…" : "Confirm reverse"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowReverseModal(false)
+                  setReverseTarget(null)
+                }}
+                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDisposalModal && disposalPreview && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Dispose fixed asset</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{asset.name}</p>
+
+            {disposalPreview.missing.length > 0 && (
+              <div className="mb-4 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-900 dark:text-amber-200">
+                <p className="font-medium">Depreciation incomplete</p>
+                <p className="mt-1">
+                  {disposalPreview.missing.length} period(s) must be posted through{" "}
+                  {disposalData.disposal_date}. Last posted:{" "}
+                  {disposalPreview.lastPosted
+                    ? new Date(disposalPreview.lastPosted).toLocaleDateString()
+                    : "none"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDisposalModal(false)
+                    setShowDepreciationModal(true)
+                  }}
+                  className="mt-2 text-blue-600 underline dark:text-blue-400"
+                >
+                  Post depreciation first
+                </button>
+              </div>
+            )}
+
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Disposal Date *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Disposal date *</label>
                 <input
                   type="date"
                   required
@@ -418,47 +825,103 @@ export default function AssetViewPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Disposal Amount (₵) *
-                </label>
-                <input
-                  type="number"
-                  required
-                  step="0.01"
-                  value={disposalData.disposal_amount}
-                  onChange={(e) => setDisposalData({ ...disposalData, disposal_amount: e.target.value })}
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Disposal type *</label>
+                <select
+                  value={disposalData.disposal_type}
+                  onChange={(e) =>
+                    setDisposalData({
+                      ...disposalData,
+                      disposal_type: e.target.value as DisposalType,
+                      disposal_amount: e.target.value === "scrap" ? "0" : disposalData.disposal_amount,
+                    })
+                  }
                   className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
+                >
+                  <option value="cash">Cash sale</option>
+                  <option value="credit">Credit sale (Accounts Receivable)</option>
+                  <option value="scrap">Scrap (zero proceeds)</option>
+                </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Buyer</label>
-                <input
-                  type="text"
-                  value={disposalData.disposal_buyer}
-                  onChange={(e) => setDisposalData({ ...disposalData, disposal_buyer: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
+              {disposalData.disposal_type === "cash" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Payment account *</label>
+                  <select
+                    value={disposalData.payment_account_id}
+                    onChange={(e) => setDisposalData({ ...disposalData, payment_account_id: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="">Select cash/bank account</option>
+                    {cashAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code} — {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {disposalData.disposal_type !== "scrap" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Proceeds (₵) *</label>
+                  <input
+                    type="number"
+                    required
+                    step="0.01"
+                    min="0"
+                    value={disposalData.disposal_amount}
+                    onChange={(e) => setDisposalData({ ...disposalData, disposal_amount: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                </div>
+              )}
+
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-900 p-4 text-sm space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Accumulated depreciation</span>
+                  <span className="font-medium">₵{disposalPreview.accum.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Carrying value</span>
+                  <span className="font-medium">₵{disposalPreview.carrying.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Expected gain / (loss)</span>
+                  <span
+                    className={`font-bold ${disposalPreview.gainLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                  >
+                    ₵{disposalPreview.gainLoss.toFixed(2)}
+                  </span>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Notes</label>
-                <textarea
-                  value={disposalData.disposal_notes}
-                  onChange={(e) => setDisposalData({ ...disposalData, disposal_notes: e.target.value })}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
+
+              <div className="rounded border border-gray-200 dark:border-gray-600 p-3 text-xs text-gray-600 dark:text-gray-400">
+                <p className="font-medium text-gray-800 dark:text-gray-200 mb-1">Journal preview</p>
+                {disposalPreview.proceeds > 0 && (
+                  <p>DR {disposalData.disposal_type === "credit" ? "AR (1100)" : "Cash"} ₵{disposalPreview.proceeds.toFixed(2)}</p>
+                )}
+                {disposalPreview.accum > 0 && (
+                  <p>DR Accumulated Depreciation (1650) ₵{disposalPreview.accum.toFixed(2)}</p>
+                )}
+                <p>CR Fixed Asset (1600) ₵{Number(asset.purchase_amount).toFixed(2)}</p>
+                {disposalPreview.gainLoss > 0.01 && (
+                  <p>CR Gain on Disposal (4200) ₵{disposalPreview.gainLoss.toFixed(2)}</p>
+                )}
+                {disposalPreview.gainLoss < -0.01 && (
+                  <p>DR Loss on Disposal (5800) ₵{Math.abs(disposalPreview.gainLoss).toFixed(2)}</p>
+                )}
               </div>
             </div>
+
             <div className="flex gap-3 mt-6">
               <button
                 onClick={handleDisposeAsset}
-                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
+                disabled={disposing || disposalPreview.missing.length > 0}
+                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
-                Dispose fixed asset
+                {disposing ? "Disposing…" : "Confirm disposal"}
               </button>
               <button
                 onClick={() => setShowDisposalModal(false)}
-                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300"
               >
                 Cancel
               </button>
@@ -469,5 +932,3 @@ export default function AssetViewPage() {
     </>
   )
 }
-
-

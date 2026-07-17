@@ -11,15 +11,22 @@ jest.mock("@/lib/supabaseServer", () => ({
 jest.mock("@/lib/business", () => ({
   resolveBusinessScopeForUser: jest.fn(),
 }))
+jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
+  resolveAuthenticatedApiUser: jest.fn(),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
+import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
 >
 const mockResolveScope = resolveBusinessScopeForUser as jest.MockedFunction<
   typeof resolveBusinessScopeForUser
+>
+const mockResolveAuth = resolveAuthenticatedApiUser as jest.MockedFunction<
+  typeof resolveAuthenticatedApiUser
 >
 
 function buildSupabase(invoices: unknown[] = []) {
@@ -49,6 +56,11 @@ function buildSupabase(invoices: unknown[] = []) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockResolveAuth.mockResolvedValue({
+    ok: true,
+    user: { id: "user-001" } as any,
+    authSource: "session",
+  })
 })
 
 describe("GET /api/invoices/list", () => {

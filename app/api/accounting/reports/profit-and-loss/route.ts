@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { resolveBusinessScopeForUser } from "@/lib/business"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
-import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import {
   getProfitAndLossReport,
   type PnLReportLoadMeta,
   type PnLReportResponse,
 } from "@/lib/accounting/reports/getProfitAndLossReport"
-import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
+import { resolvePnLMovementRangeForPnlRoute } from "@/lib/server/pnlReportDefaultPeriodCache"
+import { checkAccountingReadinessForPnlRoute } from "@/lib/server/pnlReportReadinessCache"
+import { resolvePnlReportScopeAndAuthority } from "@/lib/server/pnlReportScopeCache"
 import {
   buildPnlReportCacheKey,
   buildPnlReportQueryFingerprint,
@@ -25,7 +25,6 @@ import {
   buildReportsPnlDiagnostics,
   isReportsPnlRefreshOnRequestEnabled,
   reportsPnlResponseHeaders,
-  resolveReportsPnlSource,
   type ReportsPnlDiagnostics,
 } from "@/lib/server/reportsPnlRefreshPolicy"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
@@ -74,41 +73,52 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const scope = await resolveBusinessScopeForUser(
+    const requestedBusinessId = searchParams.get("business_id") ?? searchParams.get("businessId")
+
+    const gate = await resolvePnlReportScopeAndAuthority(
       supabase,
       auth.user.id,
-      searchParams.get("business_id") ?? searchParams.get("businessId")
+      requestedBusinessId
     )
 
-    if (!scope.ok) {
-      const authFailureStage = authFailureStageForScopeError(scope.status)
-      diag.fail(scope.status, scope.error, { auth_failure_stage: authFailureStage })
+    if (!gate.ok && "scope" in gate && !gate.scope.ok) {
+      const authFailureStage = authFailureStageForScopeError(gate.scope.status)
+      diag.fail(gate.scope.status, gate.scope.error, {
+        auth_failure_stage: authFailureStage,
+        pnl_scope_cache: gate.pnlScopeCacheStatus,
+      })
       return NextResponse.json(
-        { error: scope.error, auth_failure_stage: authFailureStage },
-        { status: scope.status }
+        { error: gate.scope.error, auth_failure_stage: authFailureStage },
+        { status: gate.scope.status }
       )
     }
 
-    const businessId = scope.businessId
-    diag = createRouteDiag("reports_pnl", businessId)
-
-    const authority = await checkAccountingAuthority(supabase, auth.user.id, businessId, "read")
-    if (!authority.authorized) {
-      diag.fail(403, "forbidden", { auth_failure_stage: "business_access_denied" })
+    if (!gate.ok) {
+      diag.fail(403, "forbidden", {
+        auth_failure_stage: "business_access_denied",
+        pnl_scope_cache: gate.pnlScopeCacheStatus,
+      })
       return NextResponse.json(
         { error: "Unauthorized. Only admins, owners, or accountants can view profit & loss." },
         { status: 403 }
       )
     }
 
+    const { businessId, authority } = gate.value
+    diag = createRouteDiag("reports_pnl", businessId)
+
     diag.step("auth", {
       ms_auth: Math.round((performance.now() - tAuth) * 10) / 10,
       auth_source: auth.authSource,
       reports_refresh_on_request: refreshOnRequest ? "enabled" : "disabled",
+      pnl_scope_cache: gate.pnlScopeCacheStatus,
     })
 
     const tReady = performance.now()
-    const { ready } = await checkAccountingReadiness(supabase, businessId)
+    const { ready, readinessCacheStatus } = await checkAccountingReadinessForPnlRoute(
+      supabase,
+      businessId
+    )
     if (!ready) {
       if (canUserInitializeAccounting(authority.authority_source)) {
         const tBootstrap = performance.now()
@@ -134,6 +144,7 @@ export async function GET(request: NextRequest) {
     diag.step("readiness", {
       ready,
       ms_readiness: timedStepMs(tReady),
+      readiness_cache: readinessCacheStatus,
     })
 
     const reportInput = {
@@ -146,7 +157,11 @@ export async function GET(request: NextRequest) {
     }
 
     const tRange = performance.now()
-    const { range, error: rangeError } = await resolvePnLMovementRange(supabase, reportInput)
+    const {
+      range,
+      error: rangeError,
+      periodCacheStatus,
+    } = await resolvePnLMovementRangeForPnlRoute(supabase, reportInput)
     if (rangeError || !range) {
       diag.fail(500, rangeError ?? "period_unresolved", {
         ms_period: timedStepMs(tRange),
@@ -160,6 +175,7 @@ export async function GET(request: NextRequest) {
       ms_period: timedStepMs(tRange),
       period_start: range.movementStart,
       period_end: range.movementEnd,
+      period_cache: periodCacheStatus,
     })
 
     const cacheKey = buildPnlReportCacheKey({
@@ -171,7 +187,14 @@ export async function GET(request: NextRequest) {
     })
 
     const tReport = performance.now()
-    const { value: cached, cacheStatus, servedExpiredCache } =
+    const {
+      value: cached,
+      cacheStatus,
+      servedExpiredCache,
+      remoteCacheStatus,
+      remoteRefreshStarted,
+      timing: cacheTiming,
+    } =
       await loadOrComputePnlReportCache<PnLReportResponse>(
         cacheKey,
         async () => {
@@ -193,44 +216,69 @@ export async function GET(request: NextRequest) {
         {
           shouldStore: shouldCachePnlReportPayload,
           serveExpiredOnMiss: true,
+          businessId,
+          cacheRemote: !refreshOnRequest,
+          scheduleBackground: (promise) => waitUntil(promise),
         }
       )
 
     const loadMeta = cached.loadMeta
-    const reportsSource = resolveReportsPnlSource({
-      cacheStatus,
-      movementSource: loadMeta.movementSource,
-      snapshotStale: loadMeta.snapshotStale,
-      servedExpiredCache,
-    })
+
+    const remoteCacheHeader =
+      remoteCacheStatus === "hit"
+        ? "hit"
+        : remoteCacheStatus === "stale_hit"
+          ? "stale_hit"
+          : remoteCacheStatus === "error"
+            ? "error"
+            : "miss"
+
+    const reportsCacheHeader =
+      remoteCacheStatus === "hit"
+        ? "fresh_hit"
+        : remoteCacheStatus === "stale_hit"
+          ? remoteRefreshStarted
+            ? "refresh_started"
+            : "stale_hit"
+          : cacheStatus === "hit"
+            ? "fresh_hit"
+            : cacheStatus === "expired_served" || servedExpiredCache
+              ? "stale_hit"
+              : "miss"
+
+    const reportsSource =
+      remoteCacheStatus === "stale_hit" || cacheStatus === "expired_served" || servedExpiredCache
+        ? "stale_cache"
+        : remoteCacheStatus === "hit" || cacheStatus === "hit"
+          ? "cache"
+          : loadMeta.movementSource === "snapshot" || loadMeta.movementSource === "zero_initialized"
+            ? loadMeta.snapshotStale
+              ? "stale_snapshot"
+              : "fresh_snapshot"
+            : loadMeta.movementSource === "ledger"
+              ? "fresh_snapshot"
+              : // For unavailable, still emit a stable header value (avoid "unavailable" in cache metadata)
+                "fresh_snapshot"
 
     const reportsDiagnostics = buildReportsPnlDiagnostics({
       refreshOnRequest,
       reportsSource,
-      cacheStatus,
+      cacheHeader: reportsCacheHeader,
+      remoteCacheHeader,
       snapshotStale: loadMeta.snapshotStale || servedExpiredCache,
     })
 
     if (
-      (loadMeta.movementSource === "unavailable" || loadMeta.movementSource === "preparing") &&
+      loadMeta.movementSource === "unavailable" &&
       cacheStatus !== "hit" &&
       cacheStatus !== "expired_served"
     ) {
-      const errorCode =
-        loadMeta.movementSource === "preparing"
-          ? "PNL_SNAPSHOT_PREPARING"
-          : "PNL_SNAPSHOT_UNAVAILABLE"
-      diag.fail(503, errorCode, {
+      diag.fail(503, "PNL_SNAPSHOT_UNAVAILABLE", {
         ms_report: Math.round((performance.now() - tReport) * 10) / 10,
         ...reportsDiagnostics,
-        refresh_job_id: loadMeta.refreshJobId ?? null,
       })
       return NextResponse.json(
-        {
-          error: errorCode,
-          ...reportsDiagnostics,
-          refresh_job_id: loadMeta.refreshJobId ?? null,
-        },
+        { error: "PNL_SNAPSHOT_UNAVAILABLE", ...reportsDiagnostics },
         {
           status: 503,
           headers: reportsPnlResponseHeaders(reportsDiagnostics),
@@ -240,6 +288,10 @@ export async function GET(request: NextRequest) {
 
     diag.step("report", {
       ms_report: Math.round((performance.now() - tReport) * 10) / 10,
+      ms_remote_cache_read: cacheTiming.remoteCacheReadMs,
+      ms_stale_return: cacheTiming.staleReturnMs,
+      reports_refresh_scheduled: cacheTiming.refreshScheduled,
+      reports_refresh_awaited: cacheTiming.refreshAwaited,
       ...reportsDiagnostics,
     })
     diag.finish(200, reportsDiagnostics)

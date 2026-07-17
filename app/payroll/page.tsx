@@ -5,9 +5,21 @@ import { useRouter } from "next/navigation"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { formatPayrollRunLabel, formatPayrollRunTypeBadge } from "@/lib/payroll/payrollRunLabels"
+import {
+  PAYROLL_DRAFT_DELETE_CONFIRM,
+  canShowPayrollDraftDelete,
+  requestDeleteDraftPayrollRun,
+} from "@/lib/payroll/payrollDraftDeleteUi"
+import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { useToast } from "@/components/ui/ToastProvider"
 type PayrollRun = {
   id: string
   payroll_month: string
+  pay_period_start?: string
+  pay_period_end?: string
+  payroll_frequency?: string
+  run_type?: string
   status: string
   total_net_salary: number
   total_gross_salary: number
@@ -19,8 +31,11 @@ export default function PayrollPage() {
   const router = useRouter()
   const payrollBase = usePayrollBasePath()
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("payroll")
+  const { openConfirm } = useConfirm()
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [runs, setRuns] = useState<PayrollRun[]>([])
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null)
 
   useEffect(() => {
     loadPayrollRuns()
@@ -43,6 +58,30 @@ export default function PayrollPage() {
     }
   }
 
+  const runDeleteDraftFromList = async (runId: string) => {
+    setDeletingRunId(runId)
+    try {
+      const result = await requestDeleteDraftPayrollRun(runId)
+      if (!result.ok) {
+        toast.showToast(result.error, "error")
+        return
+      }
+      setRuns((prev) => prev.filter((r) => r.id !== runId))
+      toast.showToast("Draft payroll deleted", "success")
+    } catch {
+      toast.showToast("Could not delete draft payroll run", "error")
+    } finally {
+      setDeletingRunId(null)
+    }
+  }
+
+  const handleDeleteDraftFromList = (run: PayrollRun) => {
+    openConfirm({
+      ...PAYROLL_DRAFT_DELETE_CONFIRM,
+      onConfirm: () => runDeleteDraftFromList(run.id),
+    })
+  }
+
   if (loading) {
     return (
       <div className="p-6">
@@ -51,10 +90,7 @@ export default function PayrollPage() {
     )
   }
 
-  const formatMonth = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return date.toLocaleDateString("en-GH", { month: "long", year: "numeric" })
-  }
+  const formatMonth = (run: PayrollRun) => formatPayrollRunLabel(run)
 
   return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
@@ -62,7 +98,7 @@ export default function PayrollPage() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Payroll Runs</h1>
-              <p className="text-gray-600 dark:text-gray-400">Manage monthly payroll processing</p>
+              <p className="text-gray-600 dark:text-gray-400">Manage payroll runs and processing</p>
             </div>
             {!readOnly && (
               <button
@@ -87,6 +123,9 @@ export default function PayrollPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Period
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      Type
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                       Gross Salary
                     </th>
@@ -107,7 +146,7 @@ export default function PayrollPage() {
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {runs.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                      <td colSpan={7} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                         No payroll runs found. Create your first payroll run to get started.
                       </td>
                     </tr>
@@ -115,7 +154,13 @@ export default function PayrollPage() {
                     runs.map((run) => (
                       <tr key={run.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                          {formatMonth(run.payroll_month)}
+                          {formatMonth(run)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                          {formatPayrollRunTypeBadge(run.run_type)}
+                          {run.payroll_frequency && run.payroll_frequency !== "monthly" ? (
+                            <span className="ml-1 text-xs text-gray-400">({run.payroll_frequency})</span>
+                          ) : null}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-white">
                           ₵{Number(run.total_gross_salary || 0).toFixed(2)}
@@ -140,12 +185,25 @@ export default function PayrollPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <button
-                            onClick={() => router.push(`${payrollBase}/${run.id}`)}
-                            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-                          >
-                            View
-                          </button>
+                          <div className="inline-flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => router.push(`${payrollBase}/${run.id}`)}
+                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+                            >
+                              View
+                            </button>
+                            {!readOnly && canShowPayrollDraftDelete(run.status) ? (
+                              <button
+                                type="button"
+                                disabled={deletingRunId === run.id}
+                                onClick={() => guardWriteAction(() => handleDeleteDraftFromList(run))}
+                                className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 disabled:opacity-50"
+                              >
+                                {deletingRunId === run.id ? "Deleting…" : "Delete draft"}
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))

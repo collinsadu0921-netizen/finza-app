@@ -64,6 +64,15 @@ export const GRA_DT107A_PAYE_HEADER_ROW: readonly string[] = [
 
 export const GRA_DT107A_ALLOWED_POSITIONS = new Set(["EXPT", "JUNR", "MNGT", "OTHR", "SENR"])
 
+/** Server/UI message when DT 107A is requested before approval. */
+export const GRA_DT107A_REQUIRES_APPROVAL_MESSAGE =
+  "DT 107A export is available only after payroll approval."
+
+export function isGraDt107aExportStatusAllowed(status: string | null | undefined): boolean {
+  const s = String(status || "").toLowerCase()
+  return s === "approved" || s === "locked"
+}
+
 export type GraDt107aStaffRow = {
   id: string
   name: string | null
@@ -99,12 +108,84 @@ export type GraDt107aPayrollEntryRow = {
 export type GraDt107aJoinedRow = {
   staff: GraDt107aStaffRow
   entry: GraDt107aPayrollEntryRow
+  /** When present, used to omit excluded payroll lines from GRA export. */
+  is_included?: boolean | null
 }
 
 export type GraDt107aValidationIssue = {
   staff_id: string
   staff_name: string
   missing_fields: ("tin" | "gra_position_code")[]
+}
+
+export type GraFilingReadinessIssue = {
+  staff_id: string
+  staff_name: string
+  problems: string[]
+}
+
+export type GraFilingReadinessResult = {
+  ready: boolean
+  included_count: number
+  issues: GraFilingReadinessIssue[]
+  summary: string
+}
+
+/** Safe include check: treat null/undefined as included (legacy rows). */
+export function isPayrollEntryIncludedForGraExport(
+  isIncluded: boolean | null | undefined
+): boolean {
+  return isIncluded !== false
+}
+
+export function filterIncludedGraDt107aRows(rows: GraDt107aJoinedRow[]): GraDt107aJoinedRow[] {
+  return rows.filter((row) => isPayrollEntryIncludedForGraExport(row.is_included))
+}
+
+export function sumGraDt107aPaye(rows: GraDt107aJoinedRow[]): number {
+  return roundPayroll(
+    rows.reduce((sum, row) => sum + (Number.isFinite(Number(row.entry.paye)) ? Number(row.entry.paye) : 0), 0)
+  )
+}
+
+/**
+ * Filing readiness for included employees only (draft or approved).
+ * Used by UI before export; export still re-validates server-side.
+ */
+export function assessGraFilingReadiness(rows: GraDt107aJoinedRow[]): GraFilingReadinessResult {
+  const included = filterIncludedGraDt107aRows(rows)
+  const issues: GraFilingReadinessIssue[] = []
+
+  for (const { staff, entry } of included) {
+    const tin = effectiveFilingTin(staff, entry)
+    const profile = parsePayrollTaxProfile(entry.payroll_tax_profile)
+    const rawPos = profile?.gra_position_code
+    const pos = typeof rawPos === "string" ? rawPos.trim().toUpperCase() : ""
+    const problems: string[] = []
+    if (!tin) problems.push("missing TIN")
+    if (!pos) problems.push("missing GRA position")
+    else if (!GRA_DT107A_ALLOWED_POSITIONS.has(pos)) problems.push("invalid GRA position")
+    if (problems.length) {
+      issues.push({
+        staff_id: String(staff.id),
+        staff_name: effectiveFilingEmployeeName(staff, entry) || "Unknown",
+        problems,
+      })
+    }
+  }
+
+  const ready = included.length > 0 && issues.length === 0
+  let summary: string
+  if (included.length === 0) {
+    summary = "No included employees are available for GRA filing on this payroll run."
+  } else if (issues.length === 0) {
+    summary = `${included.length} employee${included.length === 1 ? "" : "s"} ready for GRA filing.`
+  } else {
+    const lines = issues.map((i) => `- ${i.staff_name}: ${i.problems.join(", ")}`)
+    summary = `${issues.length} employee${issues.length === 1 ? "" : "s"} are not ready for GRA filing:\n${lines.join("\n")}`
+  }
+
+  return { ready, included_count: included.length, issues, summary }
 }
 
 /** Y = non-resident, N = resident (per GRA schedule convention for this export). */
@@ -203,17 +284,19 @@ export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
   message: string
   issues: GraDt107aValidationIssue[]
 } {
-  if (!rows.length) {
+  const included = filterIncludedGraDt107aRows(rows)
+
+  if (!included.length) {
     return {
       ok: false,
-      message: "This payroll run has no entries to export.",
+      message: "No included employees are available for GRA DT 107A export on this payroll run.",
       issues: [],
     }
   }
 
   const issues: GraDt107aValidationIssue[] = []
 
-  for (const { staff, entry } of rows) {
+  for (const { staff, entry } of included) {
     const tin = effectiveFilingTin(staff, entry)
     const profile = parsePayrollTaxProfile(entry.payroll_tax_profile)
     const rawPos = profile?.gra_position_code
@@ -237,7 +320,7 @@ export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
     )
     return {
       ok: false,
-      message: `GRA DT 107A export blocked: every employee must have a TIN and a GRA position code on the payroll snapshot. Issues:\n${lines.join("\n")}`,
+      message: `GRA DT 107A export blocked: every included employee must have a TIN and a GRA position code on the payroll snapshot. Issues:\n${lines.join("\n")}`,
       issues,
     }
   }
@@ -246,9 +329,10 @@ export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
 }
 
 export function buildGraDt107aPayeDataRows(rows: GraDt107aJoinedRow[]): string[][] {
+  const included = filterIncludedGraDt107aRows(rows)
   const out: string[][] = []
   let serial = 1
-  for (const { staff, entry } of rows) {
+  for (const { staff, entry } of included) {
     const profile = parsePayrollTaxProfile(entry.payroll_tax_profile) || {}
     const pos = String(profile.gra_position_code ?? "").trim().toUpperCase()
     const ssf = employeeSocialSecurityFundAmount(entry)

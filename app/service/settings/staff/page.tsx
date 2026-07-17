@@ -6,11 +6,35 @@ import { useRouter } from "next/navigation"
 import { getCurrentBusiness } from "@/lib/business"
 import { getTabIndustryMode } from "@/lib/industryMode"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
+import { useToast } from "@/components/ui/ToastProvider"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { GRA_POSITION_CODES } from "@/lib/payroll/staffTaxProfile"
 
 function isPayrollStaffIndustry(mode: string | null): boolean {
   return mode === "service" || mode === "professional"
+}
+
+function emptyNewStaffForm() {
+  return {
+    name: "",
+    position: "",
+    phone: "",
+    whatsapp_phone: "",
+    email: "",
+    basic_salary: "",
+    salary_basis: "monthly" as "monthly" | "weekly" | "fortnightly",
+    employment_type: "full_time" as "full_time" | "part_time" | "casual",
+    bank_name: "",
+    bank_account: "",
+    ssnit_number: "",
+    tin_number: "",
+    start_date: new Date().toISOString().split("T")[0],
+    is_tax_resident: true,
+    is_pensionable: true,
+    secondary_employment: false,
+    gra_position_code: "",
+  }
 }
 
 // Service business staff (payroll employees)
@@ -22,6 +46,7 @@ type StaffMember = {
   whatsapp_phone: string | null
   email: string | null
   basic_salary: number
+  salary_basis?: string | null
   employment_type: string
   bank_name: string | null
   bank_account: string | null
@@ -53,6 +78,7 @@ type BusinessUser = {
 export default function ServiceStaffSettingsPage() {
   const router = useRouter()
   const { openConfirm } = useConfirm()
+  const toast = useToast()
   const { format: formatSalary } = useBusinessCurrency()
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [businessUsers, setBusinessUsers] = useState<BusinessUser[]>([])
@@ -61,6 +87,7 @@ export default function ServiceStaffSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [createdStaffLink, setCreatedStaffLink] = useState<{ id: string; name: string } | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [stores, setStores] = useState<Array<{ id: string; name: string }>>([])
 
@@ -76,20 +103,7 @@ export default function ServiceStaffSettingsPage() {
   })
 
   // Form fields for new staff (service businesses only)
-  const [formData, setFormData] = useState({
-    name: "",
-    position: "",
-    phone: "",
-    whatsapp_phone: "",
-    email: "",
-    basic_salary: "",
-    employment_type: "full_time" as "full_time" | "part_time" | "casual",
-    bank_name: "",
-    bank_account: "",
-    ssnit_number: "",
-    tin_number: "",
-    start_date: new Date().toISOString().split("T")[0],
-  })
+  const [formData, setFormData] = useState(emptyNewStaffForm())
 
   useEffect(() => {
     loadData()
@@ -221,6 +235,11 @@ export default function ServiceStaffSettingsPage() {
       return
     }
 
+    if (!formData.start_date?.trim()) {
+      setError("Please enter a start date")
+      return
+    }
+
     try {
       setError("")
       const res = await fetch("/api/staff/create", {
@@ -233,12 +252,17 @@ export default function ServiceStaffSettingsPage() {
           whatsapp_phone: formData.whatsapp_phone.trim() || null,
           email: formData.email.trim() || null,
           basic_salary: parseFloat(formData.basic_salary) || 0,
+          salary_basis: formData.salary_basis,
           employment_type: formData.employment_type,
           bank_name: formData.bank_name.trim() || null,
           bank_account: formData.bank_account.trim() || null,
           ssnit_number: formData.ssnit_number.trim() || null,
           tin_number: formData.tin_number.trim() || null,
           start_date: formData.start_date,
+          is_tax_resident: formData.is_tax_resident,
+          is_pensionable: formData.is_pensionable,
+          secondary_employment: formData.secondary_employment,
+          gra_position_code: formData.gra_position_code.trim() || null,
         }),
       })
       const payload = await res.json().catch(() => ({}))
@@ -252,24 +276,15 @@ export default function ServiceStaffSettingsPage() {
         return
       }
 
-      setSuccess(`${formData.name} has been added successfully!`)
+      const staffName = formData.name.trim()
+      const staffId = payload?.staff?.id as string | undefined
+      toast.showToast(`${staffName} was added to your team`, "success")
+      if (staffId) {
+        setCreatedStaffLink({ id: staffId, name: staffName })
+      }
       setShowAddModal(false)
-      setFormData({
-        name: "",
-        position: "",
-        phone: "",
-        whatsapp_phone: "",
-        email: "",
-        basic_salary: "",
-        employment_type: "full_time",
-        bank_name: "",
-        bank_account: "",
-        ssnit_number: "",
-        tin_number: "",
-        start_date: new Date().toISOString().split("T")[0],
-      })
+      setFormData(emptyNewStaffForm())
       loadData()
-      setTimeout(() => setSuccess(""), 3000)
     } catch (err: any) {
       setError(err.message || "Failed to add staff")
     }
@@ -594,6 +609,22 @@ export default function ServiceStaffSettingsPage() {
             </div>
           )}
 
+          {createdStaffLink && (
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 px-4 py-3 rounded-lg mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <p className="text-sm">
+                <span className="font-semibold">{createdStaffLink.name}</span> was added. Review payroll
+                settings to confirm tax and pension details before the first pay run.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push(`/service/payroll/staff/${createdStaffLink.id}/edit`)}
+                className="shrink-0 inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-green-700 text-white hover:bg-green-800"
+              >
+                Review payroll settings
+              </button>
+            </div>
+          )}
+
           {success && (
             <div className="bg-green-50 dark:bg-green-900/20 border-l-4 border-green-400 text-green-700 dark:text-green-400 px-4 py-3 rounded mb-6">
               {success}
@@ -852,6 +883,27 @@ export default function ServiceStaffSettingsPage() {
                         className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                         required
                       />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Amount for the selected salary basis (no automatic conversion).
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                        Salary basis *
+                      </label>
+                      <NativeSelect
+                        value={formData.salary_basis}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            salary_basis: e.target.value as "monthly" | "weekly" | "fortnightly",
+                          })
+                        }
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="fortnightly">Fortnightly</option>
+                      </NativeSelect>
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -868,13 +920,14 @@ export default function ServiceStaffSettingsPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                        Start Date
+                        Start Date *
                       </label>
                       <input
                         type="date"
                         value={formData.start_date}
                         onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
                         className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        required
                       />
                     </div>
                     <div>
@@ -909,6 +962,9 @@ export default function ServiceStaffSettingsPage() {
                         onChange={(e) => setFormData({ ...formData, ssnit_number: e.target.value })}
                         className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                       />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Needed for SSNIT/Tier 1 remittance schedules.
+                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -920,6 +976,81 @@ export default function ServiceStaffSettingsPage() {
                         onChange={(e) => setFormData({ ...formData, tin_number: e.target.value })}
                         className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                       />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Needed for PAYE filing exports.
+                      </p>
+                    </div>
+
+                    <div className="md:col-span-2 border-t border-gray-200 dark:border-gray-600 pt-4 mt-2">
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">
+                        Payroll settings
+                      </p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
+                        New staff are created as tax resident and pensionable unless you change these settings.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="flex items-start gap-2 cursor-pointer md:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={formData.is_pensionable}
+                            onChange={(e) => setFormData({ ...formData, is_pensionable: e.target.checked })}
+                            className="mt-1 rounded border-gray-300"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
+                            Pensionable (SSNIT)
+                            <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              Uncheck if this staff member should not have SSNIT/pension deductions.
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2 cursor-pointer md:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={formData.is_tax_resident}
+                            onChange={(e) => setFormData({ ...formData, is_tax_resident: e.target.checked })}
+                            className="mt-1 rounded border-gray-300"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">
+                            Tax resident (Ghana PAYE)
+                            <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              Used for PAYE and filing records.
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2 cursor-pointer md:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={formData.secondary_employment}
+                            onChange={(e) =>
+                              setFormData({ ...formData, secondary_employment: e.target.checked })
+                            }
+                            className="mt-1 rounded border-gray-300"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">Secondary employment</span>
+                        </label>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            GRA position code (optional)
+                          </label>
+                          <NativeSelect
+                            value={formData.gra_position_code}
+                            onChange={(e) =>
+                              setFormData({ ...formData, gra_position_code: e.target.value })
+                            }
+                            wrapperClassName="max-w-md"
+                          >
+                            <option value="">Not set</option>
+                            {GRA_POSITION_CODES.map((code) => (
+                              <option key={code} value={code}>
+                                {code}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Used for GRA PAYE schedules.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

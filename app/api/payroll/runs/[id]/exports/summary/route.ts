@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { csvResponse, formatNumeric } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollExportPeriodValues,
+  payrollPeriodCellValue,
+} from "@/lib/payroll/payrollExportMetadata"
 import { getAuthorizedPayrollRunForExport } from "../_shared"
 
 export async function GET(
@@ -36,11 +42,10 @@ export async function GET(
 
     const employerCost = Number(payrollRun.total_gross_salary || 0) + sums.employerPension
     const businessName = business.trading_name || business.legal_name || business.name || business.id
-    const month = String(payrollRun.payroll_month).slice(0, 7)
 
-    return csvResponse(`finza-payroll-summary-${month}.csv`, [
+    return csvResponse(payrollExportFilename("finza-payroll-summary", payrollRun), [
       [
-        "Payroll Period",
+        ...PAYROLL_EXPORT_PERIOD_HEADERS,
         "Business Name",
         "Run Status",
         "Gross Salary",
@@ -60,7 +65,7 @@ export async function GET(
         "Approved By",
       ],
       [
-        String(payrollRun.payroll_month || ""),
+        ...payrollExportPeriodValues(payrollRun),
         String(businessName || ""),
         String(payrollRun.status || ""),
         formatNumeric(payrollRun.total_gross_salary),
