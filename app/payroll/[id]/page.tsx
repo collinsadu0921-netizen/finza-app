@@ -2241,9 +2241,9 @@ export default function PayrollRunViewPage() {
 
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-              <div>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="shrink-0 flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="min-w-0">
                 <h2 className="text-base font-bold text-gray-900 dark:text-white">Record Salary Payment</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
                   This records salary disbursement and clears net salaries payable against the selected payment account. It does not change payroll calculations or statutory liabilities.
@@ -2256,7 +2256,7 @@ export default function PayrollRunViewPage() {
                     setPaymentError("")
                   }
                 }}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2264,7 +2264,7 @@ export default function PayrollRunViewPage() {
               </button>
             </div>
 
-            <div className="px-6 py-5 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
               {paymentError && (
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   {paymentError}
@@ -2355,7 +2355,7 @@ export default function PayrollRunViewPage() {
                   value={paymentForm.notes}
                   onChange={(e) => setPaymentForm((f) => ({ ...f, notes: e.target.value }))}
                   className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
-                  rows={3}
+                  rows={2}
                 />
               </label>
 
@@ -2421,7 +2421,7 @@ export default function PayrollRunViewPage() {
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+            <div className="shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2 bg-white dark:bg-gray-800">
               <button
                 onClick={() => setShowPaymentModal(false)}
                 disabled={recordingPayment}
