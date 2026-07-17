@@ -14,6 +14,7 @@ import {
   requestDeleteDraftPayrollRun,
 } from "@/lib/payroll/payrollDraftDeleteUi"
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
+import { assessGraFilingReadiness } from "@/lib/payroll/graDt107aPayeExport"
 
 type PayrollEntry = {
   id: string
@@ -36,6 +37,9 @@ type PayrollEntry = {
   taxable_income: number
   paye: number
   net_salary: number
+  filing_tin?: string | null
+  filing_employee_name?: string | null
+  payroll_tax_profile?: Record<string, unknown> | null
   staff: {
     id: string
     name: string
@@ -43,6 +47,7 @@ type PayrollEntry = {
     phone: string | null
     whatsapp_phone: string | null
     email: string | null
+    tin_number?: string | null
   }
 }
 
@@ -1208,6 +1213,49 @@ export default function PayrollRunViewPage() {
             </div>
           )}
 
+          {(() => {
+            const readiness = assessGraFilingReadiness(
+              entries.map((e) => ({
+                is_included: e.is_included,
+                staff: {
+                  id: e.staff.id,
+                  name: e.staff.name,
+                  tin_number: e.staff.tin_number ?? null,
+                },
+                entry: {
+                  basic_salary: e.basic_salary,
+                  regular_allowances_amount: e.regular_allowances_amount ?? null,
+                  bonus_amount: e.bonus_amount ?? null,
+                  overtime_amount: e.overtime_amount ?? null,
+                  gross_salary: e.gross_salary,
+                  employee_pension_contribution: null,
+                  ssnit_employee: e.ssnit_employee,
+                  taxable_income: e.taxable_income,
+                  paye: e.paye,
+                  bonus_tax_5: null,
+                  bonus_tax_graduated: null,
+                  overtime_tax_5: null,
+                  overtime_tax_10: null,
+                  overtime_tax_graduated: null,
+                  payroll_tax_profile: e.payroll_tax_profile ?? null,
+                  filing_tin: e.filing_tin ?? null,
+                  filing_employee_name: e.filing_employee_name ?? null,
+                },
+              }))
+            )
+            if (readiness.included_count === 0 || readiness.ready) return null
+            return (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 whitespace-pre-line">
+                <p className="font-medium mb-1">GRA filing readiness</p>
+                <p>{readiness.summary}</p>
+                <p className="mt-2 text-xs opacity-90">
+                  You can still approve monthly payroll if needed. GRA DT 107A export stays blocked until
+                  every included employee has a filing TIN and a supported GRA position code.
+                </p>
+              </div>
+            )
+          })()}
+
           {!readOnly && payrollRun.status === "draft" && (
             <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
@@ -1775,7 +1823,7 @@ export default function PayrollRunViewPage() {
                                   className="px-2.5 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                                 >
                                   {o.obligation_type === "paye_gra"
-                                    ? "Pay GRA PAYE"
+                                    ? "Record GRA remittance"
                                     : o.obligation_type === "ssnit_tier1"
                                       ? "Pay SSNIT / Tier 1"
                                       : o.obligation_type === "tier2_pension"
@@ -1830,18 +1878,37 @@ export default function PayrollRunViewPage() {
                     type="button"
                     onClick={() =>
                       downloadRunExport(
-                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye`,
-                        "GRA DT 107A PAYE CSV downloaded"
+                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=gra-ready`,
+                        "GRA-ready DT 107A CSV downloaded"
                       )
                     }
                     className="px-3 py-2 text-left text-xs rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 sm:text-center sm:col-span-2"
                   >
-                    GRA DT 107A PAYE CSV
+                    GRA-ready DT 107A CSV
                   </button>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 -mt-1">
-                    Uses GRA DT 107A upload column layout. Requires TIN and GRA position code on each employee record.
-                    Verify before filing.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadRunExport(
+                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=audit`,
+                        "Finza DT 107A audit CSV downloaded"
+                      )
+                    }
+                    className="px-3 py-2 text-left text-xs rounded-lg bg-slate-600 text-white hover:bg-slate-700 sm:text-center sm:col-span-2"
+                  >
+                    Finza DT 107A audit CSV
+                  </button>
+                  <div className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 space-y-1.5 -mt-1">
+                    <p>
+                      Use the GRA-ready DT 107A CSV for portal filing. Employer return forms and the actual tax
+                      payment are completed outside Finza. Keep the GRA acknowledgement for your records.
+                    </p>
+                    <p>
+                      DT 107A is the employee schedule only. Employer TIN/profile details and cover forms
+                      (DT107 / DT107C / DT108) are entered in the GRA portal — Finza does not generate those yet.
+                    </p>
+                    <p>The audit CSV includes Finza period metadata and is for reference, not portal upload.</p>
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -2384,10 +2451,14 @@ export default function PayrollRunViewPage() {
             <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="text-base font-bold text-gray-900 dark:text-white">
-                  Record {selectedObligation.label}
+                  {selectedObligation.obligation_type === "paye_gra"
+                    ? "Record GRA remittance"
+                    : `Record ${selectedObligation.label}`}
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Use this after you have paid this amount outside Finza. Finza will record the payment in your books.
+                  {selectedObligation.obligation_type === "paye_gra"
+                    ? "File and pay through the GRA portal first. Then record the remittance here to update Finza’s books."
+                    : "Use this after you have paid this amount outside Finza. Finza will record the payment in your books."}
                 </p>
               </div>
               <button

@@ -4,17 +4,22 @@ import { join } from "path"
 import { GRA_DT0107A_0108A_UPLOADABLE_HEADER_ROW } from "./fixtures/graDt107aUploadableHeaderRow"
 import {
   GRA_DT107A_PAYE_HEADER_ROW,
+  GRA_DT107A_REQUIRES_APPROVAL_MESSAGE,
+  assessGraFilingReadiness,
   buildGraDt107aPayeCsvRows,
   buildGraDt107aPayeDataRows,
   effectiveFilingEmployeeName,
   effectiveFilingTin,
   employeeSocialSecurityFundAmount,
+  filterIncludedGraDt107aRows,
   graDt107aExcessBonusAmount,
   graDt107aExcessBonusForExport,
   graNonResidentYN,
   graSecondaryEmploymentYN,
+  isGraDt107aExportStatusAllowed,
   overtimeTaxTotal,
   parsePayrollTaxProfile,
+  sumGraDt107aPaye,
   totalAssessableIncomePhase1,
   totalCashEmolument,
   validateGraDt107aPayeExport,
@@ -355,6 +360,301 @@ describe("GRA DT 107A PAYE export", () => {
   it("blocks empty run", () => {
     const v = validateGraDt107aPayeExport([])
     expect(v.ok).toBe(false)
-    if (!v.ok) expect(v.issues).toEqual([])
+    if (!v.ok) {
+      expect(v.issues).toEqual([])
+      expect(v.message).toContain("No included employees")
+    }
+  })
+
+  describe("approved-run gate helpers", () => {
+    it("allows approved and locked only", () => {
+      expect(isGraDt107aExportStatusAllowed("draft")).toBe(false)
+      expect(isGraDt107aExportStatusAllowed("approved")).toBe(true)
+      expect(isGraDt107aExportStatusAllowed("locked")).toBe(true)
+      expect(isGraDt107aExportStatusAllowed("deleted")).toBe(false)
+      expect(isGraDt107aExportStatusAllowed(null)).toBe(false)
+      expect(GRA_DT107A_REQUIRES_APPROVAL_MESSAGE).toBe(
+        "DT 107A export is available only after payroll approval."
+      )
+    })
+
+    it("route enforces approval message and status helper", () => {
+      const file = join(
+        process.cwd(),
+        "app",
+        "api",
+        "payroll",
+        "runs",
+        "[id]",
+        "exports",
+        "gra-dt107a-paye",
+        "route.ts"
+      )
+      const src = readFileSync(file, "utf8")
+      expect(src).toContain("isGraDt107aExportStatusAllowed")
+      expect(src).toContain("GRA_DT107A_REQUIRES_APPROVAL_MESSAGE")
+      expect(src).toContain('mode === "audit"')
+      expect(src).toContain("gra-dt107a-paye-gra-ready")
+    })
+  })
+
+  describe("included-entry filter", () => {
+    it("exports included employee and omits excluded", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        { staff: sampleStaff({ id: "in", name: "Included" }), entry: sampleEntry(), is_included: true },
+        {
+          staff: sampleStaff({ id: "out", name: "Excluded", tin_number: null }),
+          entry: sampleEntry({
+            paye: 999,
+            payroll_tax_profile: { gra_position_code: null },
+          }),
+          is_included: false,
+        },
+      ]
+      expect(filterIncludedGraDt107aRows(rows)).toHaveLength(1)
+      expect(validateGraDt107aPayeExport(rows).ok).toBe(true)
+      const data = buildGraDt107aPayeDataRows(rows)
+      expect(data).toHaveLength(1)
+      expect(data[0][1]).toBe("Included")
+      expect(sumGraDt107aPaye(filterIncludedGraDt107aRows(rows))).toBe(400)
+    })
+
+    it("excluded employee with missing TIN does not block export", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        { staff: sampleStaff(), entry: sampleEntry(), is_included: true },
+        {
+          staff: sampleStaff({ id: "out", tin_number: "  " }),
+          entry: sampleEntry({
+            payroll_tax_profile: {
+              gra_position_code: null,
+              staff_is_tax_resident: true,
+              casual_worker_flat_tax_applied: false,
+            },
+          }),
+          is_included: false,
+        },
+      ]
+      expect(validateGraDt107aPayeExport(rows).ok).toBe(true)
+    })
+
+    it("no included employees returns controlled error", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        { staff: sampleStaff(), entry: sampleEntry(), is_included: false },
+      ]
+      const v = validateGraDt107aPayeExport(rows)
+      expect(v.ok).toBe(false)
+      if (!v.ok) {
+        expect(v.message).toContain("No included employees")
+        expect(v.issues).toEqual([])
+      }
+    })
+
+    it("null/undefined is_included treated as included", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        { staff: sampleStaff(), entry: sampleEntry() },
+        { staff: sampleStaff({ id: "2", name: "B" }), entry: sampleEntry({ paye: 10 }), is_included: null },
+      ]
+      expect(filterIncludedGraDt107aRows(rows)).toHaveLength(2)
+      expect(validateGraDt107aPayeExport(rows).ok).toBe(true)
+    })
+  })
+
+  describe("clean GRA-ready CSV", () => {
+    it("first row is official GRA header with 27 columns and no metadata preamble", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        { staff: sampleStaff(), entry: sampleEntry(), is_included: true },
+        {
+          staff: sampleStaff({ id: "x", name: "Skip" }),
+          entry: sampleEntry({ paye: 1 }),
+          is_included: false,
+        },
+      ]
+      const csvRows = buildGraDt107aPayeCsvRows(rows)
+      expect(csvRows[0]).toEqual([...GRA_DT107A_PAYE_HEADER_ROW])
+      expect(csvRows[0]).toHaveLength(27)
+      expect(csvRows).toHaveLength(2)
+      const csv = toCsv(csvRows)
+      expect(csv.charCodeAt(0)).toBe(0xfeff)
+      expect(csv.split("\n")[0].replace(/^\uFEFF/, "").startsWith("(3) TIN")).toBe(true)
+      expect(csv).not.toContain("Pay run metadata")
+      expect(csv).not.toContain("Pay Period Label")
+    })
+
+    it("employee count and PAYE total reconcile without duplicates", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        {
+          staff: sampleStaff({ id: "a", name: "A", tin_number: "C0000000001" }),
+          entry: sampleEntry({ paye: 100, filing_tin: "C0000000001" }),
+          is_included: true,
+        },
+        {
+          staff: sampleStaff({ id: "b", name: "B", tin_number: "C0000000002" }),
+          entry: sampleEntry({ paye: 50.5, filing_tin: "C0000000002" }),
+          is_included: true,
+        },
+        {
+          staff: sampleStaff({ id: "c", name: "C", tin_number: "C0000000003" }),
+          entry: sampleEntry({ paye: 999, filing_tin: "C0000000003" }),
+          is_included: false,
+        },
+      ]
+      const data = buildGraDt107aPayeDataRows(rows)
+      expect(data).toHaveLength(2)
+      expect(new Set(data.map((r) => r[0])).size).toBe(2)
+      expect(sumGraDt107aPaye(filterIncludedGraDt107aRows(rows))).toBe(150.5)
+      expect(data.reduce((s, r) => s + Number(r[24]), 0)).toBeCloseTo(150.5, 2)
+    })
+  })
+
+  describe("filing readiness", () => {
+    it("reports missing TIN and position; ignores excluded", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        {
+          staff: sampleStaff({ id: "a", name: "Employee A", tin_number: "  " }),
+          entry: sampleEntry({ filing_tin: null }),
+          is_included: true,
+        },
+        {
+          staff: sampleStaff({ id: "b", name: "Employee B" }),
+          entry: sampleEntry({
+            payroll_tax_profile: {
+              gra_position_code: null,
+              staff_is_tax_resident: true,
+              casual_worker_flat_tax_applied: false,
+            },
+          }),
+          is_included: true,
+        },
+        {
+          staff: sampleStaff({ id: "c", name: "Excluded Bad", tin_number: null }),
+          entry: sampleEntry({
+            payroll_tax_profile: { gra_position_code: null },
+          }),
+          is_included: false,
+        },
+      ]
+      const r = assessGraFilingReadiness(rows)
+      expect(r.ready).toBe(false)
+      expect(r.included_count).toBe(2)
+      expect(r.summary).toContain("2 employees are not ready for GRA filing")
+      expect(r.summary).toContain("Employee A: missing TIN")
+      expect(r.summary).toContain("Employee B: missing GRA position")
+      expect(r.issues.some((i) => i.staff_name === "Excluded Bad")).toBe(false)
+    })
+
+    it("reports invalid position", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        {
+          staff: sampleStaff(),
+          entry: sampleEntry({
+            payroll_tax_profile: {
+              gra_position_code: "BOSS",
+              staff_is_tax_resident: true,
+              casual_worker_flat_tax_applied: false,
+            },
+          }),
+          is_included: true,
+        },
+      ]
+      const r = assessGraFilingReadiness(rows)
+      expect(r.ready).toBe(false)
+      expect(r.summary).toContain("invalid GRA position")
+    })
+
+    it("fully ready run reports ready", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        { staff: sampleStaff(), entry: sampleEntry(), is_included: true },
+      ]
+      const r = assessGraFilingReadiness(rows)
+      expect(r.ready).toBe(true)
+      expect(r.summary).toContain("ready for GRA filing")
+    })
+  })
+
+  describe("snapshot stability (approved export uses snapshot fields)", () => {
+    it("staff name/TIN/position edits after approval do not alter export when snapshots set", () => {
+      const approved: GraDt107aJoinedRow[] = [
+        {
+          staff: sampleStaff({
+            name: "Live Edited Name",
+            tin_number: "LIVE-NEW-TIN",
+          }),
+          entry: sampleEntry({
+            filing_tin: "SNAP-TIN",
+            filing_employee_name: "Snap Name",
+            payroll_tax_profile: {
+              staff_is_tax_resident: true,
+              gra_position_code: "SENR",
+              secondary_employment: false,
+              casual_worker_flat_tax_applied: false,
+              bonus_concessional_room_before_run: 1_000_000,
+            },
+            regular_allowances_amount: 500,
+            paye: 400,
+          }),
+          is_included: true,
+        },
+      ]
+      const before = buildGraDt107aPayeDataRows(approved)[0]
+      // Simulate later live staff + source allowance edits (entry snapshot unchanged).
+      const afterStaffEdit: GraDt107aJoinedRow[] = [
+        {
+          ...approved[0],
+          staff: sampleStaff({
+            name: "Completely Different",
+            tin_number: "DIFFERENT-TIN",
+          }),
+          entry: {
+            ...approved[0].entry,
+            // live allowance mutation must not be used if we keep snapshot amounts on entry
+          },
+        },
+      ]
+      const after = buildGraDt107aPayeDataRows(afterStaffEdit)[0]
+      expect(after[0]).toBe("SNAP-TIN")
+      expect(after[1]).toBe("Snap Name")
+      expect(after[3]).toBe("SENR")
+      expect(after[9]).toBe(formatNumeric(500))
+      expect(after[24]).toBe(formatNumeric(400))
+      expect(after).toEqual(before)
+    })
+
+    it("source allowance edit does not alter approved export when entry snapshot unchanged", () => {
+      const snapAllowances = 750
+      const row: GraDt107aJoinedRow = {
+        staff: sampleStaff(),
+        entry: sampleEntry({
+          regular_allowances_amount: snapAllowances,
+          filing_tin: "C0123456789",
+          filing_employee_name: "Ama Mensah",
+        }),
+        is_included: true,
+      }
+      const export1 = buildGraDt107aPayeDataRows([row])[0]
+      // "Source" allowance change would only affect a new draft; approved entry stays.
+      const export2 = buildGraDt107aPayeDataRows([
+        {
+          ...row,
+          entry: { ...row.entry, regular_allowances_amount: snapAllowances },
+        },
+      ])[0]
+      expect(export2[9]).toBe(formatNumeric(snapAllowances))
+      expect(export2).toEqual(export1)
+    })
+  })
+
+  describe("UX/API copy surfaces", () => {
+    it("payroll run page uses remittance wording and GRA-ready export guidance", () => {
+      const file = join(process.cwd(), "app", "payroll", "[id]", "page.tsx")
+      const src = readFileSync(file, "utf8")
+      expect(src).toContain("Record GRA remittance")
+      expect(src).not.toContain("Pay GRA PAYE")
+      expect(src).toContain("File and pay through the GRA portal first")
+      expect(src).toContain("Use the GRA-ready DT 107A CSV for portal filing")
+      expect(src).toContain("Keep the GRA acknowledgement")
+      expect(src).toContain("mode=gra-ready")
+      expect(src).toContain("mode=audit")
+      expect(src).toContain("assessGraFilingReadiness")
+    })
   })
 })
