@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { parseStaffPayrollTaxFieldsFromRequestBody } from "@/lib/payroll/staffTaxProfile"
+import { parseSalaryBasis } from "@/lib/payroll/salaryBasis"
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest) {
       whatsapp_phone,
       email,
       basic_salary,
+      salary_basis,
       start_date,
       employment_type,
       bank_name,
@@ -77,6 +79,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: taxFields.error }, { status: 400 })
     }
 
+    let resolvedSalaryBasis = "monthly"
+    try {
+      resolvedSalaryBasis = parseSalaryBasis(salary_basis ?? "monthly")
+    } catch (err: unknown) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Invalid salary_basis" },
+        { status: 400 }
+      )
+    }
+
     const { data: staff, error } = await supabase
       .from("staff")
       .insert({
@@ -87,6 +99,7 @@ export async function POST(request: NextRequest) {
         whatsapp_phone: whatsapp_phone?.trim() || null,
         email: email?.trim() || null,
         basic_salary: Number(basic_salary),
+        salary_basis: resolvedSalaryBasis,
         start_date,
         employment_type: employment_type || "full_time",
         bank_name: bank_name?.trim() || null,

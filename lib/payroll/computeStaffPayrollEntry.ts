@@ -5,6 +5,8 @@ import {
   ghanaPayeInputsFromBreakdown,
   recalculateGhanaEntryAfterRemovingSsnit,
 } from "@/lib/payroll/ghanaNonPensionableAdjustments"
+import type { OneOffItemSnapshot } from "@/lib/payroll/periodPayrollItems"
+import { parseSalaryBasis, type SalaryBasis } from "@/lib/payroll/salaryBasis"
 import { buildGraFilingFieldsForPayrollEntry, parseStaffIsPensionable } from "@/lib/payroll/staffTaxProfile"
 import { roundPayroll } from "@/lib/payrollEngine/versioning"
 
@@ -12,6 +14,7 @@ export type StaffPayrollInput = {
   id: string
   name?: string | null
   basic_salary?: number | null
+  salary_basis?: string | null
   employment_type?: string | null
   position?: string | null
   tin_number?: string | null
@@ -44,6 +47,9 @@ export type ComputeStaffPayrollEntryParams = {
   baseSalarySnapshot?: number
   adjustmentReason?: string | null
   exclusionReason?: string | null
+  /** Override snapshotted salary basis (defaults to staff.salary_basis / monthly). */
+  salaryBasisSnapshot?: SalaryBasis | string | null
+  oneOffItemsSnapshot?: OneOffItemSnapshot[] | null
 }
 
 export type ComputedPayrollEntryRow = {
@@ -53,6 +59,9 @@ export type ComputedPayrollEntryRow = {
   adjustment_amount: number
   adjustment_reason: string | null
   exclusion_reason: string | null
+  salary_basis: SalaryBasis
+  period_basic_pay: number
+  one_off_items_snapshot: OneOffItemSnapshot[]
   basic_salary: number
   allowances_total: number
   regular_allowances_amount: number
@@ -98,7 +107,9 @@ function zeroEntry(
   adjustmentAmount: number,
   adjustmentReason: string | null,
   exclusionReason: string | null,
-  isIncluded: boolean
+  isIncluded: boolean,
+  salaryBasis: SalaryBasis,
+  oneOffItemsSnapshot: OneOffItemSnapshot[] = []
 ): ComputedPayrollEntryRow {
   const filing = buildGraFilingFieldsForPayrollEntry({ staff, breakdown: null })
   return {
@@ -108,6 +119,9 @@ function zeroEntry(
     adjustment_amount: adjustmentAmount,
     adjustment_reason: adjustmentReason,
     exclusion_reason: exclusionReason,
+    salary_basis: salaryBasis,
+    period_basic_pay: 0,
+    one_off_items_snapshot: oneOffItemsSnapshot,
     basic_salary: 0,
     allowances_total: 0,
     regular_allowances_amount: 0,
@@ -152,7 +166,12 @@ export function computeStaffPayrollEntry(
     baseSalarySnapshot,
     adjustmentReason = null,
     exclusionReason = null,
+    salaryBasisSnapshot,
+    oneOffItemsSnapshot = null,
   } = params
+
+  const salaryBasis = parseSalaryBasis(salaryBasisSnapshot ?? staff.salary_basis ?? "monthly")
+  const oneOffSnapshot = Array.isArray(oneOffItemsSnapshot) ? oneOffItemsSnapshot : []
 
   const baseSnapshot =
     baseSalarySnapshot !== undefined ? Number(baseSalarySnapshot) || 0 : Number(staff.basic_salary) || 0
@@ -166,7 +185,9 @@ export function computeStaffPayrollEntry(
       adjustment,
       adjustmentReason,
       exclusionReason,
-      false
+      false,
+      salaryBasis,
+      oneOffSnapshot
     )
   }
 
@@ -270,6 +291,9 @@ export function computeStaffPayrollEntry(
     adjustment_amount: adjustment,
     adjustment_reason: adjustmentReason,
     exclusion_reason: exclusionReason,
+    salary_basis: salaryBasis,
+    period_basic_pay: effectiveBasic,
+    one_off_items_snapshot: oneOffSnapshot,
     basic_salary: payrollResult.earnings.basicSalary,
     allowances_total: payrollResult.earnings.allowances,
     regular_allowances_amount: Number(breakdown?.regularAllowancesAmount ?? allowancesTotal),

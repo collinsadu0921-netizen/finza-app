@@ -15,6 +15,7 @@ type Staff = {
   whatsapp_phone: string | null
   email: string | null
   basic_salary: number
+  salary_basis?: string | null
   employment_type: string
   bank_name: string | null
   bank_account: string | null
@@ -174,15 +175,18 @@ export default function StaffViewPage() {
         : `/api/staff/${staffId}/allowances`
       const method = editingAllowance ? "PUT" : "POST"
 
+      const payload: Record<string, unknown> = {
+        type: allowanceForm.type.trim(),
+        amount: parseFloat(allowanceForm.amount),
+        description: allowanceForm.description.trim() || null,
+      }
+      // Creates from staff page are recurring only. Edits leave recurring/run linkage unchanged.
+      if (!editingAllowance) payload.recurring = true
+
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: allowanceForm.type.trim(),
-          amount: parseFloat(allowanceForm.amount),
-          recurring: allowanceForm.recurring,
-          description: allowanceForm.description.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       })
 
       const data = await response.json()
@@ -212,15 +216,17 @@ export default function StaffViewPage() {
         : `/api/staff/${staffId}/deductions`
       const method = editingDeduction ? "PUT" : "POST"
 
+      const payload: Record<string, unknown> = {
+        type: deductionForm.type.trim(),
+        amount: parseFloat(deductionForm.amount),
+        description: deductionForm.description.trim() || null,
+      }
+      if (!editingDeduction) payload.recurring = true
+
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: deductionForm.type.trim(),
-          amount: parseFloat(deductionForm.amount),
-          recurring: deductionForm.recurring,
-          description: deductionForm.description.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       })
 
       const data = await response.json()
@@ -485,6 +491,9 @@ export default function StaffViewPage() {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Basic Salary</p>
                   <p className="text-2xl font-bold text-gray-900 dark:text-white">₵{Number(staff.basic_salary).toFixed(2)}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Salary basis: {staff.salary_basis || "monthly"} (amount for that basis; no conversion)
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Bank Name</p>
@@ -779,17 +788,10 @@ export default function StaffViewPage() {
                   required
                 />
               </div>
-              <div>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={allowanceForm.recurring}
-                    onChange={(e) => setAllowanceForm({ ...allowanceForm, recurring: e.target.checked })}
-                    className="w-5 h-5"
-                  />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Recurring</span>
-                </label>
-              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Staff allowances created here are recurring (once per matching pay period). Assign
+                one-off allowances from a draft payroll run.
+              </p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
                 <textarea
@@ -857,17 +859,10 @@ export default function StaffViewPage() {
                   required
                 />
               </div>
-              <div>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={deductionForm.recurring}
-                    onChange={(e) => setDeductionForm({ ...deductionForm, recurring: e.target.checked })}
-                    className="w-5 h-5"
-                  />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Recurring</span>
-                </label>
-              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Staff deductions created here are recurring (once per matching pay period). Assign
+                one-off deductions from a draft payroll run.
+              </p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
                 <textarea

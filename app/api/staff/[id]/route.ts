@@ -5,6 +5,7 @@ import { hasPermission, requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { parseStaffPayrollTaxFieldsFromRequestBody } from "@/lib/payroll/staffTaxProfile"
+import { parseSalaryBasis } from "@/lib/payroll/salaryBasis"
 
 export async function GET(
   request: NextRequest,
@@ -165,6 +166,7 @@ export async function PUT(
       whatsapp_phone,
       email,
       basic_salary,
+      salary_basis,
       start_date,
       employment_type,
       bank_name,
@@ -185,6 +187,16 @@ export async function PUT(
     if (whatsapp_phone !== undefined) updateData.whatsapp_phone = whatsapp_phone?.trim() || null
     if (email !== undefined) updateData.email = email?.trim() || null
     if (basic_salary !== undefined) updateData.basic_salary = Number(basic_salary)
+    if (salary_basis !== undefined) {
+      try {
+        updateData.salary_basis = parseSalaryBasis(salary_basis)
+      } catch (err: unknown) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Invalid salary_basis" },
+          { status: 400 }
+        )
+      }
+    }
     if (start_date) updateData.start_date = start_date
     if (employment_type) updateData.employment_type = employment_type
     if (bank_name !== undefined) updateData.bank_name = bank_name?.trim() || null

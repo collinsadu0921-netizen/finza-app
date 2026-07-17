@@ -11,6 +11,12 @@ import {
 } from "@/lib/payroll/computeStaffPayrollEntry"
 import { rollupPayrollRunTotals } from "@/lib/payroll/rollupPayrollRunTotals"
 import { syncPayrollRunStaffScopeFingerprint } from "@/lib/payroll/syncPayrollRunStaffScope"
+import { filterPayrollItemsForRun } from "@/lib/payroll/periodPayrollItems"
+import {
+  exclusionReasonForSalaryBasisMismatch,
+  parseSalaryBasis,
+  salaryBasisMatchesFrequency,
+} from "@/lib/payroll/salaryBasis"
 
 async function syncPayrollRunTotals(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -78,7 +84,7 @@ export async function PATCH(
 
     const { data: payrollRun } = await supabase
       .from("payroll_runs")
-      .select("id, business_id, status, payroll_month")
+      .select("id, business_id, status, payroll_month, payroll_frequency")
       .eq("id", runId)
       .eq("business_id", business.id)
       .is("deleted_at", null)
@@ -107,7 +113,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const isIncluded =
+    let isIncluded =
       body.is_included !== undefined ? Boolean(body.is_included) : existingEntry.is_included !== false
     const adjustmentAmount =
       body.adjustment_amount !== undefined
@@ -117,13 +123,20 @@ export async function PATCH(
       body.adjustment_reason !== undefined
         ? body.adjustment_reason?.trim() || null
         : existingEntry.adjustment_reason
-    const exclusionReason =
+    let exclusionReason =
       body.exclusion_reason !== undefined
         ? body.exclusion_reason?.trim() || null
         : existingEntry.exclusion_reason
 
     if (!Number.isFinite(adjustmentAmount)) {
       return NextResponse.json({ error: "adjustment_amount must be a number" }, { status: 400 })
+    }
+
+    if (isIncluded && Math.abs(adjustmentAmount) > 0.0001 && !adjustmentReason) {
+      return NextResponse.json(
+        { error: "adjustment_reason is required when adjustment_amount is not zero." },
+        { status: 400 }
+      )
     }
 
     const { data: staff } = await supabase
@@ -146,18 +159,35 @@ export async function PATCH(
       )
     }
 
+    const salaryBasis = parseSalaryBasis(
+      existingEntry.salary_basis ?? staff.salary_basis ?? "monthly"
+    )
+    const frequency = String(payrollRun.payroll_frequency || "monthly")
+    if (!salaryBasisMatchesFrequency(salaryBasis, frequency)) {
+      isIncluded = false
+      exclusionReason = exclusionReasonForSalaryBasisMismatch(salaryBasis, frequency)
+    }
+
     const [{ data: allowances }, { data: deductions }] = await Promise.all([
       supabase
         .from("allowances")
-        .select("type, amount, recurring")
+        .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
         .eq("staff_id", staff.id)
         .is("deleted_at", null),
       supabase
         .from("deductions")
-        .select("amount")
+        .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
         .eq("staff_id", staff.id)
         .is("deleted_at", null),
     ])
+
+    const filtered = filterPayrollItemsForRun({
+      allowances: allowances || [],
+      deductions: deductions || [],
+      payrollRunId: runId,
+      payrollFrequency: frequency,
+      payrollMonth: payrollRun.payroll_month,
+    })
 
     let computed
     try {
@@ -165,13 +195,15 @@ export async function PATCH(
         staff,
         businessCountry,
         effectiveDate: payrollRun.payroll_month,
-        allowances: allowances || [],
-        deductions: deductions || [],
-        adjustmentAmount,
+        allowances: isIncluded ? filtered.includedAllowances : [],
+        deductions: isIncluded ? filtered.includedDeductions : [],
+        adjustmentAmount: isIncluded ? adjustmentAmount : 0,
         isIncluded,
         baseSalarySnapshot: Number(existingEntry.base_salary_snapshot ?? staff.basic_salary) || 0,
         adjustmentReason: isIncluded ? adjustmentReason : null,
         exclusionReason: isIncluded ? null : exclusionReason,
+        salaryBasisSnapshot: salaryBasis,
+        oneOffItemsSnapshot: isIncluded ? filtered.oneOffSnapshots : [],
       })
     } catch (error: unknown) {
       if (isPayrollEngineCountryError(error)) {

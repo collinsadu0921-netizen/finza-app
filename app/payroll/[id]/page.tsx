@@ -13,6 +13,7 @@ import {
   canShowPayrollDraftDelete,
   requestDeleteDraftPayrollRun,
 } from "@/lib/payroll/payrollDraftDeleteUi"
+import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
 
 type PayrollEntry = {
   id: string
@@ -21,6 +22,8 @@ type PayrollEntry = {
   adjustment_amount?: number
   adjustment_reason?: string | null
   exclusion_reason?: string | null
+  salary_basis?: string | null
+  period_basic_pay?: number | null
   is_included?: boolean
   allowances_total: number
   regular_allowances_amount?: number
@@ -265,6 +268,14 @@ export default function PayrollRunViewPage() {
   const [entryDrafts, setEntryDrafts] = useState<
     Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }>
   >({})
+  const [oneOffForm, setOneOffForm] = useState({
+    staff_id: "",
+    kind: "allowance" as "allowance" | "deduction",
+    type: "other",
+    amount: "",
+    description: "",
+  })
+  const [savingOneOff, setSavingOneOff] = useState(false)
   const [obligationsData, setObligationsData] = useState<ObligationsResponse | null>(null)
   const [loadingObligations, setLoadingObligations] = useState(false)
   const [showObligationPaymentModal, setShowObligationPaymentModal] = useState(false)
@@ -426,6 +437,54 @@ export default function PayrollRunViewPage() {
       toast.showToast("Error approving payroll run", "error")
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const handleAssignOneOff = async () => {
+    if (!oneOffForm.staff_id) {
+      toast.showToast("Select an employee for the one-off item.", "error")
+      return
+    }
+    const amount = Number(oneOffForm.amount)
+    if (!Number.isFinite(amount) || amount === 0) {
+      toast.showToast("Enter a non-zero amount.", "error")
+      return
+    }
+    setSavingOneOff(true)
+    try {
+      const path =
+        oneOffForm.kind === "allowance"
+          ? `/api/staff/${oneOffForm.staff_id}/allowances`
+          : `/api/staff/${oneOffForm.staff_id}/deductions`
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: oneOffForm.type,
+          amount,
+          recurring: false,
+          description: oneOffForm.description.trim() || null,
+          payroll_run_id: runId,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        toast.showToast(data.error || "Failed to assign one-off item", "error")
+        return
+      }
+      toast.showToast("One-off item assigned to this draft run", "success")
+      setOneOffForm({
+        staff_id: "",
+        kind: "allowance",
+        type: "other",
+        amount: "",
+        description: "",
+      })
+      await loadPayrollRun()
+    } catch {
+      toast.showToast("Failed to assign one-off item", "error")
+    } finally {
+      setSavingOneOff(false)
     }
   }
 
@@ -1113,7 +1172,16 @@ export default function PayrollRunViewPage() {
                   <button
                     type="button"
                     onClick={() => guardWriteAction(handleApprove)}
-                    disabled={updating || deleting}
+                    disabled={
+                      updating ||
+                      deleting ||
+                      (String(payrollRun.payroll_frequency || "monthly") !== "monthly")
+                    }
+                    title={
+                      String(payrollRun.payroll_frequency || "monthly") !== "monthly"
+                        ? "Approval blocked: Ghana statutory calculations use monthly PAYE bands"
+                        : undefined
+                    }
                     className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
                     {updating ? "Approving…" : "Approve payroll"}
@@ -1124,6 +1192,99 @@ export default function PayrollRunViewPage() {
           )}
 
           {readOnly && <ServiceReadOnlyNotice scope="payroll" className="mb-4" />}
+
+          {String(payrollRun.payroll_frequency || "monthly") !== "monthly" && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+              This {payrollRun.payroll_frequency} draft can be reviewed, but approval is blocked while
+              Ghana PAYE/SSNIT use monthly statutory bands.
+            </div>
+          )}
+
+          {entries.some((e) => e.is_included === false) && (
+            <div className="mb-4 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              {entries.filter((e) => e.is_included === false).length} employee
+              {entries.filter((e) => e.is_included === false).length === 1 ? "" : "s"} excluded
+              (salary basis mismatch or manual exclusion). Excluded rows show the reason below.
+            </div>
+          )}
+
+          {!readOnly && payrollRun.status === "draft" && (
+            <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                Assign one-off allowance or deduction
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Linked to this draft run only. Amount and description are snapshotted on the entry.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <select
+                  value={oneOffForm.staff_id}
+                  onChange={(e) => setOneOffForm((prev) => ({ ...prev, staff_id: e.target.value }))}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                >
+                  <option value="">Employee</option>
+                  {entries
+                    .filter((e) => e.is_included !== false)
+                    .map((e) => (
+                      <option key={e.id} value={e.staff.id}>
+                        {e.staff?.name || e.staff.id}
+                      </option>
+                    ))}
+                </select>
+                <select
+                  value={oneOffForm.kind}
+                  onChange={(e) =>
+                    setOneOffForm((prev) => ({
+                      ...prev,
+                      kind: e.target.value as "allowance" | "deduction",
+                      type: "other",
+                    }))
+                  }
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                >
+                  <option value="allowance">Allowance</option>
+                  <option value="deduction">Deduction</option>
+                </select>
+                <select
+                  value={oneOffForm.type}
+                  onChange={(e) => setOneOffForm((prev) => ({ ...prev, type: e.target.value }))}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                >
+                  {(oneOffForm.kind === "allowance"
+                    ? ALLOWANCE_TYPE_OPTIONS
+                    : DEDUCTION_TYPE_OPTIONS
+                  ).map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Amount"
+                  value={oneOffForm.amount}
+                  onChange={(e) => setOneOffForm((prev) => ({ ...prev, amount: e.target.value }))}
+                  className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  disabled={savingOneOff}
+                  onClick={() => guardWriteAction(handleAssignOneOff)}
+                  className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {savingOneOff ? "Saving…" : "Assign"}
+                </button>
+              </div>
+              <input
+                type="text"
+                placeholder="Description (optional)"
+                value={oneOffForm.description}
+                onChange={(e) => setOneOffForm((prev) => ({ ...prev, description: e.target.value }))}
+                className="mt-3 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm"
+              />
+            </div>
+          )}
 
           {/* Summary Cards — SSNIT split: only employee share reduces net pay; employer is a company cost */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-7">
@@ -1801,6 +1962,27 @@ export default function PayrollRunViewPage() {
                           {!included && entry.exclusion_reason && (
                             <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">Excluded: {entry.exclusion_reason}</p>
                           )}
+                          {!included && entry.exclusion_reason && (
+                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                              {entry.exclusion_reason}
+                            </p>
+                          )}
+                          {included && entry.salary_basis && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              Salary basis: {entry.salary_basis}
+                              {entry.base_salary_snapshot != null && (
+                                <> · Original ₵{Number(entry.base_salary_snapshot).toFixed(2)}</>
+                              )}
+                              {Number(entry.adjustment_amount) !== 0 && (
+                                <>
+                                  {" "}
+                                  · Adj {Number(entry.adjustment_amount) > 0 ? "+" : ""}
+                                  {Number(entry.adjustment_amount).toFixed(2)} · Final ₵
+                                  {Number(entry.period_basic_pay ?? entry.basic_salary).toFixed(2)}
+                                </>
+                              )}
+                            </p>
+                          )}
                           {included && entry.adjustment_reason && Number(entry.adjustment_amount) !== 0 && (
                             <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">{entry.adjustment_reason}</p>
                           )}
@@ -1878,13 +2060,22 @@ export default function PayrollRunViewPage() {
                                 <button
                                   type="button"
                                   disabled={savingEntryId === entry.id}
-                                  onClick={() =>
+                                  onClick={() => {
+                                    const adj = Number(draft?.adjustment_amount || 0)
+                                    const reason = draft?.adjustment_reason?.trim() || ""
+                                    if (Math.abs(adj) > 0.0001 && !reason) {
+                                      toast.showToast(
+                                        "Adjustment reason is required when the amount is not zero.",
+                                        "error"
+                                      )
+                                      return
+                                    }
                                     void handleUpdateEntry(entry, {
                                       is_included: true,
-                                      adjustment_amount: Number(draft?.adjustment_amount || 0),
-                                      adjustment_reason: draft?.adjustment_reason?.trim() || null,
+                                      adjustment_amount: adj,
+                                      adjustment_reason: reason || null,
                                     })
-                                  }
+                                  }}
                                   className="self-start rounded bg-slate-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
                                 >
                                   {savingEntryId === entry.id ? "Saving…" : "Apply"}

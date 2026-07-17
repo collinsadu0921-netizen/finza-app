@@ -26,6 +26,13 @@ import {
   assertNoDuplicatePayrollRun,
   DuplicatePayrollRunError,
 } from "@/lib/payroll/payrollDuplicateGuard"
+import { filterPayrollItemsForRun } from "@/lib/payroll/periodPayrollItems"
+import {
+  assertPhase1BPayrollFrequency,
+  exclusionReasonForSalaryBasisMismatch,
+  parseSalaryBasis,
+  salaryBasisMatchesFrequency,
+} from "@/lib/payroll/salaryBasis"
 
 const DEFAULT_PAYROLL_RUNS_LIMIT = 24
 const MAX_PAYROLL_RUNS_LIMIT = 100
@@ -63,12 +70,12 @@ async function fetchStaffAllowancesAndDeductions(
   const [{ data: allowances }, { data: deductions }] = await Promise.all([
     supabase
       .from("allowances")
-      .select("type, amount, recurring")
+      .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
       .eq("staff_id", staffId)
       .is("deleted_at", null),
     supabase
       .from("deductions")
-      .select("amount")
+      .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
       .eq("staff_id", staffId)
       .is("deleted_at", null),
   ])
@@ -237,6 +244,7 @@ export async function POST(request: NextRequest) {
     let periodFields
     try {
       periodFields = resolveCreatePayrollRunPeriod(body)
+      assertPhase1BPayrollFrequency(periodFields.payroll_frequency)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Invalid payroll period"
       return NextResponse.json({ error: message }, { status: 400 })
@@ -268,7 +276,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const staffScopeFingerprint = computeStaffScopeFingerprint(staffList.map((s) => s.id))
+    const eligibleStaff = staffList.filter((staff) =>
+      salaryBasisMatchesFrequency(parseSalaryBasis(staff.salary_basis), payroll_frequency)
+    )
+
+    if (eligibleStaff.length === 0) {
+      return NextResponse.json(
+        {
+          error: `No eligible employees for ${payroll_frequency} payroll. Employees must have matching salary basis (${payroll_frequency}).`,
+          code: "NO_ELIGIBLE_EMPLOYEES",
+        },
+        { status: 400 }
+      )
+    }
+
+    const staffScopeFingerprint = computeStaffScopeFingerprint(eligibleStaff.map((s) => s.id))
 
     const { data: existingRuns, error: existingRunsError } = await supabase
       .from("payroll_runs")
@@ -316,18 +338,55 @@ export async function POST(request: NextRequest) {
 
     // Calculate payroll for each staff using payroll engine
     const payrollEntries = []
+    const legacyItemWarnings: Array<{ staff_id: string; reason: string }> = []
 
     for (const staff of staffList) {
+      const salaryBasis = parseSalaryBasis(staff.salary_basis)
+      const eligible = salaryBasisMatchesFrequency(salaryBasis, payroll_frequency)
       const { allowances, deductions } = await fetchStaffAllowancesAndDeductions(supabase, staff.id)
 
+      // Run id is unknown until insert; exact-run one-offs are applied after create / on entry refresh.
+      const filtered = filterPayrollItemsForRun({
+        allowances,
+        deductions,
+        payrollRunId: null,
+        payrollFrequency: payroll_frequency,
+        payrollMonth: payroll_month,
+      })
+      for (const skipped of filtered.legacySkipped) {
+        legacyItemWarnings.push({
+          staff_id: staff.id,
+          reason: skipped.reason,
+        })
+      }
+
       try {
+        if (!eligible) {
+          payrollEntries.push(
+            computeStaffPayrollEntry({
+              staff,
+              businessCountry,
+              effectiveDate,
+              allowances: [],
+              deductions: [],
+              isIncluded: false,
+              exclusionReason: exclusionReasonForSalaryBasisMismatch(salaryBasis, payroll_frequency),
+              salaryBasisSnapshot: salaryBasis,
+              oneOffItemsSnapshot: [],
+            })
+          )
+          continue
+        }
+
         const computed = computeStaffPayrollEntry({
           staff,
           businessCountry,
           effectiveDate,
-          allowances,
-          deductions,
+          allowances: filtered.includedAllowances,
+          deductions: filtered.includedDeductions,
           isIncluded: true,
+          salaryBasisSnapshot: salaryBasis,
+          oneOffItemsSnapshot: filtered.oneOffSnapshots,
         })
 
         const allowancesTotal = computed.allowances_total
@@ -419,11 +478,19 @@ export async function POST(request: NextRequest) {
         staff_count: staffList.length,
         status: "draft",
       },
-      description: `Created payroll run for ${pay_period_start} to ${pay_period_end} (${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
+      description: `Created payroll run for ${pay_period_start} to ${pay_period_end} (${eligibleStaff.length} eligible / ${staffList.length} staff, gross ${runTotals.total_gross_salary})`,
       request,
     })
 
-    return NextResponse.json({ payrollRun }, { status: 201 })
+    return NextResponse.json(
+      {
+        payrollRun,
+        eligible_count: eligibleStaff.length,
+        excluded_count: staffList.length - eligibleStaff.length,
+        legacy_item_warnings: legacyItemWarnings.slice(0, 50),
+      },
+      { status: 201 }
+    )
   } catch (error: any) {
     console.error("Error creating payroll run:", error)
     return NextResponse.json(

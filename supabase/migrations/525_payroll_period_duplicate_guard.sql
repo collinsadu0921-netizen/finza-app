@@ -1,10 +1,15 @@
 -- Migration 525: Payroll pay period model + period-aware duplicate guard
 -- Supports monthly, weekly, fortnightly, and other run types without month-only locking.
+--
+-- Repair note (staging rollback after ERROR 23505):
+-- Do NOT normalize payroll_month while UNIQUE (business_id, payroll_month) is still
+-- active. Two approved June 2026 runs share calendar month 2026-06 after date_trunc
+-- but have different staff scopes; both must remain regular runs with journals intact.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ---------------------------------------------------------------------------
--- New period / scope columns on payroll_runs
+-- 1) New period / scope columns (nullable fingerprint until backfilled)
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.payroll_runs
   ADD COLUMN IF NOT EXISTS pay_period_start DATE,
@@ -58,7 +63,10 @@ COMMENT ON COLUMN public.payroll_runs.staff_scope_fingerprint IS
 COMMENT ON COLUMN public.payroll_runs.corrects_payroll_run_id IS
   'When run_type=correction, optional link to the payroll run being corrected.';
 
--- Backfill period boundaries from legacy payroll_month (calendar month).
+-- ---------------------------------------------------------------------------
+-- 2) Backfill period boundaries from legacy payroll_month (calendar month)
+--    Does not mutate payroll_month yet (legacy unique still active).
+-- ---------------------------------------------------------------------------
 UPDATE public.payroll_runs pr
 SET
   pay_period_start = COALESCE(
@@ -71,12 +79,9 @@ SET
   )
 WHERE pr.pay_period_start IS NULL OR pr.pay_period_end IS NULL;
 
--- Normalize payroll_month anchor to period start for reporting consistency.
-UPDATE public.payroll_runs
-SET payroll_month = pay_period_start
-WHERE payroll_month IS DISTINCT FROM pay_period_start;
-
--- Backfill staff scope fingerprint from included payroll entries.
+-- ---------------------------------------------------------------------------
+-- 3) Backfill staff_scope_fingerprint before any period+scope uniqueness
+-- ---------------------------------------------------------------------------
 UPDATE public.payroll_runs pr
 SET staff_scope_fingerprint = sub.fp
 FROM (
@@ -105,7 +110,29 @@ ALTER TABLE public.payroll_runs
   ALTER COLUMN pay_period_end SET NOT NULL,
   ALTER COLUMN staff_scope_fingerprint SET NOT NULL;
 
--- Resolve legacy duplicate monthly runs that share period + scope by marking later runs as corrections.
+-- ---------------------------------------------------------------------------
+-- 4) Drop legacy month-only uniqueness BEFORE normalizing payroll_month.
+--    Required so two same-calendar-month runs with different staff scopes can
+--    both keep payroll_month = pay_period_start (e.g. both 2026-06-01).
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.payroll_runs
+  DROP CONSTRAINT IF EXISTS payroll_runs_business_id_payroll_month_key;
+
+-- Some databases may have the uniqueness as an index rather than a constraint.
+DROP INDEX IF EXISTS public.payroll_runs_business_id_payroll_month_key;
+
+-- ---------------------------------------------------------------------------
+-- 5) Normalize payroll_month anchor to period start (safe after drop above)
+-- ---------------------------------------------------------------------------
+UPDATE public.payroll_runs
+SET payroll_month = pay_period_start
+WHERE payroll_month IS DISTINCT FROM pay_period_start;
+
+-- ---------------------------------------------------------------------------
+-- 6) True period+scope duplicates only: mark later regular runs as corrections.
+--    Different staff_scope_fingerprint values for the same month stay regular
+--    (preserves both June 2026 approved runs and their journals).
+-- ---------------------------------------------------------------------------
 WITH ranked AS (
   SELECT
     id,
@@ -141,11 +168,9 @@ WHERE pr.id = ranked.id
   AND ranked.rn > 1
   AND pr.run_type = 'regular';
 
--- Drop obsolete month-only uniqueness (allowed duplicate calendar months with different dates).
-ALTER TABLE public.payroll_runs
-  DROP CONSTRAINT IF EXISTS payroll_runs_business_id_payroll_month_key;
-
--- Period + scope duplicate guard (allows bonus vs regular, weekly vs monthly, corrections).
+-- ---------------------------------------------------------------------------
+-- 7) Period + scope duplicate guard (allows weekly vs monthly, different scopes)
+-- ---------------------------------------------------------------------------
 CREATE UNIQUE INDEX IF NOT EXISTS ux_payroll_runs_period_scope_active
   ON public.payroll_runs (
     business_id,

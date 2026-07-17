@@ -23,6 +23,7 @@ function emptyNewStaffForm() {
     whatsapp_phone: "",
     email: "",
     basic_salary: "",
+    salary_basis: "monthly" as "monthly" | "weekly" | "fortnightly",
     employment_type: "full_time" as "full_time" | "part_time" | "casual",
     bank_name: "",
     bank_account: "",
@@ -45,6 +46,7 @@ type StaffMember = {
   whatsapp_phone: string | null
   email: string | null
   basic_salary: number
+  salary_basis?: string | null
   employment_type: string
   bank_name: string | null
   bank_account: string | null
@@ -250,6 +252,7 @@ export default function ServiceStaffSettingsPage() {
           whatsapp_phone: formData.whatsapp_phone.trim() || null,
           email: formData.email.trim() || null,
           basic_salary: parseFloat(formData.basic_salary) || 0,
+          salary_basis: formData.salary_basis,
           employment_type: formData.employment_type,
           bank_name: formData.bank_name.trim() || null,
           bank_account: formData.bank_account.trim() || null,
@@ -880,6 +883,27 @@ export default function ServiceStaffSettingsPage() {
                         className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                         required
                       />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Amount for the selected salary basis (no automatic conversion).
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                        Salary basis *
+                      </label>
+                      <NativeSelect
+                        value={formData.salary_basis}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            salary_basis: e.target.value as "monthly" | "weekly" | "fortnightly",
+                          })
+                        }
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="fortnightly">Fortnightly</option>
+                      </NativeSelect>
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">

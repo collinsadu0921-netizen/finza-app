@@ -10,6 +10,10 @@ import {
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { generateOrSyncPayrollObligationsForRun } from "@/lib/payroll/obligations"
+import {
+  isGhanaMonthlyStatutoryEngine,
+  nonMonthlyApprovalBlockedMessage,
+} from "@/lib/payroll/salaryBasis"
 
 export async function GET(
   request: NextRequest,
@@ -180,7 +184,7 @@ export async function PUT(
     // Get existing payroll run
     const { data: existingRun } = await supabase
       .from("payroll_runs")
-      .select("status, journal_entry_id")
+      .select("status, journal_entry_id, payroll_frequency")
       .eq("id", runId)
       .single()
 
@@ -225,6 +229,21 @@ export async function PUT(
 
     // If approving, post to ledger (must succeed or approval fails)
     if (status === "approved" && existingRun.status !== "approved") {
+      const frequency = String(existingRun.payroll_frequency || "monthly").toLowerCase()
+      const businessCountry = business.address_country || business.country_code || null
+      if (
+        frequency !== "monthly" &&
+        isGhanaMonthlyStatutoryEngine(businessCountry)
+      ) {
+        return NextResponse.json(
+          {
+            error: nonMonthlyApprovalBlockedMessage(frequency),
+            code: "NON_MONTHLY_STATUTORY_APPROVAL_BLOCKED",
+          },
+          { status: 400 }
+        )
+      }
+
       // Check if already posted
       if (existingRun.journal_entry_id) {
         return NextResponse.json(
