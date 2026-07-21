@@ -283,20 +283,28 @@ export default function ServiceJobDetailPage() {
     }
   }
 
-  // --- Return allocated material ---
+  // --- Return material to stock (allocated or consumed) ---
   const handleReturnMaterial = async (usageId: string, materialName: string) => {
     openConfirm({
       title: "Return Material",
-      description: `Return "${materialName}" to stock? This will mark the allocation as returned and restore the quantity on hand.`,
+      description: `Return "${materialName}" to stock? This will return the material quantity to stock. If the material was already consumed and posted to accounting, Finza will reverse the related inventory/COGS entry.`,
       onConfirm: async () => {
         if (!businessId) return
         setReturningId(usageId)
         setError("")
         try {
-          const res = await fetch(`/api/service/jobs/usage/${usageId}`, {
-            method: "PATCH",
+          const idempotencyKey =
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `return-${usageId}-${Date.now()}`
+          const res = await fetch(`/api/service/jobs/usage/${usageId}/return`, {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ business_id: businessId, status: "returned" }),
+            body: JSON.stringify({
+              business_id: businessId,
+              return_date: new Date().toISOString().slice(0, 10),
+              idempotency_key: idempotencyKey,
+            }),
           })
           const data = await res.json()
           if (!res.ok) throw new Error(data.error || "Failed to return material")
@@ -786,11 +794,30 @@ export default function ServiceJobDetailPage() {
                             <>
                               <button
                                 onClick={() => handleConfirmConsumption(u.id)}
-                                disabled={consumingId === u.id}
+                                disabled={consumingId === u.id || returningId === u.id}
                                 className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
                               >
                                 {consumingId === u.id ? "Posting…" : "Confirm"}
                               </button>
+                              <button
+                                onClick={() => handleReturnMaterial(u.id, u.service_material_inventory?.name ?? "material")}
+                                disabled={returningId === u.id || consumingId === u.id}
+                                className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                              >
+                                {returningId === u.id ? "…" : "Return"}
+                              </button>
+                            </>
+                          )}
+                          {u.status === "consumed" && (
+                            <div className="flex items-center justify-end gap-3">
+                              {businessId && (
+                                <a
+                                  href={`/service/ledger?business_id=${businessId}&reference_type=service_job_usage&reference_id=${u.id}`}
+                                  className="text-xs font-medium text-blue-600 hover:underline"
+                                >
+                                  Ledger →
+                                </a>
+                              )}
                               <button
                                 onClick={() => handleReturnMaterial(u.id, u.service_material_inventory?.name ?? "material")}
                                 disabled={returningId === u.id}
@@ -798,15 +825,7 @@ export default function ServiceJobDetailPage() {
                               >
                                 {returningId === u.id ? "…" : "Return"}
                               </button>
-                            </>
-                          )}
-                          {u.status === "consumed" && businessId && (
-                            <a
-                              href={`/service/ledger?business_id=${businessId}&reference_type=service_job_usage&reference_id=${u.id}`}
-                              className="text-xs font-medium text-blue-600 hover:underline"
-                            >
-                              Ledger →
-                            </a>
+                            </div>
                           )}
                         </div>
                       </td>

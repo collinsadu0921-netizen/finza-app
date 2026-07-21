@@ -6,6 +6,8 @@ type UsageRow = {
   quantity_used: number
   unit_cost: number
   total_cost: number
+  status?: string | null
+  return_movement_id?: string | null
 }
 
 /**
@@ -13,6 +15,9 @@ type UsageRow = {
  * Used by: job cancel API and credit-note apply (when invoice linked to cancelled job).
  * Does NOT set job status — caller sets status = 'cancelled' when cancelling.
  * Idempotent: returns error "Materials already reversed." if materials_reversed is true.
+ *
+ * Skips usages already returned via return_service_job_material_usage
+ * (status = returned or return_movement_id set) so quantity/COGS are not restored twice.
  */
 export async function performServiceJobReversal(
   supabase: SupabaseClient,
@@ -36,7 +41,7 @@ export async function performServiceJobReversal(
 
   const { data: usages, error: usagesErr } = await supabase
     .from("service_job_material_usage")
-    .select("id, material_id, quantity_used, unit_cost, total_cost")
+    .select("id, material_id, quantity_used, unit_cost, total_cost, status, return_movement_id")
     .eq("job_id", jobId)
     .eq("business_id", businessId)
 
@@ -45,7 +50,11 @@ export async function performServiceJobReversal(
     return { error: "Failed to load job usage" }
   }
 
-  const rows = (usages || []) as UsageRow[]
+  const rows = ((usages || []) as UsageRow[]).filter((u) => {
+    if (u.return_movement_id) return false
+    if ((u.status ?? "").toLowerCase() === "returned") return false
+    return true
+  })
 
   for (const u of rows) {
     const qty = Number(u.quantity_used)
@@ -92,6 +101,7 @@ export async function performServiceJobReversal(
     }
   }
 
+  // reverse_service_job_cogs only sums unreverted consumed usages (migration 535)
   const { error: rpcErr } = await supabase.rpc("reverse_service_job_cogs", {
     p_job_id: jobId,
   })
