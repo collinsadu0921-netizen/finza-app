@@ -13,13 +13,13 @@ import {
 } from "@/lib/server/dashboardMetricsCache"
 import {
   dashboardPnlSourceForDiag,
-  fetchStaleDashboardPeriodPnl,
   isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
 import { SUMMARY_FRESH_SECONDS } from "@/lib/server/serviceDashboardTimeline"
 import {
   enqueueSnapshotRefreshJob,
   periodHasLivePnlMovement,
+  scheduleTargetedSnapshotRefresh,
 } from "@/lib/server/accountingSnapshotRefresh"
 import { loadCustomerPaymentsCollectedTotal } from "@/lib/server/customerPaymentsCollected"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
@@ -135,6 +135,7 @@ export type ServiceDashboardMetricsParams = {
 export type ServiceDashboardMetricsLoadOptions = {
   /** When false, summary reads only — no live get_service_dashboard_metrics RPC. */
   refreshOnRequest?: boolean
+  scheduleBackground?: (promise: Promise<unknown>) => void
 }
 
 export type ServiceDashboardMetricsLoadMeta = {
@@ -226,8 +227,10 @@ async function readPeriodPnlSummaryRow(
   businessId: string,
   startDate: string,
   endDate: string,
-  options?: { allowStalePnl?: boolean }
+  _options?: { allowStalePnl?: boolean }
 ): Promise<PeriodPnlSummaryReadResult> {
+  // Fresh only — invalidated/stale summaries are not authoritative financial truth.
+  void _options
   const { data: freshData, error: freshError } = await supabase.rpc(
     "get_fresh_service_dashboard_period_pnl",
     {
@@ -248,19 +251,31 @@ async function readPeriodPnlSummaryRow(
     return { row: freshRow as PeriodPnlSummaryReadResult["row"] }
   }
 
-  if (options?.allowStalePnl) {
-    const stalePnl = await fetchStaleDashboardPeriodPnl(
-      supabase,
-      businessId,
-      startDate,
-      endDate
-    )
-    if (stalePnl) {
-      return { row: stalePnl }
-    }
-  }
-
   return { row: null, reason: "missing_row" }
+}
+
+function ensureDashboardRefreshScheduled(
+  supabase: SupabaseClient,
+  businessId: string,
+  periodStart: string,
+  periodEnd: string,
+  scheduleBackground?: (promise: Promise<unknown>) => void
+): void {
+  void enqueueSnapshotRefreshJob(supabase, {
+    businessId,
+    periodStart,
+    periodEnd,
+    jobType: "both",
+    reason: "read_path_missing_snapshot",
+    sourceType: "dashboard_metrics",
+  })
+  scheduleTargetedSnapshotRefresh({
+    businessId,
+    periodStart,
+    periodEnd,
+    triggerSource: "stale_dashboard_read",
+    scheduleBackground,
+  })
 }
 
 async function buildMetricsFromSummarySnapshot(
@@ -359,7 +374,7 @@ async function buildMetricsFromSummarySnapshot(
         positions_ready: true,
         metrics_source: "summary",
         positions_source: "live",
-        snapshot_status: options?.allowStalePnl ? "stale" : "fresh",
+        snapshot_status: "fresh",
       },
       emptyOperationalFields()
     ),
@@ -616,22 +631,13 @@ export async function loadServiceDashboardMetrics(
           )
           if (liveFallback.ok) {
             usedLiveLedgerFallback = true
-            const hasLiveMovement = await periodHasLivePnlMovement(
+            ensureDashboardRefreshScheduled(
               supabase,
               businessId,
               range.movementStart,
-              range.movementEnd
+              range.movementEnd,
+              options?.scheduleBackground
             )
-            if (hasLiveMovement) {
-              void enqueueSnapshotRefreshJob(supabase, {
-                businessId,
-                periodStart: range.movementStart,
-                periodEnd: range.movementEnd,
-                jobType: "both",
-                reason: "read_path_missing_snapshot",
-                sourceType: "dashboard_metrics",
-              })
-            }
             return liveFallback.payload
           }
           liveFallbackTimedOut = liveFallback.timedOut
@@ -643,14 +649,13 @@ export async function loadServiceDashboardMetrics(
             range.movementEnd
           )
           if (hasLiveMovement) {
-            void enqueueSnapshotRefreshJob(supabase, {
+            ensureDashboardRefreshScheduled(
+              supabase,
               businessId,
-              periodStart: range.movementStart,
-              periodEnd: range.movementEnd,
-              jobType: "both",
-              reason: "read_path_missing_snapshot",
-              sourceType: "dashboard_metrics",
-            })
+              range.movementStart,
+              range.movementEnd,
+              options?.scheduleBackground
+            )
           }
           usedDegradedSummaryMissing = true
           return buildMissingSnapshotMetricsPayload(supabase, businessId, range, positionAsOfDate, {

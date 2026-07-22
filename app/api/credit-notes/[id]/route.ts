@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
 import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/reconciliation/types"
@@ -9,6 +10,7 @@ import {
   computeInvoiceCreditCapacity,
   formatCreditCapacityExceededError,
 } from "@/lib/creditNotes/invoiceCreditCapacity"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 export async function GET(
   request: NextRequest,
@@ -342,6 +344,20 @@ export async function PUT(
         }
       }
     }
+    if (
+      creditNote &&
+      (creditNote as { status?: string }).status === "applied" &&
+      businessId
+    ) {
+      fireAfterAccountingPost({
+        businessId,
+        journalDate: (creditNote as { date?: string }).date ?? undefined,
+        source: "credit_note_apply",
+        supabase,
+        scheduleBackground: (p) => waitUntil(p),
+      })
+    }
+
     return NextResponse.json({ creditNote })
   } catch (error: any) {
     console.error("Error updating credit note:", error)

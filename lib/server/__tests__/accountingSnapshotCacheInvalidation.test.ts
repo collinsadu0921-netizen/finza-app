@@ -1,4 +1,5 @@
 import {
+  invalidateAccountingCachesForBusiness,
   invalidateDashboardMetricsCacheForBusiness,
   invalidatePnlReportCachesForBusiness,
 } from "../accountingSnapshotCacheInvalidation"
@@ -12,6 +13,11 @@ import {
   setCachedDashboardMetrics,
   getCachedDashboardMetrics,
 } from "../dashboardMetricsCache"
+import {
+  invalidateDashboardClusterCacheForBusiness,
+  loadOrComputeDashboardClusterCache,
+  resetDashboardClusterCacheForTests,
+} from "../dashboardClusterCache"
 
 jest.mock("@vercel/functions", () => ({
   getCache: () => ({
@@ -48,5 +54,25 @@ describe("accountingSnapshotCacheInvalidation", () => {
     await expect(invalidatePnlReportCachesForBusiness("biz-1")).resolves.toBeUndefined()
     invalidateDashboardMetricsCacheForBusiness("biz-1")
     expect(typeof isPnlReportCacheEnabled()).toBe("boolean")
+  })
+
+  it("invalidates dashboard cluster cache after accounting refresh", async () => {
+    process.env.FINZA_DASHBOARD_CLUSTER_CACHE_TTL_SEC = "30"
+    resetDashboardClusterCacheForTests()
+    const key = "cluster|biz-1|12|10|2026-07-01||norefresh"
+    await loadOrComputeDashboardClusterCache(key, async () => ({ ok: true }), {
+      shouldStore: () => true,
+    })
+    const second = await loadOrComputeDashboardClusterCache(key, async () => ({ ok: false }), {
+      shouldStore: () => true,
+    })
+    expect(second.cacheSource).toBe("fresh_hit")
+    invalidateDashboardClusterCacheForBusiness("biz-1")
+    const third = await loadOrComputeDashboardClusterCache(key, async () => ({ ok: "rebuilt" }), {
+      shouldStore: () => true,
+    })
+    expect(third.value).toEqual({ ok: "rebuilt" })
+    expect(third.cacheSource).not.toBe("fresh_hit")
+    await invalidateAccountingCachesForBusiness("biz-1")
   })
 })

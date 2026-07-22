@@ -4,6 +4,7 @@
  * DELETE /api/assets/[id]/depreciation — soft-delete only unposted draft rows (legacy)
  */
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
@@ -11,6 +12,7 @@ import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enfor
 import { mapDepreciationRpcError } from "@/lib/assets/depreciationApiErrors"
 import { normalizeDepreciationPostingDate } from "@/lib/assets/depreciationAmount"
 import type { DepreciationPostResult } from "@/lib/assets/depreciationAmount"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 async function resolveAndEnforce(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, user: { id: string } | null) {
   if (!user) return { denied: NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 }) }
@@ -149,6 +151,14 @@ export async function POST(
         idempotent: result.idempotent ?? false,
       },
       request,
+    })
+
+    fireAfterAccountingPost({
+      businessId: business.id,
+      journalDate: result.posting_date,
+      source: "depreciation",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
     })
 
     return NextResponse.json(

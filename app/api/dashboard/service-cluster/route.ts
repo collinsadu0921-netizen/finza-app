@@ -174,7 +174,10 @@ async function loadDashboardCluster(
   },
   diag: ReturnType<typeof createRouteDiag>
 ): Promise<ServiceDashboardClusterPayload> {
-  const loaderOptions = { refreshOnRequest: options.refreshOnRequest }
+  const loaderOptions = {
+    refreshOnRequest: options.refreshOnRequest,
+    scheduleBackground: (promise: Promise<unknown>) => waitUntil(promise),
+  }
   const metricsMeta: ServiceDashboardMetricsLoadMeta = { source: "degraded" }
 
   const tTimeline = performance.now()

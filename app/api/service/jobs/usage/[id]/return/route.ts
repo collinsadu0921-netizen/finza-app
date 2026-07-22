@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { randomUUID } from "crypto"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { logAudit } from "@/lib/auditLog"
@@ -8,6 +9,7 @@ import {
   mapJobMaterialReturnRpcError,
   type JobMaterialReturnResult,
 } from "@/lib/service/jobMaterialReturnErrors"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 /**
  * POST /api/service/jobs/usage/[id]/return
@@ -101,6 +103,14 @@ export async function POST(
       },
       description: "Service job material returned to stock",
       request,
+    })
+
+    fireAfterAccountingPost({
+      businessId,
+      journalDate: result.return_date ?? new Date().toISOString().slice(0, 10),
+      source: "material_return",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
     })
 
     return NextResponse.json({

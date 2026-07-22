@@ -205,7 +205,10 @@ export async function GET(request: NextRequest) {
           const { data, error } = await getProfitAndLossReport(
             supabase,
             reportInput,
-            { refreshOnRequest },
+            {
+              refreshOnRequest,
+              scheduleBackground: (promise) => waitUntil(promise),
+            },
             loadMeta
           )
           if (error || !data) {

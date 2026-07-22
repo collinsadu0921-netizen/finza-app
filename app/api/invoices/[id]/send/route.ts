@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog, getIpAddress, getUserAgent } from "@/lib/auditLog"
@@ -16,6 +17,7 @@ import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 /** Performs the SEND transition: status → 'sent', assign invoice_number if missing, update DB. Triggers trigger_auto_post_invoice. */
 async function performSendTransition(
@@ -69,7 +71,28 @@ async function performSendTransition(
     if (updateData.sent_at) retry.sent_at = updateData.sent_at
     if (updateData.invoice_number) retry.invoice_number = updateData.invoice_number
     const res = await supabase.from("invoices").update(retry).eq("id", invoiceId).select().single()
+    if (res.data && !res.error) {
+      fireAfterAccountingPost({
+        businessId: invoice.business_id,
+        journalDate:
+          (res.data as { issue_date?: string }).issue_date ??
+          new Date().toISOString().slice(0, 10),
+        source: "invoice_post",
+        supabase,
+        scheduleBackground: (p) => waitUntil(p),
+      })
+    }
     return { data: res.data, error: res.error ? { message: res.error.message } : null }
+  }
+  if (data && !error) {
+    fireAfterAccountingPost({
+      businessId: invoice.business_id,
+      journalDate:
+        (data as { issue_date?: string }).issue_date ?? new Date().toISOString().slice(0, 10),
+      source: "invoice_post",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
+    })
   }
   return { data, error: error ? { message: error.message } : null }
 }

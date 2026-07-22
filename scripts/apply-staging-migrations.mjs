@@ -70,10 +70,38 @@ async function main() {
 
   try {
     for (const file of toApply) {
+      const version = file.match(/^(\d+)_/)?.[1]
+      const name = file.replace(/\.sql$/, "").replace(/^\d+_/, "")
+      if (version) {
+        const existing = await client.query(
+          `select 1 from supabase_migrations.schema_migrations where version = $1 limit 1`,
+          [version]
+        )
+        if (existing.rowCount > 0) {
+          console.log(`Skipping ${file} (already recorded as version ${version})`)
+          continue
+        }
+      }
+
       const sql = readFileSync(resolve(REPO_ROOT, "supabase/migrations", file), "utf8")
       console.log(`Applying ${file}...`)
-      await client.query(sql)
-      console.log("  OK")
+      await client.query("begin")
+      try {
+        await client.query(sql)
+        if (version) {
+          await client.query(
+            `insert into supabase_migrations.schema_migrations (version, name, statements)
+             values ($1, $2, $3)
+             on conflict (version) do nothing`,
+            [version, name, null]
+          )
+        }
+        await client.query("commit")
+        console.log("  OK" + (version ? ` (recorded ${version})` : ""))
+      } catch (e) {
+        await client.query("rollback")
+        throw e
+      }
     }
   } finally {
     await client.end()

@@ -4,7 +4,10 @@
  */
 
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { enqueueSnapshotRefreshJob } from "@/lib/server/accountingSnapshotRefresh"
+import {
+  enqueueSnapshotRefreshJob,
+  scheduleTargetedSnapshotRefresh,
+} from "@/lib/server/accountingSnapshotRefresh"
 import { supabaseErrorDiag, type createRouteDiag } from "@/lib/server/routeDiagnostics"
 import {
   loadLiveTimelineRowsBounded,
@@ -229,6 +232,12 @@ async function enqueueTimelineSnapshotRefreshJobs(
       jobType: "both",
       reason: "read_path_missing_snapshot",
       sourceType: "dashboard_timeline",
+    })
+    scheduleTargetedSnapshotRefresh({
+      businessId,
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      triggerSource: "stale_dashboard_read",
     })
   }
 }

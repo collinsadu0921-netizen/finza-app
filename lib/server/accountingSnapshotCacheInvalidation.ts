@@ -1,10 +1,11 @@
 /**
- * Best-effort cache invalidation after snapshot refresh (539).
- * Prefer generation/tag busting over broad global clears.
+ * Best-effort cache invalidation after snapshot refresh (539/544).
+ * Prefer scoped business/period busting over global clears.
  */
 
 import { getCache } from "@vercel/functions"
 
+import { invalidateDashboardClusterCacheForBusiness } from "@/lib/server/dashboardClusterCache"
 import { invalidateDashboardMetricsCachePrefix } from "@/lib/server/dashboardMetricsCache"
 import { invalidatePnlReportCacheForBusiness } from "@/lib/server/pnlReportCache"
 
@@ -28,4 +29,11 @@ export async function invalidatePnlReportCachesForBusiness(businessId: string): 
 
 export function invalidateDashboardMetricsCacheForBusiness(businessId: string): void {
   invalidateDashboardMetricsCachePrefix(businessId)
+}
+
+/** Invalidate P&L, metrics, and dashboard cluster caches for one business. */
+export async function invalidateAccountingCachesForBusiness(businessId: string): Promise<void> {
+  await invalidatePnlReportCachesForBusiness(businessId)
+  invalidateDashboardMetricsCacheForBusiness(businessId)
+  invalidateDashboardClusterCacheForBusiness(businessId)
 }

@@ -72,3 +72,21 @@ Queue reliability (539):
 - Diagnostics: `get_accounting_snapshot_queue_diagnostics(business_id)`
 
 Target freshness SLA: posted journal reflected in snapshot-backed reports within **60 seconds** when the Action drain is configured; without a drain consumer the queue will backlog again.
+
+## Migration history note (staging)
+
+Authoritative `supabase_migrations.schema_migrations` on staging previously ended at **523**.
+Queue reliability objects corresponding to repo migration **539** were already present in the live schema out-of-band (not backfilled into history).
+**544** and **545** are now recorded. Do not rewrite or invent historical 524–543 rows.
+
+## Immediate targeted refresh (544+)
+
+| Layer | Location |
+|-------|----------|
+| Scoped claim RPC | `claim_accounting_snapshot_refresh_jobs_for_period` (migration 544) |
+| Targeted processor | `processAccountingSnapshotsForPeriod` in `lib/server/accountingSnapshotWorker.ts` |
+| Scheduler + flag | `scheduleTargetedSnapshotRefresh` / `ACCOUNTING_IMMEDIATE_REFRESH_ENABLED` in `lib/server/accountingSnapshotRefresh.ts` |
+
+`ACCOUNTING_IMMEDIATE_REFRESH_ENABLED` defaults **OFF**. When off, the durable queue and five-minute GitHub recovery worker continue unchanged. Enable only on staging (`=1`) for freshness validation.
+
+The scoped claim is the authoritative concurrency gate (`FOR UPDATE SKIP LOCKED`). Empty claims exit immediately; in-process single-flight/cooldown only reduces duplicate `waitUntil` scheduling.

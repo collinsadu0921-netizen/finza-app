@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { logAudit } from "@/lib/auditLog"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 /** Statuses still allowed via PATCH. Return must use POST .../return RPC. */
 const ALLOWED_STATUSES = ["allocated", "consumed"] as const
@@ -112,6 +114,16 @@ export async function PATCH(
       description: `Service job material usage set to ${status}`,
       request,
     })
+
+    if (status === "consumed") {
+      fireAfterAccountingPost({
+        businessId,
+        journalDate: new Date().toISOString().slice(0, 10),
+        source: "material_consume",
+        supabase,
+        scheduleBackground: (p) => waitUntil(p),
+      })
+    }
 
     return NextResponse.json({ success: true, status })
   } catch (err: unknown) {

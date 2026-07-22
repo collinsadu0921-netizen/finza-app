@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { NativeSelect } from "@/components/ui/NativeSelect"
+import { afterAccountingMutationUi } from "@/lib/client/afterAccountingMutationUi"
 
 type Job = {
   id: string
@@ -275,7 +276,7 @@ export default function ServiceJobDetailPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed to confirm consumption")
-      load()
+      afterAccountingMutationUi({ reload: load, router })
     } catch (err: any) {
       setError(err.message || "Failed to confirm consumption")
     } finally {
@@ -308,7 +309,7 @@ export default function ServiceJobDetailPage() {
           })
           const data = await res.json()
           if (!res.ok) throw new Error(data.error || "Failed to return material")
-          load()
+          afterAccountingMutationUi({ reload: load, router })
         } catch (err: any) {
           setError(err.message || "Failed to return material")
         } finally {

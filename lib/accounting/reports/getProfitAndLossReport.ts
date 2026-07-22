@@ -168,8 +168,9 @@ function buildReportFromMovementRows(
 }
 
 export type PnLReportLoadOptions = {
-  /** When false, snapshot reads only — no refresh or live movement RPC. */
+  /** When false, skip blocking try_refresh; still uses bounded live fallback when needed. */
   refreshOnRequest?: boolean
+  scheduleBackground?: (promise: Promise<unknown>) => void
 }
 
 export type PnLReportLoadMeta = {
@@ -202,7 +203,7 @@ export async function getProfitAndLossReport(
       businessId,
       range.movementStart,
       range.movementEnd,
-      { refreshOnRequest }
+      { refreshOnRequest, scheduleBackground: options?.scheduleBackground }
     )
 
   if (loadMeta) {

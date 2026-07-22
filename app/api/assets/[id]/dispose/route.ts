@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { revalidatePath } from "next/cache"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import {
   mapDisposalRpcError,
   type DisposalPostResult,
@@ -128,6 +130,14 @@ export async function POST(
     revalidatePath(`/assets/${assetId}/view`)
     revalidatePath("/reports/profit-loss")
     revalidatePath("/reports/balance-sheet")
+
+    fireAfterAccountingPost({
+      businessId: business.id,
+      journalDate: result.disposal_date,
+      source: "asset_disposal",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
+    })
 
     return NextResponse.json(
       {

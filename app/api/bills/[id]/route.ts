@@ -432,6 +432,22 @@ export async function PUT(
       console.error("Error logging audit:", auditError)
     }
 
+    if (
+      bill &&
+      (bill as { status?: string }).status === "open" &&
+      (existingBill as { status?: string }).status !== "open"
+    ) {
+      const { waitUntil } = await import("@vercel/functions")
+      const { fireAfterAccountingPost } = await import("@/lib/server/fireAfterAccountingPost")
+      fireAfterAccountingPost({
+        businessId: (bill as { business_id: string }).business_id,
+        journalDate: (bill as { issue_date?: string }).issue_date,
+        source: "bill_post",
+        supabase,
+        scheduleBackground: (p) => waitUntil(p),
+      })
+    }
+
     return NextResponse.json({ bill })
   } catch (error: any) {
     console.error("Error updating bill:", error)

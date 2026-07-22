@@ -14,6 +14,10 @@ jest.mock("@/lib/accounting/reports/resolvePnLMovementRange", () => ({
 jest.mock("@/lib/server/accountingSnapshotRefresh", () => ({
   enqueueSnapshotRefreshJob: jest.fn().mockResolvedValue("job-1"),
   periodHasLivePnlMovement: jest.fn().mockResolvedValue(true),
+  scheduleTargetedSnapshotRefresh: jest.fn().mockReturnValue({
+    scheduled: true,
+    reason: "scheduled",
+  }),
 }))
 jest.mock("@/lib/server/customerPaymentsCollected", () => ({
   loadCustomerPaymentsCollectedTotal: jest.fn().mockResolvedValue(0),
