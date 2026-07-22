@@ -18,6 +18,9 @@ import {
   tryRefreshPnlMovementSnapshot,
 } from "@/lib/server/pnlMovementSnapshotRefresh"
 
+/** Beyond this age, stale snapshots must not be silently treated as current truth. */
+export const PNL_MATERIAL_STALE_SECONDS = 900
+
 export type PnLMovementRow = {
   account_id?: string
   account_code?: string
@@ -89,19 +92,59 @@ async function loadStaleSnapshotLines(
   return data as PnLMovementRow[]
 }
 
+function snapshotAgeSeconds(refreshedAt: string | undefined): number | null {
+  if (!refreshedAt) return null
+  const ms = Date.now() - new Date(refreshedAt).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  return ms / 1000
+}
+
 async function resolveFromMetadata(
   supabase: SupabaseClient,
   businessId: string,
   startDate: string,
   endDate: string,
-  metadata: { line_count: number; snapshotStale: boolean }
+  metadata: { line_count: number; snapshotStale: boolean; refreshed_at?: string },
+  options?: { refreshOnRequest?: boolean; enqueueOnStale?: boolean }
 ): Promise<PnLMovementFetchResult | null> {
-  if (metadata.line_count === 0) {
+  let refreshJobId: string | null | undefined
+
+  if (metadata.snapshotStale && options?.enqueueOnStale !== false) {
+    refreshJobId = await enqueueSnapshotRefreshJob(supabase, {
+      businessId,
+      periodStart: startDate,
+      periodEnd: endDate,
+      jobType: "both",
+      reason: "read_path_stale_snapshot",
+    })
+  }
+
+  const ageSec = snapshotAgeSeconds(metadata.refreshed_at)
+  const materiallyStale =
+    metadata.snapshotStale &&
+    ageSec != null &&
+    ageSec > PNL_MATERIAL_STALE_SECONDS
+
+  // Materially stale + refresh-on-request off: bounded live fallback for exact period.
+  if (materiallyStale && options?.refreshOnRequest === false) {
+    const live = await fetchLivePnLMovement(supabase, businessId, startDate, endDate)
+    if (!live.error) {
+      return {
+        ...live,
+        snapshotStale: true,
+        refreshJobId,
+        liveFallbackSkipped: false,
+      }
+    }
+  }
+
+  if (metadata.line_count === 0 && !materiallyStale) {
     return {
       rows: [],
       error: "",
       source: "snapshot",
       snapshotStale: metadata.snapshotStale,
+      refreshJobId,
     }
   }
 
@@ -111,12 +154,29 @@ async function resolveFromMetadata(
         await loadSnapshotLines(supabase, businessId, startDate, endDate, PNL_SNAPSHOT_FRESH_SECONDS)
       ).rows
 
-  if (lines.length > 0) {
+  if (lines.length > 0 && !materiallyStale) {
     return {
       rows: lines,
       error: "",
       source: "snapshot",
       snapshotStale: metadata.snapshotStale,
+      refreshJobId,
+    }
+  }
+
+  if (materiallyStale && lines.length > 0 && options?.refreshOnRequest !== false) {
+    // Refresh-on-request path prefers live after tryRefresh; return null to continue.
+    return null
+  }
+
+  if (materiallyStale) {
+    return {
+      rows: [],
+      error: "PNL_SNAPSHOT_STALE",
+      source: "unavailable",
+      snapshotStale: true,
+      refreshJobId,
+      liveFallbackSkipped: options?.refreshOnRequest === false,
     }
   }
 
@@ -192,14 +252,20 @@ export async function fetchProfitAndLossMovementRows(
 
   let metadata = await readPnlSnapshotMetadata(supabase, businessId, startDate, endDate)
   if (metadata) {
-    const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata)
+    const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata, {
+      refreshOnRequest,
+      enqueueOnStale: true,
+    })
     if (resolved) return resolved
   }
 
   if (!metadata) {
     metadata = await readStalePnlSnapshotMetadata(supabase, businessId, startDate, endDate)
     if (metadata) {
-      const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata)
+      const resolved = await resolveFromMetadata(supabase, businessId, startDate, endDate, metadata, {
+        refreshOnRequest,
+        enqueueOnStale: true,
+      })
       if (resolved) return resolved
     }
   }

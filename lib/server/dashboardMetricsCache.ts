@@ -39,6 +39,14 @@ export function isDashboardMetricsCacheEnabled(): boolean {
   return ttlMs() > 0
 }
 
+/** Drop in-process dashboard metrics entries whose key starts with businessId. */
+export function invalidateDashboardMetricsCachePrefix(businessId: string): void {
+  const prefix = `${businessId}|`
+  for (const key of store.keys()) {
+    if (key.startsWith(prefix)) store.delete(key)
+  }
+}
+
 export function getCachedDashboardMetrics(key: string): unknown | null {
   const ms = ttlMs()
   if (ms <= 0) return null

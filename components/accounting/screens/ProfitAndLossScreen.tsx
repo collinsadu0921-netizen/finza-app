@@ -29,17 +29,31 @@ type ReportSection = {
   subtotal: number
 }
 
-const SECTION_LABELS: Record<string, string> = {
+const SECTION_LABELS_SERVICE: Record<string, string> = {
   income:             "Revenue",
   other_income:       "Other Income",
+  cogs:               "Cost of Services",
+  cost_of_sales:      "Cost of Services",
+  expenses:           "Expenses",
+  operating_expenses: "Operating Expenses",
+  other_expenses:     "Other Expenses",
+  taxes:              "Taxes",
+}
+
+const SECTION_LABELS_RETAIL: Record<string, string> = {
+  income:             "Revenue",
+  other_income:       "Other Income",
+  cogs:               "Cost of Goods Sold",
   cost_of_sales:      "Cost of Sales",
   expenses:           "Expenses",
   operating_expenses: "Operating Expenses",
   other_expenses:     "Other Expenses",
+  taxes:              "Taxes",
 }
 
-function sectionLabel(key: string): string {
-  return SECTION_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+function sectionLabel(key: string, mode: ScreenProps["mode"]): string {
+  const map = mode === "service" ? SECTION_LABELS_SERVICE : SECTION_LABELS_RETAIL
+  return map[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 function PnLSkeleton() {
@@ -73,6 +87,7 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
   const [incomeSections, setIncomeSections]   = useState<ReportSection[]>([])
   const [expenseSections, setExpenseSections] = useState<ReportSection[]>([])
   const [netProfit, setNetProfit]             = useState(0)
+  const [grossProfit, setGrossProfit]         = useState<number | null>(null)
   const [revenueTotal, setRevenueTotal]       = useState(0)
   const [expenseTotal, setExpenseTotal]       = useState(0)
   const [periodLabel, setPeriodLabel]         = useState<string | null>(null)
@@ -87,6 +102,7 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
       setIncomeSections([])
       setExpenseSections([])
       setNetProfit(0)
+      setGrossProfit(null)
       setRevenueTotal(0)
       setExpenseTotal(0)
       setPeriodLabel(null)
@@ -132,6 +148,9 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
       setRevenueTotal(rev)
       setExpenseTotal(exp)
       setNetProfit(data.totals?.net_profit ?? 0)
+      setGrossProfit(
+        typeof data.totals?.gross_profit === "number" ? data.totals.gross_profit : null
+      )
       if (data.period) {
         const s = new Date(data.period.period_start)
         const e = new Date(data.period.period_end)
@@ -308,11 +327,17 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
         ) : hasData ? (
           <>
             {/* KPI Summary Strip */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className={`grid grid-cols-2 ${mode === "service" && grossProfit != null ? "md:grid-cols-5" : "md:grid-cols-4"} gap-3 mb-6`}>
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
                 <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Total Revenue</p>
                 <p className="text-lg font-bold text-green-700 dark:text-green-400">{formatCurrencySafe(revenueTotal)}</p>
               </div>
+              {mode === "service" && grossProfit != null && (
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Gross Profit</p>
+                  <p className="text-lg font-bold text-blue-700 dark:text-blue-400">{formatCurrencySafe(grossProfit)}</p>
+                </div>
+              )}
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3">
                 <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Total Expenses</p>
                 <p className="text-lg font-bold text-red-700 dark:text-red-400">{formatCurrencySafe(expenseTotal)}</p>
@@ -340,7 +365,7 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
                   {/* Section header */}
                   <div className="flex items-center justify-between px-6 py-3 bg-green-50 dark:bg-green-900/20 border-b border-green-100 dark:border-green-800">
                     <span className="text-sm font-semibold text-green-800 dark:text-green-300 uppercase tracking-wide">
-                      {sectionLabel(section.key)}
+                      {sectionLabel(section.key, mode)}
                     </span>
                   </div>
                   {/* Lines */}
@@ -357,7 +382,7 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
                   </div>
                   {/* Section subtotal */}
                   <div className="flex items-center justify-between px-6 py-3 bg-green-50/60 dark:bg-green-900/10 border-t border-green-100 dark:border-green-800/60">
-                    <span className="text-sm font-semibold text-green-800 dark:text-green-300">Total {sectionLabel(section.key)}</span>
+                    <span className="text-sm font-semibold text-green-800 dark:text-green-300">Total {sectionLabel(section.key, mode)}</span>
                     <span className="text-sm font-bold text-green-700 dark:text-green-400">{formatCurrencySafe(section.subtotal)}</span>
                   </div>
                   {/* Revenue grand total after last income section */}
@@ -375,12 +400,18 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
                 <div className="border-t-2 border-gray-200 dark:border-gray-600" />
               )}
 
-              {/* Expense Sections */}
-              {expenseSections.map((section, si) => (
+              {/* Expense Sections — Cost of Services first for Service presentation */}
+              {(mode === "service"
+                ? [
+                    ...expenseSections.filter((s) => s.key === "cogs"),
+                    ...expenseSections.filter((s) => s.key !== "cogs"),
+                  ]
+                : expenseSections
+              ).map((section, si, ordered) => (
                 <div key={section.key}>
                   <div className="flex items-center justify-between px-6 py-3 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-800">
                     <span className="text-sm font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">
-                      {sectionLabel(section.key)}
+                      {sectionLabel(section.key, mode)}
                     </span>
                   </div>
                   <div className="divide-y divide-gray-100 dark:divide-gray-700/60">
@@ -395,10 +426,16 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
                     ))}
                   </div>
                   <div className="flex items-center justify-between px-6 py-3 bg-red-50/60 dark:bg-red-900/10 border-t border-red-100 dark:border-red-800/60">
-                    <span className="text-sm font-semibold text-red-800 dark:text-red-300">Total {sectionLabel(section.key)}</span>
+                    <span className="text-sm font-semibold text-red-800 dark:text-red-300">Total {sectionLabel(section.key, mode)}</span>
                     <span className="text-sm font-bold text-red-700 dark:text-red-400">{formatCurrencySafe(section.subtotal)}</span>
                   </div>
-                  {si === expenseSections.length - 1 && expenseSections.length > 1 && (
+                  {mode === "service" && section.key === "cogs" && grossProfit != null && (
+                    <div className="flex items-center justify-between px-6 py-3 bg-blue-50 dark:bg-blue-900/20 border-t border-blue-200 dark:border-blue-800">
+                      <span className="text-sm font-bold text-blue-900 dark:text-blue-200">Gross Profit</span>
+                      <span className="text-base font-bold text-blue-700 dark:text-blue-300">{formatCurrencySafe(grossProfit)}</span>
+                    </div>
+                  )}
+                  {si === ordered.length - 1 && ordered.length > 1 && (
                     <div className="flex items-center justify-between px-6 py-3 bg-red-100 dark:bg-red-900/20 border-t border-red-200 dark:border-red-700">
                       <span className="text-sm font-bold text-red-900 dark:text-red-200">Total Expenses</span>
                       <span className="text-base font-bold text-red-700 dark:text-red-300">{formatCurrencySafe(expenseTotal)}</span>

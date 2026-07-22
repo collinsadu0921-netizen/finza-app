@@ -54,4 +54,21 @@ Select-String NEXT_PUBLIC_SUPABASE_URL .env.staging
 | `FINZA_REPORTS_PNL_REFRESH_ON_REQUEST` | off | Blocking refresh in P&L request path |
 | `FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST` | off | Blocking refresh in dashboard cluster path |
 
-Worker cron (`/api/cron/accounting-snapshots`) drains the queue asynchronously.
+## Worker execution (539+)
+
+| Environment | Drain path |
+|-------------|------------|
+| Staging / Preview | Vercel cron does **not** run on Preview. Use GitHub Action `accounting-snapshot-drain.yml` (`*/5`) against the staging URL, or `node scripts/process-accounting-snapshot-jobs.mjs --env .env.staging`. |
+| Production | Vercel cron `0 2 * * *` → `/api/cron/accounting-snapshots` (Hobby: once daily). Prefer the same GitHub Action for sub-minute freshness. |
+
+Requires `CRON_SECRET` on the deployment and matching `ACCOUNTING_SNAPSHOT_CRON_*` GitHub secrets.
+
+Queue reliability (539):
+
+- Enqueue invalidates snapshot freshness immediately
+- Pending-only unique key allows one follow-up while a job is processing
+- Claim uses `FOR UPDATE SKIP LOCKED` + lease reclaim for abandoned `processing` rows
+- Combined `finza_worker_refresh_period_snapshots` refreshes dashboard + P&L in one transaction
+- Diagnostics: `get_accounting_snapshot_queue_diagnostics(business_id)`
+
+Target freshness SLA: posted journal reflected in snapshot-backed reports within **60 seconds** when the Action drain is configured; without a drain consumer the queue will backlog again.
