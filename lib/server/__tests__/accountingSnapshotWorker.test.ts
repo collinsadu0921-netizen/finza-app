@@ -139,7 +139,7 @@ describe("processAccountingSnapshotJobs", () => {
 })
 
 describe("processAccountingSnapshotsForPeriod", () => {
-  it("exits immediately when scoped claim returns no jobs", async () => {
+  it("retries once when scoped claim returns no jobs then exits", async () => {
     const claim = jest.fn().mockResolvedValue({ data: [], error: null })
     const refresh = jest.fn()
     const supabase = buildSupabase({
@@ -152,12 +152,14 @@ describe("processAccountingSnapshotsForPeriod", () => {
       periodStart: "2026-07-01",
       periodEnd: "2026-07-31",
       triggerSource: "post_transaction",
+      emptyClaimRetryDelayMs: 0,
     })
 
     expect(result.claimed).toBe(0)
     expect(result.completed).toBe(0)
-    expect(result.batches).toBe(1)
+    expect(result.batches).toBe(2)
     expect(refresh).not.toHaveBeenCalled()
+    expect(claim).toHaveBeenCalledTimes(2)
     expect(claim).toHaveBeenCalledWith({
       p_business_id: "biz-a",
       p_period_start: "2026-07-01",
@@ -165,6 +167,44 @@ describe("processAccountingSnapshotsForPeriod", () => {
       p_limit: 5,
       p_lease_seconds: 900,
     })
+  })
+
+  it("claims on empty-claim retry after enqueue race", async () => {
+    const claim = jest
+      .fn()
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: "j1",
+            business_id: "biz-a",
+            period_start: "2026-07-01",
+            period_end: "2026-07-31",
+            job_type: "both",
+            claim_token: "tok-1",
+            attempts: 1,
+          },
+        ],
+        error: null,
+      })
+    const refresh = jest.fn().mockResolvedValue({ data: { dashboard: 1, pnl: 1 }, error: null })
+    const complete = jest.fn().mockResolvedValue({ data: true, error: null })
+    const supabase = buildSupabase({
+      claim_accounting_snapshot_refresh_jobs_for_period: claim,
+      finza_worker_refresh_period_snapshots: refresh,
+      complete_accounting_snapshot_refresh_job: complete,
+    })
+
+    const result = await processAccountingSnapshotsForPeriod(supabase, {
+      businessId: "biz-a",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      emptyClaimRetryDelayMs: 0,
+    })
+
+    expect(claim).toHaveBeenCalledTimes(2)
+    expect(result.claimed).toBe(1)
+    expect(result.completed).toBe(1)
   })
 
   it("does not call the global claim RPC", async () => {
@@ -325,7 +365,7 @@ describe("processAccountingSnapshotsForPeriod", () => {
         ],
         error: null,
       })
-      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValue({ data: [], error: null })
 
     const supabase = buildSupabase({
       claim_accounting_snapshot_refresh_jobs_for_period: scopedClaim,
@@ -339,16 +379,20 @@ describe("processAccountingSnapshotsForPeriod", () => {
         businessId: "biz-a",
         periodStart: "2026-07-01",
         periodEnd: "2026-07-31",
+        emptyClaimRetryDelayMs: 0,
       }),
       processAccountingSnapshotsForPeriod(supabase, {
         businessId: "biz-a",
         periodStart: "2026-07-01",
         periodEnd: "2026-07-31",
+        emptyClaimRetryDelayMs: 0,
       }),
     ])
 
     expect(a.claimed + b.claimed).toBe(1)
     expect(a.completed + b.completed).toBe(1)
-    expect(scopedClaim).toHaveBeenCalledTimes(2)
+    // One processor claims; the other may empty-claim + retry (2–3 scoped calls total).
+    expect(scopedClaim.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(scopedClaim.mock.calls.length).toBeLessThanOrEqual(3)
   })
 })

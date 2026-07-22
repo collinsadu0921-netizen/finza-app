@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
@@ -68,7 +69,10 @@ export async function GET(request: NextRequest) {
         periodStart: searchParams.get("period_start") ?? undefined,
         previousPeriodStart: searchParams.get("previous_period_start") ?? undefined,
       },
-      diag
+      diag,
+      {
+        scheduleBackground: (promise) => waitUntil(promise),
+      }
     )
 
     return finish(NextResponse.json(payload), businessId)

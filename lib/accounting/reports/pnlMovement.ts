@@ -133,21 +133,30 @@ async function ensureRefreshAndSchedule(
   reason: string,
   scheduleBackground?: (promise: Promise<unknown>) => void
 ): Promise<string | null> {
-  const refreshJobId = await enqueueSnapshotRefreshJob(supabase, {
+  // Await durable enqueue only — never block the report response on rebuild.
+  const jobId = await enqueueSnapshotRefreshJob(supabase, {
     businessId,
     periodStart: startDate,
     periodEnd: endDate,
     jobType: "both",
     reason,
   })
-  scheduleTargetedSnapshotRefresh({
+  const scheduled = scheduleTargetedSnapshotRefresh({
     businessId,
     periodStart: startDate,
     periodEnd: endDate,
     triggerSource: "stale_report_read",
     scheduleBackground,
   })
-  return refreshJobId
+  if (scheduled.scheduled && !scheduleBackground && scheduled.promise) {
+    console.warn("[pnl-movement] snapshot refresh scheduled without request-owned waitUntil", {
+      business_id: businessId,
+      period_start: startDate,
+      period_end: endDate,
+    })
+    void scheduled.promise
+  }
+  return jobId
 }
 
 async function isExactAccountingPeriodRange(

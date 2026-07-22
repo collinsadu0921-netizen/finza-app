@@ -1,5 +1,6 @@
 /**
  * Non-blocking wrapper around afterAccountingPost for mutation routes.
+ * Route owns waitUntil: pass scheduleBackground: (p) => waitUntil(p).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -29,5 +30,9 @@ export function fireAfterAccountingPost(input: {
       // fall through
     }
   }
+  console.warn("[after-accounting-post] fired without request-owned waitUntil", {
+    source: input.source,
+    business_id: input.businessId,
+  })
   void work
 }

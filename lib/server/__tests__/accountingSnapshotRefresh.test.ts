@@ -3,6 +3,7 @@
  */
 
 import {
+  enqueueAndScheduleTargetedSnapshotRefresh,
   enqueueSnapshotRefreshJob,
   isAccountingImmediateRefreshEnabled,
   resetTargetedSnapshotRefreshCoalescingForTests,
@@ -79,7 +80,10 @@ describe("scheduleTargetedSnapshotRefresh", () => {
       periodEnd: "2026-07-31",
       run,
     })
-    expect(result).toEqual({ scheduled: false, reason: "immediate_refresh_disabled" })
+    expect(result.scheduled).toBe(false)
+    expect(result.reason).toBe("immediate_refresh_disabled")
+    expect(result.promise).toBeNull()
+    expect(result.immediate_refresh_enabled).toBe(false)
     expect(run).not.toHaveBeenCalled()
   })
 
@@ -164,7 +168,57 @@ describe("scheduleTargetedSnapshotRefresh", () => {
     })
 
     expect(result.scheduled).toBe(true)
+    expect(result.promise).not.toBeNull()
     expect(scheduleBackground).toHaveBeenCalledTimes(1)
-    await Promise.resolve()
+    await result.promise
+  })
+
+  it("always performs durable enqueue even when immediate refresh is disabled", async () => {
+    delete process.env.ACCOUNTING_IMMEDIATE_REFRESH_ENABLED
+    const supabase = {
+      rpc: jest.fn().mockResolvedValue({ data: "job-1", error: null }),
+    } as unknown as SupabaseClient
+
+    const result = await enqueueAndScheduleTargetedSnapshotRefresh(supabase, {
+      businessId: "biz",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      reason: "read_path_missing_snapshot",
+    })
+
+    expect(result.jobId).toBe("job-1")
+    expect(result.scheduled).toBe(false)
+    expect(result.reason).toBe("immediate_refresh_disabled")
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "enqueue_accounting_snapshot_refresh_job",
+      expect.objectContaining({
+        p_business_id: "biz",
+        p_period_start: "2026-07-01",
+        p_period_end: "2026-07-31",
+      })
+    )
+  })
+
+  it("normalizes ISO period bounds for cooldown keys", async () => {
+    process.env.ACCOUNTING_IMMEDIATE_REFRESH_ENABLED = "1"
+    const run = jest.fn().mockResolvedValue(undefined)
+    const first = scheduleTargetedSnapshotRefresh({
+      businessId: "biz-iso",
+      periodStart: "2026-06-30T22:00:00.000Z",
+      periodEnd: "2026-07-30T22:00:00.000Z",
+      run,
+    })
+    expect(first.scheduled).toBe(true)
+    expect(first.period_start).toBe("2026-07-01")
+    expect(first.period_end).toBe("2026-07-31")
+    const second = scheduleTargetedSnapshotRefresh({
+      businessId: "biz-iso",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      run: jest.fn().mockResolvedValue(undefined),
+    })
+    expect(second.scheduled).toBe(false)
+    expect(["in_flight", "cooldown"]).toContain(second.reason)
+    await first.promise
   })
 })

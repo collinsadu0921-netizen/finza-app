@@ -4,10 +4,7 @@
  */
 
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
-import {
-  enqueueSnapshotRefreshJob,
-  scheduleTargetedSnapshotRefresh,
-} from "@/lib/server/accountingSnapshotRefresh"
+import { enqueueAndScheduleTargetedSnapshotRefresh } from "@/lib/server/accountingSnapshotRefresh"
 import { supabaseErrorDiag, type createRouteDiag } from "@/lib/server/routeDiagnostics"
 import {
   loadLiveTimelineRowsBounded,
@@ -49,6 +46,8 @@ export type TimelineLoadSource =
 export type ServiceDashboardTimelineLoadOptions = {
   /** When false, read summary only — no refresh or live fallback (cluster operational gate). */
   refreshOnRequest?: boolean
+  /** Request-owned waitUntil attachment for targeted snapshot refresh. */
+  scheduleBackground?: (promise: Promise<unknown>) => void
 }
 
 export type ServiceDashboardTimelineResult = {
@@ -218,27 +217,37 @@ function rowsResult(
 async function enqueueTimelineSnapshotRefreshJobs(
   supabase: SupabaseClient,
   businessId: string,
-  rows: TimelineRpcRow[]
+  rows: TimelineRpcRow[],
+  scheduleBackground?: (promise: Promise<unknown>) => void
 ): Promise<void> {
   const seen = new Set<string>()
   for (const row of rows) {
     const key = `${row.period_start}|${row.period_end}`
     if (seen.has(key)) continue
     seen.add(key)
-    void enqueueSnapshotRefreshJob(supabase, {
+    const work = enqueueAndScheduleTargetedSnapshotRefresh(supabase, {
       businessId,
       periodStart: row.period_start,
       periodEnd: row.period_end,
       jobType: "both",
       reason: "read_path_missing_snapshot",
       sourceType: "dashboard_timeline",
-    })
-    scheduleTargetedSnapshotRefresh({
-      businessId,
-      periodStart: row.period_start,
-      periodEnd: row.period_end,
       triggerSource: "stale_dashboard_read",
     })
+    if (scheduleBackground) {
+      try {
+        scheduleBackground(work)
+      } catch {
+        void work
+      }
+    } else {
+      console.warn("[dashboard-timeline] snapshot refresh scheduled without request-owned waitUntil", {
+        business_id: businessId,
+        period_start: row.period_start,
+        period_end: row.period_end,
+      })
+      void work
+    }
   }
 }
 
@@ -248,7 +257,10 @@ async function resolveEmptyWithLedger(
   periodsParam: number,
   diag: RouteDiag,
   t0: number,
-  extra?: Record<string, unknown> & { refreshOnRequest?: boolean }
+  extra?: Record<string, unknown> & {
+    refreshOnRequest?: boolean
+    scheduleBackground?: (promise: Promise<unknown>) => void
+  }
 ): Promise<ServiceDashboardTimelineResult> {
   const refreshOnRequest = extra?.refreshOnRequest !== false
   const hasLedger = await businessHasLedgerMovement(supabase, businessId)
@@ -265,7 +277,12 @@ async function resolveEmptyWithLedger(
     if (refreshOnRequest) {
       void blockingRefreshSummary(supabase, businessId, periodsParam)
     } else {
-      void enqueueTimelineSnapshotRefreshJobs(supabase, businessId, liveRows)
+      void enqueueTimelineSnapshotRefreshJobs(
+        supabase,
+        businessId,
+        liveRows,
+        extra?.scheduleBackground
+      )
     }
     return finish(
       diag,
@@ -296,6 +313,7 @@ export async function loadServiceDashboardTimeline(
 ): Promise<ServiceDashboardTimelineResult> {
   const t0 = performance.now()
   const refreshOnRequest = options?.refreshOnRequest !== false
+  const scheduleBackground = options?.scheduleBackground
 
   const freshRows = await readFreshSummary(supabase, businessId, periodsParam)
   if (freshRows.length > 0) {
@@ -316,7 +334,8 @@ export async function loadServiceDashboardTimeline(
           void enqueueTimelineSnapshotRefreshJobs(
             supabase,
             businessId,
-            liveRead.rows.filter((r) => patchedPeriods.includes(r.period_start))
+            liveRead.rows.filter((r) => patchedPeriods.includes(r.period_start)),
+            scheduleBackground
           )
           return finish(
             diag,
@@ -348,6 +367,7 @@ export async function loadServiceDashboardTimeline(
     return resolveEmptyWithLedger(supabase, businessId, periodsParam, diag, t0, {
       refresh_skipped: true,
       refreshOnRequest: false,
+      scheduleBackground,
     })
   }
 

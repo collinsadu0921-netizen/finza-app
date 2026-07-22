@@ -9,7 +9,12 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 const enqueue = jest.fn().mockResolvedValue("job-1")
-const schedule = jest.fn().mockReturnValue({ scheduled: true, reason: "scheduled" })
+const schedule = jest.fn().mockReturnValue({
+  scheduled: true,
+  reason: "scheduled",
+  promise: Promise.resolve(),
+  immediate_refresh_enabled: true,
+})
 const periodHasLive = jest.fn().mockResolvedValue(true)
 const ensureZero = jest.fn().mockResolvedValue(false)
 
@@ -60,7 +65,12 @@ describe("pnlMovement freshness", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     enqueue.mockResolvedValue("job-1")
-    schedule.mockReturnValue({ scheduled: true, reason: "scheduled" })
+    schedule.mockReturnValue({
+      scheduled: true,
+      reason: "scheduled",
+      promise: Promise.resolve(),
+      immediate_refresh_enabled: true,
+    })
     periodHasLive.mockResolvedValue(true)
     ensureZero.mockResolvedValue(false)
   })

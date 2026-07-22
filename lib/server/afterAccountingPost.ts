@@ -1,6 +1,10 @@
 /**
  * Shared post-accounting mutation helper.
- * Fire-and-forget: never blocks mutation success on snapshot rebuild.
+ * Fire-and-forget at the route: never blocks mutation success on snapshot rebuild.
+ *
+ * Background ownership: when used via fireAfterAccountingPost + waitUntil, this
+ * function awaits the targeted refresh promise so one request-owned chain covers
+ * cache invalidation + scoped processing.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -16,6 +20,7 @@ export type AfterAccountingPostInput = {
   periodEnd?: string | null
   source?: string
   supabase?: SupabaseClient
+  /** @deprecated Prefer route-level waitUntil around afterAccountingPost / fireAfterAccountingPost. */
   scheduleBackground?: (promise: Promise<unknown>) => void
 }
 
@@ -51,6 +56,7 @@ export async function afterAccountingPost(input: AfterAccountingPostInput): Prom
   reason: string
   periodStart?: string
   periodEnd?: string
+  immediate_refresh_enabled?: boolean
 }> {
   const businessId = input.businessId?.trim()
   if (!businessId) {
@@ -82,28 +88,35 @@ export async function afterAccountingPost(input: AfterAccountingPostInput): Prom
     return { scheduled: false, reason: "period_unresolved", periodStart, periodEnd }
   }
 
+  // Single ownership: do not nest scheduleBackground here. Await the promise so the
+  // route's waitUntil(afterAccountingPost / fireAfterAccountingPost) covers processing.
   const scheduled = scheduleTargetedSnapshotRefresh({
     businessId,
     periodStart,
     periodEnd,
     triggerSource: "post_transaction",
-    scheduleBackground: input.scheduleBackground,
   })
+
+  if (scheduled.promise) {
+    await scheduled.promise
+  }
 
   console.info("[after-accounting-post]", {
     business_id: businessId,
-    period_start: periodStart,
-    period_end: periodEnd,
+    period_start: scheduled.period_start ?? periodStart,
+    period_end: scheduled.period_end ?? periodEnd,
     trigger_source: "post_transaction",
     source: input.source ?? null,
     scheduled: scheduled.scheduled,
     reason: scheduled.reason,
+    immediate_refresh_enabled: scheduled.immediate_refresh_enabled,
   })
 
   return {
     scheduled: scheduled.scheduled,
     reason: scheduled.reason,
-    periodStart,
-    periodEnd,
+    periodStart: scheduled.period_start ?? periodStart,
+    periodEnd: scheduled.period_end ?? periodEnd,
+    immediate_refresh_enabled: scheduled.immediate_refresh_enabled,
   }
 }

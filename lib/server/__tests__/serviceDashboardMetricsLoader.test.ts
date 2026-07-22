@@ -13,10 +13,18 @@ jest.mock("@/lib/accounting/reports/resolvePnLMovementRange", () => ({
 }))
 jest.mock("@/lib/server/accountingSnapshotRefresh", () => ({
   enqueueSnapshotRefreshJob: jest.fn().mockResolvedValue("job-1"),
+  enqueueAndScheduleTargetedSnapshotRefresh: jest.fn().mockResolvedValue({
+    jobId: "job-1",
+    scheduled: true,
+    reason: "scheduled",
+    immediate_refresh_enabled: true,
+  }),
   periodHasLivePnlMovement: jest.fn().mockResolvedValue(true),
   scheduleTargetedSnapshotRefresh: jest.fn().mockReturnValue({
     scheduled: true,
     reason: "scheduled",
+    promise: Promise.resolve(),
+    immediate_refresh_enabled: true,
   }),
 }))
 jest.mock("@/lib/server/customerPaymentsCollected", () => ({
@@ -35,13 +43,16 @@ jest.mock("@/lib/server/dashboardMetricsCache", () => ({
 }))
 
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
-import { enqueueSnapshotRefreshJob, periodHasLivePnlMovement } from "@/lib/server/accountingSnapshotRefresh"
+import {
+  enqueueAndScheduleTargetedSnapshotRefresh,
+  periodHasLivePnlMovement,
+} from "@/lib/server/accountingSnapshotRefresh"
 
 const mockResolveRange = resolvePnLMovementRange as jest.MockedFunction<
   typeof resolvePnLMovementRange
 >
-const mockEnqueue = enqueueSnapshotRefreshJob as jest.MockedFunction<
-  typeof enqueueSnapshotRefreshJob
+const mockEnqueue = enqueueAndScheduleTargetedSnapshotRefresh as jest.MockedFunction<
+  typeof enqueueAndScheduleTargetedSnapshotRefresh
 >
 const mockHasLiveMovement = periodHasLivePnlMovement as jest.MockedFunction<
   typeof periodHasLivePnlMovement

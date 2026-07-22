@@ -1,6 +1,13 @@
 import { afterAccountingPost } from "../afterAccountingPost"
 
-const schedule = jest.fn().mockReturnValue({ scheduled: true, reason: "scheduled" })
+const schedule = jest.fn().mockReturnValue({
+  scheduled: true,
+  reason: "scheduled",
+  promise: Promise.resolve(),
+  immediate_refresh_enabled: true,
+  period_start: "2026-07-01",
+  period_end: "2026-07-31",
+})
 const invalidate = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("../accountingSnapshotRefresh", () => ({

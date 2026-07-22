@@ -17,9 +17,8 @@ import {
 } from "@/lib/server/dashboardPeriodSummaryRead"
 import { SUMMARY_FRESH_SECONDS } from "@/lib/server/serviceDashboardTimeline"
 import {
-  enqueueSnapshotRefreshJob,
+  enqueueAndScheduleTargetedSnapshotRefresh,
   periodHasLivePnlMovement,
-  scheduleTargetedSnapshotRefresh,
 } from "@/lib/server/accountingSnapshotRefresh"
 import { loadCustomerPaymentsCollectedTotal } from "@/lib/server/customerPaymentsCollected"
 import { classifySupabaseError, logSupabaseRpcFailure } from "@/lib/server/logSupabaseRpcError"
@@ -261,21 +260,29 @@ function ensureDashboardRefreshScheduled(
   periodEnd: string,
   scheduleBackground?: (promise: Promise<unknown>) => void
 ): void {
-  void enqueueSnapshotRefreshJob(supabase, {
+  const work = enqueueAndScheduleTargetedSnapshotRefresh(supabase, {
     businessId,
     periodStart,
     periodEnd,
     jobType: "both",
     reason: "read_path_missing_snapshot",
     sourceType: "dashboard_metrics",
-  })
-  scheduleTargetedSnapshotRefresh({
-    businessId,
-    periodStart,
-    periodEnd,
     triggerSource: "stale_dashboard_read",
-    scheduleBackground,
   })
+  if (scheduleBackground) {
+    try {
+      scheduleBackground(work)
+      return
+    } catch {
+      // fall through
+    }
+  }
+  console.warn("[dashboard-metrics] snapshot refresh scheduled without request-owned waitUntil", {
+    business_id: businessId,
+    period_start: periodStart,
+    period_end: periodEnd,
+  })
+  void work
 }
 
 async function buildMetricsFromSummarySnapshot(

@@ -1,13 +1,15 @@
-# Drain accounting snapshot refresh queue on a short cadence.
-# Preview/staging Vercel crons do not run; this workflow is the primary drain path.
-# Secrets:
-#   ACCOUNTING_SNAPSHOT_CRON_URL  — full URL to /api/internal/accounting-snapshots/process
+# Optional backup drain for accounting snapshot refresh queue.
+# Primary recovery on staging: Supabase Cron → protected Vercel worker (migration 546).
+# Preview/staging Vercel crons do not run.
+# Secrets (repo):
+#   ACCOUNTING_SNAPSHOT_CRON_URL — full URL to staging /api/internal/accounting-snapshots/process
 #   ACCOUNTING_SNAPSHOT_CRON_SECRET — same value as CRON_SECRET on that deployment
+#   VERCEL_AUTOMATION_BYPASS_SECRET — Vercel deployment protection bypass
 name: Accounting Snapshot Drain
 
 on:
   schedule:
-    # Every 5 minutes
+    # Every 5 minutes (backup only; may be delayed/dropped by GitHub)
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
@@ -22,14 +24,16 @@ jobs:
         env:
           CRON_URL: ${{ secrets.ACCOUNTING_SNAPSHOT_CRON_URL }}
           CRON_SECRET: ${{ secrets.ACCOUNTING_SNAPSHOT_CRON_SECRET }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
-          if [ -z "$CRON_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "Missing ACCOUNTING_SNAPSHOT_CRON_URL or ACCOUNTING_SNAPSHOT_CRON_SECRET"
+          if [ -z "$CRON_URL" ] || [ -z "$CRON_SECRET" ] || [ -z "$BYPASS_SECRET" ]; then
+            echo "Missing ACCOUNTING_SNAPSHOT_CRON_URL, ACCOUNTING_SNAPSHOT_CRON_SECRET, or VERCEL_AUTOMATION_BYPASS_SECRET"
             exit 1
           fi
-          echo "Calling $CRON_URL ..."
+          echo "Calling staging snapshot worker ..."
           response=$(curl -s -w "\n%{http_code}" -X POST "${CRON_URL}?batch=25&batches=8" \
-            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
             -H "Content-Type: application/json")
           http_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | sed '$d')

@@ -1,25 +1,36 @@
 /**
  * Accounting snapshot refresh queue helpers (522/544).
  * Durable enqueue remains authoritative; immediate targeted drain is best-effort.
+ *
+ * Background ownership: callers (routes) own waitUntil via scheduleBackground, or
+ * await the returned promise inside a request-owned async chain (afterAccountingPost).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 
+import { toAccountingDateOnly } from "@/lib/server/accountingPeriodDate"
 import { PNL_SNAPSHOT_FRESH_SECONDS } from "@/lib/server/dashboardPeriodSummaryRead"
 import {
   processAccountingSnapshotsForPeriod,
   type SnapshotRefreshTriggerSource,
 } from "@/lib/server/accountingSnapshotWorker"
 
-/** Default OFF — durable queue + five-minute recovery remain the only drain path. */
+export { toAccountingDateOnly } from "@/lib/server/accountingPeriodDate"
+
+/**
+ * Default OFF — durable queue + recovery remain the only drain path.
+ * Uses dynamic env key access so Vercel/Next does not bake an empty build-time value.
+ */
 export function isAccountingImmediateRefreshEnabled(): boolean {
-  const raw = String(process.env.ACCOUNTING_IMMEDIATE_REFRESH_ENABLED ?? "")
+  const env = process.env as Record<string, string | undefined>
+  const raw = String(env["ACCOUNTING_IMMEDIATE_REFRESH_ENABLED"] ?? "")
     .trim()
     .toLowerCase()
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on"
 }
 
 const TARGETED_REFRESH_COOLDOWN_MS = 2_000
+const EMPTY_CLAIM_RETRY_DELAY_MS = 150
 const targetedRefreshInFlight = new Map<string, Promise<void>>()
 const targetedRefreshCooldownUntil = new Map<string, number>()
 
@@ -36,43 +47,89 @@ export type ScheduleTargetedSnapshotRefreshInput = {
   periodStart: string
   periodEnd: string
   triggerSource?: SnapshotRefreshTriggerSource
-  /** Optional Vercel waitUntil (or test harness). When omitted, fire-and-forget. */
+  /**
+   * Request-owned background attachment (Vercel waitUntil).
+   * Prefer this at route boundaries. When omitted, callers must await `promise`
+   * inside a waitUntil-owned async function (e.g. afterAccountingPost).
+   */
   scheduleBackground?: (promise: Promise<unknown>) => void
   /** Test injection — production uses service-role admin client. */
   run?: () => Promise<unknown>
 }
 
+export type ScheduleTargetedSnapshotRefreshResult = {
+  scheduled: boolean
+  reason: string
+  /** Present when work was started; attach via waitUntil or await in request-owned chain. */
+  promise: Promise<void> | null
+  immediate_refresh_enabled: boolean
+  period_start?: string
+  period_end?: string
+}
+
 /**
  * Best-effort immediate targeted refresh after a journal/durable enqueue.
- * Never throws to callers. Never owns durability. Empty scoped claim exits immediately.
+ * Never throws to callers. Never owns durability.
  */
 export function scheduleTargetedSnapshotRefresh(
   input: ScheduleTargetedSnapshotRefreshInput
-): { scheduled: boolean; reason: string } {
-  if (!isAccountingImmediateRefreshEnabled()) {
-    return { scheduled: false, reason: "immediate_refresh_disabled" }
+): ScheduleTargetedSnapshotRefreshResult {
+  const immediateEnabled = isAccountingImmediateRefreshEnabled()
+  if (!immediateEnabled) {
+    return {
+      scheduled: false,
+      reason: "immediate_refresh_disabled",
+      promise: null,
+      immediate_refresh_enabled: false,
+    }
   }
 
-  const { businessId, periodStart, periodEnd } = input
+  const periodStart = toAccountingDateOnly(input.periodStart)
+  const periodEnd = toAccountingDateOnly(input.periodEnd)
+  const businessId = input.businessId?.trim() || ""
   if (!businessId || !periodStart || !periodEnd) {
-    return { scheduled: false, reason: "invalid_period_scope" }
+    return {
+      scheduled: false,
+      reason: "invalid_period_scope",
+      promise: null,
+      immediate_refresh_enabled: true,
+    }
   }
 
   const key = targetedRefreshKey(businessId, periodStart, periodEnd)
   const now = Date.now()
   const coolUntil = targetedRefreshCooldownUntil.get(key) ?? 0
   if (coolUntil > now) {
-    return { scheduled: false, reason: "cooldown" }
+    return {
+      scheduled: false,
+      reason: "cooldown",
+      promise: null,
+      immediate_refresh_enabled: true,
+      period_start: periodStart,
+      period_end: periodEnd,
+    }
   }
   if (targetedRefreshInFlight.has(key)) {
-    return { scheduled: false, reason: "in_flight" }
+    return {
+      scheduled: false,
+      reason: "in_flight",
+      promise: null,
+      immediate_refresh_enabled: true,
+      period_start: periodStart,
+      period_end: periodEnd,
+    }
   }
-
-  targetedRefreshCooldownUntil.set(key, now + TARGETED_REFRESH_COOLDOWN_MS)
 
   const triggerSource = input.triggerSource ?? "post_transaction"
   const work = (async () => {
     try {
+      console.info("[accounting-snapshot] targeted refresh start", {
+        business_id: businessId,
+        period_start: periodStart,
+        period_end: periodEnd,
+        trigger_source: triggerSource,
+        immediate_refresh_enabled: true,
+      })
       if (input.run) {
         await input.run()
         return
@@ -85,6 +142,8 @@ export function scheduleTargetedSnapshotRefresh(
         periodEnd,
         maxJobs: 5,
         triggerSource,
+        emptyClaimRetry: true,
+        emptyClaimRetryDelayMs: EMPTY_CLAIM_RETRY_DELAY_MS,
       })
     } catch (err) {
       console.warn("[accounting-snapshot] targeted refresh failed:", {
@@ -92,10 +151,13 @@ export function scheduleTargetedSnapshotRefresh(
         period_start: periodStart,
         period_end: periodEnd,
         trigger_source: triggerSource,
+        immediate_refresh_enabled: true,
         error: err instanceof Error ? err.message.slice(0, 300) : "unknown_error",
       })
     } finally {
       targetedRefreshInFlight.delete(key)
+      // Arm cooldown after work finishes so empty-claim retry inside the same run is not blocked.
+      targetedRefreshCooldownUntil.set(key, Date.now() + TARGETED_REFRESH_COOLDOWN_MS)
     }
   })()
 
@@ -111,11 +173,16 @@ export function scheduleTargetedSnapshotRefresh(
       )
       void work
     }
-  } else {
-    void work
   }
 
-  return { scheduled: true, reason: "scheduled" }
+  return {
+    scheduled: true,
+    reason: "scheduled",
+    promise: work,
+    immediate_refresh_enabled: true,
+    period_start: periodStart,
+    period_end: periodEnd,
+  }
 }
 
 /** Test-only: clear in-process coalescing state. */
@@ -208,10 +275,16 @@ export async function enqueueSnapshotRefreshJob(
     sourceId?: string | null
   }
 ): Promise<string | null> {
+  const periodStart = toAccountingDateOnly(input.periodStart)
+  const periodEnd = toAccountingDateOnly(input.periodEnd)
+  if (!periodStart || !periodEnd) {
+    console.warn("[accounting-snapshot] enqueue skipped: invalid period bounds")
+    return null
+  }
   const { data, error } = await supabase.rpc("enqueue_accounting_snapshot_refresh_job", {
     p_business_id: input.businessId,
-    p_period_start: input.periodStart,
-    p_period_end: input.periodEnd,
+    p_period_start: periodStart,
+    p_period_end: periodEnd,
     p_job_type: input.jobType ?? "both",
     p_reason: input.reason ?? "read_path_missing_snapshot",
     p_source_type: input.sourceType ?? null,
@@ -222,6 +295,56 @@ export async function enqueueSnapshotRefreshJob(
     return null
   }
   return typeof data === "string" ? data : null
+}
+
+/**
+ * Durable enqueue first, then request-owned immediate schedule.
+ * Awaits enqueue so the scoped claim can see the row.
+ */
+export async function enqueueAndScheduleTargetedSnapshotRefresh(
+  supabase: SupabaseClient,
+  input: {
+    businessId: string
+    periodStart: string
+    periodEnd: string
+    jobType?: SnapshotRefreshJobType
+    reason?: string
+    sourceType?: string | null
+    sourceId?: string | null
+    triggerSource?: SnapshotRefreshTriggerSource
+  }
+): Promise<{
+  jobId: string | null
+  scheduled: boolean
+  reason: string
+  immediate_refresh_enabled: boolean
+}> {
+  const jobId = await enqueueSnapshotRefreshJob(supabase, {
+    businessId: input.businessId,
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    jobType: input.jobType,
+    reason: input.reason,
+    sourceType: input.sourceType,
+    sourceId: input.sourceId,
+  })
+  // Do not nest scheduleBackground here — callers waitUntil() this whole async function
+  // so enqueue + targeted processing stay on one request-owned chain.
+  const scheduled = scheduleTargetedSnapshotRefresh({
+    businessId: input.businessId,
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    triggerSource: input.triggerSource,
+  })
+  if (scheduled.promise) {
+    await scheduled.promise
+  }
+  return {
+    jobId,
+    scheduled: scheduled.scheduled,
+    reason: scheduled.reason,
+    immediate_refresh_enabled: scheduled.immediate_refresh_enabled,
+  }
 }
 
 export async function ensureZeroPnlSnapshotForPeriod(

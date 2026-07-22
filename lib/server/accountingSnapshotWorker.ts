@@ -6,6 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 import { invalidateAccountingCachesForBusiness } from "@/lib/server/accountingSnapshotCacheInvalidation"
+import { toAccountingDateOnly } from "@/lib/server/accountingPeriodDate"
 
 export type SnapshotRefreshJob = {
   id: string
@@ -146,6 +147,9 @@ export async function processAccountingSnapshotsForPeriod(
     maxAttempts?: number
     leaseSeconds?: number
     triggerSource?: SnapshotRefreshTriggerSource
+    /** Retry once after a short delay when the first scoped claim is empty (enqueue race). */
+    emptyClaimRetry?: boolean
+    emptyClaimRetryDelayMs?: number
   }
 ): Promise<SnapshotWorkerResult> {
   const started = Date.now()
@@ -153,6 +157,10 @@ export async function processAccountingSnapshotsForPeriod(
   const maxAttempts = input.maxAttempts ?? MAX_ATTEMPTS
   const leaseSeconds = input.leaseSeconds ?? DEFAULT_LEASE_SECONDS
   const triggerSource = input.triggerSource ?? "post_transaction"
+  const periodStart = toAccountingDateOnly(input.periodStart) ?? input.periodStart
+  const periodEnd = toAccountingDateOnly(input.periodEnd) ?? input.periodEnd
+  const emptyClaimRetry = input.emptyClaimRetry !== false
+  const emptyClaimRetryDelayMs = Math.max(0, input.emptyClaimRetryDelayMs ?? 150)
 
   const result: SnapshotWorkerResult = {
     claimed: 0,
@@ -165,31 +173,51 @@ export async function processAccountingSnapshotsForPeriod(
     triggerSource,
   }
 
-  const { data: jobs, error: claimError } = await supabase.rpc(
-    "claim_accounting_snapshot_refresh_jobs_for_period",
-    {
-      p_business_id: input.businessId,
-      p_period_start: input.periodStart,
-      p_period_end: input.periodEnd,
-      p_limit: maxJobs,
-      p_lease_seconds: leaseSeconds,
-    }
-  )
-
-  if (claimError) {
-    throw new Error(
-      `claim_accounting_snapshot_refresh_jobs_for_period failed: ${claimError.message}`
+  async function scopedClaim(): Promise<SnapshotRefreshJob[]> {
+    const { data: jobs, error: claimError } = await supabase.rpc(
+      "claim_accounting_snapshot_refresh_jobs_for_period",
+      {
+        p_business_id: input.businessId,
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_limit: maxJobs,
+        p_lease_seconds: leaseSeconds,
+      }
     )
+    if (claimError) {
+      throw new Error(
+        `claim_accounting_snapshot_refresh_jobs_for_period failed: ${claimError.message}`
+      )
+    }
+    return (jobs ?? []) as SnapshotRefreshJob[]
   }
 
-  const claimed = (jobs ?? []) as SnapshotRefreshJob[]
+  let claimed = await scopedClaim()
+  if (claimed.length === 0 && emptyClaimRetry) {
+    await new Promise((r) => setTimeout(r, emptyClaimRetryDelayMs))
+    claimed = await scopedClaim()
+    result.batches = 2
+    if (claimed.length === 0) {
+      console.info("[accounting-snapshot-worker]", {
+        scoped: true,
+        business_id: input.businessId,
+        period_start: periodStart,
+        period_end: periodEnd,
+        trigger_source: triggerSource,
+        claimed_count: 0,
+        empty_claim_retry: true,
+        empty_claim_retry_exhausted: true,
+      })
+    }
+  }
+
   if (claimed.length === 0) {
     result.elapsedMs = Date.now() - started
     logSnapshotWorkerResult(result, {
       scoped: true,
       businessId: input.businessId,
-      periodStart: input.periodStart,
-      periodEnd: input.periodEnd,
+      periodStart,
+      periodEnd,
     })
     return result
   }
@@ -198,11 +226,13 @@ export async function processAccountingSnapshotsForPeriod(
   const touchedBusinesses = new Set<string>()
 
   for (const job of claimed) {
+    const jobStart = toAccountingDateOnly(job.period_start) ?? String(job.period_start)
+    const jobEnd = toAccountingDateOnly(job.period_end) ?? String(job.period_end)
     // Defense in depth — scoped RPC must already filter, never process other tenants.
     if (
       job.business_id !== input.businessId ||
-      job.period_start !== input.periodStart ||
-      job.period_end !== input.periodEnd
+      jobStart !== periodStart ||
+      jobEnd !== periodEnd
     ) {
       result.failed++
       result.errors.push({
@@ -234,8 +264,8 @@ export async function processAccountingSnapshotsForPeriod(
   logSnapshotWorkerResult(result, {
     scoped: true,
     businessId: input.businessId,
-    periodStart: input.periodStart,
-    periodEnd: input.periodEnd,
+    periodStart,
+    periodEnd,
   })
   return result
 }
@@ -346,6 +376,7 @@ function logSnapshotWorkerResult(
     completed_count: result.completed,
     failed_count: result.failed,
     retried_count: result.retried,
+    batches: result.batches,
     elapsed_ms: result.elapsedMs,
     claim_token_presence: result.claimed > 0,
     error_count: result.errors.length,
