@@ -126,9 +126,11 @@ export async function POST(request: NextRequest) {
       metadata: { expense_id: expense.id },
     })
 
+    const expenseDate =
+      typeof result.expense?.date === "string" ? result.expense.date : undefined
     fireAfterAccountingPost({
       businessId: business_id,
-      journalDate: result.expense?.date ?? undefined,
+      journalDate: expenseDate,
       source: "expense_post",
       supabase,
       scheduleBackground: (p) => waitUntil(p),
