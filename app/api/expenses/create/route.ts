@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { insertExpenseForBusiness } from "@/lib/expenses/insertExpenseForBusiness"
@@ -8,6 +9,7 @@ import {
   linkIncomingDocumentToEntity,
 } from "@/lib/documents/incomingDocumentsService"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 export async function POST(request: NextRequest) {
   try {
@@ -122,6 +124,16 @@ export async function POST(request: NextRequest) {
       businessId: business_id,
       eventName: "expense_created",
       metadata: { expense_id: expense.id },
+    })
+
+    const expenseDate =
+      typeof result.expense?.date === "string" ? result.expense.date : undefined
+    fireAfterAccountingPost({
+      businessId: business_id,
+      journalDate: expenseDate,
+      source: "expense_post",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
     })
 
     return NextResponse.json({

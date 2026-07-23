@@ -3,6 +3,7 @@
  */
 
 import {
+  dashboardFinancialSourceForDiag,
   dashboardPnlSourceForDiag,
   isDashboardPnlSummaryFastPathEnabled,
 } from "../dashboardPeriodSummaryRead"
@@ -18,15 +19,39 @@ describe("dashboardPeriodSummaryRead flags", () => {
     }
   })
 
-  it("fast path disabled by default", () => {
+  it("compat flag defaults off (summary path no longer depends on it)", () => {
     delete process.env.FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH
     expect(isDashboardPnlSummaryFastPathEnabled()).toBe(false)
     expect(dashboardPnlSourceForDiag(false)).toBe("live_metrics_rpc")
   })
 
-  it("fast path enabled when FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH=1", () => {
+  it("compat flag still readable when FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH=1", () => {
     process.env.FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH = "1"
     expect(isDashboardPnlSummaryFastPathEnabled()).toBe(true)
     expect(dashboardPnlSourceForDiag(true)).toBe("summary_fast_path")
+  })
+
+  it("maps truthful dashboard_financial_source values", () => {
+    expect(
+      dashboardFinancialSourceForDiag({
+        cacheHit: true,
+        usedSummaryFastPath: true,
+        usedLiveFallback: false,
+      })
+    ).toBe("cache_hit")
+    expect(
+      dashboardFinancialSourceForDiag({
+        cacheHit: false,
+        usedSummaryFastPath: true,
+        usedLiveFallback: false,
+      })
+    ).toBe("fresh_snapshot")
+    expect(
+      dashboardFinancialSourceForDiag({
+        cacheHit: false,
+        usedSummaryFastPath: false,
+        usedLiveFallback: true,
+      })
+    ).toBe("live_fallback")
   })
 })

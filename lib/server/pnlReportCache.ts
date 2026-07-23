@@ -38,6 +38,14 @@ export function isPnlReportCacheEnabled(): boolean {
   return ttlMs() > 0
 }
 
+/** Drop in-process P&L report entries for one business after snapshot refresh. */
+export function invalidatePnlReportCacheForBusiness(businessId: string): void {
+  const prefix = `pnl|${businessId}|`
+  for (const key of store.keys()) {
+    if (key.startsWith(prefix)) store.delete(key)
+  }
+}
+
 export type PnlReportCacheStatus =
   | "hit"
   | "miss"

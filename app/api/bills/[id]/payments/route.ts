@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
@@ -7,6 +8,7 @@ import {
   enforceServiceWorkspaceAccess,
   enforceServiceWorkspaceWriteAccess,
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 export async function GET(
   request: NextRequest,
@@ -267,6 +269,13 @@ export async function POST(
     }
 
     // Status will be updated automatically by trigger
+    fireAfterAccountingPost({
+      businessId: business_id,
+      journalDate: payment?.date ?? date,
+      source: "bill_payment",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
+    })
 
     return NextResponse.json({ payment }, { status: 201 })
   } catch (error: any) {

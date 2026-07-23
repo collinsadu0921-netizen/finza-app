@@ -1,5 +1,10 @@
-# Drain accounting snapshot refresh queue on a short cadence.
-# Preview/staging Vercel crons do not run; this workflow is the primary drain path.
+# Accounting snapshot queue drain.
+#
+# During rollout, this GitHub Actions schedule remains the active recovery path
+# until production migration 546 and the Supabase Cron/Vault configuration are verified.
+#
+# After that verification, Supabase Cron → protected Vercel worker is the primary
+# recovery path and this workflow remains an optional backup.
 # Secrets (repo):
 #   ACCOUNTING_SNAPSHOT_CRON_URL — full URL to staging /api/internal/accounting-snapshots/process
 #   ACCOUNTING_SNAPSHOT_CRON_SECRET — same value as CRON_SECRET on that deployment

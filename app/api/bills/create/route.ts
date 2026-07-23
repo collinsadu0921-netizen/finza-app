@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
@@ -378,6 +380,16 @@ export async function POST(request: NextRequest) {
       } else if (doc && ap && doc.storage_path !== ap) {
         console.warn("[bills/create] incoming_document_id ignored: attachment_path does not match document")
       }
+    }
+
+    if (bill?.status === "open") {
+      fireAfterAccountingPost({
+        businessId: business_id,
+        journalDate: bill.issue_date ?? issue_date,
+        source: "bill_post",
+        supabase,
+        scheduleBackground: (p) => waitUntil(p),
+      })
     }
 
     return NextResponse.json({ 

@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 
 export const dynamic = "force-dynamic"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
@@ -73,7 +74,10 @@ export async function GET(request: NextRequest) {
     const { value, source: cacheSource, cache_enabled } =
       await loadOrComputeDashboardClusterCache(
         cacheKey,
-        () => loadServiceDashboardTimeline(supabase, businessId, periodsParam, diag),
+        () =>
+          loadServiceDashboardTimeline(supabase, businessId, periodsParam, diag, {
+            scheduleBackground: (promise) => waitUntil(promise),
+          }),
         { shouldStore: isTimelineResultCacheable }
       )
 

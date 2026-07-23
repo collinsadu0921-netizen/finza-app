@@ -18,12 +18,20 @@ jest.mock("@/lib/supabaseAdmin", () => ({
   createSupabaseAdminClient: jest.fn(),
 }))
 
+jest.mock("@/lib/accountingBootstrap", () => ({
+  ensureAccountingInitialized: jest.fn(),
+}))
+
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { sendServiceWelcomeNotificationsAfterProvision } from "@/lib/auth/sendServiceWelcomeNotification"
+import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 
 const welcomeMock = sendServiceWelcomeNotificationsAfterProvision as jest.MockedFunction<
   typeof sendServiceWelcomeNotificationsAfterProvision
+>
+const bootstrapMock = ensureAccountingInitialized as jest.MockedFunction<
+  typeof ensureAccountingInitialized
 >
 
 function defaultAdminClient() {
@@ -137,12 +145,15 @@ function makeSupabaseForExistingBusiness() {
 
 beforeEach(() => {
   welcomeMock.mockClear()
+  bootstrapMock.mockReset()
+  bootstrapMock.mockResolvedValue({ initialized: true })
   jest.mocked(createSupabaseAdminClient).mockReturnValue(defaultAdminClient() as never)
 })
 
 describe("POST /api/auth/provision-service-business", () => {
   it("schedules welcome notifications after new business + business_users", async () => {
-    jest.mocked(createSupabaseServerClient).mockResolvedValue(makeSupabaseForNewBusiness() as never)
+    const sb = makeSupabaseForNewBusiness()
+    jest.mocked(createSupabaseServerClient).mockResolvedValue(sb as never)
 
     const req = new NextRequest("http://localhost/api/auth/provision-service-business", {
       method: "POST",
@@ -156,8 +167,35 @@ describe("POST /api/auth/provision-service-business", () => {
     expect(json.ok).toBe(true)
     expect(json.alreadyExists).toBe(false)
 
+    expect(bootstrapMock).toHaveBeenCalledWith(sb, "biz-new")
     await Promise.resolve()
     expect(welcomeMock).toHaveBeenCalledWith({ businessId: "biz-new", ownerUserId: "user-1" })
+  })
+
+  it("returns 500 when accounting bootstrap fails and skips welcome", async () => {
+    bootstrapMock.mockResolvedValueOnce({
+      initialized: false,
+      error: "Unable to start accounting. Please try again.",
+      structuredError: {
+        error_code: "ACCOUNTING_BOOTSTRAP_FAILED",
+        message: "Unable to start accounting. Please try again.",
+        step: "ensure_accounting_initialized",
+        business_id: "biz-new",
+      },
+    })
+    jest.mocked(createSupabaseServerClient).mockResolvedValue(makeSupabaseForNewBusiness() as never)
+
+    const req = new NextRequest("http://localhost/api/auth/provision-service-business", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validProvisionBody()),
+    })
+
+    const res = await POST(req)
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json.error_code).toBe("ACCOUNTING_BOOTSTRAP_FAILED")
+    expect(welcomeMock).not.toHaveBeenCalled()
   })
 
   it("does not call welcome when business already exists", async () => {
@@ -173,6 +211,7 @@ describe("POST /api/auth/provision-service-business", () => {
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.alreadyExists).toBe(true)
+    expect(bootstrapMock).not.toHaveBeenCalled()
     expect(welcomeMock).not.toHaveBeenCalled()
   })
 
@@ -257,6 +296,7 @@ describe("POST /api/auth/provision-service-business", () => {
     const res = await POST(req)
     expect(res.status).toBe(200)
     expect(adminGetUser).toHaveBeenCalledWith("user-1")
+    expect(bootstrapMock).toHaveBeenCalledWith(sb, "biz-new")
     expect(insertedRow?.service_subscription_status).toBe("trialing")
     expect(insertedRow?.service_subscription_tier).toBe("professional")
     expect(insertedRow?.billing_cycle).toBe("monthly")
@@ -281,5 +321,6 @@ describe("POST /api/auth/provision-service-business", () => {
     const json = await res.json()
     expect(json.ok).toBe(true)
     expect(json.alreadyExists).toBe(false)
+    expect(bootstrapMock).toHaveBeenCalled()
   })
 })

@@ -54,4 +54,51 @@ Select-String NEXT_PUBLIC_SUPABASE_URL .env.staging
 | `FINZA_REPORTS_PNL_REFRESH_ON_REQUEST` | off | Blocking refresh in P&L request path |
 | `FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST` | off | Blocking refresh in dashboard cluster path |
 
-Worker cron (`/api/cron/accounting-snapshots`) drains the queue asynchronously.
+## Worker execution (539+ / 546+)
+
+| Environment | Drain path |
+|-------------|------------|
+| Staging / Preview | **Primary recovery:** Supabase Cron (`* * * * *`) → `invoke_accounting_snapshot_recovery_worker()` → protected Vercel process URL (migration **546**). **Backup:** GitHub Action `accounting-snapshot-drain.yml` (`*/5`) with Bearer + bypass headers. |
+| Production | Do not apply 546/547 here without a separate production plan. Vercel cron `0 2 * * *` → `/api/cron/accounting-snapshots` remains the production path until then. |
+
+Staging Vault secret setup (values never committed):
+
+```powershell
+# After applying 546/547 on staging:
+$env:ACCOUNTING_SNAPSHOT_CRON_URL="https://finza-app-git-staging-….vercel.app/api/internal/accounting-snapshots/process"
+# Also set CRON_SECRET / VERCEL_AUTOMATION_BYPASS_SECRET in the shell, then:
+node scripts/staging-setup-snapshot-recovery-secrets.mjs
+```
+
+Requires `CRON_SECRET` on the Preview deployment and matching Vault / GitHub secrets.
+
+Queue reliability (539):
+
+- Enqueue invalidates snapshot freshness immediately
+- Pending-only unique key allows one follow-up while a job is processing
+- Claim uses `FOR UPDATE SKIP LOCKED` + lease reclaim for abandoned `processing` rows
+- Combined `finza_worker_refresh_period_snapshots` refreshes dashboard + P&L in one transaction
+- Diagnostics: `get_accounting_snapshot_queue_diagnostics(business_id)`
+
+Target freshness SLA: posted journal reflected in snapshot-backed reports within **60 seconds** when the Action drain is configured; without a drain consumer the queue will backlog again.
+
+## Migration history note (staging)
+
+Authoritative `supabase_migrations.schema_migrations` on staging previously ended at **523**.
+Queue reliability objects corresponding to repo migration **539** were already present in the live schema out-of-band (not backfilled into history).
+**544**–**547** are recorded on staging as applied. Do not rewrite or invent historical 524–543 rows.
+
+## Immediate targeted refresh (544+)
+
+| Layer | Location |
+|-------|----------|
+| Scoped claim RPC | `claim_accounting_snapshot_refresh_jobs_for_period` (migration 544) |
+| Targeted processor | `processAccountingSnapshotsForPeriod` in `lib/server/accountingSnapshotWorker.ts` |
+| Scheduler + flag | `scheduleTargetedSnapshotRefresh` / `ACCOUNTING_IMMEDIATE_REFRESH_ENABLED` in `lib/server/accountingSnapshotRefresh.ts` |
+| Period normalize | `toAccountingDateOnly` in `lib/server/accountingPeriodDate.ts` |
+| Enqueue-then-schedule | `enqueueAndScheduleTargetedSnapshotRefresh` |
+| Flag diagnostic | `GET /api/internal/accounting-snapshots/health` → `immediate_refresh_enabled` (boolean only) |
+
+`ACCOUNTING_IMMEDIATE_REFRESH_ENABLED` defaults **OFF**. When off, the durable queue and recovery cron continue unchanged. Enable only on staging (`true`/`1`) and **rebuild** Preview (not artifact-only redeploy) so the runtime value is live.
+
+Background ownership: routes attach `waitUntil` once to the schedule/process promise. `afterAccountingPost` awaits the targeted promise inside the `fireAfterAccountingPost` + `waitUntil` chain. Scoped claim retries once after 150ms on empty claim (enqueue race). Cooldown arms after work finishes.

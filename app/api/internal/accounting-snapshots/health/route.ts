@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { isAccountingImmediateRefreshEnabled } from "@/lib/server/accountingSnapshotRefresh"
 import { fetchAccountingSnapshotHealth } from "@/lib/server/accountingSnapshotWorker"
 
 export const dynamic = "force-dynamic"
@@ -25,5 +26,8 @@ export async function GET(request: NextRequest) {
 
   const supabase = createSupabaseAdminClient()
   const health = await fetchAccountingSnapshotHealth(supabase)
-  return NextResponse.json(health)
+  return NextResponse.json({
+    ...health,
+    immediate_refresh_enabled: isAccountingImmediateRefreshEnabled(),
+  })
 }

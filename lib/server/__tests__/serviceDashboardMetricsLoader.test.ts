@@ -1,5 +1,5 @@
 /**
- * loadServiceDashboardMetrics — summary-only path with ledger live fallback.
+ * loadServiceDashboardMetrics — summary-first financial KPIs + bounded live fallback.
  */
 
 import { loadServiceDashboardMetrics } from "@/lib/server/serviceDashboardMetricsLoader"
@@ -13,7 +13,19 @@ jest.mock("@/lib/accounting/reports/resolvePnLMovementRange", () => ({
 }))
 jest.mock("@/lib/server/accountingSnapshotRefresh", () => ({
   enqueueSnapshotRefreshJob: jest.fn().mockResolvedValue("job-1"),
+  enqueueAndScheduleTargetedSnapshotRefresh: jest.fn().mockResolvedValue({
+    jobId: "job-1",
+    scheduled: true,
+    reason: "scheduled",
+    immediate_refresh_enabled: true,
+  }),
   periodHasLivePnlMovement: jest.fn().mockResolvedValue(true),
+  scheduleTargetedSnapshotRefresh: jest.fn().mockReturnValue({
+    scheduled: true,
+    reason: "scheduled",
+    promise: Promise.resolve(),
+    immediate_refresh_enabled: true,
+  }),
 }))
 jest.mock("@/lib/server/customerPaymentsCollected", () => ({
   loadCustomerPaymentsCollectedTotal: jest.fn().mockResolvedValue(0),
@@ -31,13 +43,16 @@ jest.mock("@/lib/server/dashboardMetricsCache", () => ({
 }))
 
 import { resolvePnLMovementRange } from "@/lib/accounting/reports/resolvePnLMovementRange"
-import { enqueueSnapshotRefreshJob, periodHasLivePnlMovement } from "@/lib/server/accountingSnapshotRefresh"
+import {
+  enqueueAndScheduleTargetedSnapshotRefresh,
+  periodHasLivePnlMovement,
+} from "@/lib/server/accountingSnapshotRefresh"
 
 const mockResolveRange = resolvePnLMovementRange as jest.MockedFunction<
   typeof resolvePnLMovementRange
 >
-const mockEnqueue = enqueueSnapshotRefreshJob as jest.MockedFunction<
-  typeof enqueueSnapshotRefreshJob
+const mockEnqueue = enqueueAndScheduleTargetedSnapshotRefresh as jest.MockedFunction<
+  typeof enqueueAndScheduleTargetedSnapshotRefresh
 >
 const mockHasLiveMovement = periodHasLivePnlMovement as jest.MockedFunction<
   typeof periodHasLivePnlMovement
@@ -51,6 +66,17 @@ const defaultRange = {
     period_start: "2026-07-01",
     period_end: "2026-07-31",
     resolution_reason: "latest_activity" as const,
+  },
+}
+
+const compareRange = {
+  movementStart: "2026-06-01",
+  movementEnd: "2026-06-30",
+  period: {
+    period_id: "period-june",
+    period_start: "2026-06-01",
+    period_end: "2026-06-30",
+    resolution_reason: "period_start" as const,
   },
 }
 
@@ -79,6 +105,15 @@ function unpaidRpc() {
   })
 }
 
+function freshSummaryRow(overrides?: Partial<{ revenue: number; expenses: number; net_profit: number }>) {
+  return {
+    revenue: overrides?.revenue ?? 4133.34,
+    expenses: overrides?.expenses ?? 7119,
+    net_profit: overrides?.net_profit ?? -2985.66,
+    refreshed_at: "2026-07-09T10:00:00Z",
+  }
+}
+
 function mockSupabase(rpcImpl: jest.Mock) {
   return {
     from: jest.fn().mockReturnValue({
@@ -98,11 +133,79 @@ function mockSupabase(rpcImpl: jest.Mock) {
 beforeEach(() => {
   jest.clearAllMocks()
   delete process.env.FINZA_DASHBOARD_LIVE_FALLBACK_TIMEOUT_MS
+  delete process.env.FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH
   mockResolveRange.mockResolvedValue({ range: defaultRange, error: "" })
   mockHasLiveMovement.mockResolvedValue(true)
 })
 
-describe("loadServiceDashboardMetrics summary-only", () => {
+describe("loadServiceDashboardMetrics summary-first", () => {
+  it("uses fresh summary without calling live metrics RPC (flag unset)", async () => {
+    const rpc = jest.fn().mockImplementation((name: string, args?: Record<string, unknown>) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        expect(args?.p_business_id).toBe("biz-load")
+        expect(args?.p_start_date).toBe("2026-07-01")
+        expect(args?.p_end_date).toBe("2026-07-31")
+        return Promise.resolve({ data: [freshSummaryRow()], error: null })
+      }
+      if (name === "finza_dashboard_positions_as_of") return positionsRpc()
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return Promise.resolve({ data: null, error: null })
+    })
+
+    const loadMeta = { source: "degraded" as const }
+    const payload = await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-load",
+      {},
+      createRouteDiag("dashboard_metrics", "biz-load"),
+      { refreshOnRequest: true },
+      loadMeta
+    )
+
+    expect(rpc).not.toHaveBeenCalledWith("get_service_dashboard_metrics", expect.anything())
+    expect(rpc).not.toHaveBeenCalledWith("finza_dashboard_pnl_totals", expect.anything())
+    expect(loadMeta.source).toBe("summary")
+    expect(payload.snapshot_status).toBe("fresh")
+    expect(payload.metrics_source).toBe("summary")
+    expect(payload.metrics_ready).toBe(true)
+    expect(payload.revenue).toBe(4133.34)
+    expect(payload.netProfit).toBe(-2985.66)
+    expect(payload.previousPeriod).toBeNull()
+  })
+
+  it("missing compare summary keeps current KPIs and does not call live RPC", async () => {
+    mockResolveRange
+      .mockResolvedValueOnce({ range: defaultRange, error: "" })
+      .mockResolvedValueOnce({ range: compareRange, error: "" })
+
+    const rpc = jest.fn().mockImplementation((name: string, args?: Record<string, unknown>) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        if (args?.p_start_date === "2026-06-01") {
+          return Promise.resolve({ data: [], error: null })
+        }
+        return Promise.resolve({ data: [freshSummaryRow()], error: null })
+      }
+      if (name === "finza_dashboard_positions_as_of") return positionsRpc()
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return Promise.resolve({ data: null, error: null })
+    })
+
+    const payload = await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-load",
+      { previousPeriodStart: "2026-06-01" },
+      createRouteDiag("dashboard_metrics", "biz-load"),
+      { refreshOnRequest: true }
+    )
+
+    expect(rpc).not.toHaveBeenCalledWith("get_service_dashboard_metrics", expect.anything())
+    expect(rpc).not.toHaveBeenCalledWith("finza_dashboard_pnl_totals", expect.anything())
+    expect(payload.snapshot_status).toBe("fresh")
+    expect(payload.metrics_ready).toBe(true)
+    expect(payload.revenue).toBe(4133.34)
+    expect(payload.previousPeriod).toBeNull()
+  })
+
   it("uses ledger live fallback when summary row is missing", async () => {
     const rpc = jest.fn().mockImplementation((name: string) => {
       if (name === "get_fresh_service_dashboard_period_pnl") {
@@ -151,7 +254,38 @@ describe("loadServiceDashboardMetrics summary-only", () => {
     expect(payload.unpaidInvoicesTotal).toBe(733574.2)
   })
 
-  it("returns not-ready metrics when live fallback times out", async () => {
+  it("does not mark live fallback as fresh", async () => {
+    const rpc = jest.fn().mockImplementation((name: string) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        return Promise.resolve({ data: [], error: null })
+      }
+      if (name === "finza_dashboard_pnl_totals") {
+        return Promise.resolve({
+          data: [{ revenue: 100, expenses: 40, net_profit: 60 }],
+          error: null,
+        })
+      }
+      if (name === "finza_dashboard_positions_as_of") return positionsRpc()
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return Promise.resolve({ data: null, error: null })
+    })
+
+    const payload = await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-load",
+      {},
+      createRouteDiag("dashboard_metrics", "biz-load"),
+      { refreshOnRequest: true }
+    )
+
+    expect(payload.snapshot_status).toBe("live_fallback")
+    expect(payload.snapshot_status).not.toBe("fresh")
+    expect(payload.live_fallback_used).toBe(true)
+    expect(payload.metrics_ready).toBe(true)
+    expect(payload.revenue).toBe(100)
+  })
+
+  it("returns not-ready metrics when live fallback times out (no false zero ready)", async () => {
     process.env.FINZA_DASHBOARD_LIVE_FALLBACK_TIMEOUT_MS = "50"
     const rpc = jest.fn().mockImplementation((name: string) => {
       if (name === "get_fresh_service_dashboard_period_pnl") {
@@ -182,9 +316,12 @@ describe("loadServiceDashboardMetrics summary-only", () => {
     expect(payload.unpaidInvoicesTotal).toBe(733574.2)
   })
 
-  it("still calls live RPC when refresh-on-request is enabled", async () => {
+  it("calls live metrics RPC only when ledger fallback also fails", async () => {
     const rpc = jest.fn().mockImplementation((name: string) => {
       if (name === "get_fresh_service_dashboard_period_pnl") {
+        return Promise.resolve({ data: [], error: null })
+      }
+      if (name === "finza_dashboard_pnl_totals") {
         return Promise.resolve({ data: [], error: null })
       }
       if (name === "get_service_dashboard_metrics") {
@@ -228,6 +365,45 @@ describe("loadServiceDashboardMetrics summary-only", () => {
 
     expect(rpc).toHaveBeenCalledWith("get_service_dashboard_metrics", expect.any(Object))
     expect(loadMeta.source).toBe("live")
+    expect(payload.snapshot_status).toBe("live_fallback")
+    expect(payload.live_fallback_used).toBe(true)
     expect(payload.revenue).toBe(100)
+  })
+
+  it("scopes summary and ledger reads to the resolved business and period", async () => {
+    const rpc = jest.fn().mockImplementation((name: string) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        return Promise.resolve({ data: [], error: null })
+      }
+      if (name === "finza_dashboard_pnl_totals") {
+        return Promise.resolve({
+          data: [{ revenue: 10, expenses: 4, net_profit: 6 }],
+          error: null,
+        })
+      }
+      if (name === "finza_dashboard_positions_as_of") return positionsRpc()
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return Promise.resolve({ data: null, error: null })
+    })
+
+    await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-isolated",
+      {},
+      createRouteDiag("dashboard_metrics", "biz-isolated"),
+      { refreshOnRequest: true }
+    )
+
+    expect(rpc).toHaveBeenCalledWith("get_fresh_service_dashboard_period_pnl", {
+      p_business_id: "biz-isolated",
+      p_start_date: "2026-07-01",
+      p_end_date: "2026-07-31",
+      p_max_stale_seconds: expect.any(Number),
+    })
+    expect(rpc).toHaveBeenCalledWith("finza_dashboard_pnl_totals", {
+      p_business_id: "biz-isolated",
+      p_start_date: "2026-07-01",
+      p_end_date: "2026-07-31",
+    })
   })
 })

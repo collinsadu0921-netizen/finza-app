@@ -405,6 +405,28 @@ export async function loadOrComputeDashboardClusterCache<T>(
   )
 }
 
+/**
+ * Invalidate in-process cluster/timeline/activity cache entries for one business.
+ * Keys include the business id (e.g. `cluster|<businessId>|...`, `timeline|<businessId>|...`).
+ */
+export function invalidateDashboardClusterCacheForBusiness(businessId: string): void {
+  if (!businessId) return
+  const needle = `|${businessId}|`
+  for (const key of clusterStore.keys()) {
+    if (key.includes(needle) || key.endsWith(`|${businessId}`) || key.startsWith(`${businessId}|`)) {
+      clusterStore.delete(key)
+    }
+  }
+  for (const key of activityStore.keys()) {
+    if (key.includes(needle) || key.includes(businessId)) {
+      activityStore.delete(key)
+    }
+  }
+  for (const key of [...clusterRefreshCooldownUntil.keys()]) {
+    if (key.includes(businessId)) clusterRefreshCooldownUntil.delete(key)
+  }
+}
+
 /** Test-only: clear cluster SWR store and inflight maps. */
 export function resetDashboardClusterCacheForTests(): void {
   clusterStore.clear()

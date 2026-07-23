@@ -24,7 +24,8 @@ export type AccountingBootstrapError = {
  * The RPC is idempotent (if period exists, returns no-op). Frontend must NOT decide
  * whether accounting is initialized — only the database function does.
  *
- * Creates accounts, chart_of_accounts + control mappings (AR/AP/CASH/BANK), and one
+ * Creates accounts, Service material accounts (1450/5110 for industry=service),
+ * chart_of_accounts + control mappings (AR/AP/CASH/BANK), and one
  * open period if none exist. Does NOT create journal entries, snapshots, or balances.
  */
 export async function ensureAccountingInitialized(

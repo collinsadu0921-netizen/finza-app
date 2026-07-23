@@ -12,13 +12,12 @@ import {
   loadOrComputeDashboardMetrics,
 } from "@/lib/server/dashboardMetricsCache"
 import {
+  dashboardFinancialSourceForDiag,
   dashboardPnlSourceForDiag,
-  fetchStaleDashboardPeriodPnl,
-  isDashboardPnlSummaryFastPathEnabled,
 } from "@/lib/server/dashboardPeriodSummaryRead"
 import { SUMMARY_FRESH_SECONDS } from "@/lib/server/serviceDashboardTimeline"
 import {
-  enqueueSnapshotRefreshJob,
+  enqueueAndScheduleTargetedSnapshotRefresh,
   periodHasLivePnlMovement,
 } from "@/lib/server/accountingSnapshotRefresh"
 import { loadCustomerPaymentsCollectedTotal } from "@/lib/server/customerPaymentsCollected"
@@ -135,6 +134,7 @@ export type ServiceDashboardMetricsParams = {
 export type ServiceDashboardMetricsLoadOptions = {
   /** When false, summary reads only — no live get_service_dashboard_metrics RPC. */
   refreshOnRequest?: boolean
+  scheduleBackground?: (promise: Promise<unknown>) => void
 }
 
 export type ServiceDashboardMetricsLoadMeta = {
@@ -226,8 +226,10 @@ async function readPeriodPnlSummaryRow(
   businessId: string,
   startDate: string,
   endDate: string,
-  options?: { allowStalePnl?: boolean }
+  _options?: { allowStalePnl?: boolean }
 ): Promise<PeriodPnlSummaryReadResult> {
+  // Fresh only — invalidated/stale summaries are not authoritative financial truth.
+  void _options
   const { data: freshData, error: freshError } = await supabase.rpc(
     "get_fresh_service_dashboard_period_pnl",
     {
@@ -248,19 +250,39 @@ async function readPeriodPnlSummaryRow(
     return { row: freshRow as PeriodPnlSummaryReadResult["row"] }
   }
 
-  if (options?.allowStalePnl) {
-    const stalePnl = await fetchStaleDashboardPeriodPnl(
-      supabase,
-      businessId,
-      startDate,
-      endDate
-    )
-    if (stalePnl) {
-      return { row: stalePnl }
+  return { row: null, reason: "missing_row" }
+}
+
+function ensureDashboardRefreshScheduled(
+  supabase: SupabaseClient,
+  businessId: string,
+  periodStart: string,
+  periodEnd: string,
+  scheduleBackground?: (promise: Promise<unknown>) => void
+): void {
+  const work = enqueueAndScheduleTargetedSnapshotRefresh(supabase, {
+    businessId,
+    periodStart,
+    periodEnd,
+    jobType: "both",
+    reason: "read_path_missing_snapshot",
+    sourceType: "dashboard_metrics",
+    triggerSource: "stale_dashboard_read",
+  })
+  if (scheduleBackground) {
+    try {
+      scheduleBackground(work)
+      return
+    } catch {
+      // fall through
     }
   }
-
-  return { row: null, reason: "missing_row" }
+  console.warn("[dashboard-metrics] snapshot refresh scheduled without request-owned waitUntil", {
+    business_id: businessId,
+    period_start: periodStart,
+    period_end: periodEnd,
+  })
+  void work
 }
 
 async function buildMetricsFromSummarySnapshot(
@@ -290,6 +312,8 @@ async function buildMetricsFromSummarySnapshot(
 
   const softReads = options?.softPositionReads === true
 
+  // Missing compare-period summary must not force current-period onto live RPC.
+  // Soft-omit previousPeriod when comparison data is unavailable.
   let previousPeriod: PreviousPeriodPayload | null = null
   if (compareStart && compareEnd) {
     const prevPnlRead = await readPeriodPnlSummaryRow(
@@ -299,30 +323,24 @@ async function buildMetricsFromSummarySnapshot(
       compareEnd,
       { allowStalePnl: options?.allowStalePnl }
     )
-    if (!prevPnlRead.row) {
-      return {
-        ok: false,
-        reason:
-          prevPnlRead.reason === "rpc_error" ? "rpc_error" : "compare_period_missing",
+    if (prevPnlRead.row) {
+      const prevPnl = prevPnlRead.row
+      const [prevPositions, prevCash] = await Promise.all([
+        loadPositionsAsOf(supabase, businessId, compareEnd, { throwOnError: !softReads }),
+        loadCashCollected(supabase, businessId, compareStart, compareEnd, {
+          throwOnError: !softReads,
+        }),
+      ])
+
+      previousPeriod = {
+        revenue: num(prevPnl.revenue),
+        expenses: num(prevPnl.expenses),
+        netProfit: num(prevPnl.net_profit),
+        cashCollected: prevCash,
+        accountsReceivable: num(prevPositions.accounts_receivable),
+        accountsPayable: num(prevPositions.accounts_payable),
+        cashBalance: num(prevPositions.cash_balance),
       }
-    }
-    const prevPnl = prevPnlRead.row
-
-    const [prevPositions, prevCash] = await Promise.all([
-      loadPositionsAsOf(supabase, businessId, compareEnd, { throwOnError: !softReads }),
-      loadCashCollected(supabase, businessId, compareStart, compareEnd, {
-        throwOnError: !softReads,
-      }),
-    ])
-
-    previousPeriod = {
-      revenue: num(prevPnl.revenue),
-      expenses: num(prevPnl.expenses),
-      netProfit: num(prevPnl.net_profit),
-      cashCollected: prevCash,
-      accountsReceivable: num(prevPositions.accounts_receivable),
-      accountsPayable: num(prevPositions.accounts_payable),
-      cashBalance: num(prevPositions.cash_balance),
     }
   }
 
@@ -359,7 +377,7 @@ async function buildMetricsFromSummarySnapshot(
         positions_ready: true,
         metrics_source: "summary",
         positions_source: "live",
-        snapshot_status: options?.allowStalePnl ? "stale" : "fresh",
+        snapshot_status: "fresh",
       },
       emptyOperationalFields()
     ),
@@ -591,84 +609,71 @@ export async function loadServiceDashboardMetrics(
         softPositionReads: summaryOnly,
       }
 
-      if (summaryOnly || isDashboardPnlSummaryFastPathEnabled()) {
-        const snapshotResult = await buildMetricsFromSummarySnapshot(
+      // Fresh current-period summary is the default financial KPI source
+      // (not gated on FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH).
+      const snapshotResult = await buildMetricsFromSummarySnapshot(
+        supabase,
+        businessId,
+        range,
+        positionAsOfDate,
+        compareStart,
+        compareEnd,
+        summaryOptions
+      )
+      if (snapshotResult.ok) {
+        usedSummaryFastPath = true
+        return snapshotResult.payload
+      }
+
+      summaryMissReason = snapshotResult.reason
+
+      // Invalidated/missing current-period summary → bounded ledger live fallback.
+      const liveFallback = await buildMetricsFromLiveLedgerFallback(
+        supabase,
+        businessId,
+        range,
+        positionAsOfDate,
+        { softPositionReads: true }
+      )
+      if (liveFallback.ok) {
+        usedLiveLedgerFallback = true
+        ensureDashboardRefreshScheduled(
           supabase,
           businessId,
-          range,
-          positionAsOfDate,
-          compareStart,
-          compareEnd,
-          summaryOptions
+          range.movementStart,
+          range.movementEnd,
+          options?.scheduleBackground
         )
-        if (snapshotResult.ok) {
-          usedSummaryFastPath = true
-          return snapshotResult.payload
-        }
-        if (summaryOnly) {
-          summaryMissReason = snapshotResult.reason
-          const liveFallback = await buildMetricsFromLiveLedgerFallback(
-            supabase,
-            businessId,
-            range,
-            positionAsOfDate,
-            { softPositionReads: true }
-          )
-          if (liveFallback.ok) {
-            usedLiveLedgerFallback = true
-            const hasLiveMovement = await periodHasLivePnlMovement(
-              supabase,
-              businessId,
-              range.movementStart,
-              range.movementEnd
-            )
-            if (hasLiveMovement) {
-              void enqueueSnapshotRefreshJob(supabase, {
-                businessId,
-                periodStart: range.movementStart,
-                periodEnd: range.movementEnd,
-                jobType: "both",
-                reason: "read_path_missing_snapshot",
-                sourceType: "dashboard_metrics",
-              })
-            }
-            return liveFallback.payload
-          }
-          liveFallbackTimedOut = liveFallback.timedOut
-          liveFallbackError = liveFallback.error
-          const hasLiveMovement = await periodHasLivePnlMovement(
+        return liveFallback.payload
+      }
+      liveFallbackTimedOut = liveFallback.timedOut
+      liveFallbackError = liveFallback.error
+
+      if (summaryOnly) {
+        const hasLiveMovement = await periodHasLivePnlMovement(
+          supabase,
+          businessId,
+          range.movementStart,
+          range.movementEnd
+        )
+        if (hasLiveMovement) {
+          ensureDashboardRefreshScheduled(
             supabase,
             businessId,
             range.movementStart,
-            range.movementEnd
+            range.movementEnd,
+            options?.scheduleBackground
           )
-          if (hasLiveMovement) {
-            void enqueueSnapshotRefreshJob(supabase, {
-              businessId,
-              periodStart: range.movementStart,
-              periodEnd: range.movementEnd,
-              jobType: "both",
-              reason: "read_path_missing_snapshot",
-              sourceType: "dashboard_metrics",
-            })
-          }
-          usedDegradedSummaryMissing = true
-          return buildMissingSnapshotMetricsPayload(supabase, businessId, range, positionAsOfDate, {
-            resolutionReason: "degraded",
-            liveFallbackTimedOut,
-            liveFallbackError,
-          })
         }
-      }
-
-      if (summaryOnly) {
         usedDegradedSummaryMissing = true
-        summaryMissReason = summaryMissReason ?? "unknown"
         return buildMissingSnapshotMetricsPayload(supabase, businessId, range, positionAsOfDate, {
           resolutionReason: "degraded",
+          liveFallbackTimedOut,
+          liveFallbackError,
         })
       }
 
+      // Last resort (refresh-on-request): heavy metrics RPC — never label as fresh.
       const tRpc = performance.now()
       const { data: metricsRaw, error: rpcError } = await supabase.rpc(
         "get_service_dashboard_metrics",
@@ -709,6 +714,14 @@ export async function loadServiceDashboardMetrics(
         }
         throw err
       }
+
+      ensureDashboardRefreshScheduled(
+        supabase,
+        businessId,
+        range.movementStart,
+        range.movementEnd,
+        options?.scheduleBackground
+      )
 
       const metrics = (metricsRaw ?? {}) as DashboardMetricsRpcResult
       const currencyCode = String(metrics.currency_code ?? "GHS")
@@ -752,7 +765,8 @@ export async function loadServiceDashboardMetrics(
           positions_ready: true,
           metrics_source: "live",
           positions_source: "live",
-          snapshot_status: "fresh",
+          snapshot_status: "live_fallback",
+          live_fallback_used: true,
         },
         emptyOperationalFields()
       )
@@ -784,6 +798,8 @@ export async function loadServiceDashboardMetrics(
     loadMeta.source = metricsSource
   }
 
+  const cacheHit = cacheSource === "cache_hit" || cacheSource === "cache_coalesce"
+
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
     cache_source: cacheSource,
@@ -792,6 +808,11 @@ export async function loadServiceDashboardMetrics(
       : usedDegradedSummaryMissing
         ? "degraded"
         : dashboardPnlSourceForDiag(usedSummaryFastPath),
+    dashboard_financial_source: dashboardFinancialSourceForDiag({
+      cacheHit,
+      usedSummaryFastPath,
+      usedLiveFallback: usedLiveLedgerFallback || (!usedSummaryFastPath && !usedDegradedSummaryMissing),
+    }),
     metrics_source: usedLiveLedgerFallback
       ? "ledger_live_fallback"
       : usedDegradedSummaryMissing
@@ -800,7 +821,13 @@ export async function loadServiceDashboardMetrics(
     metrics_ready: payload.metrics_ready !== false,
     snapshot_status:
       payload.snapshot_status ??
-      (usedLiveLedgerFallback ? "live_fallback" : usedDegradedSummaryMissing ? "missing" : "fresh"),
+      (usedLiveLedgerFallback
+        ? "live_fallback"
+        : usedDegradedSummaryMissing
+          ? "missing"
+          : usedSummaryFastPath
+            ? "fresh"
+            : "live_fallback"),
     positions_source: payload.positions_source,
     live_fallback_used: payload.live_fallback_used === true,
     ...(liveFallbackTimedOut ? { live_fallback_timeout: true } : {}),

@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { processAccountingSnapshotJobs } from "@/lib/server/accountingSnapshotWorker"
 
 export const dynamic = "force-dynamic"
+export const maxDuration = 60
 
 function unauthorized(): NextResponse {
   return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -23,9 +24,27 @@ async function run(request: NextRequest): Promise<NextResponse> {
   const denied = assertCronAuth(request)
   if (denied) return denied
 
+  const url = new URL(request.url)
+  const batchRaw = url.searchParams.get("batch")
+  const batchesRaw = url.searchParams.get("batches")
+  const batchSize = batchRaw ? parseInt(batchRaw, 10) : 20
+  const maxBatches = batchesRaw ? parseInt(batchesRaw, 10) : 5
+
   const supabase = createSupabaseAdminClient()
-  const result = await processAccountingSnapshotJobs(supabase, { batchSize: 20 })
-  return NextResponse.json(result)
+  const result = await processAccountingSnapshotJobs(supabase, {
+    batchSize: Number.isFinite(batchSize) ? batchSize : 20,
+    maxBatches: Number.isFinite(maxBatches) ? maxBatches : 5,
+    timeBudgetMs: 50_000,
+  })
+
+  return NextResponse.json({
+    claimed: result.claimed,
+    completed: result.completed,
+    retried: result.retried,
+    failed: result.failed,
+    batches: result.batches,
+    error_count: result.errors.length,
+  })
 }
 
 export async function GET(request: NextRequest) {

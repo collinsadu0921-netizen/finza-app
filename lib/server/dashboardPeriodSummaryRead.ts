@@ -2,8 +2,9 @@
  * DB-backed dashboard period summary reads (512).
  * Shared freshness window with timeline summary (508/509).
  *
- * Dashboard metrics fast path is OFF by default — enable with
- * FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH=1 after operational load validation.
+ * Fresh valid current-period summary is the default financial KPI source.
+ * `FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH` is retained for compatibility only —
+ * normal behaviour no longer depends on it.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -12,8 +13,13 @@ import { SUMMARY_FRESH_SECONDS } from "@/lib/server/serviceDashboardTimeline"
 
 export { SUMMARY_FRESH_SECONDS as PNL_SNAPSHOT_FRESH_SECONDS }
 
+/** @deprecated Prefer DashboardFinancialSource */
 export type DashboardPnlSource = "live_metrics_rpc" | "summary_fast_path"
 
+/** Truthful financial KPI provenance for diagnostics (never log line amounts). */
+export type DashboardFinancialSource = "fresh_snapshot" | "live_fallback" | "cache_hit"
+
+/** @deprecated Compatibility shim — summary path is always attempted. */
 export function isDashboardPnlSummaryFastPathEnabled(): boolean {
   const raw = String(process.env.FINZA_DASHBOARD_PNL_SUMMARY_FAST_PATH ?? "").trim()
   return raw === "1" || raw.toLowerCase() === "true"
@@ -23,6 +29,16 @@ export function dashboardPnlSourceForDiag(
   usedSummaryFastPath: boolean
 ): DashboardPnlSource {
   return usedSummaryFastPath ? "summary_fast_path" : "live_metrics_rpc"
+}
+
+export function dashboardFinancialSourceForDiag(input: {
+  cacheHit: boolean
+  usedSummaryFastPath: boolean
+  usedLiveFallback: boolean
+}): DashboardFinancialSource {
+  if (input.cacheHit) return "cache_hit"
+  if (input.usedSummaryFastPath) return "fresh_snapshot"
+  return "live_fallback"
 }
 
 export type FreshPeriodPnlRow = {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
@@ -11,6 +12,7 @@ import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
+import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 export async function POST(request: NextRequest) {
   try {
@@ -332,6 +334,14 @@ export async function POST(request: NextRequest) {
       businessId: business_id,
       eventName: "payment_recorded",
       metadata: { payment_id: payment.id, invoice_id },
+    })
+
+    fireAfterAccountingPost({
+      businessId: business_id,
+      journalDate: payment.date ?? date,
+      source: "payment_post",
+      supabase,
+      scheduleBackground: (p) => waitUntil(p),
     })
 
     return NextResponse.json({

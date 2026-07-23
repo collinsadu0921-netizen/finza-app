@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { resolveServiceBusinessSubscriptionFromUserMetadata } from "@/lib/auth/resolveServiceBusinessSubscription"
 import { sendServiceWelcomeNotificationsAfterProvision } from "@/lib/auth/sendServiceWelcomeNotification"
 import { parsePhoneOrWhatsApp } from "@/lib/growth/parsePhoneOrWhatsApp"
@@ -167,6 +168,20 @@ export async function POST(request: NextRequest) {
   if (linkError) {
     console.error("[provision-service-business] business_users:", linkError)
     return NextResponse.json({ error: linkError.message || "Could not link user to business" }, { status: 500 })
+  }
+
+  // Authoritative accounting bootstrap (system accounts → Service 1450/5110 → COA sync).
+  // Do not silently succeed with incomplete ledger setup.
+  const bootstrap = await ensureAccountingInitialized(supabase, business.id as string)
+  if (!bootstrap.initialized) {
+    console.error("[provision-service-business] accounting bootstrap failed:", bootstrap.structuredError)
+    return NextResponse.json(
+      {
+        error: bootstrap.error || "Unable to start accounting. Please try again.",
+        error_code: bootstrap.structuredError?.error_code ?? "ACCOUNTING_BOOTSTRAP_FAILED",
+      },
+      { status: 500 }
+    )
   }
 
   voidRecordBusinessActivationEvent(supabase, {
