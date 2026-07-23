@@ -3,6 +3,7 @@
  */
 
 import { getProfitAndLossReport, pnlTotalsFromReport } from "../getProfitAndLossReport"
+import * as resolvePnLMovementRangeMod from "../resolvePnLMovementRange"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 jest.mock("@/lib/accounting/resolveAccountingPeriodForReport", () => ({
@@ -130,6 +131,37 @@ describe("getProfitAndLossReport ledger movement", () => {
       p_end_date: "2026-03-31",
     })
     expect(data!.totals.net_profit).toBe(16000)
+  })
+
+  it("uses preResolvedRange and skips duplicate period resolution", async () => {
+    const spy = jest.spyOn(resolvePnLMovementRangeMod, "resolvePnLMovementRange")
+    const supabase = buildMockSupabase()
+    const { data, error } = await getProfitAndLossReport(
+      supabase,
+      { businessId: "biz-001" },
+      {
+        preResolvedRange: {
+          movementStart: "2026-02-01",
+          movementEnd: "2026-02-28",
+          period: {
+            period_id: "period-feb",
+            period_start: "2026-02-01",
+            period_end: "2026-02-28",
+            resolution_reason: "period_start",
+          },
+        },
+      }
+    )
+    expect(error).toBe("")
+    expect(spy).not.toHaveBeenCalled()
+    expect(data!.period.period_start).toBe("2026-02-01")
+    expect(data!.period.period_end).toBe("2026-02-28")
+    expect(supabase.rpc).toHaveBeenCalledWith("get_profit_and_loss_movement", {
+      p_business_id: "biz-001",
+      p_start_date: "2026-02-01",
+      p_end_date: "2026-02-28",
+    })
+    spy.mockRestore()
   })
 
   it("pnlTotalsFromReport matches income minus expenses", () => {

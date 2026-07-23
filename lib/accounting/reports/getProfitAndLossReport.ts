@@ -7,7 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { getCurrencySymbol, getCurrencyName } from "@/lib/currency"
 import { fetchProfitAndLossMovementRows, type PnLMovementRow } from "./pnlMovement"
-import { resolvePnLMovementRange } from "./resolvePnLMovementRange"
+import { resolvePnLMovementRange, type PnLMovementRange } from "./resolvePnLMovementRange"
 
 export type PnLReportInput = {
   businessId: string
@@ -171,6 +171,8 @@ export type PnLReportLoadOptions = {
   /** When false, skip blocking try_refresh; still uses bounded live fallback when needed. */
   refreshOnRequest?: boolean
   scheduleBackground?: (promise: Promise<unknown>) => void
+  /** When provided by the route, skip duplicate period resolution. */
+  preResolvedRange?: PnLMovementRange
 }
 
 export type PnLReportLoadMeta = {
@@ -190,9 +192,13 @@ export async function getProfitAndLossReport(
     return { data: null, error: "Missing required parameter: business_id" }
   }
 
-  const { range, error: rangeError } = await resolvePnLMovementRange(supabase, input)
-  if (rangeError || !range) {
-    return { data: null, error: rangeError ?? "Accounting period could not be resolved" }
+  let range = options?.preResolvedRange ?? null
+  if (!range) {
+    const resolved = await resolvePnLMovementRange(supabase, input)
+    if (resolved.error || !resolved.range) {
+      return { data: null, error: resolved.error ?? "Accounting period could not be resolved" }
+    }
+    range = resolved.range
   }
 
   const refreshOnRequest = options?.refreshOnRequest !== false

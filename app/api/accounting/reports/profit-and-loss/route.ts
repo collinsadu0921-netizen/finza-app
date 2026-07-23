@@ -114,11 +114,24 @@ export async function GET(request: NextRequest) {
       pnl_scope_cache: gate.pnlScopeCacheStatus,
     })
 
-    const tReady = performance.now()
-    const { ready, readinessCacheStatus } = await checkAccountingReadinessForPnlRoute(
-      supabase,
-      businessId
-    )
+    const reportInput = {
+      businessId,
+      period_id: searchParams.get("period_id") ?? undefined,
+      period_start: searchParams.get("period_start") ?? undefined,
+      as_of_date: searchParams.get("as_of_date") ?? undefined,
+      start_date: searchParams.get("start_date") ?? undefined,
+      end_date: searchParams.get("end_date") ?? undefined,
+    }
+
+    // After authenticated scope: readiness and period resolution run concurrently.
+    const tReadyPeriod = performance.now()
+    const [readinessResult, periodResult] = await Promise.all([
+      checkAccountingReadinessForPnlRoute(supabase, businessId),
+      resolvePnLMovementRangeForPnlRoute(supabase, reportInput),
+    ])
+    const msReadyPeriod = timedStepMs(tReadyPeriod)
+
+    const { ready, readinessCacheStatus } = readinessResult
     if (!ready) {
       if (canUserInitializeAccounting(authority.authority_source)) {
         const tBootstrap = performance.now()
@@ -143,28 +156,18 @@ export async function GET(request: NextRequest) {
     }
     diag.step("readiness", {
       ready,
-      ms_readiness: timedStepMs(tReady),
+      ms_readiness: msReadyPeriod,
       readiness_cache: readinessCacheStatus,
     })
 
-    const reportInput = {
-      businessId,
-      period_id: searchParams.get("period_id") ?? undefined,
-      period_start: searchParams.get("period_start") ?? undefined,
-      as_of_date: searchParams.get("as_of_date") ?? undefined,
-      start_date: searchParams.get("start_date") ?? undefined,
-      end_date: searchParams.get("end_date") ?? undefined,
-    }
-
-    const tRange = performance.now()
     const {
       range,
       error: rangeError,
       periodCacheStatus,
-    } = await resolvePnLMovementRangeForPnlRoute(supabase, reportInput)
+    } = periodResult
     if (rangeError || !range) {
       diag.fail(500, rangeError ?? "period_unresolved", {
-        ms_period: timedStepMs(tRange),
+        ms_period: msReadyPeriod,
       })
       return NextResponse.json(
         { error: rangeError ?? "Accounting period could not be resolved" },
@@ -172,10 +175,11 @@ export async function GET(request: NextRequest) {
       )
     }
     diag.step("period_resolve", {
-      ms_period: timedStepMs(tRange),
+      ms_period: msReadyPeriod,
       period_start: range.movementStart,
       period_end: range.movementEnd,
       period_cache: periodCacheStatus,
+      readiness_period_concurrent: true,
     })
 
     const cacheKey = buildPnlReportCacheKey({
@@ -208,6 +212,7 @@ export async function GET(request: NextRequest) {
             {
               refreshOnRequest,
               scheduleBackground: (promise) => waitUntil(promise),
+              preResolvedRange: range,
             },
             loadMeta
           )

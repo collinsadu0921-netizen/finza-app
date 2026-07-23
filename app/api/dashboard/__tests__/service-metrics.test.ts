@@ -1,5 +1,5 @@
 /**
- * GET /api/dashboard/service-metrics — consolidated metrics RPC.
+ * GET /api/dashboard/service-metrics — summary-first financial KPIs.
  */
 
 import { GET } from "../service-metrics/route"
@@ -72,6 +72,31 @@ function mockDashboardRpc(rpcImpl?: jest.Mock) {
   const rpc =
     rpcImpl ??
     jest.fn().mockImplementation((name: string) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        return Promise.resolve({
+          data: [
+            {
+              revenue: metricsPayload.revenue,
+              expenses: metricsPayload.expenses,
+              net_profit: metricsPayload.net_profit,
+              refreshed_at: "2026-06-22T12:00:00Z",
+            },
+          ],
+          error: null,
+        })
+      }
+      if (name === "finza_dashboard_positions_as_of") {
+        return Promise.resolve({
+          data: [
+            {
+              cash_balance: metricsPayload.cash_balance,
+              accounts_receivable: metricsPayload.accounts_receivable,
+              accounts_payable: metricsPayload.accounts_payable,
+            },
+          ],
+          error: null,
+        })
+      }
       if (name === "get_service_dashboard_metrics") {
         return Promise.resolve({ data: metricsPayload, error: null })
       }
@@ -84,6 +109,16 @@ function mockDashboardRpc(rpcImpl?: jest.Mock) {
     auth: {
       getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
     },
+    from: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          single: jest.fn().mockResolvedValue({
+            data: { default_currency: "GHS" },
+            error: null,
+          }),
+        }),
+      }),
+    }),
     rpc,
   } as any)
   return rpc
@@ -109,7 +144,7 @@ describe("GET /api/dashboard/service-metrics", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns required dashboard fields via get_service_dashboard_metrics RPC", async () => {
+  it("returns required dashboard fields from fresh period summary without live metrics RPC", async () => {
     const rpc = mockDashboardRpc()
 
     const res = await GET(
@@ -117,14 +152,15 @@ describe("GET /api/dashboard/service-metrics", () => {
     )
     expect(res.status).toBe(200)
 
-    expect(rpc).toHaveBeenCalledWith("get_service_dashboard_metrics", {
-      p_business_id: "biz-a",
-      p_start_date: "2026-06-01",
-      p_end_date: "2026-06-30",
-      p_position_as_of_date: "2026-06-22",
-      p_compare_start_date: null,
-      p_compare_end_date: null,
-    })
+    expect(rpc).toHaveBeenCalledWith(
+      "get_fresh_service_dashboard_period_pnl",
+      expect.objectContaining({
+        p_business_id: "biz-a",
+        p_start_date: "2026-06-01",
+        p_end_date: "2026-06-30",
+      })
+    )
+    expect(rpc).not.toHaveBeenCalledWith("get_service_dashboard_metrics", expect.anything())
     expect(rpc).toHaveBeenCalledWith("get_operational_unpaid_invoices_total", {
       p_business_id: "biz-a",
     })
@@ -144,6 +180,8 @@ describe("GET /api/dashboard/service-metrics", () => {
       unpaidInvoicesCount: 4,
       overdueInvoicesTotal: 250,
       overdueInvoicesCount: 2,
+      snapshot_status: "fresh",
+      metrics_source: "summary",
     })
     expect(body.period).toMatchObject({
       period_id: "period-current",
@@ -156,7 +194,16 @@ describe("GET /api/dashboard/service-metrics", () => {
 
   it("loads cash collected from operational payments, not ledger cash debits", async () => {
     const rpc = mockDashboardRpc()
-    const from = jest.fn()
+    const from = jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          single: jest.fn().mockResolvedValue({
+            data: { default_currency: "GHS" },
+            error: null,
+          }),
+        }),
+      }),
+    })
     mockCreateSupabase.mockResolvedValue({
       auth: {
         getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }),
@@ -177,7 +224,7 @@ describe("GET /api/dashboard/service-metrics", () => {
     expect(body.cashCollected).toBe(2500.5)
   })
 
-  it("includes previousPeriod when previous_period_start resolves and RPC returns compare fields", async () => {
+  it("includes previousPeriod when compare-period summary is fresh", async () => {
     mockResolveRange
       .mockResolvedValueOnce({ range: defaultRange, error: "" })
       .mockResolvedValueOnce({
@@ -195,19 +242,55 @@ describe("GET /api/dashboard/service-metrics", () => {
       })
 
     const rpc = mockDashboardRpc(
-      jest.fn().mockImplementation((name: string) => {
-        if (name === "get_service_dashboard_metrics") {
+      jest.fn().mockImplementation((name: string, args?: Record<string, unknown>) => {
+        if (name === "get_fresh_service_dashboard_period_pnl") {
+          if (args?.p_start_date === "2026-05-01") {
+            return Promise.resolve({
+              data: [
+                {
+                  revenue: 8000,
+                  expenses: 3000,
+                  net_profit: 5000,
+                  refreshed_at: "2026-06-22T12:00:00Z",
+                },
+              ],
+              error: null,
+            })
+          }
           return Promise.resolve({
-            data: {
-              ...metricsPayload,
-              previous_revenue: 8000,
-              previous_expenses: 3000,
-              previous_net_profit: 5000,
-              previous_cash_collected: 0,
-              previous_cash_balance: 4500,
-              previous_accounts_receivable: 900,
-              previous_accounts_payable: 700,
-            },
+            data: [
+              {
+                revenue: metricsPayload.revenue,
+                expenses: metricsPayload.expenses,
+                net_profit: metricsPayload.net_profit,
+                refreshed_at: "2026-06-22T12:00:00Z",
+              },
+            ],
+            error: null,
+          })
+        }
+        if (name === "finza_dashboard_positions_as_of") {
+          const asOf = args?.p_as_of_date
+          if (asOf === "2026-05-31") {
+            return Promise.resolve({
+              data: [
+                {
+                  cash_balance: 4500,
+                  accounts_receivable: 900,
+                  accounts_payable: 700,
+                },
+              ],
+              error: null,
+            })
+          }
+          return Promise.resolve({
+            data: [
+              {
+                cash_balance: metricsPayload.cash_balance,
+                accounts_receivable: metricsPayload.accounts_receivable,
+                accounts_payable: metricsPayload.accounts_payable,
+              },
+            ],
             error: null,
           })
         }
@@ -219,8 +302,8 @@ describe("GET /api/dashboard/service-metrics", () => {
     )
 
     mockLoadCustomerPayments
-      .mockResolvedValueOnce(2500.5)
       .mockResolvedValueOnce(1800)
+      .mockResolvedValueOnce(2500.5)
 
     const res = await GET(
       new NextRequest(
@@ -229,13 +312,7 @@ describe("GET /api/dashboard/service-metrics", () => {
     )
     expect(res.status).toBe(200)
 
-    expect(rpc).toHaveBeenCalledWith(
-      "get_service_dashboard_metrics",
-      expect.objectContaining({
-        p_compare_start_date: "2026-05-01",
-        p_compare_end_date: "2026-05-31",
-      })
-    )
+    expect(rpc).not.toHaveBeenCalledWith("get_service_dashboard_metrics", expect.anything())
 
     const body = await res.json()
     expect(body.previousPeriod).toMatchObject({

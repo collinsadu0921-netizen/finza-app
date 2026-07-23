@@ -58,6 +58,8 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { checkAccountingReadinessForPnlRoute } from "@/lib/server/pnlReportReadinessCache"
+import { resolvePnLMovementRangeForPnlRoute } from "@/lib/server/pnlReportDefaultPeriodCache"
 import { getUserRole } from "@/lib/userRoles"
 import { getProfitAndLossReport } from "@/lib/accounting/reports/getProfitAndLossReport"
 import { resetPnlReportCacheForTests } from "@/lib/server/pnlReportCache"
@@ -77,6 +79,12 @@ const mockCheckAuthority = checkAccountingAuthority as jest.MockedFunction<
 >
 const mockGetReport = getProfitAndLossReport as jest.MockedFunction<typeof getProfitAndLossReport>
 const mockGetUserRole = getUserRole as jest.MockedFunction<typeof getUserRole>
+const mockReadiness = checkAccountingReadinessForPnlRoute as jest.MockedFunction<
+  typeof checkAccountingReadinessForPnlRoute
+>
+const mockResolvePeriod = resolvePnLMovementRangeForPnlRoute as jest.MockedFunction<
+  typeof resolvePnLMovementRangeForPnlRoute
+>
 
 const sampleReport = {
   period: {
@@ -186,5 +194,61 @@ describe("GET /api/accounting/reports/profit-and-loss", () => {
     expect(res.headers.get("x-finza-reports-refresh-on-request")).toBe("disabled")
     expect(res.headers.get("x-finza-reports-cache")).toBe("miss")
     expect(res.headers.get("x-finza-reports-source")).toBe("fresh_snapshot")
+  })
+
+  it("runs readiness and period resolution concurrently and passes preResolvedRange", async () => {
+    let readinessStarted = false
+    let periodStarted = false
+    let readinessSawPeriod = false
+    let periodSawReadiness = false
+
+    mockReadiness.mockImplementation(async () => {
+      readinessStarted = true
+      periodSawReadiness = periodStarted
+      await new Promise((r) => setTimeout(r, 20))
+      return { ready: true, readinessCacheStatus: "miss" as const }
+    })
+    mockResolvePeriod.mockImplementation(async () => {
+      periodStarted = true
+      readinessSawPeriod = readinessStarted
+      await new Promise((r) => setTimeout(r, 20))
+      return {
+        range: {
+          movementStart: "2026-01-01",
+          movementEnd: "2026-01-31",
+          period: {
+            period_id: "p1",
+            period_start: "2026-01-01",
+            period_end: "2026-01-31",
+            resolution_reason: "period_id" as const,
+          },
+        },
+        error: "",
+        periodCacheStatus: "miss" as const,
+      }
+    })
+
+    const req = new NextRequest(
+      "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
+    )
+    const res = await GET(req)
+
+    expect(res.status).toBe(200)
+    expect(mockReadiness).toHaveBeenCalledTimes(1)
+    expect(mockResolvePeriod).toHaveBeenCalledTimes(1)
+    // Concurrent start: each saw the other already started (or both started before either finished).
+    expect(readinessStarted && periodStarted).toBe(true)
+    expect(readinessSawPeriod || periodSawReadiness).toBe(true)
+    expect(mockGetReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ businessId: "biz-a" }),
+      expect.objectContaining({
+        preResolvedRange: expect.objectContaining({
+          movementStart: "2026-01-01",
+          movementEnd: "2026-01-31",
+        }),
+      }),
+      expect.anything()
+    )
   })
 })
