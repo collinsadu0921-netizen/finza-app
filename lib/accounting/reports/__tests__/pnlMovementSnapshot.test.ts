@@ -10,6 +10,13 @@ jest.mock("@/lib/server/accountingSnapshotRefresh", () => ({
   readStalePnlSnapshotMetadata: jest.fn(),
   enqueueSnapshotRefreshJob: jest.fn(),
   ensureZeroPnlSnapshotForPeriod: jest.fn(),
+  periodHasLivePnlMovement: jest.fn().mockResolvedValue(false),
+  scheduleTargetedSnapshotRefresh: jest.fn().mockReturnValue({
+    scheduled: false,
+    reason: "immediate_refresh_disabled",
+    promise: null,
+    immediate_refresh_enabled: false,
+  }),
 }))
 
 jest.mock("@/lib/server/pnlMovementSnapshotRefresh", () => ({
@@ -21,8 +28,10 @@ jest.mock("@/lib/server/pnlMovementSnapshotRefresh", () => ({
 import {
   ensureZeroPnlSnapshotForPeriod,
   enqueueSnapshotRefreshJob,
+  periodHasLivePnlMovement,
   readPnlSnapshotMetadata,
   readStalePnlSnapshotMetadata,
+  scheduleTargetedSnapshotRefresh,
 } from "@/lib/server/accountingSnapshotRefresh"
 import {
   readPnlMovementLinesFromSnapshot,
@@ -37,6 +46,12 @@ const mockEnqueue = enqueueSnapshotRefreshJob as jest.MockedFunction<typeof enqu
 const mockEnsureZero = ensureZeroPnlSnapshotForPeriod as jest.MockedFunction<
   typeof ensureZeroPnlSnapshotForPeriod
 >
+const mockPeriodHasLive = periodHasLivePnlMovement as jest.MockedFunction<
+  typeof periodHasLivePnlMovement
+>
+const mockSchedule = scheduleTargetedSnapshotRefresh as jest.MockedFunction<
+  typeof scheduleTargetedSnapshotRefresh
+>
 const mockReadLines = readPnlMovementLinesFromSnapshot as jest.MockedFunction<
   typeof readPnlMovementLinesFromSnapshot
 >
@@ -47,9 +62,13 @@ const mockTryRefresh = tryRefreshPnlMovementSnapshot as jest.MockedFunction<
 function buildSupabase(options: {
   exactAccountingPeriod?: boolean
   movementRows?: Array<{ account_code?: string; account_type?: string; period_total?: number }>
+  movementError?: { message: string } | null
 }) {
   const rpc = jest.fn((name: string) => {
     if (name === "get_profit_and_loss_movement") {
+      if (options.movementError) {
+        return Promise.resolve({ data: null, error: options.movementError })
+      }
       return Promise.resolve({ data: options.movementRows ?? [], error: null })
     }
     return Promise.resolve({ data: null, error: null })
@@ -130,7 +149,7 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
     expect(result.rows).toHaveLength(1)
   })
 
-  it("enqueues refresh and returns unavailable when snapshot missing (no live fallback)", async () => {
+  it("enqueues refresh and uses live fallback when snapshot missing", async () => {
     mockReadMeta.mockResolvedValue(null)
     mockReadStaleMeta.mockResolvedValue(null)
     mockEnqueue.mockResolvedValue("job-1")
@@ -148,13 +167,15 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
       { refreshOnRequest: false }
     )
 
-    expect(result.source).toBe("unavailable")
-    expect(result.error).toBe("PNL_SNAPSHOT_UNAVAILABLE")
+    expect(result.source).toBe("ledger")
+    expect(result.rows[0]?.period_total).toBe(1130)
     expect(result.refreshJobId).toBe("job-1")
-    expect(result.liveFallbackSkipped).toBe(true)
+    expect(result.snapshotStale).toBe(true)
+    expect(result.liveFallbackSkipped).toBe(false)
     expect(mockEnqueue).toHaveBeenCalled()
-    expect(mockEnsureZero).toHaveBeenCalled()
-    expect(supabase.rpc).not.toHaveBeenCalledWith(
+    expect(mockSchedule).toHaveBeenCalled()
+    expect(mockEnsureZero).not.toHaveBeenCalled()
+    expect(supabase.rpc).toHaveBeenCalledWith(
       "get_profit_and_loss_movement",
       expect.any(Object)
     )
@@ -165,9 +186,14 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
     mockReadStaleMeta.mockResolvedValue(null)
     mockEnqueue.mockResolvedValue("job-2")
     mockEnsureZero.mockResolvedValue(true)
+    mockPeriodHasLive.mockResolvedValue(false)
+    const supabase = buildSupabase({
+      exactAccountingPeriod: true,
+      movementError: { message: "rpc_down" },
+    })
 
     const result = await fetchProfitAndLossMovementRows(
-      buildSupabase({ exactAccountingPeriod: true }),
+      supabase,
       "biz",
       "2026-05-01",
       "2026-05-31",
@@ -179,6 +205,8 @@ describe("fetchProfitAndLossMovementRows metadata-first", () => {
     expect(result.refreshJobId).toBe("job-2")
     expect(result.liveFallbackSkipped).toBe(true)
     expect(mockEnqueue).toHaveBeenCalled()
+    expect(mockSchedule).toHaveBeenCalled()
+    expect(mockPeriodHasLive).toHaveBeenCalled()
     expect(mockEnsureZero).toHaveBeenCalled()
   })
 
