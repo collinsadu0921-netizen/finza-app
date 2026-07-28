@@ -21,6 +21,12 @@ import {
   mapInvoiceItemsForInsert,
   validateInvoiceLineMaterials,
 } from "@/lib/invoices/validateInvoiceLineMaterials"
+import {
+  lineFulfilledQuantity,
+  lineReturnedQuantity,
+  remainingToFulfilQuantity,
+  returnableQuantity,
+} from "@/lib/invoices/invoiceMaterialReturnUi"
 
 export async function GET(
   request: NextRequest,
@@ -253,51 +259,73 @@ export async function GET(
           ),
         ]
 
-        const [{ data: fulfilments }, { data: stockRows }] = await Promise.all([
+        const [fulfilmentsResult, stockResult] = await Promise.all([
           supabase
             .from("invoice_material_fulfilments")
             .select(
               "id, invoice_item_id, quantity, quantity_returned, unit_cost, total_cost, status, movement_id, journal_entry_id, created_at"
             )
             .eq("invoice_id", invoiceId)
-            .in("invoice_item_id", materialItemIds),
+            .in("invoice_item_id", materialItemIds)
+            .order("created_at", { ascending: true }),
           materialIds.length
             ? supabase
                 .from("service_material_inventory")
                 .select("id, name, quantity_on_hand")
                 .eq("business_id", scopedBusinessId)
                 .in("id", materialIds)
-            : Promise.resolve({ data: [] as { id: string; name: string; quantity_on_hand: number }[] }),
+            : Promise.resolve({
+                data: [] as { id: string; name: string; quantity_on_hand: number }[],
+                error: null,
+              }),
         ])
+
+        if (fulfilmentsResult.error) {
+          console.error(
+            "Error fetching invoice_material_fulfilments:",
+            fulfilmentsResult.error
+          )
+        }
+        if (stockResult.error) {
+          console.error(
+            "Error fetching service_material_inventory for invoice items:",
+            stockResult.error
+          )
+        }
+
+        const fulfilments = fulfilmentsResult.data
+        const stockRows = stockResult.data
 
         const stockById = new Map(
           (stockRows ?? []).map((s) => [s.id, s])
         )
-        const fulfilmentsByItem = new Map<string, typeof fulfilments>()
+        const fulfilmentsByItem = new Map<string, NonNullable<typeof fulfilments>>()
         for (const f of fulfilments ?? []) {
-          const list = fulfilmentsByItem.get(f.invoice_item_id) ?? []
+          const key = String(f.invoice_item_id)
+          const list = fulfilmentsByItem.get(key) ?? []
           list.push(f)
-          fulfilmentsByItem.set(f.invoice_item_id, list)
+          fulfilmentsByItem.set(key, list)
         }
 
         enrichedItems = enrichedItems.map((it: Record<string, unknown>) => {
           if (!it.material_id) return it
           const stock = stockById.get(String(it.material_id))
           const itemFulfilments = fulfilmentsByItem.get(String(it.id)) ?? []
-          const fulfilledNet = itemFulfilments.reduce(
-            (sum, f) => sum + (Number(f.quantity) - Number(f.quantity_returned || 0)),
-            0
-          )
+          const fulfilledGross = lineFulfilledQuantity(itemFulfilments)
+          const returnedTotal = lineReturnedQuantity(itemFulfilments)
           const ordered = Number(it.qty) || 0
           const source = String(it.material_inventory_source ?? "")
           return {
             ...it,
             material_name: stock?.name ?? null,
             quantity_on_hand: stock != null ? Number(stock.quantity_on_hand) : null,
-            fulfilled_quantity: Math.round(fulfilledNet * 10000) / 10000,
+            // Gross fulfilled — do not net out returns (returns are separate).
+            fulfilled_quantity: fulfilledGross,
+            returned_quantity: returnedTotal,
+            returnable_quantity: returnableQuantity(fulfilledGross, returnedTotal),
             remaining_fulfil_quantity:
               source === "direct_sale"
-                ? Math.max(0, Math.round((ordered - fulfilledNet) * 10000) / 10000)
+                ? remainingToFulfilQuantity(ordered, fulfilledGross)
                 : 0,
             fulfilments: itemFulfilments,
           }

@@ -28,7 +28,15 @@ import { useServiceFinancialWrite } from "@/components/service/useServiceFinanci
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
 import CustomerApprovalSection from "@/components/invoices/CustomerApprovalSection"
-import { canShowReturnMaterialsAction } from "@/lib/invoices/invoiceMaterialReturnUi"
+import {
+  canShowReturnMaterialsAction,
+  fulfilmentReturnableQuantity,
+  lineFulfilledQuantity,
+  lineReturnedQuantity,
+  normalizeFulfilments,
+  remainingToFulfilQuantity,
+  returnableQuantity,
+} from "@/lib/invoices/invoiceMaterialReturnUi"
 
 type Invoice = {
   id: string
@@ -104,6 +112,8 @@ type InvoiceItem = {
   material_name?: string | null
   quantity_on_hand?: number | null
   fulfilled_quantity?: number
+  returned_quantity?: number
+  returnable_quantity?: number
   remaining_fulfil_quantity?: number
   fulfilments?: Array<{
     id: string
@@ -955,8 +965,28 @@ Thank you.`
                         const isMaterial = !!item.material_id
                         const source = item.material_inventory_source
                         const ordered = Number(item.qty) || 0
-                        const fulfilled = Number(item.fulfilled_quantity ?? 0)
-                        const remaining = Number(item.remaining_fulfil_quantity ?? 0)
+                        const itemFulfilments = normalizeFulfilments(item.fulfilments)
+                        const fulfilledFromRows = lineFulfilledQuantity(itemFulfilments)
+                        const returnedFromRows = lineReturnedQuantity(itemFulfilments)
+                        const fulfilled =
+                          itemFulfilments.length > 0
+                            ? fulfilledFromRows
+                            : Number(item.fulfilled_quantity ?? 0)
+                        const returned =
+                          itemFulfilments.length > 0
+                            ? returnedFromRows
+                            : Number(item.returned_quantity ?? 0)
+                        const returnable =
+                          itemFulfilments.length > 0
+                            ? returnableQuantity(fulfilled, returned)
+                            : Number(
+                                item.returnable_quantity ??
+                                  returnableQuantity(fulfilled, returned)
+                              )
+                        const remaining =
+                          source === "direct_sale"
+                            ? remainingToFulfilQuantity(ordered, fulfilled)
+                            : Number(item.remaining_fulfil_quantity ?? 0)
                         const stock = item.quantity_on_hand
 
                         return (
@@ -974,28 +1004,33 @@ Thank you.`
                                 <div className="text-xs text-slate-500 tabular-nums">
                                   Ordered {ordered}
                                   {" · "}Fulfilled {fulfilled}
-                                  {" · "}Remaining {remaining}
+                                  {" · "}Returned {returned}
+                                  {" · "}Returnable {returnable}
+                                  {" · "}Remaining to fulfil {remaining}
                                   {stock != null && <>{" · "}Stock {Number(stock)}</>}
                                 </div>
-                                {(item.fulfilments?.length ?? 0) > 0 && (
+                                {/* History/return UI depends on returnable fulfilments, not remaining_to_fulfil. */}
+                                {itemFulfilments.length > 0 && (
                                   <div className="rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/40 p-2 space-y-2">
                                     <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                                       Fulfilment history
                                     </div>
-                                    {item.fulfilments!.map((f) => {
+                                    {itemFulfilments.map((f) => {
                                       const fQty = Number(f.quantity) || 0
                                       const fRet = Number(f.quantity_returned || 0)
-                                      const fReturnable = Math.max(
-                                        0,
-                                        Math.round((fQty - fRet) * 10000) / 10000
-                                      )
+                                      const fReturnable = fulfilmentReturnableQuantity({
+                                        id: String(f.id),
+                                        quantity: fQty,
+                                        quantity_returned: fRet,
+                                        status: f.status,
+                                      })
                                       const fStatus = String(f.status || "active")
                                       const canReturnThis = canShowReturnMaterialsAction({
                                         materialInventorySource: source,
                                         readOnly,
                                         invoiceStatus: invoiceStatusLower,
                                         fulfilment: {
-                                          id: f.id,
+                                          id: String(f.id),
                                           quantity: fQty,
                                           quantity_returned: fRet,
                                           status: fStatus,
@@ -1003,7 +1038,7 @@ Thank you.`
                                       })
                                       return (
                                         <div
-                                          key={f.id}
+                                          key={String(f.id)}
                                           className="flex flex-wrap items-start justify-between gap-2 text-xs"
                                         >
                                           <div className="space-y-0.5 tabular-nums text-slate-600 dark:text-slate-300">
@@ -1040,7 +1075,7 @@ Thank you.`
                                               onClick={() => {
                                                 if (!guardWriteAction(() => {})) return
                                                 openReturnModal({
-                                                  fulfilment_id: f.id,
+                                                  fulfilment_id: String(f.id),
                                                   invoice_item_id: item.id,
                                                   material_name:
                                                     item.material_name ||
