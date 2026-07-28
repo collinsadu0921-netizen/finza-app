@@ -4,13 +4,18 @@ import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW,
+  INVENTORY_LINKED_JOURNAL_USER_MESSAGE,
+  isInvoiceMaterialInventoryJournalReferenceType,
+} from "@/lib/accounting/inventoryLinkedJournalReversal"
 
 /**
  * GET /api/accounting/reversal/status
  *
  * Query params: business_id, je_ids (comma-separated list of journal entry ids)
- * Returns for each JE: can_reverse, reason (if blocked), reversal_je_id (if already reversed).
- * Used by ledger UI to disable Reverse button and show tooltips.
+ * Returns for each JE: can_reverse, reason (if blocked), reversal_je_id (if already reversed),
+ * and optionally code + invoice_id for inventory-linked fulfilment journals.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -24,7 +29,6 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")?.trim()
     const jeIdsParam = searchParams.get("je_ids")
     const jeIds = jeIdsParam
       ? jeIdsParam.split(",").map((id) => id.trim()).filter(Boolean)
@@ -67,7 +71,14 @@ export async function GET(request: NextRequest) {
     )
     if (tierBlockRevSt) return tierBlockRevSt
 
-    const statuses: Record<string, { can_reverse: boolean; reason?: string; reversal_je_id?: string }> = {}
+    type StatusRow = {
+      can_reverse: boolean
+      reason?: string
+      reversal_je_id?: string
+      code?: string
+      invoice_id?: string | null
+    }
+    const statuses: Record<string, StatusRow> = {}
 
     if (jeIds.length === 0) {
       return NextResponse.json({ statuses })
@@ -75,11 +86,32 @@ export async function GET(request: NextRequest) {
 
     const { data: entries } = await supabase
       .from("journal_entries")
-      .select("id, business_id, date")
+      .select("id, business_id, date, reference_type, reference_id")
       .eq("business_id", resolvedBusinessId)
       .in("id", jeIds)
 
     const entryMap = new Map((entries || []).map((e) => [e.id, e]))
+
+    const fulfilmentIds = [
+      ...new Set(
+        (entries || [])
+          .filter((e) => isInvoiceMaterialInventoryJournalReferenceType(e.reference_type))
+          .map((e) => e.reference_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      ),
+    ]
+
+    const fulfilmentInvoiceById = new Map<string, string>()
+    if (fulfilmentIds.length > 0) {
+      const { data: fulfilments } = await supabase
+        .from("invoice_material_fulfilments")
+        .select("id, invoice_id")
+        .eq("business_id", resolvedBusinessId)
+        .in("id", fulfilmentIds)
+      for (const f of fulfilments ?? []) {
+        fulfilmentInvoiceById.set(f.id, f.invoice_id)
+      }
+    }
 
     const { data: reversals } = await supabase
       .from("journal_entries")
@@ -116,6 +148,20 @@ export async function GET(request: NextRequest) {
         continue
       }
 
+      if (isInvoiceMaterialInventoryJournalReferenceType(entry.reference_type)) {
+        const invoiceId =
+          typeof entry.reference_id === "string"
+            ? fulfilmentInvoiceById.get(entry.reference_id) ?? null
+            : null
+        statuses[jeId] = {
+          can_reverse: false,
+          reason: INVENTORY_LINKED_JOURNAL_USER_MESSAGE,
+          code: INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW,
+          invoice_id: invoiceId,
+        }
+        continue
+      }
+
       const existingReversalId = reversedOriginalToReversal.get(jeId)
       if (existingReversalId) {
         statuses[jeId] = {
@@ -127,7 +173,10 @@ export async function GET(request: NextRequest) {
       }
 
       if (!hasOpenPeriodContainingToday) {
-        statuses[jeId] = { can_reverse: false, reason: "Current period is closed. Reversals are only allowed in an open period." }
+        statuses[jeId] = {
+          can_reverse: false,
+          reason: "Current period is closed. Reversals are only allowed in an open period.",
+        }
         continue
       }
 

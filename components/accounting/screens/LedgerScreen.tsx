@@ -70,6 +70,14 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
   settlement:         { label: "Settlement",      color: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300" },
   manual:             { label: "Manual Entry",    color: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" },
   reversal:           { label: "Reversal",        color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
+  invoice_material_fulfilment: {
+    label: "Material Fulfilment",
+    color: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  },
+  invoice_material_fulfilment_return: {
+    label: "Material Return",
+    color: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  },
 }
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
@@ -109,6 +117,14 @@ function LedgerSkeleton() {
 
 // ─── Entry Card ──────────────────────────────────────────────────────────────
 
+type ReversalStatus = {
+  can_reverse: boolean
+  reason?: string
+  reversal_je_id?: string
+  code?: string
+  invoice_id?: string | null
+}
+
 function EntryCard({
   entry,
   reversalStatus,
@@ -117,13 +133,18 @@ function EntryCard({
   currencyCode,
 }: {
   entry: JournalEntry
-  reversalStatus: { can_reverse: boolean; reason?: string; reversal_je_id?: string } | undefined
+  reversalStatus: ReversalStatus | undefined
   canReverseByEngagement: boolean
   onReverse: (entry: JournalEntry) => void
   currencyCode: string | null
 }) {
   const canReverse = reversalStatus?.can_reverse ?? false
   const blockReason = reversalStatus?.reason ?? "Cannot reverse"
+  const inventoryLinked =
+    reversalStatus?.code === "INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW"
+  const invoiceHref = reversalStatus?.invoice_id
+    ? `/invoices/${reversalStatus.invoice_id}/view`
+    : null
 
   const totalDebits  = entry.journal_entry_lines.reduce((s, l) => s + Number(l.debit  || 0), 0)
   const totalCredits = entry.journal_entry_lines.reduce((s, l) => s + Number(l.credit || 0), 0)
@@ -185,28 +206,43 @@ function EntryCard({
               Unbalanced
             </span>
           )}
-          {/* Reverse button */}
-          <button
-            type="button"
-            disabled={!canReverseByEngagement || !canReverse}
-            title={
-              !canReverseByEngagement
-                ? "Requires approve engagement access"
-                : !canReverse
-                  ? blockReason
-                  : "Reverse this journal entry"
-            }
-            onClick={canReverseByEngagement && canReverse ? () => onReverse(entry) : undefined}
-            className="inline-flex items-center px-2.5 py-1 rounded border text-xs font-medium transition-colors
-              enabled:border-red-200 enabled:text-red-600 enabled:hover:bg-red-50
-              dark:enabled:border-red-800 dark:enabled:text-red-400 dark:enabled:hover:bg-red-900/20
-              disabled:border-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed
-              dark:disabled:border-gray-700 dark:disabled:text-gray-600"
-          >
-            Reverse
-          </button>
+          {/* Reverse button — hidden for inventory-linked fulfilment journals */}
+          {!inventoryLinked && (
+            <button
+              type="button"
+              disabled={!canReverseByEngagement || !canReverse}
+              title={
+                !canReverseByEngagement
+                  ? "Requires approve engagement access"
+                  : !canReverse
+                    ? blockReason
+                    : "Reverse this journal entry"
+              }
+              onClick={canReverseByEngagement && canReverse ? () => onReverse(entry) : undefined}
+              className="inline-flex items-center px-2.5 py-1 rounded border text-xs font-medium transition-colors
+                enabled:border-red-200 enabled:text-red-600 enabled:hover:bg-red-50
+                dark:enabled:border-red-800 dark:enabled:text-red-400 dark:enabled:hover:bg-red-900/20
+                disabled:border-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed
+                dark:disabled:border-gray-700 dark:disabled:text-gray-600"
+            >
+              Reverse
+            </button>
+          )}
         </div>
       </div>
+      {inventoryLinked && (
+        <div className="px-4 py-2.5 bg-amber-50/80 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-200 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>{blockReason}</span>
+          {invoiceHref && (
+            <a
+              href={invoiceHref}
+              className="font-medium text-amber-950 underline underline-offset-2 hover:no-underline dark:text-amber-100"
+            >
+              Open invoice to return materials
+            </a>
+          )}
+        </div>
+      )}
 
       {/* ── Lines ── */}
       <div className="divide-y divide-gray-100 dark:divide-gray-700/60">
@@ -321,7 +357,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string; code: string }>>([])
   const [reversalModalOpen, setReversalModalOpen] = useState(false)
   const [reversalEntry, setReversalEntry] = useState<JournalEntry | null>(null)
-  const [reversalStatuses, setReversalStatuses] = useState<Record<string, { can_reverse: boolean; reason?: string; reversal_je_id?: string }>>({})
+  const [reversalStatuses, setReversalStatuses] = useState<Record<string, ReversalStatus>>({})
   const [successBanner, setSuccessBanner] = useState<{ message: string; reversalJeId: string } | null>(null)
   const [blockedActionMessage, setBlockedActionMessage] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)

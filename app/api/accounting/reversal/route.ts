@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/auditLog"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
 
 const MIN_REASON_LENGTH = 10
 
@@ -115,6 +116,16 @@ export async function POST(request: NextRequest) {
       resolvedBusinessId
     )
     if (tierBlockRev) return tierBlockRev
+
+    const inventoryBlock = inventoryLinkedJournalReversalBlock(
+      originalJe.reference_type as string | null
+    )
+    if (inventoryBlock) {
+      return NextResponse.json(
+        { error: inventoryBlock.error, code: inventoryBlock.code },
+        { status: 409 }
+      )
+    }
 
     const { data: existingReversal } = await supabase
       .from("journal_entries")
