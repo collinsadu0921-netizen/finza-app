@@ -295,15 +295,95 @@ export async function GET(
 
         const fulfilments = fulfilmentsResult.data
         const stockRows = stockResult.data
+        const fulfilmentIds = (fulfilments ?? []).map((f) => f.id)
+
+        const { data: returnRows, error: returnsError } =
+          fulfilmentIds.length > 0
+            ? await supabase
+                .from("invoice_material_fulfilment_returns")
+                .select(
+                  "id, fulfilment_id, quantity, quantity_undone, unit_cost, total_cost, status, movement_id, journal_entry_id, created_at"
+                )
+                .in("fulfilment_id", fulfilmentIds)
+                .order("created_at", { ascending: true })
+            : { data: [], error: null }
+
+        if (returnsError) {
+          console.error(
+            "Error fetching invoice_material_fulfilment_returns:",
+            returnsError
+          )
+        }
+
+        type EnrichedReturn = {
+          id: string
+          fulfilment_id: string
+          quantity: number
+          quantity_undone?: number | null
+          unit_cost?: number | null
+          total_cost?: number | null
+          status?: string | null
+          movement_id?: string | null
+          journal_entry_id?: string | null
+          created_at?: string | null
+          undoable_quantity: number
+        }
+        type EnrichedFulfilment = {
+          id: string
+          invoice_item_id: string
+          quantity: number
+          quantity_returned?: number | null
+          unit_cost?: number | null
+          total_cost?: number | null
+          status?: string | null
+          movement_id?: string | null
+          journal_entry_id?: string | null
+          created_at?: string | null
+          returned_gross_quantity: number
+          undo_return_quantity: number
+          net_returned_quantity: number
+          returns: EnrichedReturn[]
+        }
+
+        const returnsByFulfilment = new Map<string, EnrichedReturn[]>()
+        for (const r of returnRows ?? []) {
+          const key = String(r.fulfilment_id)
+          const list = returnsByFulfilment.get(key) ?? []
+          list.push({
+            ...r,
+            undoable_quantity: Math.max(
+              0,
+              Math.round(
+                ((Number(r.quantity) || 0) - (Number(r.quantity_undone) || 0)) * 10000
+              ) / 10000
+            ),
+          })
+          returnsByFulfilment.set(key, list)
+        }
 
         const stockById = new Map(
           (stockRows ?? []).map((s) => [s.id, s])
         )
-        const fulfilmentsByItem = new Map<string, NonNullable<typeof fulfilments>>()
+        const fulfilmentsByItem = new Map<string, EnrichedFulfilment[]>()
         for (const f of fulfilments ?? []) {
           const key = String(f.invoice_item_id)
           const list = fulfilmentsByItem.get(key) ?? []
-          list.push(f)
+          const returns = returnsByFulfilment.get(String(f.id)) ?? []
+          const returnedGross = returns.reduce(
+            (sum, row) => sum + (Number(row.quantity) || 0),
+            0
+          )
+          const undoneTotal = returns.reduce(
+            (sum, row) => sum + (Number(row.quantity_undone) || 0),
+            0
+          )
+          list.push({
+            ...f,
+            returned_gross_quantity: Math.round(returnedGross * 10000) / 10000,
+            undo_return_quantity: Math.round(undoneTotal * 10000) / 10000,
+            net_returned_quantity: Number(f.quantity_returned) || 0,
+            returns,
+          })
           fulfilmentsByItem.set(key, list)
         }
 
@@ -312,7 +392,18 @@ export async function GET(
           const stock = stockById.get(String(it.material_id))
           const itemFulfilments = fulfilmentsByItem.get(String(it.id)) ?? []
           const fulfilledGross = lineFulfilledQuantity(itemFulfilments)
-          const returnedTotal = lineReturnedQuantity(itemFulfilments)
+          // quantity_returned on fulfilment is net (returns − undos)
+          const netReturned = lineReturnedQuantity(itemFulfilments)
+          const returnedGross = itemFulfilments.reduce(
+            (sum, f) =>
+              sum + (Number((f as { returned_gross_quantity?: number }).returned_gross_quantity) || 0),
+            0
+          )
+          const undoReturned = itemFulfilments.reduce(
+            (sum, f) =>
+              sum + (Number((f as { undo_return_quantity?: number }).undo_return_quantity) || 0),
+            0
+          )
           const ordered = Number(it.qty) || 0
           const source = String(it.material_inventory_source ?? "")
           return {
@@ -321,8 +412,10 @@ export async function GET(
             quantity_on_hand: stock != null ? Number(stock.quantity_on_hand) : null,
             // Gross fulfilled — do not net out returns (returns are separate).
             fulfilled_quantity: fulfilledGross,
-            returned_quantity: returnedTotal,
-            returnable_quantity: returnableQuantity(fulfilledGross, returnedTotal),
+            returned_quantity: Math.round(returnedGross * 10000) / 10000,
+            undo_return_quantity: Math.round(undoReturned * 10000) / 10000,
+            net_returned_quantity: netReturned,
+            returnable_quantity: returnableQuantity(fulfilledGross, netReturned),
             remaining_fulfil_quantity:
               source === "direct_sale"
                 ? remainingToFulfilQuantity(ordered, fulfilledGross)

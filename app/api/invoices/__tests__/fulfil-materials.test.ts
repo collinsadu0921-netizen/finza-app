@@ -32,11 +32,13 @@ import { resolveBusinessScopeForUser } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
 import { POST as fulfilPost } from "../[id]/fulfil-materials/route"
 import { POST as returnPost } from "../[id]/return-materials/route"
+import { POST as undoReturnPost } from "../[id]/undo-material-return/route"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const INVOICE_ID = "iiiiiiii-iiii-4iii-8iii-iiiiiiiiiiii"
 const ITEM_ID = "llllllll-llll-4lll-8lll-llllllllllll"
 const FULFIL_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+const RETURN_ID = "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrrrrr"
 
 describe("mapInvoiceMaterialFulfilRpcError", () => {
   it("maps insufficient stock", () => {
@@ -60,6 +62,22 @@ describe("mapInvoiceMaterialFulfilRpcError", () => {
       "JOB_USAGE_NO_FULFIL: job-sourced material lines cannot be fulfilled from stock"
     )
     expect(mapped.code).toBe("JOB_USAGE_NO_FULFIL")
+  })
+
+  it("maps undo-return domain errors", () => {
+    expect(
+      mapInvoiceMaterialFulfilRpcError(
+        "UNDO_RETURN_NOTHING_LEFT: this return has already been fully undone"
+      ).code
+    ).toBe("UNDO_RETURN_NOTHING_LEFT")
+    expect(
+      mapInvoiceMaterialFulfilRpcError(
+        "UNDO_RETURN_QTY_EXCEEDS_UNDOABLE: requested 4 exceeds undoable 3"
+      ).code
+    ).toBe("UNDO_RETURN_QTY_EXCEEDS_UNDOABLE")
+    expect(
+      mapInvoiceMaterialFulfilRpcError("RETURN_NOT_FOUND: return does not exist").code
+    ).toBe("RETURN_NOT_FOUND")
   })
 })
 
@@ -231,5 +249,177 @@ describe("POST return-materials", () => {
       "return_invoice_material_fulfilment",
       expect.objectContaining({ p_fulfilment_id: FULFIL_ID, p_quantity: 1 })
     )
+  })
+})
+
+describe("POST undo-material-return", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    jest.mocked(getUserRole).mockResolvedValue("owner" as never)
+    jest.mocked(resolveBusinessScopeForUser).mockResolvedValue({
+      ok: true,
+      businessId: BUSINESS_ID,
+    } as never)
+  })
+
+  it("calls undo RPC and returns result", async () => {
+    const rpc = jest.fn().mockResolvedValue({
+      data: {
+        undo_id: "u1",
+        return_id: RETURN_ID,
+        fulfilment_id: FULFIL_ID,
+        quantity: 1,
+        unit_cost: 9.89,
+        total_cost: 9.89,
+        movement_id: "mov3",
+        journal_entry_id: "je3",
+        idempotent: false,
+      },
+      error: null,
+    })
+
+    jest.mocked(createSupabaseServerClient).mockResolvedValue({
+      auth: {
+        getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } }, error: null }),
+      },
+      from: jest.fn((table: string) => {
+        if (table === "invoices") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: INVOICE_ID,
+                business_id: BUSINESS_ID,
+                deleted_at: null,
+                status: "sent",
+              },
+              error: null,
+            }),
+          }
+        }
+        if (table === "invoice_material_fulfilment_returns") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: RETURN_ID,
+                fulfilment_id: FULFIL_ID,
+                business_id: BUSINESS_ID,
+                quantity: 1,
+                quantity_undone: 0,
+                status: "active",
+              },
+              error: null,
+            }),
+          }
+        }
+        if (table === "invoice_material_fulfilments") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: FULFIL_ID,
+                invoice_id: INVOICE_ID,
+                business_id: BUSINESS_ID,
+              },
+              error: null,
+            }),
+          }
+        }
+        return {}
+      }),
+      rpc,
+    } as never)
+
+    const req = new NextRequest(
+      `http://localhost/api/invoices/${INVOICE_ID}/undo-material-return`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          return_id: RETURN_ID,
+          quantity: 1,
+          idempotency_key: "undo-1",
+        }),
+      }
+    )
+    const res = await undoReturnPost(req, { params: Promise.resolve({ id: INVOICE_ID }) })
+    expect(res.status).toBe(200)
+    expect(rpc).toHaveBeenCalledWith(
+      "undo_invoice_material_fulfilment_return",
+      expect.objectContaining({ p_return_id: RETURN_ID, p_quantity: 1 })
+    )
+  })
+
+  it("rejects return that belongs to another invoice", async () => {
+    const rpc = jest.fn()
+    jest.mocked(createSupabaseServerClient).mockResolvedValue({
+      auth: {
+        getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } }, error: null }),
+      },
+      from: jest.fn((table: string) => {
+        if (table === "invoices") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: INVOICE_ID,
+                business_id: BUSINESS_ID,
+                deleted_at: null,
+                status: "sent",
+              },
+              error: null,
+            }),
+          }
+        }
+        if (table === "invoice_material_fulfilment_returns") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: RETURN_ID,
+                fulfilment_id: FULFIL_ID,
+                business_id: BUSINESS_ID,
+                quantity: 1,
+                quantity_undone: 0,
+                status: "active",
+              },
+              error: null,
+            }),
+          }
+        }
+        if (table === "invoice_material_fulfilments") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: FULFIL_ID,
+                invoice_id: "other-invoice-id",
+                business_id: BUSINESS_ID,
+              },
+              error: null,
+            }),
+          }
+        }
+        return {}
+      }),
+      rpc,
+    } as never)
+
+    const req = new NextRequest(
+      `http://localhost/api/invoices/${INVOICE_ID}/undo-material-return`,
+      {
+        method: "POST",
+        body: JSON.stringify({ return_id: RETURN_ID, quantity: 1 }),
+      }
+    )
+    const res = await undoReturnPost(req, { params: Promise.resolve({ id: INVOICE_ID }) })
+    expect(res.status).toBe(404)
+    expect(rpc).not.toHaveBeenCalled()
   })
 })

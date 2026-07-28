@@ -30,12 +30,17 @@ import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCap
 import CustomerApprovalSection from "@/components/invoices/CustomerApprovalSection"
 import {
   canShowReturnMaterialsAction,
+  canShowUndoReturnAction,
   fulfilmentReturnableQuantity,
   lineFulfilledQuantity,
+  lineReturnedGrossQuantity,
   lineReturnedQuantity,
+  lineUndoReturnQuantity,
   normalizeFulfilments,
+  normalizeReturns,
   remainingToFulfilQuantity,
   returnableQuantity,
+  returnUndoableQuantity,
 } from "@/lib/invoices/invoiceMaterialReturnUi"
 
 type Invoice = {
@@ -113,17 +118,31 @@ type InvoiceItem = {
   quantity_on_hand?: number | null
   fulfilled_quantity?: number
   returned_quantity?: number
+  undo_return_quantity?: number
+  net_returned_quantity?: number
   returnable_quantity?: number
   remaining_fulfil_quantity?: number
   fulfilments?: Array<{
     id: string
     quantity: number
     quantity_returned?: number
+    returned_gross_quantity?: number
+    undo_return_quantity?: number
+    net_returned_quantity?: number
     unit_cost?: number
     total_cost?: number
     status?: string
     created_at?: string
     journal_entry_id?: string | null
+    returns?: Array<{
+      id: string
+      quantity: number
+      quantity_undone?: number
+      undoable_quantity?: number
+      unit_cost?: number
+      status?: string
+      created_at?: string
+    }>
   }>
   products_services?: { name?: string } | null
 }
@@ -137,6 +156,20 @@ type ReturnableFulfilment = {
   returnable: number
   unit_cost: number | null
   status: string
+  created_at: string | null
+}
+
+type UndoableReturn = {
+  return_id: string
+  fulfilment_id: string
+  invoice_item_id: string
+  material_name: string
+  quantity: number
+  quantity_undone: number
+  undoable: number
+  unit_cost: number | null
+  status: string
+  stock: number | null
   created_at: string | null
 }
 
@@ -228,6 +261,11 @@ export default function InvoiceViewPage() {
   const [returnQty, setReturnQty] = useState(0)
   const [returnSubmitting, setReturnSubmitting] = useState(false)
   const [returnIdempotencyKey, setReturnIdempotencyKey] = useState<string | null>(null)
+  const [undoTarget, setUndoTarget] = useState<UndoableReturn | null>(null)
+  const [undoQty, setUndoQty] = useState(0)
+  const [undoSubmitting, setUndoSubmitting] = useState(false)
+  const [undoIdempotencyKey, setUndoIdempotencyKey] = useState<string | null>(null)
+  const [undoReason, setUndoReason] = useState("")
   const [classifyPicker, setClassifyPicker] = useState<ClassifyPickerState>(null)
   const [classifyUsages, setClassifyUsages] = useState<BillableJobUsage[]>([])
   const [loadingClassifyUsages, setLoadingClassifyUsages] = useState(false)
@@ -460,6 +498,77 @@ Thank you.`
       })
     } finally {
       setReturnSubmitting(false)
+    }
+  }
+
+  const openUndoModal = (target: UndoableReturn) => {
+    setUndoTarget(target)
+    setUndoQty(target.undoable)
+    setUndoReason("")
+    setUndoIdempotencyKey(crypto.randomUUID())
+  }
+
+  const handleUndoSubmit = async () => {
+    if (!invoice || !undoTarget || !undoIdempotencyKey) return
+    const qty = Number(undoQty)
+    if (!(qty > 0)) {
+      setToast({ message: "Enter a quantity to undo.", type: "error" })
+      return
+    }
+    if (qty > undoTarget.undoable + 0.000001) {
+      setToast({
+        message: `You can undo at most ${undoTarget.undoable}.`,
+        type: "error",
+      })
+      return
+    }
+    if (
+      undoTarget.stock != null &&
+      qty > Number(undoTarget.stock) + 0.000001
+    ) {
+      setToast({
+        message: `Insufficient stock. Available ${undoTarget.stock}; requested ${qty}.`,
+        type: "error",
+      })
+      return
+    }
+    try {
+      setUndoSubmitting(true)
+      const res = await fetch(`/api/invoices/${invoiceId}/undo-material-return`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: invoice.business_id,
+          return_id: undoTarget.return_id,
+          quantity: qty,
+          idempotency_key: undoIdempotencyKey,
+          reason: undoReason.trim() || undefined,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : "Failed to undo material return"
+        )
+      }
+      setUndoTarget(null)
+      setUndoQty(0)
+      setUndoReason("")
+      setUndoIdempotencyKey(null)
+      setToast({
+        message: data.idempotent
+          ? "Undo already recorded (no duplicate stock change)."
+          : "Material return undone. Stock and material cost were updated.",
+        type: "success",
+      })
+      loadInvoice()
+    } catch (err: unknown) {
+      setToast({
+        message: err instanceof Error ? err.message : "Failed to undo material return",
+        type: "error",
+      })
+    } finally {
+      setUndoSubmitting(false)
     }
   }
 
@@ -967,21 +1076,31 @@ Thank you.`
                         const ordered = Number(item.qty) || 0
                         const itemFulfilments = normalizeFulfilments(item.fulfilments)
                         const fulfilledFromRows = lineFulfilledQuantity(itemFulfilments)
-                        const returnedFromRows = lineReturnedQuantity(itemFulfilments)
+                        const netReturnedFromRows = lineReturnedQuantity(itemFulfilments)
+                        const returnedGrossFromRows = lineReturnedGrossQuantity(itemFulfilments)
+                        const undoFromRows = lineUndoReturnQuantity(itemFulfilments)
                         const fulfilled =
                           itemFulfilments.length > 0
                             ? fulfilledFromRows
                             : Number(item.fulfilled_quantity ?? 0)
-                        const returned =
+                        const returnedGross =
                           itemFulfilments.length > 0
-                            ? returnedFromRows
+                            ? returnedGrossFromRows
                             : Number(item.returned_quantity ?? 0)
+                        const undoReturned =
+                          itemFulfilments.length > 0
+                            ? undoFromRows
+                            : Number(item.undo_return_quantity ?? 0)
+                        const netReturned =
+                          itemFulfilments.length > 0
+                            ? netReturnedFromRows
+                            : Number(item.net_returned_quantity ?? item.returned_quantity ?? 0)
                         const returnable =
                           itemFulfilments.length > 0
-                            ? returnableQuantity(fulfilled, returned)
+                            ? returnableQuantity(fulfilled, netReturned)
                             : Number(
                                 item.returnable_quantity ??
-                                  returnableQuantity(fulfilled, returned)
+                                  returnableQuantity(fulfilled, netReturned)
                               )
                         const remaining =
                           source === "direct_sale"
@@ -1004,12 +1123,13 @@ Thank you.`
                                 <div className="text-xs text-slate-500 tabular-nums">
                                   Ordered {ordered}
                                   {" · "}Fulfilled {fulfilled}
-                                  {" · "}Returned {returned}
+                                  {" · "}Returned {returnedGross}
+                                  {" · "}Undo return {undoReturned}
+                                  {" · "}Net returned {netReturned}
                                   {" · "}Returnable {returnable}
                                   {" · "}Remaining to fulfil {remaining}
                                   {stock != null && <>{" · "}Stock {Number(stock)}</>}
                                 </div>
-                                {/* History/return UI depends on returnable fulfilments, not remaining_to_fulfil. */}
                                 {itemFulfilments.length > 0 && (
                                   <div className="rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/40 p-2 space-y-2">
                                     <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1017,11 +1137,29 @@ Thank you.`
                                     </div>
                                     {itemFulfilments.map((f) => {
                                       const fQty = Number(f.quantity) || 0
-                                      const fRet = Number(f.quantity_returned || 0)
+                                      const fNetRet =
+                                        Number(
+                                          f.net_returned_quantity != null
+                                            ? f.net_returned_quantity
+                                            : f.quantity_returned
+                                        ) || 0
+                                      const fReturnedGross =
+                                        Number(f.returned_gross_quantity) ||
+                                        normalizeReturns(f.returns).reduce(
+                                          (s, r) => s + (Number(r.quantity) || 0),
+                                          0
+                                        )
+                                      const fUndo =
+                                        Number(f.undo_return_quantity) ||
+                                        normalizeReturns(f.returns).reduce(
+                                          (s, r) => s + (Number(r.quantity_undone) || 0),
+                                          0
+                                        )
                                       const fReturnable = fulfilmentReturnableQuantity({
                                         id: String(f.id),
                                         quantity: fQty,
-                                        quantity_returned: fRet,
+                                        quantity_returned: fNetRet,
+                                        net_returned_quantity: fNetRet,
                                         status: f.status,
                                       })
                                       const fStatus = String(f.status || "active")
@@ -1032,70 +1170,148 @@ Thank you.`
                                         fulfilment: {
                                           id: String(f.id),
                                           quantity: fQty,
-                                          quantity_returned: fRet,
+                                          quantity_returned: fNetRet,
+                                          net_returned_quantity: fNetRet,
                                           status: fStatus,
                                         },
                                       })
+                                      const fReturns = normalizeReturns(f.returns)
                                       return (
                                         <div
                                           key={String(f.id)}
-                                          className="flex flex-wrap items-start justify-between gap-2 text-xs"
+                                          className="space-y-2 text-xs"
                                         >
-                                          <div className="space-y-0.5 tabular-nums text-slate-600 dark:text-slate-300">
-                                            <div>
-                                              Fulfilled {fQty}
-                                              {" · "}Returned {fRet}
-                                              {" · "}Returnable {fReturnable}
+                                          <div className="flex flex-wrap items-start justify-between gap-2">
+                                            <div className="space-y-0.5 tabular-nums text-slate-600 dark:text-slate-300">
+                                              <div>
+                                                Fulfilled {fQty}
+                                                {" · "}Returned {fReturnedGross}
+                                                {" · "}Undo return {fUndo}
+                                                {" · "}Net returned {fNetRet}
+                                                {" · "}Returnable {fReturnable}
+                                              </div>
+                                              <div className="text-slate-400">
+                                                {f.created_at
+                                                  ? new Date(f.created_at).toLocaleDateString()
+                                                  : "—"}
+                                                {" · "}
+                                                {fStatus === "fully_returned"
+                                                  ? "Fully returned"
+                                                  : fReturnable > 0
+                                                    ? "Returnable"
+                                                    : "Active"}
+                                                {!readOnly && f.unit_cost != null && (
+                                                  <>
+                                                    {" · "}Cost{" "}
+                                                    {formatMoney(
+                                                      Number(f.unit_cost),
+                                                      invoice.currency_code
+                                                    )}
+                                                    /unit
+                                                  </>
+                                                )}
+                                              </div>
                                             </div>
-                                            <div className="text-slate-400">
-                                              {f.created_at
-                                                ? new Date(f.created_at).toLocaleDateString()
-                                                : "—"}
-                                              {" · "}
-                                              {fStatus === "fully_returned"
-                                                ? "Fully returned"
-                                                : fReturnable > 0
-                                                  ? "Returnable"
-                                                  : "Active"}
-                                              {!readOnly && f.unit_cost != null && (
-                                                <>
-                                                  {" · "}Cost{" "}
-                                                  {formatMoney(
-                                                    Number(f.unit_cost),
-                                                    invoice.currency_code
-                                                  )}
-                                                  /unit
-                                                </>
-                                              )}
-                                            </div>
+                                            {canReturnThis && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  if (!guardWriteAction(() => {})) return
+                                                  openReturnModal({
+                                                    fulfilment_id: String(f.id),
+                                                    invoice_item_id: item.id,
+                                                    material_name:
+                                                      item.material_name ||
+                                                      item.description ||
+                                                      "Material",
+                                                    quantity: fQty,
+                                                    quantity_returned: fNetRet,
+                                                    returnable: fReturnable,
+                                                    unit_cost:
+                                                      f.unit_cost != null
+                                                        ? Number(f.unit_cost)
+                                                        : null,
+                                                    status: fStatus,
+                                                    created_at: f.created_at ?? null,
+                                                  })
+                                                }}
+                                                className="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                              >
+                                                Return materials
+                                              </button>
+                                            )}
                                           </div>
-                                          {canReturnThis && (
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                if (!guardWriteAction(() => {})) return
-                                                openReturnModal({
-                                                  fulfilment_id: String(f.id),
-                                                  invoice_item_id: item.id,
-                                                  material_name:
-                                                    item.material_name ||
-                                                    item.description ||
-                                                    "Material",
-                                                  quantity: fQty,
-                                                  quantity_returned: fRet,
-                                                  returnable: fReturnable,
-                                                  unit_cost:
-                                                    f.unit_cost != null
-                                                      ? Number(f.unit_cost)
-                                                      : null,
-                                                  status: fStatus,
-                                                  created_at: f.created_at ?? null,
+                                          {fReturns.length > 0 && (
+                                            <div className="ml-1 space-y-1.5 border-l border-slate-200 pl-2 dark:border-slate-600">
+                                              {fReturns.map((ret) => {
+                                                const rQty = Number(ret.quantity) || 0
+                                                const rUndone = Number(ret.quantity_undone) || 0
+                                                const rUndoable = returnUndoableQuantity(ret)
+                                                const rStatus = String(ret.status || "active")
+                                                const canUndoThis = canShowUndoReturnAction({
+                                                  materialInventorySource: source,
+                                                  readOnly,
+                                                  invoiceStatus: invoiceStatusLower,
+                                                  returnRow: ret,
                                                 })
-                                              }}
-                                              className="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                                            >
-                                              Return materials
-                                            </button>
+                                                return (
+                                                  <div
+                                                    key={String(ret.id)}
+                                                    className="flex flex-wrap items-start justify-between gap-2"
+                                                  >
+                                                    <div className="tabular-nums text-slate-500 dark:text-slate-400">
+                                                      Return {rQty}
+                                                      {" · "}Already undone {rUndone}
+                                                      {" · "}Undoable {rUndoable}
+                                                      {" · "}
+                                                      {ret.created_at
+                                                        ? new Date(ret.created_at).toLocaleDateString()
+                                                        : "—"}
+                                                      {rStatus === "fully_undone"
+                                                        ? " · Fully undone"
+                                                        : rStatus === "partially_undone"
+                                                          ? " · Partially undone"
+                                                          : ""}
+                                                    </div>
+                                                    {canUndoThis && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          if (!guardWriteAction(() => {})) return
+                                                          openUndoModal({
+                                                            return_id: String(ret.id),
+                                                            fulfilment_id: String(f.id),
+                                                            invoice_item_id: item.id,
+                                                            material_name:
+                                                              item.material_name ||
+                                                              item.description ||
+                                                              "Material",
+                                                            quantity: rQty,
+                                                            quantity_undone: rUndone,
+                                                            undoable: rUndoable,
+                                                            unit_cost:
+                                                              ret.unit_cost != null
+                                                                ? Number(ret.unit_cost)
+                                                                : f.unit_cost != null
+                                                                  ? Number(f.unit_cost)
+                                                                  : null,
+                                                            status: rStatus,
+                                                            stock:
+                                                              stock != null
+                                                                ? Number(stock)
+                                                                : null,
+                                                            created_at: ret.created_at ?? null,
+                                                          })
+                                                        }}
+                                                        className="shrink-0 rounded border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-50 dark:border-amber-600 dark:bg-slate-800 dark:text-amber-200 dark:hover:bg-slate-700"
+                                                      >
+                                                        Undo return
+                                                      </button>
+                                                    )}
+                                                  </div>
+                                                )
+                                              })}
+                                            </div>
                                           )}
                                         </div>
                                       )
@@ -1586,6 +1802,107 @@ Thank you.`
                 className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
                 {returnSubmitting ? "Returning…" : "Confirm return"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {undoTarget && invoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => {
+              if (!undoSubmitting) {
+                setUndoTarget(null)
+                setUndoIdempotencyKey(null)
+                setUndoReason("")
+              }
+            }}
+          />
+          <div
+            className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">Undo return</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Undo this material return when the item was recorded as returned by mistake or was
+              handed back to the customer. Stock will decrease again and the original material cost
+              will be restored. This does not change the customer invoice or credit note.
+            </p>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-600 p-3 space-y-1 text-sm">
+              <div className="font-medium text-slate-900 dark:text-white">
+                {undoTarget.material_name}
+              </div>
+              <div className="text-xs text-slate-500 tabular-nums">
+                Original returned {undoTarget.quantity}
+                {" · "}Already undone {undoTarget.quantity_undone}
+                {" · "}Max undoable {undoTarget.undoable}
+                {undoTarget.stock != null && <>{" · "}Available stock {undoTarget.stock}</>}
+              </div>
+              {!readOnly && undoTarget.unit_cost != null && (
+                <div className="text-xs text-slate-400 tabular-nums">
+                  Snapshotted cost{" "}
+                  {formatMoney(undoTarget.unit_cost, invoice.currency_code)}
+                  /unit (used to restore COGS)
+                </div>
+              )}
+            </div>
+            <label className="block mt-4 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Quantity to undo
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={undoTarget.undoable}
+              step="any"
+              value={undoQty}
+              disabled={undoSubmitting}
+              onChange={(e) => {
+                const raw = Number(e.target.value)
+                const qty = isNaN(raw)
+                  ? 0
+                  : Math.min(Math.max(0, raw), undoTarget.undoable)
+                setUndoQty(qty)
+              }}
+              className="mt-1 w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm tabular-nums"
+            />
+            <label className="block mt-3 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Reason (optional)
+            </label>
+            <input
+              type="text"
+              value={undoReason}
+              disabled={undoSubmitting}
+              maxLength={500}
+              onChange={(e) => setUndoReason(e.target.value)}
+              className="mt-1 w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm"
+              placeholder="e.g. Returned by mistake"
+            />
+            <p className="mt-3 text-xs text-slate-500">
+              Stock will decrease and material cost will be restored. Customer balance, credit notes,
+              and invoice revenue are unchanged.
+            </p>
+            <div className="flex gap-3 pt-5">
+              <button
+                type="button"
+                disabled={undoSubmitting}
+                onClick={() => {
+                  setUndoTarget(null)
+                  setUndoIdempotencyKey(null)
+                  setUndoReason("")
+                }}
+                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={undoSubmitting || !(undoQty > 0)}
+                onClick={() => void handleUndoSubmit()}
+                className="flex-1 bg-amber-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-800 disabled:opacity-50 transition-colors"
+              >
+                {undoSubmitting ? "Undoing…" : "Confirm undo return"}
               </button>
             </div>
           </div>
