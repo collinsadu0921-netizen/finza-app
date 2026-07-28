@@ -3,10 +3,14 @@
 import Link from "next/link"
 import { DEFAULT_PLATFORM_CURRENCY_CODE } from "@/lib/currency"
 import { formatMoney } from "@/lib/money"
+import {
+  formatServiceActivityDescription,
+  type ServiceActivityType,
+} from "@/lib/dashboard/formatServiceActivityDescription"
 
 export type ActivityItem = {
   id: string
-  type: "invoice" | "expense" | "payment" | "customer" | "email"
+  type: ServiceActivityType
   description: string
   amount?: number | null
   currencyCode?: string
@@ -30,45 +34,13 @@ const TYPE_DOT: Record<string, string> = {
   invoice: "bg-blue-500",
   payment: "bg-emerald-500",
   expense: "bg-amber-500",
+  bill: "bg-violet-500",
+  bill_payment: "bg-violet-400",
   customer: "bg-purple-500",
   email: "bg-sky-500",
 }
 
 const DEFAULT_MAX_ITEMS = 5
-
-const INVOICE_NUMBER_RE = /\b(INV-[\w-]+)\b/i
-
-/** Display-only copy; does not change API payloads. */
-function formatActivityDescription(item: ActivityItem): string {
-  const raw = item.description?.trim() || ""
-  const invNum = raw.match(INVOICE_NUMBER_RE)?.[1]
-
-  switch (item.type) {
-    case "payment": {
-      if (invNum) return `Payment received — Invoice ${invNum}`
-      if (/^payment received/i.test(raw)) return raw
-      if (/^payment/i.test(raw)) return raw.replace(/^payment/i, "Payment received")
-      return raw ? `Payment received — ${raw}` : "Payment received"
-    }
-    case "invoice": {
-      if (invNum) return `Invoice created — ${invNum}`
-      if (/^invoice created/i.test(raw)) return raw
-      return raw ? `Invoice created — ${raw}` : "Invoice activity"
-    }
-    case "expense": {
-      if (/^expense/i.test(raw)) return raw.replace(/^expense/i, "Expense recorded")
-      return raw ? `Expense recorded — ${raw}` : "Expense recorded"
-    }
-    case "customer": {
-      if (/^new customer/i.test(raw)) return raw
-      return raw ? `New customer — ${raw}` : "New customer added"
-    }
-    case "email":
-      return raw || "Email update"
-    default:
-      return raw || "Activity"
-  }
-}
 
 export default function RecentActivityFeed({
   items = [],
@@ -118,7 +90,7 @@ export default function RecentActivityFeed({
               const dot = TYPE_DOT[item.type] ?? "bg-slate-400"
               const displayCurrency = item.currencyCode ?? currencyCode
               const isFx = item.currencyCode && item.currencyCode !== currencyCode
-              const label = formatActivityDescription(item)
+              const label = formatServiceActivityDescription(item)
 
               const row = (
                 <div className="flex items-start gap-3 px-4 py-2.5 text-sm">

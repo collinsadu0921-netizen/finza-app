@@ -4,8 +4,13 @@
 
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { supabaseErrorDiag, timedStepMs, type createRouteDiag } from "@/lib/server/routeDiagnostics"
+import {
+  expenseDetailHref,
+  supplierBillDetailHref,
+  type ServiceActivityType,
+} from "@/lib/dashboard/formatServiceActivityDescription"
 
-export type ActivityType = "invoice" | "expense" | "payment" | "customer" | "email"
+export type ActivityType = ServiceActivityType
 
 export type ServiceDashboardActivityItem = {
   id: string
@@ -20,7 +25,8 @@ export type ServiceDashboardActivityItem = {
 const SOURCE_TYPE_MAP: Record<string, Exclude<ActivityType, "email">> = {
   invoice: "invoice",
   credit_note: "invoice",
-  bill: "expense",
+  bill: "bill",
+  bill_payment: "bill_payment",
   expense: "expense",
   purchase: "expense",
   payment: "payment",
@@ -87,10 +93,14 @@ function journalAmountFromRow(e: JournalActivityRow): number {
   return 0
 }
 
+function mapActivityType(e: JournalActivityRow): Exclude<ActivityType, "email"> {
+  const srcRaw = ((e.source_type ?? e.reference_type ?? "journal") as string).toLowerCase()
+  return SOURCE_TYPE_MAP[srcRaw] ?? "expense"
+}
+
 function basicJournalActivityItems(entries: JournalActivityRow[]): ServiceDashboardActivityItem[] {
   return entries.map((e) => {
-    const srcRaw = ((e.source_type ?? e.reference_type ?? "journal") as string).toLowerCase()
-    const type: Exclude<ActivityType, "email"> = SOURCE_TYPE_MAP[srcRaw] ?? "expense"
+    const type = mapActivityType(e)
     const rawDesc = e.description
     const description =
       rawDesc ||
@@ -115,6 +125,7 @@ async function buildJournalActivityItems(
   const billIds: string[] = []
   const expenseIds: string[] = []
   const paymentIds: string[] = []
+  const billPaymentIds: string[] = []
 
   for (const e of entries) {
     const refId = e.reference_id
@@ -123,40 +134,103 @@ async function buildJournalActivityItems(
     if (refType === "invoice") invoiceIds.push(refId)
     else if (refType === "bill") billIds.push(refId)
     else if (refType === "expense") expenseIds.push(refId)
+    else if (refType === "bill_payment") billPaymentIds.push(refId)
     else if (refType === "payment" || refType === "receipt" || refType === "customer_payment")
       paymentIds.push(refId)
   }
 
-  const [{ data: invDocs }, { data: billDocs }, { data: expDocs }, { data: paymentRows }] =
-    await Promise.all([
-      invoiceIds.length
-        ? supabase.from("invoices").select("id, currency_code, total").in("id", invoiceIds)
-        : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
-      billIds.length
-        ? supabase.from("bills").select("id, currency_code, total").in("id", billIds)
-        : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
-      expenseIds.length
-        ? supabase.from("expenses").select("id, currency_code, total").in("id", expenseIds)
-        : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
-      paymentIds.length
-        ? supabase
-            .from("payments")
-            .select("id, invoice_id, amount")
-            .in("id", paymentIds)
-            .is("deleted_at", null)
-        : Promise.resolve({
-            data: [] as { id: string; invoice_id: string; amount: number | null }[],
-          }),
-    ])
+  const [
+    { data: invDocs },
+    { data: billDocs },
+    { data: expDocs },
+    { data: paymentRows },
+    { data: billPaymentRows },
+  ] = await Promise.all([
+    invoiceIds.length
+      ? supabase.from("invoices").select("id, currency_code, total").in("id", invoiceIds)
+      : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
+    billIds.length
+      ? supabase
+          .from("bills")
+          .select("id, currency_code, total, bill_number, supplier_name")
+          .in("id", billIds)
+      : Promise.resolve({
+          data: [] as {
+            id: string
+            currency_code: string | null
+            total: number | null
+            bill_number: string | null
+            supplier_name: string | null
+          }[],
+        }),
+    expenseIds.length
+      ? supabase.from("expenses").select("id, currency_code, total").in("id", expenseIds)
+      : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
+    paymentIds.length
+      ? supabase
+          .from("payments")
+          .select("id, invoice_id, amount")
+          .in("id", paymentIds)
+          .is("deleted_at", null)
+      : Promise.resolve({
+          data: [] as { id: string; invoice_id: string; amount: number | null }[],
+        }),
+    billPaymentIds.length
+      ? supabase
+          .from("bill_payments")
+          .select("id, bill_id, amount")
+          .in("id", billPaymentIds)
+      : Promise.resolve({
+          data: [] as { id: string; bill_id: string; amount: number | null }[],
+        }),
+  ])
 
   const docMap = new Map<string, DocCurrency>()
   for (const d of [...(invDocs ?? []), ...(billDocs ?? []), ...(expDocs ?? [])]) {
     docMap.set(d.id, { currency_code: d.currency_code, total: d.total })
   }
 
+  const billMeta = new Map<
+    string,
+    { bill_number: string | null; supplier_name: string | null }
+  >()
+  for (const b of billDocs ?? []) {
+    billMeta.set(b.id, {
+      bill_number: b.bill_number,
+      supplier_name: b.supplier_name,
+    })
+  }
+
   const paymentInvoiceMap = new Map<string, { invoice_id: string; amount: number | null }>()
   for (const p of paymentRows ?? []) {
     paymentInvoiceMap.set(p.id, { invoice_id: p.invoice_id, amount: p.amount })
+  }
+
+  const billPaymentMap = new Map<string, { bill_id: string; amount: number | null }>()
+  for (const p of billPaymentRows ?? []) {
+    billPaymentMap.set(p.id, { bill_id: p.bill_id, amount: p.amount })
+  }
+
+  // Resolve bill docs referenced via bill_payment only
+  const missingBillIds = [
+    ...new Set(
+      [...billPaymentMap.values()]
+        .map((p) => p.bill_id)
+        .filter((id) => id && !docMap.has(id))
+    ),
+  ]
+  if (missingBillIds.length > 0) {
+    const { data: payBillDocs } = await supabase
+      .from("bills")
+      .select("id, currency_code, total, bill_number, supplier_name")
+      .in("id", missingBillIds)
+    for (const d of payBillDocs ?? []) {
+      docMap.set(d.id, { currency_code: d.currency_code, total: d.total })
+      billMeta.set(d.id, {
+        bill_number: d.bill_number,
+        supplier_name: d.supplier_name,
+      })
+    }
   }
 
   const paymentInvoiceIds = [...new Set([...paymentInvoiceMap.values()].map((p) => p.invoice_id))]
@@ -171,26 +245,41 @@ async function buildJournalActivityItems(
     }
   }
 
+  const knownBillIds = new Set(billMeta.keys())
+  const knownExpenseIds = new Set((expDocs ?? []).map((d) => d.id))
+
   return entries.map((e) => {
     const journalAmount = journalAmountFromRow(e)
-    const srcRaw = ((e.source_type ?? e.reference_type ?? "journal") as string).toLowerCase()
-    const type: Exclude<ActivityType, "email"> = SOURCE_TYPE_MAP[srcRaw] ?? "expense"
+    const type = mapActivityType(e)
 
     const refId = e.reference_id
     const refType = e.reference_type?.toLowerCase()
     const paymentLink = refId ? paymentInvoiceMap.get(refId) : null
+    const billPaymentLink = refId ? billPaymentMap.get(refId) : null
     const invoiceIdForPayment = paymentLink?.invoice_id
+    const billIdForPayment = billPaymentLink?.bill_id
+
     const doc =
       refType === "invoice" && refId
         ? docMap.get(refId)
-        : invoiceIdForPayment
-          ? docMap.get(invoiceIdForPayment)
-          : refId
+        : refType === "bill" && refId
+          ? docMap.get(refId)
+          : refType === "expense" && refId
             ? docMap.get(refId)
-            : null
+            : billIdForPayment
+              ? docMap.get(billIdForPayment)
+              : invoiceIdForPayment
+                ? docMap.get(invoiceIdForPayment)
+                : refId
+                  ? docMap.get(refId)
+                  : null
     const currencyCode: string | undefined = doc?.currency_code ?? undefined
     const paymentAmount =
-      paymentLink?.amount != null ? Math.round(Number(paymentLink.amount) * 100) / 100 : null
+      billPaymentLink?.amount != null
+        ? Math.round(Number(billPaymentLink.amount) * 100) / 100
+        : paymentLink?.amount != null
+          ? Math.round(Number(paymentLink.amount) * 100) / 100
+          : null
     const amount =
       paymentAmount != null
         ? paymentAmount
@@ -199,22 +288,42 @@ async function buildJournalActivityItems(
           : journalAmount
 
     let href: string | undefined
-    const srcType = (e.source_type ?? e.reference_type)?.toLowerCase()
-    if (srcType === "invoice" && refId) href = `/service/invoices/${refId}`
-    else if ((srcType === "bill" || srcType === "expense") && refId)
-      href = `/service/expenses/${refId}`
-    else if (
-      (srcType === "payment" || srcType === "receipt" || srcType === "customer_payment") &&
-      invoiceIdForPayment
-    )
+    if (type === "invoice" && refId && docMap.has(refId)) {
+      href = `/service/invoices/${refId}`
+    } else if (type === "bill" && refId && knownBillIds.has(refId)) {
+      href = supplierBillDetailHref(refId)
+    } else if (type === "expense" && refId && knownExpenseIds.has(refId)) {
+      href = expenseDetailHref(refId)
+    } else if (type === "bill_payment" && billIdForPayment && knownBillIds.has(billIdForPayment)) {
+      href = supplierBillDetailHref(billIdForPayment)
+    } else if (
+      (type === "payment") &&
+      invoiceIdForPayment &&
+      docMap.has(invoiceIdForPayment)
+    ) {
       href = `/service/invoices/${invoiceIdForPayment}`
+    }
 
-    const rawDesc = e.description
-    const description =
-      rawDesc ||
+    let description =
+      e.description ||
       (e.reference_type
         ? `${e.reference_type.replace(/_/g, " ")} entry`
         : "Journal entry")
+
+    if (type === "bill" && refId) {
+      const meta = billMeta.get(refId)
+      if (meta?.bill_number) {
+        const supplier = meta.supplier_name?.trim()
+        description = supplier
+          ? `Bill #${meta.bill_number} — ${supplier}`
+          : `Bill #${meta.bill_number}`
+      }
+    } else if (type === "bill_payment" && billIdForPayment) {
+      const meta = billMeta.get(billIdForPayment)
+      if (meta?.bill_number) {
+        description = `Payment for Bill #${meta.bill_number}`
+      }
+    }
 
     return {
       id: e.id,
@@ -364,4 +473,20 @@ export async function loadServiceDashboardActivityFeed(
   })
 
   return { items: merged }
+}
+
+/** Test helper: map journal reference/source to activity type. */
+export function mapJournalSourceToActivityType(
+  sourceType: string | null | undefined,
+  referenceType?: string | null
+): Exclude<ActivityType, "email"> {
+  return mapActivityType({
+    id: "",
+    created_at: "",
+    description: null,
+    source_type: sourceType ?? null,
+    reference_type: referenceType ?? null,
+    reference_id: null,
+    journal_amount: null,
+  })
 }
