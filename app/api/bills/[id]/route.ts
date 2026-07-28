@@ -9,6 +9,51 @@ import {
   enforceServiceWorkspaceWriteAccess,
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { getCurrencySymbol } from "@/lib/currency"
+import { resolveMaterialInventoryAccount } from "@/lib/bills/resolveMaterialInventoryAccount"
+
+type HeaderDiscountRejection = {
+  error: string
+  code: "unsupported_bill_level_discount"
+}
+
+/** Fail closed: omitted/null OK; zero OK; any non-zero or malformed header discount → reject. */
+function rejectUnsupportedBillLevelDiscount(
+  values: unknown[]
+): HeaderDiscountRejection | null {
+  const error =
+    "unsupported_bill_level_discount: bill-level discounts are not supported; use line-level discount_amount on items"
+  const code = "unsupported_bill_level_discount" as const
+
+  for (const value of values) {
+    if (value === undefined || value === null) continue
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value) || value !== 0) {
+        return { error, code }
+      }
+      continue
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim()
+      if (trimmed === "") {
+        return { error, code }
+      }
+      if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) {
+        return { error, code }
+      }
+      const n = Number(trimmed)
+      if (!Number.isFinite(n) || n !== 0) {
+        return { error, code }
+      }
+      continue
+    }
+
+    return { error, code }
+  }
+
+  return null
+}
 
 export async function GET(
   request: NextRequest,
@@ -154,7 +199,23 @@ export async function PUT(
       fx_rate: body_fx_rate,
       material_id: body_material_id,
       quantity: body_import_quantity,
+      discount_amount: header_discount_amount,
+      bill_discount_amount,
     } = body
+
+    const headerDiscountRejection = rejectUnsupportedBillLevelDiscount([
+      header_discount_amount,
+      bill_discount_amount,
+    ])
+    if (headerDiscountRejection) {
+      return NextResponse.json(
+        {
+          error: headerDiscountRejection.error,
+          code: headerDiscountRejection.code,
+        },
+        { status: 400 }
+      )
+    }
 
     // Verify bill exists and belongs to this business
     const { data: existingBill } = await supabase
@@ -168,6 +229,17 @@ export async function PUT(
       return NextResponse.json(
         { error: "Bill not found" },
         { status: 404 }
+      )
+    }
+
+    if (existingBill.status !== "draft" && items !== undefined) {
+      return NextResponse.json(
+        {
+          error:
+            "Posted bill lines cannot be edited or replaced. Draft bills may still be edited.",
+          code: "posted_bill_lines_locked",
+        },
+        { status: 409 }
       )
     }
 
@@ -373,24 +445,38 @@ export async function PUT(
       )
     }
 
-    // Update line items for standard bills only
-    if (!isImportBill && items && items.length > 0) {
+    // Update line items for draft standard bills only (posted lines locked above)
+    if (
+      existingBill.status === "draft" &&
+      !isImportBill &&
+      items &&
+      items.length > 0
+    ) {
       await supabase.from("bill_items").delete().eq("bill_id", billId)
 
-      const hasInventoryLines = items.some(
-        (item: any) => item.material_id != null && String(item.material_id).trim() !== ""
+      const hasMaterialLines = items.some(
+        (item: any) =>
+          item.material_id != null && String(item.material_id).trim() !== ""
       )
-      let inventoryAccountId: string | null = null
-      if (hasInventoryLines) {
-        const { data: invAcct } = await supabase
-          .from("chart_of_accounts")
-          .select("id")
-          .eq("business_id", business.id)
-          .eq("code", "1450")
-          .maybeSingle()
-        inventoryAccountId = invAcct?.id ?? null
+      let materialCoaId: string | null = null
+      if (hasMaterialLines) {
+        const resolved = await resolveMaterialInventoryAccount(
+          supabase,
+          business.id
+        )
+        if (!resolved.ok) {
+          return NextResponse.json(
+            {
+              error: resolved.error,
+              code: resolved.code,
+            },
+            { status: 400 }
+          )
+        }
+        materialCoaId = resolved.chartOfAccountsId
       }
 
+      // bill_items.account_id → chart_of_accounts(id). Materials store CoA 1450.
       const billItems = items.map((item: any) => {
         const mid =
           item.material_id != null && String(item.material_id).trim() !== ""
@@ -406,7 +492,7 @@ export async function PUT(
             (Number(item.qty) || 0) * (Number(item.unit_price) || 0) -
             (Number(item.discount_amount) || 0),
           material_id: mid,
-          account_id: mid ? inventoryAccountId : null,
+          account_id: mid ? materialCoaId : item.account_id || null,
         }
       })
 

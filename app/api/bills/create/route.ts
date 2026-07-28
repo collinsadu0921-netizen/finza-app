@@ -11,6 +11,51 @@ import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes 
 import { createAuditLog } from "@/lib/auditLog"
 import { getCurrencySymbol } from "@/lib/currency"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { resolveMaterialInventoryAccount } from "@/lib/bills/resolveMaterialInventoryAccount"
+
+type HeaderDiscountRejection = {
+  error: string
+  code: "unsupported_bill_level_discount"
+}
+
+/** Fail closed: omitted/null OK; zero OK; any non-zero or malformed header discount → reject. */
+function rejectUnsupportedBillLevelDiscount(
+  values: unknown[]
+): HeaderDiscountRejection | null {
+  const error =
+    "unsupported_bill_level_discount: bill-level discounts are not supported; use line-level discount_amount on items"
+  const code = "unsupported_bill_level_discount" as const
+
+  for (const value of values) {
+    if (value === undefined || value === null) continue
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value) || value !== 0) {
+        return { error, code }
+      }
+      continue
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim()
+      if (trimmed === "") {
+        return { error, code }
+      }
+      if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) {
+        return { error, code }
+      }
+      const n = Number(trimmed)
+      if (!Number.isFinite(n) || n !== 0) {
+        return { error, code }
+      }
+      continue
+    }
+
+    return { error, code }
+  }
+
+  return null
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,7 +107,25 @@ export async function POST(request: NextRequest) {
       material_id: import_material_id = null,
       quantity: import_quantity = 1,
       incoming_document_id,
+      // Unsupported bill-level discount fields (use line item discount_amount)
+      discount_amount: header_discount_amount,
+      bill_discount_amount,
     } = body
+
+    const headerDiscountRejection = rejectUnsupportedBillLevelDiscount([
+      header_discount_amount,
+      bill_discount_amount,
+    ])
+    if (headerDiscountRejection) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: headerDiscountRejection.error,
+          code: headerDiscountRejection.code,
+        },
+        { status: 400 }
+      )
+    }
 
     // Validate required fields
     if (!business_id) {
@@ -225,16 +288,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Determine initial status
-    let finalStatus = status
-    if (status === "draft") {
-      finalStatus = "draft"
-    } else {
-      finalStatus = "open"
-    }
+    // Standard bills: always insert as draft, then insert lines, then open if requested
+    // so the post trigger never runs before bill_items exist.
+    const wantsOpen = status !== "draft"
+    const insertStatus = bill_type === "standard" ? "draft" : wantsOpen ? "open" : "draft"
 
     // Create bill
-    const { data: bill, error: billError } = await supabase
+    let { data: bill, error: billError } = await supabase
       .from("bills")
       .insert({
         business_id,
@@ -257,7 +317,7 @@ export async function POST(request: NextRequest) {
         wht_rate_code: apply_wht ? wht_rate_code : null,
         wht_rate: apply_wht ? wht_rate : null,
         wht_amount: apply_wht ? wht_amount : 0,
-        status: finalStatus,
+        status: insertStatus,
         attachment_path: attachment_path || null,
         // Import bill fields
         bill_type,
@@ -312,40 +372,113 @@ export async function POST(request: NextRequest) {
 
     // Create bill items (standard bills only — import bills use the breakdown fields)
     if (bill_type === "standard" && items?.length > 0) {
-      // Resolve inventory account UUID (1450) once if any line has a material_id
-      const hasInventoryLines = items.some((item: any) => item.material_id)
-      let inventoryAccountId: string | null = null
-      if (hasInventoryLines) {
-        const { data: invAcct } = await supabase
-          .from("chart_of_accounts")
-          .select("id")
-          .eq("business_id", business_id)
-          .eq("code", "1450")
-          .single()
-        inventoryAccountId = invAcct?.id ?? null
+      const hasMaterialLines = items.some(
+        (item: any) =>
+          item.material_id != null && String(item.material_id).trim() !== ""
+      )
+      let materialCoaId: string | null = null
+      if (hasMaterialLines) {
+        const resolved = await resolveMaterialInventoryAccount(
+          supabase,
+          business_id
+        )
+        if (!resolved.ok) {
+          const { error: cleanupError } = await supabase
+            .from("bills")
+            .delete()
+            .eq("id", bill.id)
+          return NextResponse.json(
+            {
+              success: false,
+              error: resolved.error,
+              code: resolved.code,
+              ...(cleanupError
+                ? {
+                    cleanup_failed: true,
+                    bill_id: bill.id,
+                    cleanup_error: cleanupError.message,
+                  }
+                : {}),
+            },
+            { status: 400 }
+          )
+        }
+        materialCoaId = resolved.chartOfAccountsId
       }
 
-      const billItems = items.map((item: any) => ({
-        bill_id: bill.id,
-        description: item.description || "",
-        qty: Number(item.qty) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        discount_amount: Number(item.discount_amount) || 0,
-        line_subtotal: (Number(item.qty) || 0) * (Number(item.unit_price) || 0) - (Number(item.discount_amount) || 0),
-        material_id: item.material_id || null,
-        account_id: item.material_id ? inventoryAccountId : null,
-      }))
+      // bill_items.account_id → chart_of_accounts(id). Materials store CoA 1450;
+      // post_bill_to_ledger still routes material_id lines to accounts.code 1450
+      // even if an older row has a null account_id.
+      const billItems = items.map((item: any) => {
+        const mid =
+          item.material_id != null && String(item.material_id).trim() !== ""
+            ? String(item.material_id).trim()
+            : null
+        return {
+          bill_id: bill.id,
+          description: item.description || "",
+          qty: Number(item.qty) || 0,
+          unit_price: Number(item.unit_price) || 0,
+          discount_amount: Number(item.discount_amount) || 0,
+          line_subtotal:
+            (Number(item.qty) || 0) * (Number(item.unit_price) || 0) -
+            (Number(item.discount_amount) || 0),
+          material_id: mid,
+          account_id: mid ? materialCoaId : item.account_id || null,
+        }
+      })
 
       const { error: itemsError } = await supabase.from("bill_items").insert(billItems)
 
       if (itemsError) {
         console.error("Error creating bill items:", itemsError)
-        await supabase.from("bills").delete().eq("id", bill.id)
+        const { error: cleanupError } = await supabase
+          .from("bills")
+          .delete()
+          .eq("id", bill.id)
+
+        // Never open/post on line failure. If cleanup fails, bill remains draft
+        // (cannot post without a later open) and the original insert error is reported.
         return NextResponse.json(
-          { success: false, error: itemsError.message || "Failed to create bill items.", details: itemsError },
+          {
+            success: false,
+            error: itemsError.message || "Failed to create bill items.",
+            details: itemsError,
+            ...(cleanupError
+              ? {
+                  cleanup_failed: true,
+                  bill_id: bill.id,
+                  cleanup_error: cleanupError.message,
+                }
+              : {}),
+          },
           { status: 500 }
         )
       }
+    }
+
+    if (bill_type === "standard" && wantsOpen) {
+      const { data: opened, error: openError } = await supabase
+        .from("bills")
+        .update({ status: "open" })
+        .eq("id", bill.id)
+        .eq("business_id", business_id)
+        .select()
+        .single()
+
+      if (openError || !opened) {
+        console.error("Error opening bill after lines:", openError)
+        return NextResponse.json(
+          {
+            success: false,
+            error: openError?.message || "Bill lines saved but failed to open bill for posting.",
+            details: openError,
+            bill_id: bill.id,
+          },
+          { status: 500 }
+        )
+      }
+      bill = opened
     }
 
     // Log audit entry
