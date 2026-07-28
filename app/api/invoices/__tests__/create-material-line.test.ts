@@ -192,6 +192,7 @@ describe("POST /api/invoices/create — material lines", () => {
         items: [
           {
             material_id: MATERIAL_ID,
+            material_inventory_source: "direct_sale",
             description: "Premium paint",
             qty: 1,
             unit_price: 450,
@@ -208,6 +209,7 @@ describe("POST /api/invoices/create — material lines", () => {
       expect.objectContaining({
         material_id: MATERIAL_ID,
         product_service_id: null,
+        material_inventory_source: "direct_sale",
         description: "Premium paint",
         unit_price: 450,
       }),

@@ -31,10 +31,16 @@ type Customer = {
   address?: string | null
 }
 
+type MaterialInventorySource = "direct_sale" | "job_usage"
+
 type InvoiceItem = {
   id: string
   product_id: string | null
   material_id?: string | null
+  material_inventory_source?: MaterialInventorySource | null
+  job_material_usage_id?: string | null
+  /** Max billable qty when source is job_usage */
+  _maxBillableQty?: number
   /** Service workspace: material lines use material picker instead of service catalog. */
   _lineKind?: "service" | "material"
   description: string
@@ -49,6 +55,24 @@ type InvoiceItem = {
   _rawPrice?: string
   _rawDiscount?: string
 }
+
+type BillableJobUsage = {
+  id: string
+  job_id: string
+  material_id: string
+  material_name: string | null
+  material_unit: string | null
+  quantity_used: number
+  quantity_billed: number
+  quantity_remaining_billable: number
+  created_at: string
+}
+
+type MaterialSourcePickerState = {
+  itemId: string
+  materialId: string
+  step: "choose" | "pick_usage"
+} | null
 
 type BillableMaterialOption = {
   id: string
@@ -100,7 +124,7 @@ type LineItemRowProps = {
   onCommit: (id: string, field: "quantity" | "price" | "discount_value") => void
   onRemove: (id: string) => void
   onSelectProduct: (itemId: string, productId: string) => void
-  onSelectMaterial?: (itemId: string, materialId: string) => void
+  onSelectMaterial?: (itemId: string, materialId: string | null) => void
 }
 
 const LineItemRow = memo(function LineItemRow({
@@ -124,8 +148,7 @@ const LineItemRow = memo(function LineItemRow({
             <MenuSelect
               value={item.material_id || ""}
               onValueChange={(v) => {
-                if (v && onSelectMaterial) onSelectMaterial(item.id, v)
-                else onUpdate(item.id, "material_id", null)
+                if (onSelectMaterial) onSelectMaterial(item.id, v || null)
               }}
               options={materialMenuOptions ?? [{ value: "", label: "Select material…" }]}
               placeholder="Select material…"
@@ -148,6 +171,16 @@ const LineItemRow = memo(function LineItemRow({
             rows={1}
             className="block w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 resize-none"
           />
+          {item.material_id && item.material_inventory_source === "direct_sale" && (
+            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600">
+              Direct from stock
+            </span>
+          )}
+          {item.material_id && item.material_inventory_source === "job_usage" && (
+            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-50 text-violet-700">
+              Already used on job
+            </span>
+          )}
         </div>
       </td>
       <td className="px-3 py-3 align-top sm:px-4">
@@ -291,6 +324,12 @@ function NewInvoicePageContent() {
     type: "success" | "error" | "info"
     duration?: number
   } | null>(null)
+
+  const [materialSourcePicker, setMaterialSourcePicker] = useState<MaterialSourcePickerState>(null)
+  const [billableUsages, setBillableUsages] = useState<BillableJobUsage[]>([])
+  const [loadingBillableUsages, setLoadingBillableUsages] = useState(false)
+  const [billableUsagesError, setBillableUsagesError] = useState("")
+  const [selectedUsageId, setSelectedUsageId] = useState("")
 
   const invoiceViewHref = (id: string) =>
     pathname?.startsWith("/service") ? `/service/invoices/${id}/view` : `/invoices/${id}/view`
@@ -496,7 +535,11 @@ function NewInvoicePageContent() {
         const numValue = value === "" || value === null || value === undefined
           ? 0
           : parseFloat(String(value))
-        updated[field] = isNaN(numValue) ? 0 : numValue
+        let parsed = isNaN(numValue) ? 0 : numValue
+        if (field === "quantity" && updated.material_inventory_source === "job_usage" && updated._maxBillableQty != null) {
+          parsed = Math.min(parsed, updated._maxBillableQty)
+        }
+        updated[field] = parsed
         updated.total = getLineTotal(updated)
       } else if (field === "_rawQty") {
         updated._rawQty = value
@@ -548,7 +591,7 @@ function NewInvoicePageContent() {
     }))
   }, [products])
 
-  const selectMaterial = useCallback((itemId: string, materialId: string) => {
+  const applyMaterialDirectSale = useCallback((itemId: string, materialId: string) => {
     const material = materials.find((m) => m.id === materialId)
     if (!material) return
     setItems(prev => prev.map(it => {
@@ -560,13 +603,121 @@ function NewInvoicePageContent() {
         material_id: materialId,
         product_id: null,
         _lineKind: "material" as const,
+        material_inventory_source: "direct_sale" as const,
+        job_material_usage_id: null,
+        _maxBillableQty: undefined,
         description: material.description || material.name,
         price,
         quantity: qty,
       }
       return { ...nextItem, total: getLineTotal(nextItem) }
     }))
+    setMaterialSourcePicker(null)
+    setBillableUsages([])
+    setSelectedUsageId("")
+    setBillableUsagesError("")
   }, [materials])
+
+  const applyMaterialJobUsage = useCallback((itemId: string, materialId: string, usage: BillableJobUsage) => {
+    const material = materials.find((m) => m.id === materialId)
+    if (!material) return
+    const maxQty = usage.quantity_remaining_billable
+    setItems(prev => prev.map(it => {
+      if (it.id !== itemId) return it
+      const qty = Math.min(it.quantity || 1, maxQty) || maxQty
+      const price = Number(material.sellingPrice) || 0
+      const nextItem = {
+        ...it,
+        material_id: materialId,
+        product_id: null,
+        _lineKind: "material" as const,
+        material_inventory_source: "job_usage" as const,
+        job_material_usage_id: usage.id,
+        _maxBillableQty: maxQty,
+        description: material.description || material.name,
+        price,
+        quantity: qty,
+      }
+      return { ...nextItem, total: getLineTotal(nextItem) }
+    }))
+    setMaterialSourcePicker(null)
+    setBillableUsages([])
+    setSelectedUsageId("")
+    setBillableUsagesError("")
+  }, [materials])
+
+  const fetchBillableUsages = useCallback(async (materialId: string) => {
+    if (!businessId || !selectedCustomerId) {
+      setBillableUsagesError("Select a customer first.")
+      return
+    }
+    setLoadingBillableUsages(true)
+    setBillableUsagesError("")
+    try {
+      const params = new URLSearchParams({
+        business_id: businessId,
+        customer_id: selectedCustomerId,
+        material_id: materialId,
+      })
+      if (selectedJobId) params.set("job_id", selectedJobId)
+      const res = await fetch(`/api/service/jobs/billable-material-usages?${params}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Failed to load job usages")
+      const usages = (data.usages ?? []) as BillableJobUsage[]
+      setBillableUsages(usages)
+      if (usages.length === 0) {
+        setBillableUsagesError("No billable job usages found for this material and customer.")
+      }
+    } catch (err: unknown) {
+      setBillableUsages([])
+      setBillableUsagesError(err instanceof Error ? err.message : "Failed to load job usages")
+    } finally {
+      setLoadingBillableUsages(false)
+    }
+  }, [businessId, selectedCustomerId, selectedJobId])
+
+  const handleMaterialSelect = useCallback((itemId: string, materialId: string | null) => {
+    if (!materialId) {
+      setItems(prev => prev.map(it => {
+        if (it.id !== itemId) return it
+        return {
+          ...it,
+          material_id: null,
+          material_inventory_source: null,
+          job_material_usage_id: null,
+          _maxBillableQty: undefined,
+          description: "",
+        }
+      }))
+      return
+    }
+    if (businessIndustry !== "service") {
+      const material = materials.find((m) => m.id === materialId)
+      if (!material) return
+      setItems(prev => prev.map(it => {
+        if (it.id !== itemId) return it
+        const qty = it.quantity || 1
+        const price = Number(material.sellingPrice) || 0
+        const nextItem = {
+          ...it,
+          material_id: materialId,
+          product_id: null,
+          _lineKind: "material" as const,
+          description: material.description || material.name,
+          price,
+          quantity: qty,
+        }
+        return { ...nextItem, total: getLineTotal(nextItem) }
+      }))
+      return
+    }
+    setMaterialSourcePicker({ itemId, materialId, step: "choose" })
+    setBillableUsages([])
+    setSelectedUsageId("")
+    setBillableUsagesError("")
+  }, [businessIndustry, materials])
+
+  const selectMaterial = handleMaterialSelect
 
   // -- Financial Calculations (Strictly Preserved) --
   // Calculate subtotal from line items (sum of all line totals)
@@ -664,6 +815,18 @@ function NewInvoicePageContent() {
     if (!businessId) { setError("Business not found."); return false }
     if (!selectedCustomerId) { setError("Please select a customer"); return false }
     if (items.length === 0) { setError("Please add at least one item"); return false }
+    if (businessIndustry === "service") {
+      for (const item of items) {
+        if (item.material_id && !item.material_inventory_source) {
+          setError("Each material line needs a supply source (direct from stock or already used on a job).")
+          return false
+        }
+        if (item.material_inventory_source === "job_usage" && !item.job_material_usage_id) {
+          setError("Job usage material lines require selecting a job usage.")
+          return false
+        }
+      }
+    }
     return true
   }
 
@@ -698,6 +861,8 @@ function NewInvoicePageContent() {
         items: items.map(item => ({
           product_service_id: item.material_id ? null : (item.product_id || null),
           material_id: item.material_id || null,
+          material_inventory_source: item.material_inventory_source ?? null,
+          job_material_usage_id: item.job_material_usage_id ?? null,
           description: item.description || "",
           qty: Number(item.quantity) || 0,
           unit_price: Number(item.price) || 0,
@@ -1318,8 +1483,6 @@ function NewInvoicePageContent() {
             </button>
           </div>
 
-          {/* --- Modals Helper --- */}
-
           {showCustomerModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               {/* Backdrop */}
@@ -1368,6 +1531,158 @@ function NewInvoicePageContent() {
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {materialSourcePicker && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/60"
+                onClick={() => {
+                  setMaterialSourcePicker(null)
+                  setBillableUsages([])
+                  setSelectedUsageId("")
+                  setBillableUsagesError("")
+                }}
+              />
+              <div
+                className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {materialSourcePicker.step === "choose" ? (
+                  <>
+                    <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">
+                      How is this material being supplied?
+                    </h3>
+                    <p className="text-sm text-slate-500 mb-4">
+                      Choose how stock and costs should be handled for this line.
+                    </p>
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => applyMaterialDirectSale(materialSourcePicker.itemId, materialSourcePicker.materialId)}
+                        className="w-full text-left rounded-lg border border-slate-200 p-4 hover:bg-slate-50 transition-colors dark:border-slate-600 dark:hover:bg-slate-700/50"
+                      >
+                        <div className="font-semibold text-slate-900 dark:text-white">Sell directly from stock</div>
+                        <p className="text-sm text-slate-500 mt-1">
+                          Use this when the material has not already been recorded on a job. Stock will reduce when you fulfil the material.
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMaterialSourcePicker((prev) =>
+                            prev ? { ...prev, step: "pick_usage" } : null
+                          )
+                          void fetchBillableUsages(materialSourcePicker.materialId)
+                        }}
+                        className="w-full text-left rounded-lg border border-slate-200 p-4 hover:bg-slate-50 transition-colors dark:border-slate-600 dark:hover:bg-slate-700/50"
+                      >
+                        <div className="font-semibold text-slate-900 dark:text-white">Already used on a job</div>
+                        <p className="text-sm text-slate-500 mt-1">
+                          Use this when the material was already consumed on a service job. Finza will charge the customer without reducing stock again.
+                        </p>
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMaterialSourcePicker(null)
+                        setBillableUsages([])
+                        setSelectedUsageId("")
+                        setBillableUsagesError("")
+                      }}
+                      className="mt-4 w-full border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">
+                      Select job usage
+                    </h3>
+                    <p className="text-sm text-slate-500 mb-4">
+                      Pick the job usage this invoice line should bill against.
+                    </p>
+                    {loadingBillableUsages && (
+                      <p className="text-sm text-slate-500 py-4">Loading eligible usages…</p>
+                    )}
+                    {billableUsagesError && (
+                      <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-2 rounded mb-3">
+                        {billableUsagesError}
+                      </div>
+                    )}
+                    {!loadingBillableUsages && billableUsages.length > 0 && (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {billableUsages.map((usage) => (
+                          <label
+                            key={usage.id}
+                            className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                              selectedUsageId === usage.id
+                                ? "border-blue-500 bg-blue-50/50 dark:bg-blue-900/20"
+                                : "border-slate-200 hover:bg-slate-50 dark:border-slate-600"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="job_usage"
+                              value={usage.id}
+                              checked={selectedUsageId === usage.id}
+                              onChange={() => setSelectedUsageId(usage.id)}
+                              className="mt-1"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium text-sm text-slate-900 dark:text-white">
+                                {usage.material_name ?? "Material"}
+                              </div>
+                              <div className="text-xs text-slate-500 mt-0.5 tabular-nums">
+                                Consumed {usage.quantity_used}
+                                {usage.material_unit ? ` ${usage.material_unit}` : ""}
+                                {" · "}Billed {usage.quantity_billed}
+                                {" · "}Remaining {usage.quantity_remaining_billable}
+                              </div>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMaterialSourcePicker((prev) =>
+                            prev ? { ...prev, step: "choose" } : null
+                          )
+                          setBillableUsages([])
+                          setSelectedUsageId("")
+                          setBillableUsagesError("")
+                        }}
+                        className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!selectedUsageId}
+                        onClick={() => {
+                          const usage = billableUsages.find((u) => u.id === selectedUsageId)
+                          if (usage) {
+                            applyMaterialJobUsage(
+                              materialSourcePicker.itemId,
+                              materialSourcePicker.materialId,
+                              usage
+                            )
+                          }
+                        }}
+                        className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        Confirm usage
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

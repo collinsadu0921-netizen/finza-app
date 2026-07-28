@@ -237,9 +237,77 @@ export async function GET(
       }
     }
 
+    // Enrich material lines with fulfilment / stock summary (read-only)
+    let enrichedItems = items || []
+    if (enrichedItems.length > 0) {
+      const materialItemIds = enrichedItems
+        .filter((it: { material_id?: string | null }) => it.material_id)
+        .map((it: { id: string }) => it.id)
+
+      if (materialItemIds.length > 0) {
+        const materialIds = [
+          ...new Set(
+            enrichedItems
+              .map((it: { material_id?: string | null }) => it.material_id)
+              .filter(Boolean) as string[]
+          ),
+        ]
+
+        const [{ data: fulfilments }, { data: stockRows }] = await Promise.all([
+          supabase
+            .from("invoice_material_fulfilments")
+            .select(
+              "id, invoice_item_id, quantity, quantity_returned, unit_cost, total_cost, status, movement_id, journal_entry_id, created_at"
+            )
+            .eq("invoice_id", invoiceId)
+            .in("invoice_item_id", materialItemIds),
+          materialIds.length
+            ? supabase
+                .from("service_material_inventory")
+                .select("id, name, quantity_on_hand")
+                .eq("business_id", scopedBusinessId)
+                .in("id", materialIds)
+            : Promise.resolve({ data: [] as { id: string; name: string; quantity_on_hand: number }[] }),
+        ])
+
+        const stockById = new Map(
+          (stockRows ?? []).map((s) => [s.id, s])
+        )
+        const fulfilmentsByItem = new Map<string, typeof fulfilments>()
+        for (const f of fulfilments ?? []) {
+          const list = fulfilmentsByItem.get(f.invoice_item_id) ?? []
+          list.push(f)
+          fulfilmentsByItem.set(f.invoice_item_id, list)
+        }
+
+        enrichedItems = enrichedItems.map((it: Record<string, unknown>) => {
+          if (!it.material_id) return it
+          const stock = stockById.get(String(it.material_id))
+          const itemFulfilments = fulfilmentsByItem.get(String(it.id)) ?? []
+          const fulfilledNet = itemFulfilments.reduce(
+            (sum, f) => sum + (Number(f.quantity) - Number(f.quantity_returned || 0)),
+            0
+          )
+          const ordered = Number(it.qty) || 0
+          const source = String(it.material_inventory_source ?? "")
+          return {
+            ...it,
+            material_name: stock?.name ?? null,
+            quantity_on_hand: stock != null ? Number(stock.quantity_on_hand) : null,
+            fulfilled_quantity: Math.round(fulfilledNet * 10000) / 10000,
+            remaining_fulfil_quantity:
+              source === "direct_sale"
+                ? Math.max(0, Math.round((ordered - fulfilledNet) * 10000) / 10000)
+                : 0,
+            fulfilments: itemFulfilments,
+          }
+        })
+      }
+    }
+
     const payload: Record<string, unknown> = {
       invoice,
-      items: items || [],
+      items: enrichedItems,
       payments: payments || [],
       creditNotes: creditNotes || [],
     }
@@ -356,7 +424,8 @@ export async function PUT(
       materialValidationForItems = await validateInvoiceLineMaterials(
         supabase,
         businessId,
-        items
+        items,
+        { excludeInvoiceId: invoiceId }
       )
       if (!materialValidationForItems.ok) {
         return NextResponse.json(

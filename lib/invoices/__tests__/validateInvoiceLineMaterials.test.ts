@@ -31,12 +31,39 @@ describe("validateInvoiceLineMaterials", () => {
     const result = await validateInvoiceLineMaterials(
       supabase as never,
       businessId,
-      [{ material_id: materialId }]
+      [{ material_id: materialId, material_inventory_source: "direct_sale" }]
     )
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.validMaterialIds.has(materialId)).toBe(true)
     }
+  })
+
+  it("rejects material without inventory source", async () => {
+    const supabase = {
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        in: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: materialId,
+              is_active: true,
+              is_billable: true,
+              default_selling_price: 450,
+            },
+          ],
+          error: null,
+        }),
+      })),
+    }
+
+    const result = await validateInvoiceLineMaterials(
+      supabase as never,
+      businessId,
+      [{ material_id: materialId }]
+    )
+    expect(result.ok).toBe(false)
   })
 
   it("rejects material from another business", async () => {
@@ -51,7 +78,7 @@ describe("validateInvoiceLineMaterials", () => {
     const result = await validateInvoiceLineMaterials(
       supabase as never,
       businessId,
-      [{ material_id: materialId }]
+      [{ material_id: materialId, material_inventory_source: "direct_sale" }]
     )
     expect(result.ok).toBe(false)
     if (!result.ok) {
@@ -81,7 +108,7 @@ describe("validateInvoiceLineMaterials", () => {
     const result = await validateInvoiceLineMaterials(
       supabase as never,
       businessId,
-      [{ material_id: materialId }]
+      [{ material_id: materialId, material_inventory_source: "direct_sale" }]
     )
     expect(result.ok).toBe(false)
   })
@@ -142,6 +169,7 @@ describe("mapInvoiceItemsForInsert", () => {
         {
           material_id: materialId,
           product_service_id: productId,
+          material_inventory_source: "direct_sale",
           description: "Premium paint",
           qty: 2,
           unit_price: 450,
@@ -155,11 +183,30 @@ describe("mapInvoiceItemsForInsert", () => {
       invoice_id: invoiceId,
       material_id: materialId,
       product_service_id: null,
+      material_inventory_source: "direct_sale",
       description: "Premium paint",
       qty: 2,
       unit_price: 450,
     })
     expect(rows[0]).not.toHaveProperty("average_cost")
+  })
+
+  it("defaults unspecified material source to legacy_unclassified", () => {
+    const rows = mapInvoiceItemsForInsert(
+      invoiceId,
+      [
+        {
+          material_id: materialId,
+          description: "Legacy paint",
+          qty: 1,
+          unit_price: 10,
+        },
+      ],
+      new Set(),
+      new Set([materialId])
+    )
+    expect(rows[0].material_inventory_source).toBe("legacy_unclassified")
+    expect(rows[0].job_material_usage_id).toBeNull()
   })
 
   it("keeps manual/service lines unchanged", () => {

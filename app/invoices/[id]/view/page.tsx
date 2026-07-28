@@ -97,7 +97,47 @@ type InvoiceItem = {
   unit_price: number
   discount_amount: number
   line_subtotal: number
+  material_id?: string | null
+  material_inventory_source?: "direct_sale" | "job_usage" | "legacy_unclassified" | null
+  job_material_usage_id?: string | null
+  material_name?: string | null
+  quantity_on_hand?: number | null
+  fulfilled_quantity?: number
+  remaining_fulfil_quantity?: number
+  fulfilments?: Array<{
+    id: string
+    quantity: number
+    quantity_returned?: number
+    status?: string
+  }>
+  products_services?: { name?: string } | null
 }
+
+type BillableJobUsage = {
+  id: string
+  job_id: string
+  material_id: string
+  material_name: string | null
+  material_unit: string | null
+  quantity_used: number
+  quantity_billed: number
+  quantity_remaining_billable: number
+  created_at: string
+}
+
+type FulfilLineDraft = {
+  invoice_item_id: string
+  description: string
+  remaining: number
+  stock: number | null
+  quantity: number
+}
+
+type ClassifyPickerState = {
+  itemId: string
+  materialId: string
+  step: "choose" | "pick_usage"
+} | null
 
 type CreditNote = {
   id: string
@@ -153,6 +193,16 @@ export default function InvoiceViewPage() {
     expectedBalance?: number
     ledgerBalance?: number
   } | null>(null)
+
+  const [showFulfilModal, setShowFulfilModal] = useState(false)
+  const [fulfilLines, setFulfilLines] = useState<FulfilLineDraft[]>([])
+  const [fulfilSubmitting, setFulfilSubmitting] = useState(false)
+  const [classifyPicker, setClassifyPicker] = useState<ClassifyPickerState>(null)
+  const [classifyUsages, setClassifyUsages] = useState<BillableJobUsage[]>([])
+  const [loadingClassifyUsages, setLoadingClassifyUsages] = useState(false)
+  const [classifyUsagesError, setClassifyUsagesError] = useState("")
+  const [classifyUsageId, setClassifyUsageId] = useState("")
+  const [classifySubmitting, setClassifySubmitting] = useState(false)
 
   const loadInvoice = useCallback(async () => {
     try {
@@ -310,6 +360,142 @@ Thank you.`
   }
 
   const currency = resolveCurrencyDisplay(invoice)
+
+  const invoiceStatusLower = String(invoice?.status ?? "").toLowerCase()
+  const canFulfilMaterials =
+    !!invoice &&
+    !readOnly &&
+    !["draft", "cancelled", "void"].includes(invoiceStatusLower)
+
+  const directSaleLinesToFulfil = items.filter(
+    (item) =>
+      item.material_id &&
+      item.material_inventory_source === "direct_sale" &&
+      Number(item.remaining_fulfil_quantity ?? 0) > 0
+  )
+
+  const openFulfilModal = () => {
+    setFulfilLines(
+      directSaleLinesToFulfil.map((item) => ({
+        invoice_item_id: item.id,
+        description: item.material_name || item.description || "Material",
+        remaining: Number(item.remaining_fulfil_quantity ?? 0),
+        stock: item.quantity_on_hand != null ? Number(item.quantity_on_hand) : null,
+        quantity: Number(item.remaining_fulfil_quantity ?? 0),
+      }))
+    )
+    setShowFulfilModal(true)
+  }
+
+  const handleFulfilSubmit = async () => {
+    if (!invoice || fulfilLines.length === 0) return
+    const lines = fulfilLines
+      .filter((l) => l.quantity > 0)
+      .map((l) => ({
+        invoice_item_id: l.invoice_item_id,
+        quantity: l.quantity,
+      }))
+    if (lines.length === 0) {
+      setToast({ message: "Enter a quantity to fulfil.", type: "error" })
+      return
+    }
+    try {
+      setFulfilSubmitting(true)
+      const res = await fetch(`/api/invoices/${invoiceId}/fulfil-materials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: invoice.business_id,
+          lines,
+          idempotency_key: crypto.randomUUID(),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Failed to fulfil materials")
+      setShowFulfilModal(false)
+      setFulfilLines([])
+      setToast({ message: "Materials fulfilled successfully.", type: "success" })
+      loadInvoice()
+    } catch (err: unknown) {
+      setToast({
+        message: err instanceof Error ? err.message : "Failed to fulfil materials",
+        type: "error",
+      })
+    } finally {
+      setFulfilSubmitting(false)
+    }
+  }
+
+  const fetchClassifyUsages = async (materialId: string) => {
+    if (!invoice?.business_id || !invoice.customers?.id) {
+      setClassifyUsagesError("Customer is required to classify job usage.")
+      return
+    }
+    setLoadingClassifyUsages(true)
+    setClassifyUsagesError("")
+    try {
+      const params = new URLSearchParams({
+        business_id: invoice.business_id,
+        customer_id: invoice.customers.id,
+        material_id: materialId,
+        exclude_invoice_id: invoiceId,
+      })
+      if (invoice.source_type === "job" && invoice.source_id) {
+        params.set("job_id", invoice.source_id)
+      }
+      const res = await fetch(`/api/service/jobs/billable-material-usages?${params}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Failed to load job usages")
+      const usages = (data.usages ?? []) as BillableJobUsage[]
+      setClassifyUsages(usages)
+      if (usages.length === 0) {
+        setClassifyUsagesError("No billable job usages found for this material.")
+      }
+    } catch (err: unknown) {
+      setClassifyUsages([])
+      setClassifyUsagesError(err instanceof Error ? err.message : "Failed to load job usages")
+    } finally {
+      setLoadingClassifyUsages(false)
+    }
+  }
+
+  const handleClassifySource = async (
+    itemId: string,
+    source: "direct_sale" | "job_usage",
+    usageId?: string
+  ) => {
+    if (!invoice) return
+    try {
+      setClassifySubmitting(true)
+      const res = await fetch(
+        `/api/invoices/${invoiceId}/items/${itemId}/material-source`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            business_id: invoice.business_id,
+            material_inventory_source: source,
+            ...(source === "job_usage" && usageId ? { job_material_usage_id: usageId } : {}),
+          }),
+        }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Failed to classify material source")
+      setClassifyPicker(null)
+      setClassifyUsages([])
+      setClassifyUsageId("")
+      setClassifyUsagesError("")
+      setToast({ message: "Material source updated.", type: "success" })
+      loadInvoice()
+    } catch (err: unknown) {
+      setToast({
+        message: err instanceof Error ? err.message : "Failed to classify material source",
+        type: "error",
+      })
+    } finally {
+      setClassifySubmitting(false)
+    }
+  }
 
   const handleDeleteInvoice = () => {
     if (!guardWriteAction(() => {})) return
@@ -656,8 +842,20 @@ Thank you.`
 
               {/* Line Items Table */}
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800">
+                <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-slate-800 dark:text-gray-200 uppercase tracking-wide">Line Items</h3>
+                  {canFulfilMaterials && directSaleLinesToFulfil.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!guardWriteAction(() => {})) return
+                        openFulfilModal()
+                      }}
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      Fulfil materials
+                    </button>
+                  )}
                 </div>
 
                 <div className="overflow-x-auto">
@@ -672,12 +870,66 @@ Thank you.`
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-gray-700">
-                      {items.map((item) => (
+                      {items.map((item) => {
+                        const isMaterial = !!item.material_id
+                        const source = item.material_inventory_source
+                        const ordered = Number(item.qty) || 0
+                        const fulfilled = Number(item.fulfilled_quantity ?? 0)
+                        const remaining = Number(item.remaining_fulfil_quantity ?? 0)
+                        const stock = item.quantity_on_hand
+
+                        return (
                         <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-gray-700/30 transition-colors">
                           <td className="px-6 py-4 text-slate-900 dark:text-gray-100">
-                            <div className="font-medium">{(item as any).products_services?.name || item.description || "Item"}</div>
-                            {(item as any).products_services?.name && item.description && item.description !== (item as any).products_services?.name && (
+                            <div className="font-medium">{item.products_services?.name || item.material_name || item.description || "Item"}</div>
+                            {(item.products_services?.name || item.material_name) && item.description && item.description !== (item.products_services?.name || item.material_name) && (
                               <div className="text-slate-500 text-xs mt-0.5">{item.description}</div>
+                            )}
+                            {isMaterial && source === "direct_sale" && (
+                              <div className="mt-2 space-y-1">
+                                <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                  Direct from stock
+                                </span>
+                                <div className="text-xs text-slate-500 tabular-nums">
+                                  Ordered {ordered}
+                                  {" · "}Fulfilled {fulfilled}
+                                  {" · "}Remaining {remaining}
+                                  {stock != null && <>{" · "}Stock {Number(stock)}</>}
+                                </div>
+                              </div>
+                            )}
+                            {isMaterial && source === "job_usage" && (
+                              <div className="mt-2">
+                                <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                                  Already used on job — stock and COGS recorded
+                                </span>
+                              </div>
+                            )}
+                            {isMaterial && (!source || source === "legacy_unclassified") && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                  Material source required
+                                </span>
+                                {!readOnly && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!guardWriteAction(() => {})) return
+                                      setClassifyPicker({
+                                        itemId: item.id,
+                                        materialId: String(item.material_id),
+                                        step: "choose",
+                                      })
+                                      setClassifyUsages([])
+                                      setClassifyUsageId("")
+                                      setClassifyUsagesError("")
+                                    }}
+                                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                                  >
+                                    Classify
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </td>
                           <td className="px-6 py-4 text-center text-slate-600 dark:text-gray-400 tabular-nums">{item.qty}</td>
@@ -698,7 +950,8 @@ Thank you.`
                             )}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                     <tfoot className="bg-slate-50 dark:bg-slate-800/80">
                       {/* Tax Breakdown Rows */}
@@ -1045,6 +1298,207 @@ Thank you.`
             }, 500)
           }}
         />
+      )}
+
+      {showFulfilModal && invoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !fulfilSubmitting && setShowFulfilModal(false)}
+          />
+          <div
+            className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">Fulfil materials</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Stock will reduce when you confirm fulfilment. Only direct-from-stock lines with remaining quantity are shown.
+            </p>
+            <div className="space-y-4">
+              {fulfilLines.map((line, idx) => (
+                <div key={line.invoice_item_id} className="rounded-lg border border-slate-200 dark:border-slate-600 p-3">
+                  <div className="font-medium text-sm text-slate-900 dark:text-white">{line.description}</div>
+                  <div className="text-xs text-slate-500 mt-1 tabular-nums">
+                    Remaining {line.remaining}
+                    {line.stock != null && <> · Available stock {line.stock}</>}
+                  </div>
+                  <label className="block mt-2 text-xs font-medium text-slate-600 dark:text-slate-400">
+                    Quantity to fulfil
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={line.remaining}
+                    step="any"
+                    value={line.quantity}
+                    onChange={(e) => {
+                      const raw = Number(e.target.value)
+                      const qty = isNaN(raw) ? 0 : Math.min(Math.max(0, raw), line.remaining)
+                      setFulfilLines((prev) =>
+                        prev.map((l, i) => (i === idx ? { ...l, quantity: qty } : l))
+                      )
+                    }}
+                    className="mt-1 w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm tabular-nums"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3 pt-5">
+              <button
+                type="button"
+                disabled={fulfilSubmitting}
+                onClick={() => setShowFulfilModal(false)}
+                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={fulfilSubmitting}
+                onClick={() => void handleFulfilSubmit()}
+                className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {fulfilSubmitting ? "Fulfilling…" : "Confirm fulfilment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {classifyPicker && invoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !classifySubmitting && setClassifyPicker(null)}
+          />
+          <div
+            className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {classifyPicker.step === "choose" ? (
+              <>
+                <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">
+                  Classify material source
+                </h3>
+                <p className="text-sm text-slate-500 mb-4">
+                  How should this material line be treated?
+                </p>
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    disabled={classifySubmitting}
+                    onClick={() => void handleClassifySource(classifyPicker.itemId, "direct_sale")}
+                    className="w-full text-left rounded-lg border border-slate-200 p-4 hover:bg-slate-50 transition-colors dark:border-slate-600 dark:hover:bg-slate-700/50 disabled:opacity-50"
+                  >
+                    <div className="font-semibold text-slate-900 dark:text-white">Sell directly from stock</div>
+                    <p className="text-sm text-slate-500 mt-1">
+                      Stock will reduce when you fulfil the material.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={classifySubmitting}
+                    onClick={() => {
+                      setClassifyPicker((prev) =>
+                        prev ? { ...prev, step: "pick_usage" } : null
+                      )
+                      void fetchClassifyUsages(classifyPicker.materialId)
+                    }}
+                    className="w-full text-left rounded-lg border border-slate-200 p-4 hover:bg-slate-50 transition-colors dark:border-slate-600 dark:hover:bg-slate-700/50 disabled:opacity-50"
+                  >
+                    <div className="font-semibold text-slate-900 dark:text-white">Already used on a job</div>
+                    <p className="text-sm text-slate-500 mt-1">
+                      Charge the customer without reducing stock again.
+                    </p>
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  disabled={classifySubmitting}
+                  onClick={() => setClassifyPicker(null)}
+                  className="mt-4 w-full border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">
+                  Select job usage
+                </h3>
+                {loadingClassifyUsages && (
+                  <p className="text-sm text-slate-500 py-4">Loading eligible usages…</p>
+                )}
+                {classifyUsagesError && (
+                  <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-2 rounded mb-3">
+                    {classifyUsagesError}
+                  </div>
+                )}
+                {!loadingClassifyUsages && classifyUsages.length > 0 && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {classifyUsages.map((usage) => (
+                      <label
+                        key={usage.id}
+                        className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                          classifyUsageId === usage.id
+                            ? "border-blue-500 bg-blue-50/50 dark:bg-blue-900/20"
+                            : "border-slate-200 hover:bg-slate-50 dark:border-slate-600"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="classify_usage"
+                          value={usage.id}
+                          checked={classifyUsageId === usage.id}
+                          onChange={() => setClassifyUsageId(usage.id)}
+                          className="mt-1"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-sm text-slate-900 dark:text-white">
+                            {usage.material_name ?? "Material"}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5 tabular-nums">
+                            Consumed {usage.quantity_used}
+                            {usage.material_unit ? ` ${usage.material_unit}` : ""}
+                            {" · "}Billed {usage.quantity_billed}
+                            {" · "}Remaining {usage.quantity_remaining_billable}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    disabled={classifySubmitting}
+                    onClick={() => {
+                      setClassifyPicker((prev) =>
+                        prev ? { ...prev, step: "choose" } : null
+                      )
+                      setClassifyUsages([])
+                      setClassifyUsageId("")
+                      setClassifyUsagesError("")
+                    }}
+                    className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={classifySubmitting || !classifyUsageId}
+                    onClick={() =>
+                      void handleClassifySource(classifyPicker.itemId, "job_usage", classifyUsageId)
+                    }
+                    className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {classifySubmitting ? "Saving…" : "Confirm"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Toast Notification */}
