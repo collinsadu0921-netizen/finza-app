@@ -44,4 +44,18 @@ describe("helpArticles", () => {
   it("has at least 40 articles", () => {
     expect(HELP_ARTICLES.length).toBeGreaterThanOrEqual(40)
   })
+
+  it("explains supplier bills: AP, expenses, inventory, usage, payment, taxes", () => {
+    const article = getHelpArticleById("add-supplier-bill")
+    expect(article?.title).toBe("Record a supplier bill")
+    const blob = [article?.summary, ...(article?.steps ?? [])].join("\n").toLowerCase()
+    expect(blob).toMatch(/accounts payable/)
+    expect(blob).toMatch(/expense/)
+    expect(blob).toMatch(/inventory/)
+    expect(blob).toMatch(/used on a job|fulfilled/)
+    expect(blob).toMatch(/payment/)
+    expect(blob).toMatch(/withholding tax|wht|input tax/)
+    expect(article?.summary).toMatch(/expense lines go to expenses/i)
+    expect(article?.summary).toMatch(/inventory/i)
+  })
 })
