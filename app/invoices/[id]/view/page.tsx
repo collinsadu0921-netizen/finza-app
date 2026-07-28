@@ -28,6 +28,7 @@ import { useServiceFinancialWrite } from "@/components/service/useServiceFinanci
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
 import CustomerApprovalSection from "@/components/invoices/CustomerApprovalSection"
+import { canShowReturnMaterialsAction } from "@/lib/invoices/invoiceMaterialReturnUi"
 
 type Invoice = {
   id: string
@@ -108,9 +109,25 @@ type InvoiceItem = {
     id: string
     quantity: number
     quantity_returned?: number
+    unit_cost?: number
+    total_cost?: number
     status?: string
+    created_at?: string
+    journal_entry_id?: string | null
   }>
   products_services?: { name?: string } | null
+}
+
+type ReturnableFulfilment = {
+  fulfilment_id: string
+  invoice_item_id: string
+  material_name: string
+  quantity: number
+  quantity_returned: number
+  returnable: number
+  unit_cost: number | null
+  status: string
+  created_at: string | null
 }
 
 type BillableJobUsage = {
@@ -197,6 +214,10 @@ export default function InvoiceViewPage() {
   const [showFulfilModal, setShowFulfilModal] = useState(false)
   const [fulfilLines, setFulfilLines] = useState<FulfilLineDraft[]>([])
   const [fulfilSubmitting, setFulfilSubmitting] = useState(false)
+  const [returnTarget, setReturnTarget] = useState<ReturnableFulfilment | null>(null)
+  const [returnQty, setReturnQty] = useState(0)
+  const [returnSubmitting, setReturnSubmitting] = useState(false)
+  const [returnIdempotencyKey, setReturnIdempotencyKey] = useState<string | null>(null)
   const [classifyPicker, setClassifyPicker] = useState<ClassifyPickerState>(null)
   const [classifyUsages, setClassifyUsages] = useState<BillableJobUsage[]>([])
   const [loadingClassifyUsages, setLoadingClassifyUsages] = useState(false)
@@ -373,6 +394,64 @@ Thank you.`
       item.material_inventory_source === "direct_sale" &&
       Number(item.remaining_fulfil_quantity ?? 0) > 0
   )
+
+  const openReturnModal = (target: ReturnableFulfilment) => {
+    setReturnTarget(target)
+    setReturnQty(target.returnable)
+    setReturnIdempotencyKey(crypto.randomUUID())
+  }
+
+  const handleReturnSubmit = async () => {
+    if (!invoice || !returnTarget || !returnIdempotencyKey) return
+    const qty = Number(returnQty)
+    if (!(qty > 0)) {
+      setToast({ message: "Enter a quantity to return.", type: "error" })
+      return
+    }
+    if (qty > returnTarget.returnable + 0.000001) {
+      setToast({
+        message: `You can return at most ${returnTarget.returnable}.`,
+        type: "error",
+      })
+      return
+    }
+    try {
+      setReturnSubmitting(true)
+      const res = await fetch(`/api/invoices/${invoiceId}/return-materials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: invoice.business_id,
+          fulfilment_id: returnTarget.fulfilment_id,
+          quantity: qty,
+          idempotency_key: returnIdempotencyKey,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : "Failed to return materials"
+        )
+      }
+      setReturnTarget(null)
+      setReturnQty(0)
+      setReturnIdempotencyKey(null)
+      setToast({
+        message: data.idempotent
+          ? "Return already recorded (no duplicate stock change)."
+          : "Material returned to stock. Customer invoice unchanged — create a credit note separately if needed.",
+        type: "success",
+      })
+      loadInvoice()
+    } catch (err: unknown) {
+      setToast({
+        message: err instanceof Error ? err.message : "Failed to return materials",
+        type: "error",
+      })
+    } finally {
+      setReturnSubmitting(false)
+    }
+  }
 
   const openFulfilModal = () => {
     setFulfilLines(
@@ -844,18 +923,20 @@ Thank you.`
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-slate-800 dark:text-gray-200 uppercase tracking-wide">Line Items</h3>
-                  {canFulfilMaterials && directSaleLinesToFulfil.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!guardWriteAction(() => {})) return
-                        openFulfilModal()
-                      }}
-                      className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                    >
-                      Fulfil materials
-                    </button>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {canFulfilMaterials && directSaleLinesToFulfil.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!guardWriteAction(() => {})) return
+                          openFulfilModal()
+                        }}
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Fulfil materials
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -886,7 +967,7 @@ Thank you.`
                               <div className="text-slate-500 text-xs mt-0.5">{item.description}</div>
                             )}
                             {isMaterial && source === "direct_sale" && (
-                              <div className="mt-2 space-y-1">
+                              <div className="mt-2 space-y-2">
                                 <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                                   Direct from stock
                                 </span>
@@ -896,6 +977,96 @@ Thank you.`
                                   {" · "}Remaining {remaining}
                                   {stock != null && <>{" · "}Stock {Number(stock)}</>}
                                 </div>
+                                {(item.fulfilments?.length ?? 0) > 0 && (
+                                  <div className="rounded-md border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/40 p-2 space-y-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                      Fulfilment history
+                                    </div>
+                                    {item.fulfilments!.map((f) => {
+                                      const fQty = Number(f.quantity) || 0
+                                      const fRet = Number(f.quantity_returned || 0)
+                                      const fReturnable = Math.max(
+                                        0,
+                                        Math.round((fQty - fRet) * 10000) / 10000
+                                      )
+                                      const fStatus = String(f.status || "active")
+                                      const canReturnThis = canShowReturnMaterialsAction({
+                                        materialInventorySource: source,
+                                        readOnly,
+                                        invoiceStatus: invoiceStatusLower,
+                                        fulfilment: {
+                                          id: f.id,
+                                          quantity: fQty,
+                                          quantity_returned: fRet,
+                                          status: fStatus,
+                                        },
+                                      })
+                                      return (
+                                        <div
+                                          key={f.id}
+                                          className="flex flex-wrap items-start justify-between gap-2 text-xs"
+                                        >
+                                          <div className="space-y-0.5 tabular-nums text-slate-600 dark:text-slate-300">
+                                            <div>
+                                              Fulfilled {fQty}
+                                              {" · "}Returned {fRet}
+                                              {" · "}Returnable {fReturnable}
+                                            </div>
+                                            <div className="text-slate-400">
+                                              {f.created_at
+                                                ? new Date(f.created_at).toLocaleDateString()
+                                                : "—"}
+                                              {" · "}
+                                              {fStatus === "fully_returned"
+                                                ? "Fully returned"
+                                                : fReturnable > 0
+                                                  ? "Returnable"
+                                                  : "Active"}
+                                              {!readOnly && f.unit_cost != null && (
+                                                <>
+                                                  {" · "}Cost{" "}
+                                                  {formatMoney(
+                                                    Number(f.unit_cost),
+                                                    invoice.currency_code
+                                                  )}
+                                                  /unit
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+                                          {canReturnThis && (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (!guardWriteAction(() => {})) return
+                                                openReturnModal({
+                                                  fulfilment_id: f.id,
+                                                  invoice_item_id: item.id,
+                                                  material_name:
+                                                    item.material_name ||
+                                                    item.description ||
+                                                    "Material",
+                                                  quantity: fQty,
+                                                  quantity_returned: fRet,
+                                                  returnable: fReturnable,
+                                                  unit_cost:
+                                                    f.unit_cost != null
+                                                      ? Number(f.unit_cost)
+                                                      : null,
+                                                  status: fStatus,
+                                                  created_at: f.created_at ?? null,
+                                                })
+                                              }}
+                                              className="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                            >
+                                              Return materials
+                                            </button>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             )}
                             {isMaterial && source === "job_usage" && (
@@ -1298,6 +1469,92 @@ Thank you.`
             }, 500)
           }}
         />
+      )}
+
+      {returnTarget && invoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => {
+              if (!returnSubmitting) {
+                setReturnTarget(null)
+                setReturnIdempotencyKey(null)
+              }
+            }}
+          />
+          <div
+            className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">Return materials</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Return the physical material to stock. This reverses the material cost but does not
+              change the customer invoice. Create a credit note separately when the customer
+              balance also needs to be reduced.
+            </p>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-600 p-3 space-y-1 text-sm">
+              <div className="font-medium text-slate-900 dark:text-white">
+                {returnTarget.material_name}
+              </div>
+              <div className="text-xs text-slate-500 tabular-nums">
+                Fulfilled {returnTarget.quantity}
+                {" · "}Already returned {returnTarget.quantity_returned}
+                {" · "}Max returnable {returnTarget.returnable}
+              </div>
+              {!readOnly && returnTarget.unit_cost != null && (
+                <div className="text-xs text-slate-400 tabular-nums">
+                  Snapshotted cost{" "}
+                  {formatMoney(returnTarget.unit_cost, invoice.currency_code)}
+                  /unit (used for COGS reversal)
+                </div>
+              )}
+            </div>
+            <label className="block mt-4 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Quantity to return
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={returnTarget.returnable}
+              step="any"
+              value={returnQty}
+              disabled={returnSubmitting}
+              onChange={(e) => {
+                const raw = Number(e.target.value)
+                const qty = isNaN(raw)
+                  ? 0
+                  : Math.min(Math.max(0, raw), returnTarget.returnable)
+                setReturnQty(qty)
+              }}
+              className="mt-1 w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm tabular-nums"
+            />
+            <p className="mt-3 text-xs text-slate-500">
+              Stock will increase and material cost will reverse. This is separate from{" "}
+              <span className="font-medium">Create credit note</span>.
+            </p>
+            <div className="flex gap-3 pt-5">
+              <button
+                type="button"
+                disabled={returnSubmitting}
+                onClick={() => {
+                  setReturnTarget(null)
+                  setReturnIdempotencyKey(null)
+                }}
+                className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={returnSubmitting || !(returnQty > 0)}
+                onClick={() => void handleReturnSubmit()}
+                className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {returnSubmitting ? "Returning…" : "Confirm return"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showFulfilModal && invoice && (
