@@ -135,4 +135,53 @@ describe("POST /api/accounting/reversal — inventory guard", () => {
     const body = await res.json()
     expect(body.code).toBe("INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW")
   })
+
+  it("rejects invoice_material_fulfilment_return_undo", async () => {
+    const rpc = jest.fn()
+    jest.mocked(createSupabaseServerClient).mockResolvedValue({
+      auth: {
+        getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } }, error: null }),
+      },
+      from: jest.fn((table: string) => {
+        if (table === "journal_entries") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: {
+                id: JE_ID,
+                business_id: BUSINESS_ID,
+                date: "2099-08-15",
+                description: "Undo return",
+                period_id: "p1",
+                reference_type: "invoice_material_fulfilment_return_undo",
+                reference_id: "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrrrrr",
+              },
+              error: null,
+            }),
+            limit: jest.fn().mockReturnThis(),
+          }
+        }
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+        }
+      }),
+      rpc,
+    } as never)
+
+    const req = new NextRequest("http://localhost/api/accounting/reversal", {
+      method: "POST",
+      body: JSON.stringify({
+        original_je_id: JE_ID,
+        reason: "Need to reverse this undo-return entry",
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe("INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW")
+    expect(rpc).not.toHaveBeenCalled()
+  })
 })

@@ -6,6 +6,7 @@
 export const INVOICE_MATERIAL_INVENTORY_JOURNAL_REFERENCE_TYPES = [
   "invoice_material_fulfilment",
   "invoice_material_fulfilment_return",
+  "invoice_material_fulfilment_return_undo",
 ] as const
 
 export type InvoiceMaterialInventoryJournalReferenceType =
@@ -15,7 +16,7 @@ export const INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW =
   "INVENTORY_LINKED_JOURNAL_REQUIRES_SOURCE_WORKFLOW"
 
 export const INVENTORY_LINKED_JOURNAL_USER_MESSAGE =
-  "This journal is linked to material stock. Return the material from the invoice instead so stock and accounting remain consistent."
+  "This journal is linked to material stock. Use Return materials or Undo return on the invoice so stock and accounting remain consistent."
 
 export function isInvoiceMaterialInventoryJournalReferenceType(
   referenceType: string | null | undefined
