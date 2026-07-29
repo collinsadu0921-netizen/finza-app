@@ -4,16 +4,18 @@ import { rollupPayrollRunTotals } from "@/lib/payroll/rollupPayrollRunTotals"
 import { computePensionTierAmounts } from "@/lib/payroll/pensionTierSplit"
 
 describe("deriveEntryPensionSnapshots", () => {
-  it("splits mandatory pension into tier1 and tier2 per employee", () => {
+  it("persists engine tier remittances from base × rates", () => {
     const snapshots = deriveEntryPensionSnapshots({
-      pensionableBase: 3500,
-      employeeContribution: 192.5,
-      employerContribution: 455,
+      pensionableBase: 1000,
+      employeeContribution: 55,
+      employerContribution: 130,
+      tier1Remittance: 135,
+      tier2Remittance: 50,
     })
-    expect(snapshots.pensionable_base).toBe(3500)
-    expect(snapshots.total_mandatory_pension).toBe(647.5)
-    expect(snapshots.tier1_ssnit_remittance + snapshots.tier2_pension_remittance).toBeCloseTo(647.5, 2)
-    expect(snapshots.tier1_ssnit_remittance).toBeCloseTo(647.5 * (13.5 / 18.5), 2)
+    expect(snapshots.pensionable_base).toBe(1000)
+    expect(snapshots.total_mandatory_pension).toBe(185)
+    expect(snapshots.tier1_ssnit_remittance).toBe(135)
+    expect(snapshots.tier2_pension_remittance).toBe(50)
   })
 })
 

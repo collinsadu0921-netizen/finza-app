@@ -84,7 +84,9 @@ export async function PATCH(
 
     const { data: payrollRun } = await supabase
       .from("payroll_runs")
-      .select("id, business_id, status, payroll_month, payroll_frequency")
+      .select(
+        "id, business_id, status, payroll_month, payroll_frequency, paye_rate_version, pension_rate_version, statutory_period_basis"
+      )
       .eq("id", runId)
       .eq("business_id", business.id)
       .is("deleted_at", null)
@@ -191,6 +193,15 @@ export async function PATCH(
 
     let computed
     try {
+      const ghanaRateVersions =
+        payrollRun.paye_rate_version && payrollRun.pension_rate_version
+          ? {
+              payeRateVersion: String(payrollRun.paye_rate_version),
+              pensionRateVersion: String(payrollRun.pension_rate_version),
+              periodBasis: String(payrollRun.statutory_period_basis || payrollRun.payroll_month),
+            }
+          : null
+
       computed = computeStaffPayrollEntry({
         staff,
         businessCountry,
@@ -204,6 +215,7 @@ export async function PATCH(
         exclusionReason: isIncluded ? null : exclusionReason,
         salaryBasisSnapshot: salaryBasis,
         oneOffItemsSnapshot: isIncluded ? filtered.oneOffSnapshots : [],
+        ghanaRateVersions,
       })
     } catch (error: unknown) {
       if (isPayrollEngineCountryError(error)) {

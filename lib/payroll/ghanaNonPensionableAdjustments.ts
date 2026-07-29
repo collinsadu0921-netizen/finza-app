@@ -3,31 +3,12 @@
  * Taxable income is gross salary — SSNIT is not deducted or deductible.
  */
 import { roundPayroll } from "@/lib/payrollEngine/versioning"
-
-function calculateGhanaPaye(taxableIncome: number): number {
-  if (taxableIncome <= 0) return 0
-  if (taxableIncome <= 490) return 0
-  if (taxableIncome <= 650) return roundPayroll((taxableIncome - 490) * 0.05)
-  if (taxableIncome <= 3850) return roundPayroll((650 - 490) * 0.05 + (taxableIncome - 650) * 0.1)
-  if (taxableIncome <= 20000) {
-    return roundPayroll((650 - 490) * 0.05 + (3850 - 650) * 0.1 + (taxableIncome - 3850) * 0.175)
-  }
-  if (taxableIncome <= 50000) {
-    return roundPayroll(
-      (650 - 490) * 0.05 +
-        (3850 - 650) * 0.1 +
-        (20000 - 3850) * 0.175 +
-        (taxableIncome - 20000) * 0.25
-    )
-  }
-  return roundPayroll(
-    (650 - 490) * 0.05 +
-      (3850 - 650) * 0.1 +
-      (20000 - 3850) * 0.175 +
-      (50000 - 20000) * 0.25 +
-      (taxableIncome - 50000) * 0.3
-  )
-}
+import {
+  calculateGhanaPayeFromBands,
+  type GhanaPayeBand,
+  getGhanaPayeRatesByVersion,
+  getGhanaPayeRatesForPeriod,
+} from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 
 function gradedTaxTotal(
   graduatedPaye: number,
@@ -49,27 +30,28 @@ export function recalculateGhanaEntryAfterRemovingSsnit(opts: {
   overtimeGraduatedAmount: number
   overtimeTax5: number
   overtimeTax10: number
+  /** Prefer snapshotted PAYE version; else period date. */
+  payeRateVersion?: string | null
+  effectiveDate?: string | null
+  payeBands?: readonly GhanaPayeBand[] | null
 }): { taxableIncome: number; paye: number; netSalary: number } {
-  const taxableIncome = roundPayroll(opts.grossSalary)
+  let bands = opts.payeBands
+  if (!bands || bands.length === 0) {
+    if (opts.payeRateVersion) {
+      bands = getGhanaPayeRatesByVersion(opts.payeRateVersion).bands
+    } else if (opts.effectiveDate) {
+      bands = getGhanaPayeRatesForPeriod(opts.effectiveDate).bands
+    } else {
+      throw new Error("Ghana non-pensionable PAYE recalc requires payeRateVersion, effectiveDate, or payeBands")
+    }
+  }
+
+  const taxableIncome = roundPayroll(Math.max(0, opts.grossSalary))
   const graduatedPayeBase = roundPayroll(
     taxableIncome - opts.bonusConcessionalAmount - opts.overtimeTaxableAt5 - opts.overtimeTaxableAt10
   )
-  const regularGraduatedBase = roundPayroll(
-    graduatedPayeBase - opts.bonusGraduatedAmount - opts.overtimeGraduatedAmount
-  )
-  const regularPayeAmount = calculateGhanaPaye(Math.max(0, regularGraduatedBase))
-  const regularPlusBonusPayeAmount = calculateGhanaPaye(
-    Math.max(0, regularGraduatedBase + opts.bonusGraduatedAmount)
-  )
-  const graduatedPayeAmount = calculateGhanaPaye(Math.max(0, graduatedPayeBase))
-  void regularPayeAmount
-  void regularPlusBonusPayeAmount
-  const paye = gradedTaxTotal(
-    graduatedPayeAmount,
-    opts.bonusTax5,
-    opts.overtimeTax5,
-    opts.overtimeTax10
-  )
+  const graduatedPayeAmount = calculateGhanaPayeFromBands(Math.max(0, graduatedPayeBase), bands)
+  const paye = gradedTaxTotal(graduatedPayeAmount, opts.bonusTax5, opts.overtimeTax5, opts.overtimeTax10)
   const netSalary = Math.max(0, roundPayroll(taxableIncome - paye - opts.otherDeductions))
   return { taxableIncome, paye, netSalary }
 }

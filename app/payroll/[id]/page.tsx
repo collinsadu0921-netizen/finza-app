@@ -436,7 +436,18 @@ export default function PayrollRunViewPage() {
         }
         toast.showToast("Payroll approved", "success")
       } else {
-        toast.showToast(data.error || "Error approving payroll run", "error")
+        const affected = Array.isArray(data.affectedEmployees) ? data.affectedEmployees : []
+        const detail =
+          affected.length > 0
+            ? `\n${affected
+                .slice(0, 8)
+                .map(
+                  (e: { employeeName?: string | null; unsupportedClassification?: string; staffId?: string }) =>
+                    `• ${e.employeeName || e.staffId || "Employee"} (${e.unsupportedClassification || "unsupported"})`
+                )
+                .join("\n")}${affected.length > 8 ? `\n• …and ${affected.length - 8} more` : ""}`
+            : ""
+        toast.showToast(`${data.error || "Error approving payroll run"}${detail}`, "error")
       }
     } catch {
       toast.showToast("Error approving payroll run", "error")
@@ -1246,11 +1257,11 @@ export default function PayrollRunViewPage() {
             if (readiness.included_count === 0 || readiness.ready) return null
             return (
               <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 whitespace-pre-line">
-                <p className="font-medium mb-1">GRA filing readiness</p>
+                <p className="font-medium mb-1">DT 107A preparation checks</p>
                 <p>{readiness.summary}</p>
                 <p className="mt-2 text-xs opacity-90">
-                  You can still approve monthly payroll if needed. GRA DT 107A export stays blocked until
-                  every included employee has a filing TIN and a supported GRA position code.
+                  You can still approve monthly payroll if statutory calculations allow. The DT 107A preparation
+                  export is for verification only — confirm amounts before any GRA submission.
                 </p>
               </div>
             )
@@ -1879,12 +1890,12 @@ export default function PayrollRunViewPage() {
                     onClick={() =>
                       downloadRunExport(
                         `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=gra-ready`,
-                        "GRA-ready DT 107A CSV downloaded"
+                        "DT 107A preparation export downloaded"
                       )
                     }
                     className="px-3 py-2 text-left text-xs rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 sm:text-center sm:col-span-2"
                   >
-                    GRA-ready DT 107A CSV
+                    DT 107A preparation export
                   </button>
                   <button
                     type="button"
@@ -1900,8 +1911,8 @@ export default function PayrollRunViewPage() {
                   </button>
                   <div className="text-xs text-gray-600 dark:text-gray-400 sm:col-span-2 space-y-1.5 -mt-1">
                     <p>
-                      Use the GRA-ready DT 107A CSV for portal filing. Employer return forms and the actual tax
-                      payment are completed outside Finza. Keep the GRA acknowledgement for your records.
+                      DT 107A preparation export — verify before submission. Employer return forms and the actual tax
+                      payment are completed outside Finza. Keep any GRA acknowledgement for your records.
                     </p>
                     <p>
                       DT 107A is the employee schedule only. Employer TIN/profile details and cover forms

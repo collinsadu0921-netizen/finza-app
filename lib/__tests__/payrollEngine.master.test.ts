@@ -74,99 +74,24 @@ describe("A. Global Sanity Test (ALL COUNTRIES)", () => {
 
 describe("B. PAYE Boundary Tests (COUNTRY-SPECIFIC)", () => {
   describe("B1. Ghana (GH)", () => {
-    it("should calculate PAYE = 0 for 490 (first band edge)", () => {
-      // Adjust basic to get taxable income of 490 after SSNIT
-      // SSNIT = 5.5% of gross, so: taxable = gross - 0.055*gross = 0.945*gross
-      // For taxable = 490: gross = 490 / 0.945 ≈ 518.52
-      const gross = 490 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      expect(paye?.amount).toBeCloseTo(0, 1) // Should be 0 or very close
+    it("should calculate PAYE = 0 for taxable 490", () => {
+      const { calculateGhanaPayeFromBands, getGhanaPayeRatesForPeriod } = require("../payrollEngine/jurisdictions/ghanaStatutoryRates")
+      expect(calculateGhanaPayeFromBands(490, getGhanaPayeRatesForPeriod("2026-01-01").bands)).toBe(0)
     })
 
-    it("should calculate PAYE correctly for 650 (second band edge)", () => {
-      const gross = 650 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const taxable = result.totals.taxableIncome
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // PAYE = (650 - 490) * 5% = 8
-      expect(paye?.amount).toBeCloseTo(8, 1)
+    it("should calculate PAYE = 10.50 for taxable 650", () => {
+      const { calculateGhanaPayeFromBands, getGhanaPayeRatesForPeriod } = require("../payrollEngine/jurisdictions/ghanaStatutoryRates")
+      expect(calculateGhanaPayeFromBands(650, getGhanaPayeRatesForPeriod("2026-01-01").bands)).toBe(10.5)
     })
 
-    it("should calculate PAYE correctly for 3,850 (third band edge)", () => {
-      const gross = 3850 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: (650-490)*5% + (3850-650)*10% = 8 + 320 = 328
-      expect(paye?.amount).toBeCloseTo(328, 1)
+    it("should calculate PAYE = 2098.50 for taxable 10000", () => {
+      const { calculateGhanaPayeFromBands, getGhanaPayeRatesForPeriod } = require("../payrollEngine/jurisdictions/ghanaStatutoryRates")
+      expect(calculateGhanaPayeFromBands(10000, getGhanaPayeRatesForPeriod("2026-01-01").bands)).toBe(2098.5)
     })
 
-    it("should calculate PAYE correctly for 20,000 (fourth band edge)", () => {
-      const gross = 20000 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: 8 + 320 + (20000-3850)*17.5% = 8 + 320 + 2826.25 = 3154.25
-      expect(paye?.amount).toBeCloseTo(3154.25, 1)
-    })
-
-    it("should calculate PAYE correctly for 50,000 (fifth band edge)", () => {
-      const gross = 50000 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: 8 + 320 + 2826.25 + (50000-20000)*25% = 8 + 320 + 2826.25 + 7500 = 10654.25
-      expect(paye?.amount).toBeCloseTo(10654.25, 1)
-    })
-
-    it("should calculate PAYE correctly for 100,000 (sixth band)", () => {
-      const gross = 100000 / 0.945
-      const result = ghanaPayrollEngine.calculate({
-        jurisdiction: 'GH',
-        effectiveDate: '2026-01-01',
-        basicSalary: Math.round(gross),
-        allowances: 0,
-        otherDeductions: 0
-      })
-
-      const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')
-      // Cumulative: 8 + 320 + 2826.25 + 7500 + (taxable-50000)*30%
-      // taxable ≈ 100000/0.945 ≈ 105820
-      // PAYE ≈ 10654.25 + (105820-50000)*30% ≈ 10654.25 + 16746 ≈ 27400
-      expect(paye?.amount).toBeGreaterThan(20000)
+    it("should calculate PAYE = 17082.83 for taxable 60000 (35% band)", () => {
+      const { calculateGhanaPayeFromBands, getGhanaPayeRatesForPeriod } = require("../payrollEngine/jurisdictions/ghanaStatutoryRates")
+      expect(calculateGhanaPayeFromBands(60000, getGhanaPayeRatesForPeriod("2026-01-01").bands)).toBe(17082.83)
     })
 
     it("should verify SSNIT employee reduces taxable income", () => {
@@ -179,9 +104,7 @@ describe("B. PAYE Boundary Tests (COUNTRY-SPECIFIC)", () => {
       })
 
       const ssnitEmployee = result.statutoryDeductions.find(d => d.code === 'SSNIT_EMPLOYEE')
-      expect(ssnitEmployee?.amount).toBeCloseTo(550, 2) // 5.5% of 10000
-      
-      // Taxable = gross - SSNIT employee
+      expect(ssnitEmployee?.amount).toBeCloseTo(550, 2)
       expect(result.totals.taxableIncome).toBeCloseTo(10000 - 550, 2)
     })
 
@@ -195,11 +118,22 @@ describe("B. PAYE Boundary Tests (COUNTRY-SPECIFIC)", () => {
       })
 
       const paye = result.statutoryDeductions.find(d => d.code === 'PAYE')?.amount || 0
-      const ssnitEmployee = result.statutoryDeductions.find(d => d.code === 'SSNIT_EMPLOYEE')?.amount || 0
-      
-      // Net = taxable - PAYE - otherDeductions
       const expectedNet = result.totals.taxableIncome - paye - 200
       expect(result.totals.netSalary).toBeCloseTo(expectedNet, 2)
+    })
+
+    it("should expose rate versions on compliance breakdown", () => {
+      const result = ghanaPayrollEngine.calculate({
+        jurisdiction: 'GH',
+        effectiveDate: '2026-01-01',
+        basicSalary: 1000,
+        allowances: 0,
+        otherDeductions: 0
+      })
+      expect(result.complianceBreakdown?.calculationEngineVersion).toBe('finza-ghana-v2')
+      expect(result.complianceBreakdown?.payeRateVersion).toBe('gh-paye-2024-01')
+      expect(result.complianceBreakdown?.pensionRateVersion).toBe('gh-pension-2026-01')
+      expect(result.totals.netSalary).toBeCloseTo(888.87, 2)
     })
   })
 

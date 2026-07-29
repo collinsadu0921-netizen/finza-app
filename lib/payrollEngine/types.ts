@@ -74,9 +74,19 @@ export interface PayrollEngineConfig {
   /**
    * Optional: Whether employee is resident for tax purposes
    * Default: true
-   * Note: Currently does not affect PAYE rates (same rates apply per PwC guidance)
+   * Ghana: non-resident special tax is not implemented — approval must block non-residents.
    */
   isResident?: boolean
+
+  /**
+   * Optional: Lock Ghana statutory versions for draft recalc / historical stability.
+   * When set, the Ghana engine must not re-resolve from "newest" rates.
+   */
+  ghanaRateVersions?: {
+    payeRateVersion: string
+    pensionRateVersion: string
+    periodBasis: string
+  }
 
   /**
    * Optional: NHIMA base selection (Zambia)
@@ -280,6 +290,13 @@ export interface PayrollCalculationResult {
     graduatedPayeBase: number
     graduatedPayeAmount: number
     totalIncomeTax: number
+    calculationEngineVersion?: string
+    payeRateVersion?: string
+    pensionRateVersion?: string
+    statutoryPeriodBasis?: string
+    pensionableBase?: number
+    tier1SsnitRemittance?: number
+    tier2PensionRemittance?: number
   }
 }
 

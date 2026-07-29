@@ -14,6 +14,7 @@ import {
   isGhanaMonthlyStatutoryEngine,
   nonMonthlyApprovalBlockedMessage,
 } from "@/lib/payroll/salaryBasis"
+import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
 
 export async function GET(
   request: NextRequest,
@@ -184,7 +185,9 @@ export async function PUT(
     // Get existing payroll run
     const { data: existingRun } = await supabase
       .from("payroll_runs")
-      .select("status, journal_entry_id, payroll_frequency")
+      .select(
+        "status, journal_entry_id, payroll_frequency, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis"
+      )
       .eq("id", runId)
       .single()
 
@@ -239,6 +242,53 @@ export async function PUT(
           {
             error: nonMonthlyApprovalBlockedMessage(frequency),
             code: "NON_MONTHLY_STATUTORY_APPROVAL_BLOCKED",
+          },
+          { status: 400 }
+        )
+      }
+
+      const { data: approvalEntries, error: approvalEntriesError } = await supabase
+        .from("payroll_entries")
+        .select(
+          `
+          staff_id,
+          is_included,
+          calculation_engine_version,
+          paye_rate_version,
+          pension_rate_version,
+          calculation_jurisdiction,
+          statutory_period_basis,
+          payroll_tax_profile,
+          filing_employee_name,
+          staff:staff_id (
+            id,
+            name,
+            employment_type,
+            is_tax_resident,
+            secondary_employment
+          )
+        `
+        )
+        .eq("payroll_run_id", runId)
+
+      if (approvalEntriesError) {
+        return NextResponse.json(
+          { error: `Failed to validate payroll entries before approval: ${approvalEntriesError.message}` },
+          { status: 500 }
+        )
+      }
+
+      const ghanaGuard = validateGhanaPayrollRunForApproval({
+        businessCountry,
+        run: existingRun,
+        entries: (approvalEntries || []) as any,
+      })
+      if (!ghanaGuard.ok) {
+        return NextResponse.json(
+          {
+            error: ghanaGuard.message,
+            code: ghanaGuard.code,
+            affectedEmployees: ghanaGuard.affectedEmployees,
           },
           { status: 400 }
         )

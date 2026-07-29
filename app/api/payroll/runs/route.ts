@@ -30,9 +30,14 @@ import { filterPayrollItemsForRun } from "@/lib/payroll/periodPayrollItems"
 import {
   assertPhase1BPayrollFrequency,
   exclusionReasonForSalaryBasisMismatch,
+  isGhanaMonthlyStatutoryEngine,
   parseSalaryBasis,
   salaryBasisMatchesFrequency,
 } from "@/lib/payroll/salaryBasis"
+import {
+  GHANA_CALCULATION_ENGINE_VERSION,
+  resolveGhanaStatutoryRatesForPeriod,
+} from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 
 const DEFAULT_PAYROLL_RUNS_LIMIT = 24
 const MAX_PAYROLL_RUNS_LIMIT = 100
@@ -336,6 +341,43 @@ export async function POST(request: NextRequest) {
     // Validate effectiveDate (use payroll_month as effectiveDate for versioning)
     const effectiveDate = payroll_month // payroll_month drives effectiveDate for deterministic calculations
 
+    let ghanaRateVersions: {
+      payeRateVersion: string
+      pensionRateVersion: string
+      periodBasis: string
+    } | null = null
+    let runStatutoryFields: Record<string, string | null> = {
+      calculation_engine_version: null,
+      paye_rate_version: null,
+      pension_rate_version: null,
+      calculation_jurisdiction: null,
+      statutory_period_basis: null,
+    }
+
+    if (isGhanaMonthlyStatutoryEngine(businessCountry)) {
+      try {
+        const resolved = resolveGhanaStatutoryRatesForPeriod(effectiveDate)
+        ghanaRateVersions = {
+          payeRateVersion: resolved.paye.version,
+          pensionRateVersion: resolved.pension.version,
+          periodBasis: resolved.periodBasis,
+        }
+        runStatutoryFields = {
+          calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
+          paye_rate_version: resolved.paye.version,
+          pension_rate_version: resolved.pension.version,
+          calculation_jurisdiction: "GH",
+          statutory_period_basis: resolved.periodBasis,
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unsupported Ghana statutory rate period"
+        return NextResponse.json(
+          { error: message, code: "GHANA_PAYROLL_UNKNOWN_RATE_VERSION" },
+          { status: 400 }
+        )
+      }
+    }
+
     // Calculate payroll for each staff using payroll engine
     const payrollEntries = []
     const legacyItemWarnings: Array<{ staff_id: string; reason: string }> = []
@@ -373,6 +415,7 @@ export async function POST(request: NextRequest) {
               exclusionReason: exclusionReasonForSalaryBasisMismatch(salaryBasis, payroll_frequency),
               salaryBasisSnapshot: salaryBasis,
               oneOffItemsSnapshot: [],
+              ghanaRateVersions,
             })
           )
           continue
@@ -387,6 +430,7 @@ export async function POST(request: NextRequest) {
           isIncluded: true,
           salaryBasisSnapshot: salaryBasis,
           oneOffItemsSnapshot: filtered.oneOffSnapshots,
+          ghanaRateVersions,
         })
 
         const allowancesTotal = computed.allowances_total
@@ -429,6 +473,7 @@ export async function POST(request: NextRequest) {
         total_ssnit_employer: runTotals.total_ssnit_employer,
         total_paye: runTotals.total_paye,
         total_net_salary: runTotals.total_net_salary,
+        ...runStatutoryFields,
       })
       .select()
       .single()

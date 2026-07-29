@@ -24,7 +24,9 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
 
   const { data: payrollRun } = await supabase
     .from("payroll_runs")
-    .select("id, status, payroll_month, payroll_frequency, business_id")
+    .select(
+      "id, status, payroll_month, payroll_frequency, business_id, paye_rate_version, pension_rate_version, statutory_period_basis, calculation_engine_version"
+    )
     .eq("id", runId)
     .eq("business_id", businessId)
     .is("deleted_at", null)
@@ -86,6 +88,15 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
   })
 
   try {
+    const ghanaRateVersions =
+      payrollRun.paye_rate_version && payrollRun.pension_rate_version
+        ? {
+            payeRateVersion: String(payrollRun.paye_rate_version),
+            pensionRateVersion: String(payrollRun.pension_rate_version),
+            periodBasis: String(payrollRun.statutory_period_basis || payrollRun.payroll_month),
+          }
+        : null
+
     const computed = computeStaffPayrollEntry({
       staff,
       businessCountry,
@@ -101,6 +112,7 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
         : exclusionReasonForSalaryBasisMismatch(salaryBasis, frequency),
       salaryBasisSnapshot: salaryBasis,
       oneOffItemsSnapshot: eligible ? filtered.oneOffSnapshots : [],
+      ghanaRateVersions,
     })
 
     const { staff_id: _sid, ...entryUpdate } = computed

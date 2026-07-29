@@ -9,6 +9,10 @@ import type { OneOffItemSnapshot } from "@/lib/payroll/periodPayrollItems"
 import { parseSalaryBasis, type SalaryBasis } from "@/lib/payroll/salaryBasis"
 import { buildGraFilingFieldsForPayrollEntry, parseStaffIsPensionable } from "@/lib/payroll/staffTaxProfile"
 import { roundPayroll } from "@/lib/payrollEngine/versioning"
+import {
+  GHANA_CALCULATION_ENGINE_VERSION,
+  resolveGhanaStatutoryRatesForPeriod,
+} from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 
 export type StaffPayrollInput = {
   id: string
@@ -33,6 +37,12 @@ export type DeductionRow = {
   amount?: number | null
 }
 
+export type GhanaRateVersionLock = {
+  payeRateVersion: string
+  pensionRateVersion: string
+  periodBasis: string
+}
+
 export type ComputeStaffPayrollEntryParams = {
   staff: StaffPayrollInput
   businessCountry: string
@@ -50,6 +60,11 @@ export type ComputeStaffPayrollEntryParams = {
   /** Override snapshotted salary basis (defaults to staff.salary_basis / monthly). */
   salaryBasisSnapshot?: SalaryBasis | string | null
   oneOffItemsSnapshot?: OneOffItemSnapshot[] | null
+  /**
+   * Lock Ghana statutory versions (draft recalc / run create after resolve).
+   * When omitted for GH, versions are resolved from effectiveDate.
+   */
+  ghanaRateVersions?: GhanaRateVersionLock | null
 }
 
 export type ComputedPayrollEntryRow = {
@@ -93,6 +108,16 @@ export type ComputedPayrollEntryRow = {
   total_mandatory_pension: number
   tier1_ssnit_remittance: number
   tier2_pension_remittance: number
+  calculation_engine_version: string | null
+  paye_rate_version: string | null
+  pension_rate_version: string | null
+  calculation_jurisdiction: string | null
+  statutory_period_basis: string | null
+}
+
+function isGhanaCountry(businessCountry: string): boolean {
+  const c = String(businessCountry || "").trim().toUpperCase()
+  return c === "GH" || c === "GHANA"
 }
 
 function isQualifyingJuniorEmployee(staff: StaffPayrollInput): boolean {
@@ -109,7 +134,8 @@ function zeroEntry(
   exclusionReason: string | null,
   isIncluded: boolean,
   salaryBasis: SalaryBasis,
-  oneOffItemsSnapshot: OneOffItemSnapshot[] = []
+  oneOffItemsSnapshot: OneOffItemSnapshot[] = [],
+  versionFields: Partial<ComputedPayrollEntryRow> = {}
 ): ComputedPayrollEntryRow {
   const filing = buildGraFilingFieldsForPayrollEntry({ staff, breakdown: null })
   return {
@@ -148,6 +174,11 @@ function zeroEntry(
     total_mandatory_pension: 0,
     tier1_ssnit_remittance: 0,
     tier2_pension_remittance: 0,
+    calculation_engine_version: versionFields.calculation_engine_version ?? null,
+    paye_rate_version: versionFields.paye_rate_version ?? null,
+    pension_rate_version: versionFields.pension_rate_version ?? null,
+    calculation_jurisdiction: versionFields.calculation_jurisdiction ?? null,
+    statutory_period_basis: versionFields.statutory_period_basis ?? null,
     ...filing,
   }
 }
@@ -168,6 +199,7 @@ export function computeStaffPayrollEntry(
     exclusionReason = null,
     salaryBasisSnapshot,
     oneOffItemsSnapshot = null,
+    ghanaRateVersions = null,
   } = params
 
   const salaryBasis = parseSalaryBasis(salaryBasisSnapshot ?? staff.salary_basis ?? "monthly")
@@ -178,6 +210,33 @@ export function computeStaffPayrollEntry(
   const adjustment = Number(adjustmentAmount) || 0
   const effectiveBasic = Math.max(0, baseSnapshot + adjustment)
 
+  let lockedVersions = ghanaRateVersions
+  let versionMeta: Partial<ComputedPayrollEntryRow> = {
+    calculation_engine_version: null,
+    paye_rate_version: null,
+    pension_rate_version: null,
+    calculation_jurisdiction: isGhanaCountry(businessCountry) ? "GH" : null,
+    statutory_period_basis: null,
+  }
+
+  if (isGhanaCountry(businessCountry)) {
+    if (!lockedVersions) {
+      const resolved = resolveGhanaStatutoryRatesForPeriod(effectiveDate)
+      lockedVersions = {
+        payeRateVersion: resolved.paye.version,
+        pensionRateVersion: resolved.pension.version,
+        periodBasis: resolved.periodBasis,
+      }
+    }
+    versionMeta = {
+      calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
+      paye_rate_version: lockedVersions.payeRateVersion,
+      pension_rate_version: lockedVersions.pensionRateVersion,
+      calculation_jurisdiction: "GH",
+      statutory_period_basis: lockedVersions.periodBasis,
+    }
+  }
+
   if (!isIncluded) {
     return zeroEntry(
       staff,
@@ -187,7 +246,8 @@ export function computeStaffPayrollEntry(
       exclusionReason,
       false,
       salaryBasis,
-      oneOffSnapshot
+      oneOffSnapshot,
+      versionMeta
     )
   }
 
@@ -221,6 +281,7 @@ export function computeStaffPayrollEntry(
       bonusAmount,
       overtimeAmount,
       isQualifyingJuniorEmployee: isQualifyingJuniorEmployee(staff),
+      ...(lockedVersions ? { ghanaRateVersions: lockedVersions } : {}),
     },
     businessCountry
   )
@@ -247,8 +308,7 @@ export function computeStaffPayrollEntry(
     employeeStatutoryContributions = 0
     employerStatutoryContributions = 0
 
-    const country = String(businessCountry || "").toUpperCase()
-    if (country === "GH" || country === "GHANA") {
+    if (isGhanaCountry(businessCountry)) {
       const payeInputs = ghanaPayeInputsFromBreakdown(
         breakdown as Record<string, unknown> | null | undefined,
         payrollResult.earnings.basicSalary
@@ -256,6 +316,8 @@ export function computeStaffPayrollEntry(
       const adjusted = recalculateGhanaEntryAfterRemovingSsnit({
         grossSalary: payrollResult.earnings.grossSalary,
         otherDeductions: payrollResult.totals.totalOtherDeductions,
+        payeRateVersion: lockedVersions?.payeRateVersion ?? breakdown?.payeRateVersion,
+        effectiveDate,
         ...payeInputs,
       })
       paye = adjusted.paye
@@ -274,15 +336,32 @@ export function computeStaffPayrollEntry(
 
   const pensionSnapshots = isPensionable
     ? deriveEntryPensionSnapshots({
-        pensionableBase: payrollResult.earnings.basicSalary,
+        pensionableBase: Number(breakdown?.pensionableBase ?? payrollResult.earnings.basicSalary),
         employeeContribution: employeeStatutoryContributions,
         employerContribution: employerStatutoryContributions,
+        tier1Remittance: Number(breakdown?.tier1SsnitRemittance ?? 0),
+        tier2Remittance: Number(breakdown?.tier2PensionRemittance ?? 0),
       })
     : deriveEntryPensionSnapshots({
         pensionableBase: 0,
         employeeContribution: 0,
         employerContribution: 0,
+        tier1Remittance: 0,
+        tier2Remittance: 0,
       })
+
+  if (breakdown?.calculationEngineVersion) {
+    versionMeta.calculation_engine_version = String(breakdown.calculationEngineVersion)
+  }
+  if (breakdown?.payeRateVersion) {
+    versionMeta.paye_rate_version = String(breakdown.payeRateVersion)
+  }
+  if (breakdown?.pensionRateVersion) {
+    versionMeta.pension_rate_version = String(breakdown.pensionRateVersion)
+  }
+  if (breakdown?.statutoryPeriodBasis) {
+    versionMeta.statutory_period_basis = String(breakdown.statutoryPeriodBasis)
+  }
 
   return {
     staff_id: staff.id,
@@ -316,6 +395,11 @@ export function computeStaffPayrollEntry(
     net_salary: netSalary,
     ...pensionSnapshots,
     ...filing,
+    calculation_engine_version: versionMeta.calculation_engine_version ?? null,
+    paye_rate_version: versionMeta.paye_rate_version ?? null,
+    pension_rate_version: versionMeta.pension_rate_version ?? null,
+    calculation_jurisdiction: versionMeta.calculation_jurisdiction ?? null,
+    statutory_period_basis: versionMeta.statutory_period_basis ?? null,
   }
 }
 

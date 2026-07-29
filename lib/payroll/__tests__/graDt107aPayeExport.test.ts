@@ -644,14 +644,16 @@ describe("GRA DT 107A PAYE export", () => {
   })
 
   describe("UX/API copy surfaces", () => {
-    it("payroll run page uses remittance wording and GRA-ready export guidance", () => {
+    it("payroll run page uses remittance wording and DT 107A preparation export guidance", () => {
       const file = join(process.cwd(), "app", "payroll", "[id]", "page.tsx")
       const src = readFileSync(file, "utf8")
       expect(src).toContain("Record GRA remittance")
       expect(src).not.toContain("Pay GRA PAYE")
       expect(src).toContain("File and pay through the GRA portal first")
-      expect(src).toContain("Use the GRA-ready DT 107A CSV for portal filing")
-      expect(src).toContain("Keep the GRA acknowledgement")
+      expect(src).toContain("DT 107A preparation export")
+      expect(src).toContain("verify before submission")
+      expect(src).not.toContain("GRA-ready DT 107A CSV")
+      expect(src).not.toContain("Use the GRA-ready DT 107A CSV for portal filing")
       expect(src).toContain("mode=gra-ready")
       expect(src).toContain("mode=audit")
       expect(src).toContain("assessGraFilingReadiness")
