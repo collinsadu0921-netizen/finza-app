@@ -32,6 +32,46 @@ export function parseStaffSecondaryEmployment(value: unknown): boolean {
   return value === true
 }
 
+/** Canonical employment_type values stored on payroll_tax_profile snapshots. */
+export const PAYROLL_EMPLOYMENT_TYPES = [
+  "full_time",
+  "part_time",
+  "casual",
+  "temporary",
+  "permanent",
+  "contract",
+] as const
+
+export type PayrollEmploymentType = (typeof PAYROLL_EMPLOYMENT_TYPES)[number]
+
+/**
+ * Normalize employment classification for immutable payroll snapshots.
+ * Trims, lowercases, maps aliases to stable canonical values. Returns null if blank.
+ */
+export function normalizeEmploymentTypeForSnapshot(value: unknown): string | null {
+  if (value == null) return null
+  const raw = String(value).trim().toLowerCase().replace(/[\s-]+/g, "_")
+  if (!raw) return null
+
+  if (raw === "fulltime" || raw === "full_time" || raw === "ft") return "full_time"
+  if (raw === "parttime" || raw === "part_time" || raw === "pt") return "part_time"
+  if (raw === "casual" || raw === "casual_worker" || raw.includes("casual")) return "casual"
+  if (
+    raw === "temporary" ||
+    raw === "temp" ||
+    raw === "temp_worker" ||
+    raw === "temporary_worker" ||
+    raw.includes("temporary") ||
+    raw.includes("temp_worker")
+  ) {
+    return "temporary"
+  }
+  if (raw === "permanent" || raw === "perm") return "permanent"
+  if (raw === "contract" || raw === "contractor" || raw === "fixed_term") return "contract"
+
+  return raw
+}
+
 export const GRA_POSITION_CODE_VALIDATION_ERROR =
   "gra_position_code must be one of EXPT, JUNR, MNGT, OTHR, SENR, or empty"
 
@@ -75,6 +115,7 @@ export type StaffFilingProfileInput = {
   is_pensionable?: unknown
   gra_position_code?: unknown
   secondary_employment?: unknown
+  employment_type?: unknown
 }
 
 export type GraFilingFieldsForPayrollEntry = {
@@ -125,6 +166,7 @@ export function buildPayrollTaxProfileSnapshotForEntry(input: {
   staffIsPensionable: boolean
   graPositionCode: string | null
   secondaryEmployment: boolean
+  employmentType: string | null
 }): Record<string, unknown> {
   const b = input.breakdown
   return {
@@ -134,6 +176,7 @@ export function buildPayrollTaxProfileSnapshotForEntry(input: {
     staff_is_pensionable: input.staffIsPensionable,
     gra_position_code: input.graPositionCode,
     secondary_employment: input.secondaryEmployment,
+    employment_type: input.employmentType,
     casual_worker_flat_tax_applied: breakdownBool(b, "casualWorkerFlatTaxApplied"),
     prior_bonus_paid_in_calendar_year: breakdownNum(b, "priorBonusPaidInCalendarYear"),
     bonus_concessional_room_before_run: breakdownNum(b, "bonusConcessionalRoomBeforeRun"),
@@ -155,6 +198,7 @@ export function buildGraFilingFieldsForPayrollEntry(input: {
       staffIsPensionable: parseStaffIsPensionable(input.staff.is_pensionable),
       graPositionCode: normalizeGraPositionCode(input.staff.gra_position_code),
       secondaryEmployment: parseStaffSecondaryEmployment(input.staff.secondary_employment),
+      employmentType: normalizeEmploymentTypeForSnapshot(input.staff.employment_type),
     }),
     filing_tin: snapshotText(input.staff.tin_number),
     filing_employee_name: snapshotText(input.staff.name),

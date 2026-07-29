@@ -6,14 +6,31 @@
  *   GRA PAYE page Year 2024 table).
  * - SSNIT Public Notice 13 Jan 2026: 2026 min/max insurable earnings GH¢587.80 / GH¢69,000;
  *   prior (2025) levels GH¢539.19 / GH¢61,000 cited in that notice.
+ * - 2024 SSNIT ceilings: min GH¢490.05 / max GH¢52,000 (Tier 1 bounds GH¢66.16 / GH¢7,020).
  * - National Pensions Act, 2008 (Act 766): employee 5.5%, employer 13%; Tier 1 13.5%, Tier 2 5%.
  *
- * Selection uses the payroll period date, never "today". Fail closed when no version covers the period.
+ * Selection uses the payroll period date, never "today". Fail closed when no version covers the period
+ * or the period is outside the verified support horizon (2024-01-01 … 2026-12-31).
  */
 
 import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
 
 export const GHANA_CALCULATION_ENGINE_VERSION = "finza-ghana-v2"
+
+/** Inclusive verified statutory configuration window for Finza Ghana payroll. */
+export const GHANA_STATUTORY_VERIFIED_FROM = "2024-01-01"
+export const GHANA_STATUTORY_VERIFIED_THROUGH = "2026-12-31"
+
+export const GHANA_STATUTORY_VERSION_ERROR_CODE = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
+
+export class GhanaStatutoryVersionError extends Error {
+  readonly code = GHANA_STATUTORY_VERSION_ERROR_CODE
+
+  constructor(message: string) {
+    super(message)
+    this.name = "GhanaStatutoryVersionError"
+  }
+}
 
 export type GhanaPayeBand = {
   /** Width of this band ("Next X"), or null for open-ended residual. */
@@ -62,16 +79,11 @@ const GHANA_PAYE_VERSIONS: GhanaPayeRates[] = [
   {
     version: "gh-paye-2024-01",
     effectiveFrom: "2024-01-01",
+    effectiveTo: GHANA_STATUTORY_VERIFIED_THROUGH,
     bands: [...GHANA_PAYE_2024_01_BANDS],
   },
 ]
 
-/**
- * Pension / SSNIT versions.
- * 2024–2025 caps use predecessor figures stated in SSNIT Public Notice 13 Jan 2026
- * (max GH¢61,000 / min GH¢539.19) for the Finza support window from Act 1111 PAYE start.
- * 2026+ uses the notice’s revised ceilings.
- */
 const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
   {
     version: "gh-pension-2024-01",
@@ -81,8 +93,8 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     employerRate: 0.13,
     tier1TotalRate: 0.135,
     tier2Rate: 0.05,
-    minimumInsurableEarnings: 539.19,
-    maximumInsurableEarnings: 61000,
+    minimumInsurableEarnings: 490.05,
+    maximumInsurableEarnings: 52000,
   },
   {
     version: "gh-pension-2025-01",
@@ -98,6 +110,7 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
   {
     version: "gh-pension-2026-01",
     effectiveFrom: "2026-01-01",
+    effectiveTo: "2026-12-31",
     employeeRate: 0.055,
     employerRate: 0.13,
     tier1TotalRate: 0.135,
@@ -116,25 +129,34 @@ function versionCoversDate(
   return true
 }
 
-export function getGhanaPayeRatesForPeriod(periodDate: string): GhanaPayeRates {
+export function assertGhanaPeriodWithinVerifiedHorizon(periodDate: string): string {
   validateEffectiveDate(periodDate)
   const date = extractDatePart(periodDate)
+  if (date < GHANA_STATUTORY_VERIFIED_FROM || date > GHANA_STATUTORY_VERIFIED_THROUGH) {
+    throw new GhanaStatutoryVersionError(
+      `Ghana payroll period ${date} is outside the verified statutory support window (${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}).`
+    )
+  }
+  return date
+}
+
+export function getGhanaPayeRatesForPeriod(periodDate: string): GhanaPayeRates {
+  const date = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
   const match = GHANA_PAYE_VERSIONS.find((v) => versionCoversDate(v, date))
   if (!match) {
-    throw new Error(
-      `No Ghana PAYE rate version covers payroll period ${date}. Supported from ${GHANA_PAYE_VERSIONS[0]?.effectiveFrom ?? "n/a"}.`
+    throw new GhanaStatutoryVersionError(
+      `No Ghana PAYE rate version covers payroll period ${date}. Supported from ${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}.`
     )
   }
   return match
 }
 
 export function getGhanaPensionRatesForPeriod(periodDate: string): GhanaPensionRates {
-  validateEffectiveDate(periodDate)
-  const date = extractDatePart(periodDate)
+  const date = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
   const match = GHANA_PENSION_VERSIONS.find((v) => versionCoversDate(v, date))
   if (!match) {
-    throw new Error(
-      `No Ghana pension/SSNIT rate version covers payroll period ${date}. Supported from ${GHANA_PENSION_VERSIONS[0]?.effectiveFrom ?? "n/a"}.`
+    throw new GhanaStatutoryVersionError(
+      `No Ghana pension/SSNIT rate version covers payroll period ${date}. Supported from ${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}.`
     )
   }
   return match
@@ -143,7 +165,7 @@ export function getGhanaPensionRatesForPeriod(periodDate: string): GhanaPensionR
 export function getGhanaPayeRatesByVersion(versionId: string): GhanaPayeRates {
   const match = GHANA_PAYE_VERSIONS.find((v) => v.version === versionId)
   if (!match) {
-    throw new Error(`Unknown Ghana PAYE rate version: ${versionId}`)
+    throw new GhanaStatutoryVersionError(`Unknown Ghana PAYE rate version: ${versionId}`)
   }
   return match
 }
@@ -151,14 +173,14 @@ export function getGhanaPayeRatesByVersion(versionId: string): GhanaPayeRates {
 export function getGhanaPensionRatesByVersion(versionId: string): GhanaPensionRates {
   const match = GHANA_PENSION_VERSIONS.find((v) => v.version === versionId)
   if (!match) {
-    throw new Error(`Unknown Ghana pension rate version: ${versionId}`)
+    throw new GhanaStatutoryVersionError(`Unknown Ghana pension rate version: ${versionId}`)
   }
   return match
 }
 
 /** Resolve PAYE + pension for a payroll period. Fail closed — no newest/oldest fallback. */
 export function resolveGhanaStatutoryRatesForPeriod(periodDate: string): GhanaStatutoryRateBundle {
-  const periodBasis = extractDatePart(periodDate)
+  const periodBasis = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
   return {
     paye: getGhanaPayeRatesForPeriod(periodBasis),
     pension: getGhanaPensionRatesForPeriod(periodBasis),
@@ -167,17 +189,36 @@ export function resolveGhanaStatutoryRatesForPeriod(periodDate: string): GhanaSt
   }
 }
 
-/** Resolve by previously snapshotted version ids (draft recalc / historical stability). */
+/**
+ * Resolve by previously snapshotted version ids (draft recalc / historical stability).
+ * Validates that both versions exist, are Ghana tables, and cover the stored period basis
+ * within the verified support horizon. Does not fall back to any other version.
+ */
 export function resolveGhanaStatutoryRatesByVersions(opts: {
   payeRateVersion: string
   pensionRateVersion: string
   periodBasis: string
 }): GhanaStatutoryRateBundle {
+  const periodBasis = assertGhanaPeriodWithinVerifiedHorizon(opts.periodBasis)
+  const paye = getGhanaPayeRatesByVersion(opts.payeRateVersion)
+  const pension = getGhanaPensionRatesByVersion(opts.pensionRateVersion)
+
+  if (!versionCoversDate(paye, periodBasis)) {
+    throw new GhanaStatutoryVersionError(
+      `Ghana PAYE version "${paye.version}" does not cover stored period ${periodBasis}.`
+    )
+  }
+  if (!versionCoversDate(pension, periodBasis)) {
+    throw new GhanaStatutoryVersionError(
+      `Ghana pension version "${pension.version}" does not cover stored period ${periodBasis}.`
+    )
+  }
+
   return {
-    paye: getGhanaPayeRatesByVersion(opts.payeRateVersion),
-    pension: getGhanaPensionRatesByVersion(opts.pensionRateVersion),
+    paye,
+    pension,
     calculationEngineVersion: GHANA_CALCULATION_ENGINE_VERSION,
-    periodBasis: extractDatePart(opts.periodBasis),
+    periodBasis,
   }
 }
 
@@ -241,7 +282,6 @@ export function computeGhanaPensionAmounts(
   if (Math.abs(drift) > 0 && Math.abs(drift) <= 0.01) {
     tier2 = roundPayroll(tier2 + drift)
   } else if (Math.abs(drift) > 0.01) {
-    // Prefer statutory tier rates; force residual onto Tier 2 and document via assertion callers.
     tier2 = roundPayroll(totalMandatory - tier1)
   }
   return {

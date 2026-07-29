@@ -1,17 +1,17 @@
 /**
  * Ghana payroll approval containment — block unsupported tax profiles and unknown rate versions.
+ *
+ * For finza-ghana-v2 entries, payroll_entries.payroll_tax_profile is authoritative.
+ * Live staff fields must not determine classification or repair missing snapshots.
  */
 
 import {
   GHANA_CALCULATION_ENGINE_VERSION,
-  getGhanaPayeRatesByVersion,
-  getGhanaPensionRatesByVersion,
+  resolveGhanaStatutoryRatesByVersions,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
-import {
-  parseStaffIsTaxResident,
-  parseStaffSecondaryEmployment,
-} from "@/lib/payroll/staffTaxProfile"
+import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfile"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
+import { extractDatePart } from "@/lib/payrollEngine/versioning"
 
 export const GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE = "GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE"
 export const GHANA_PAYROLL_UNKNOWN_RATE_VERSION = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
@@ -42,6 +42,7 @@ export type PayrollEntryForGhanaApproval = {
   statutory_period_basis?: string | null
   payroll_tax_profile?: Record<string, unknown> | null
   filing_employee_name?: string | null
+  /** Display / legacy diagnostics only — never authoritative for finza-ghana-v2 classification. */
   staff?: {
     id?: string
     name?: string | null
@@ -51,27 +52,50 @@ export type PayrollEntryForGhanaApproval = {
   } | null
 }
 
-function classifyUnsupported(entry: PayrollEntryForGhanaApproval): string | null {
-  const profile = entry.payroll_tax_profile || {}
-  const staff = entry.staff || {}
+function employeeName(entry: PayrollEntryForGhanaApproval): string | null {
+  return (
+    (entry.filing_employee_name && String(entry.filing_employee_name).trim()) ||
+    (entry.staff?.name && String(entry.staff.name).trim()) ||
+    null
+  )
+}
 
-  const isResident =
-    profile.staff_is_tax_resident !== undefined
-      ? profile.staff_is_tax_resident !== false
-      : parseStaffIsTaxResident(staff.is_tax_resident)
-  if (!isResident) return "non_resident"
+function profileHasBoolean(profile: Record<string, unknown>, key: string): boolean {
+  return typeof profile[key] === "boolean"
+}
 
-  const secondary =
-    profile.secondary_employment !== undefined
-      ? profile.secondary_employment === true
-      : parseStaffSecondaryEmployment(staff.secondary_employment)
-  if (secondary) return "secondary_employment"
+/**
+ * Classify unsupported / incomplete tax profile from the immutable entry snapshot only.
+ * Returns a classification code, or null when the snapshotted profile is supported.
+ */
+export function classifyUnsupportedFromTaxProfileSnapshot(
+  profile: Record<string, unknown> | null | undefined
+): string | null {
+  if (!profile || typeof profile !== "object") {
+    return "missing_tax_profile_snapshot"
+  }
 
-  const employmentType = String(staff.employment_type || profile.employment_type || "")
-    .trim()
-    .toLowerCase()
+  if (!profileHasBoolean(profile, "staff_is_tax_resident")) {
+    return "missing_tax_profile_snapshot"
+  }
+  if (!profileHasBoolean(profile, "secondary_employment")) {
+    return "missing_tax_profile_snapshot"
+  }
+
+  const employmentRaw = profile.employment_type
+  const employmentType =
+    employmentRaw === undefined || employmentRaw === null
+      ? null
+      : normalizeEmploymentTypeForSnapshot(employmentRaw)
+  if (!employmentType) {
+    return "missing_tax_profile_snapshot"
+  }
+
+  if (profile.staff_is_tax_resident === false) return "non_resident"
+  if (profile.secondary_employment === true) return "secondary_employment"
+
   if (employmentType === "casual" || employmentType.includes("casual")) return "casual_worker"
-  if (employmentType.includes("temporary") || employmentType.includes("temp_worker")) {
+  if (employmentType === "temporary" || employmentType.includes("temporary")) {
     return "temporary_worker"
   }
 
@@ -80,12 +104,70 @@ function classifyUnsupported(entry: PayrollEntryForGhanaApproval): string | null
   return null
 }
 
-function employeeName(entry: PayrollEntryForGhanaApproval): string | null {
-  return (
-    (entry.filing_employee_name && String(entry.filing_employee_name).trim()) ||
-    (entry.staff?.name && String(entry.staff.name).trim()) ||
-    null
-  )
+function normalizePeriodBasis(value: unknown): string | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  if (!s) return null
+  try {
+    return extractDatePart(s)
+  } catch {
+    return null
+  }
+}
+
+function collectEntryVersionMismatches(
+  run: {
+    calculation_engine_version: string
+    paye_rate_version: string
+    pension_rate_version: string
+    calculation_jurisdiction: string
+    statutory_period_basis: string
+  },
+  entries: PayrollEntryForGhanaApproval[]
+): UnsupportedTaxProfileEmployee[] {
+  const mismatches: UnsupportedTaxProfileEmployee[] = []
+
+  for (const entry of entries) {
+    const name = employeeName(entry)
+    const push = (unsupportedClassification: string) => {
+      mismatches.push({
+        staffId: entry.staff_id,
+        employeeName: name,
+        unsupportedClassification,
+      })
+    }
+
+    if (
+      !entry.calculation_engine_version ||
+      !entry.paye_rate_version ||
+      !entry.pension_rate_version ||
+      !entry.calculation_jurisdiction ||
+      !entry.statutory_period_basis
+    ) {
+      push("missing_rate_version_snapshot")
+      continue
+    }
+
+    if (entry.calculation_engine_version !== run.calculation_engine_version) {
+      push("engine_version_mismatch")
+    }
+    if (entry.paye_rate_version !== run.paye_rate_version) {
+      push("paye_version_mismatch")
+    }
+    if (entry.pension_rate_version !== run.pension_rate_version) {
+      push("pension_version_mismatch")
+    }
+    if (String(entry.calculation_jurisdiction).trim().toUpperCase() !== run.calculation_jurisdiction) {
+      push("jurisdiction_mismatch")
+    }
+
+    const entryPeriod = normalizePeriodBasis(entry.statutory_period_basis)
+    if (!entryPeriod || entryPeriod !== run.statutory_period_basis) {
+      push("statutory_period_mismatch")
+    }
+  }
+
+  return mismatches
 }
 
 export function validateGhanaPayrollRunForApproval(opts: {
@@ -109,13 +191,20 @@ export function validateGhanaPayrollRunForApproval(opts: {
   const runEngine = opts.run.calculation_engine_version
   const runPaye = opts.run.paye_rate_version
   const runPension = opts.run.pension_rate_version
+  const runJurisdiction = opts.run.calculation_jurisdiction
+    ? String(opts.run.calculation_jurisdiction).trim().toUpperCase()
+    : null
+  const runPeriod = normalizePeriodBasis(opts.run.statutory_period_basis)
+  const runFrequency = opts.run.payroll_frequency
+    ? String(opts.run.payroll_frequency).trim().toLowerCase()
+    : null
 
-  if (!runEngine || !runPaye || !runPension) {
+  if (!runEngine || !runPaye || !runPension || !runJurisdiction || !runPeriod || !runFrequency) {
     return {
       ok: false,
       code: GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
       message:
-        "This payroll run is missing a recognized Ghana calculation-engine or statutory-rate version and cannot be approved. Recreate the run after upgrading, or contact support for legacy runs.",
+        "This payroll run is missing a recognized Ghana calculation-engine, jurisdiction, period basis, frequency, or statutory-rate version and cannot be approved. Recreate the run after upgrading, or contact support for legacy runs.",
       affectedEmployees: [],
     }
   }
@@ -129,64 +218,102 @@ export function validateGhanaPayrollRunForApproval(opts: {
     }
   }
 
-  try {
-    getGhanaPayeRatesByVersion(runPaye)
-    getGhanaPensionRatesByVersion(runPension)
-  } catch {
+  if (runJurisdiction !== "GH") {
     return {
       ok: false,
-      code: GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
-      message: `Unknown Ghana statutory rate version (PAYE="${runPaye}", pension="${runPension}"). Approval is blocked.`,
+      code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+      message: `Ghana payroll approval requires calculation_jurisdiction "GH" (received "${runJurisdiction}").`,
       affectedEmployees: [],
     }
   }
 
-  const versionMismatches: UnsupportedTaxProfileEmployee[] = []
-  for (const entry of included) {
-    if (
-      !entry.calculation_engine_version ||
-      !entry.paye_rate_version ||
-      !entry.pension_rate_version
-    ) {
-      versionMismatches.push({
-        staffId: entry.staff_id,
-        employeeName: employeeName(entry),
-        unsupportedClassification: "missing_rate_version_snapshot",
-      })
-      continue
-    }
-    if (
-      entry.calculation_engine_version !== runEngine ||
-      entry.paye_rate_version !== runPaye ||
-      entry.pension_rate_version !== runPension
-    ) {
-      versionMismatches.push({
-        staffId: entry.staff_id,
-        employeeName: employeeName(entry),
-        unsupportedClassification: "mixed_or_unknown_rate_version",
-      })
+  if (runFrequency !== "monthly") {
+    return {
+      ok: false,
+      code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+      message: `Ghana payroll approval currently requires monthly frequency (received "${runFrequency}").`,
+      affectedEmployees: [],
     }
   }
+
+  try {
+    resolveGhanaStatutoryRatesByVersions({
+      payeRateVersion: runPaye,
+      pensionRateVersion: runPension,
+      periodBasis: runPeriod,
+    })
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Stored Ghana rate versions are invalid for this payroll period."
+    const outsideOrUncovered = /does not cover|outside the verified/i.test(message)
+    if (outsideOrUncovered) {
+      return {
+        ok: false,
+        code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+        message: `Ghana statutory rate versions do not cover period ${runPeriod}. Approval is blocked.`,
+        affectedEmployees: [
+          {
+            staffId: "",
+            employeeName: null,
+            unsupportedClassification: "version_does_not_cover_period",
+          },
+        ],
+      }
+    }
+    return {
+      ok: false,
+      code: GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
+      message: `Unknown or unsupported Ghana statutory rate version (PAYE="${runPaye}", pension="${runPension}", period="${runPeriod}"). Approval is blocked.`,
+      affectedEmployees: [],
+    }
+  }
+
+  const versionMismatches = collectEntryVersionMismatches(
+    {
+      calculation_engine_version: runEngine,
+      paye_rate_version: runPaye,
+      pension_rate_version: runPension,
+      calculation_jurisdiction: runJurisdiction,
+      statutory_period_basis: runPeriod,
+    },
+    included
+  )
 
   if (versionMismatches.length > 0) {
     return {
       ok: false,
       code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
       message:
-        "Included payroll entries do not all share this run’s Ghana calculation and rate versions. Approval is blocked.",
+        "Included payroll entries do not all match this run’s Ghana calculation versions, jurisdiction, and period basis. Approval is blocked.",
       affectedEmployees: versionMismatches,
     }
   }
 
   const unsupported: UnsupportedTaxProfileEmployee[] = []
+  const missingProfile: UnsupportedTaxProfileEmployee[] = []
+
   for (const entry of included) {
-    const classification = classifyUnsupported(entry)
-    if (classification) {
-      unsupported.push({
-        staffId: entry.staff_id,
-        employeeName: employeeName(entry),
-        unsupportedClassification: classification,
-      })
+    const classification = classifyUnsupportedFromTaxProfileSnapshot(entry.payroll_tax_profile)
+    if (!classification) continue
+    const item = {
+      staffId: entry.staff_id,
+      employeeName: employeeName(entry),
+      unsupportedClassification: classification,
+    }
+    if (classification === "missing_tax_profile_snapshot") {
+      missingProfile.push(item)
+    } else {
+      unsupported.push(item)
+    }
+  }
+
+  if (missingProfile.length > 0) {
+    return {
+      ok: false,
+      code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+      message:
+        "One or more included employees are missing immutable tax-profile snapshot fields required for Ghana approval (residency, secondary employment, or employment classification).",
+      affectedEmployees: missingProfile,
     }
   }
 

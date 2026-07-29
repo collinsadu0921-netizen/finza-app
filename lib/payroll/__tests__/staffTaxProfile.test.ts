@@ -1,5 +1,7 @@
 import {
+  buildGraFilingFieldsForPayrollEntry,
   buildPayrollTaxProfileSnapshotForEntry,
+  normalizeEmploymentTypeForSnapshot,
   normalizeGraPositionCode,
   parseStaffIsPensionable,
   parseStaffIsTaxResident,
@@ -35,6 +37,15 @@ describe("staffTaxProfile helpers", () => {
     expect(parseStaffSecondaryEmployment(false)).toBe(false)
     expect(parseStaffSecondaryEmployment(true)).toBe(true)
   })
+
+  it("normalizes employment_type for snapshots", () => {
+    expect(normalizeEmploymentTypeForSnapshot(" Full-Time ")).toBe("full_time")
+    expect(normalizeEmploymentTypeForSnapshot("CASUAL")).toBe("casual")
+    expect(normalizeEmploymentTypeForSnapshot("temp_worker")).toBe("temporary")
+    expect(normalizeEmploymentTypeForSnapshot("Temporary")).toBe("temporary")
+    expect(normalizeEmploymentTypeForSnapshot("")).toBe(null)
+    expect(normalizeEmploymentTypeForSnapshot(null)).toBe(null)
+  })
 })
 
 describe("payroll_tax_profile snapshot builder", () => {
@@ -55,12 +66,27 @@ describe("payroll_tax_profile snapshot builder", () => {
       staffIsPensionable: true,
       graPositionCode: "MNGT",
       secondaryEmployment: true,
+      employmentType: "full_time",
     })
     expect(snap.staff_is_tax_resident).toBe(true)
     expect(snap.staff_is_pensionable).toBe(true)
     expect(snap.gra_position_code).toBe("MNGT")
     expect(snap.secondary_employment).toBe(true)
+    expect(snap.employment_type).toBe("full_time")
     expect(snap.is_resident).toBe(true)
     expect(snap.is_pensionable).toBe(true)
+  })
+
+  it("snapshots employment_type from staff via GRA filing builder", () => {
+    const fields = buildGraFilingFieldsForPayrollEntry({
+      staff: {
+        name: "Test",
+        employment_type: " Casual ",
+        is_tax_resident: true,
+        secondary_employment: false,
+      },
+      breakdown: null,
+    })
+    expect(fields.payroll_tax_profile.employment_type).toBe("casual")
   })
 })

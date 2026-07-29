@@ -240,7 +240,137 @@ describe("Ghana statutory golden — SSNIT min/max 2026", () => {
   })
 })
 
-describe("Ghana statutory golden — versioning", () => {
+describe("Ghana statutory golden — pension year caps", () => {
+  it("2024: min 490.05 / max 52000 with Tier1 bounds 66.16 / 7020", () => {
+    const pension = getGhanaPensionRatesForPeriod("2024-06-01")
+    expect(pension.version).toBe("gh-pension-2024-01")
+    expect(pension.minimumInsurableEarnings).toBe(490.05)
+    expect(pension.maximumInsurableEarnings).toBe(52000)
+
+    const below = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2024-06-01",
+      basicSalary: 400,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(below.complianceBreakdown?.pensionableBase).toBe(490.05)
+    expect(below.complianceBreakdown?.tier1SsnitRemittance).toBe(66.16)
+
+    const exactlyMin = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2024-06-01",
+      basicSalary: 490.05,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(exactlyMin.complianceBreakdown?.pensionableBase).toBe(490.05)
+    expect(exactlyMin.complianceBreakdown?.tier1SsnitRemittance).toBe(66.16)
+
+    const at1000 = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2024-06-01",
+      basicSalary: 1000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(at1000.complianceBreakdown?.pensionableBase).toBe(1000)
+    expect(at1000.complianceBreakdown?.tier1SsnitRemittance).toBe(135)
+
+    const exactlyMax = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2024-06-01",
+      basicSalary: 52000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(exactlyMax.complianceBreakdown?.pensionableBase).toBe(52000)
+    expect(exactlyMax.complianceBreakdown?.tier1SsnitRemittance).toBe(7020)
+
+    const above = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2024-06-01",
+      basicSalary: 60000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(above.complianceBreakdown?.pensionableBase).toBe(52000)
+    expect(above.complianceBreakdown?.tier1SsnitRemittance).toBe(7020)
+  })
+
+  it("2025: min 539.19 / max 61000", () => {
+    const pension = getGhanaPensionRatesForPeriod("2025-06-15")
+    expect(pension.version).toBe("gh-pension-2025-01")
+    expect(pension.minimumInsurableEarnings).toBe(539.19)
+    expect(pension.maximumInsurableEarnings).toBe(61000)
+
+    const exactlyMin = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2025-03-01",
+      basicSalary: 539.19,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(exactlyMin.complianceBreakdown?.pensionableBase).toBe(539.19)
+
+    const exactlyMax = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2025-03-01",
+      basicSalary: 61000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(exactlyMax.complianceBreakdown?.pensionableBase).toBe(61000)
+
+    const above = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2025-03-01",
+      basicSalary: 70000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(above.complianceBreakdown?.pensionableBase).toBe(61000)
+  })
+
+  it("2026: min 587.80 / max 69000", () => {
+    const pension = getGhanaPensionRatesForPeriod("2026-06-01")
+    expect(pension.version).toBe("gh-pension-2026-01")
+    expect(pension.minimumInsurableEarnings).toBe(587.8)
+    expect(pension.maximumInsurableEarnings).toBe(69000)
+
+    expect(
+      ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-06-01",
+        basicSalary: 587.8,
+        allowances: 0,
+        otherDeductions: 0,
+      }).complianceBreakdown?.pensionableBase
+    ).toBe(587.8)
+
+    expect(
+      ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-06-01",
+        basicSalary: 69000,
+        allowances: 0,
+        otherDeductions: 0,
+      }).complianceBreakdown?.pensionableBase
+    ).toBe(69000)
+
+    expect(
+      ghanaPayrollEngine.calculate({
+        jurisdiction: "GH",
+        effectiveDate: "2026-06-01",
+        basicSalary: 80000,
+        allowances: 0,
+        otherDeductions: 0,
+      }).complianceBreakdown?.pensionableBase
+    ).toBe(69000)
+  })
+})
+
+describe("Ghana statutory golden — versioning and support horizon", () => {
   it("payroll period selects 2026 pension version", () => {
     const bundle = resolveGhanaStatutoryRatesForPeriod("2026-03-01")
     expect(bundle.pension.version).toBe("gh-pension-2026-01")
@@ -248,18 +378,24 @@ describe("Ghana statutory golden — versioning", () => {
     expect(bundle.calculationEngineVersion).toBe(GHANA_CALCULATION_ENGINE_VERSION)
   })
 
-  it("2025 period selects 2025 pension caps", () => {
-    const pension = getGhanaPensionRatesForPeriod("2025-06-15")
-    expect(pension.version).toBe("gh-pension-2025-01")
-    expect(pension.maximumInsurableEarnings).toBe(61000)
-    expect(pension.minimumInsurableEarnings).toBe(539.19)
+  it.each([
+    ["2023-12-31", false],
+    ["2024-01-01", true],
+    ["2024-12-31", true],
+    ["2025-01-01", true],
+    ["2025-12-31", true],
+    ["2026-01-01", true],
+    ["2026-12-31", true],
+    ["2027-01-01", false],
+  ] as const)("horizon %s accepted=%s", (period, accepted) => {
+    if (accepted) {
+      expect(() => resolveGhanaStatutoryRatesForPeriod(period)).not.toThrow()
+    } else {
+      expect(() => resolveGhanaStatutoryRatesForPeriod(period)).toThrow(/outside the verified|No Ghana/)
+    }
   })
 
-  it("unsupported period before 2024 fails closed", () => {
-    expect(() => resolveGhanaStatutoryRatesForPeriod("2023-12-01")).toThrow(/No Ghana/)
-  })
-
-  it("recalc lock keeps stored versions", () => {
+  it("recalc lock keeps stored versions when period is compatible", () => {
     const locked = resolveGhanaStatutoryRatesByVersions({
       payeRateVersion: "gh-paye-2024-01",
       pensionRateVersion: "gh-pension-2026-01",
@@ -268,7 +404,7 @@ describe("Ghana statutory golden — versioning", () => {
     const result = calculatePayroll(
       {
         jurisdiction: "GH",
-        effectiveDate: "2099-01-01",
+        effectiveDate: "2026-01-01",
         basicSalary: 1000,
         allowances: 0,
         otherDeductions: 0,
@@ -283,6 +419,24 @@ describe("Ghana statutory golden — versioning", () => {
     expect(result.complianceBreakdown?.payeRateVersion).toBe("gh-paye-2024-01")
     expect(result.complianceBreakdown?.pensionRateVersion).toBe("gh-pension-2026-01")
     expect(result.totals.netSalary).toBe(888.87)
+  })
+
+  it("stored-version resolution rejects incompatible period", () => {
+    expect(() =>
+      resolveGhanaStatutoryRatesByVersions({
+        payeRateVersion: "gh-paye-2024-01",
+        pensionRateVersion: "gh-pension-2026-01",
+        periodBasis: "2027-01-01",
+      })
+    ).toThrow(/outside the verified/)
+
+    expect(() =>
+      resolveGhanaStatutoryRatesByVersions({
+        payeRateVersion: "gh-paye-2024-01",
+        pensionRateVersion: "gh-pension-2024-01",
+        periodBasis: "2026-01-01",
+      })
+    ).toThrow(/does not cover/)
   })
 })
 
@@ -302,9 +456,12 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
     calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
     paye_rate_version: "gh-paye-2024-01",
     pension_rate_version: "gh-pension-2026-01",
+    calculation_jurisdiction: "GH",
+    statutory_period_basis: "2026-01-01",
     payroll_tax_profile: {
       staff_is_tax_resident: true,
       secondary_employment: false,
+      employment_type: "full_time",
     },
     filing_employee_name: "Ok Employee",
     staff: {
@@ -316,7 +473,7 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
     },
   }
 
-  it("blocks non-resident", () => {
+  it("blocks non-resident snapshot even if live staff is resident", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
       run: baseRun,
@@ -325,8 +482,17 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
           ...supportedEntry,
           staff_id: "s-nr",
           filing_employee_name: "Non Resident",
-          payroll_tax_profile: { staff_is_tax_resident: false, secondary_employment: false },
-          staff: { ...supportedEntry.staff!, id: "s-nr", name: "Non Resident", is_tax_resident: false },
+          payroll_tax_profile: {
+            staff_is_tax_resident: false,
+            secondary_employment: false,
+            employment_type: "full_time",
+          },
+          staff: {
+            ...supportedEntry.staff!,
+            id: "s-nr",
+            name: "Non Resident",
+            is_tax_resident: true,
+          },
         },
       ],
     })
@@ -337,7 +503,7 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
     }
   })
 
-  it("blocks secondary employment", () => {
+  it("blocks secondary-employment snapshot even if live staff clears it", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
       run: baseRun,
@@ -345,8 +511,12 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
         {
           ...supportedEntry,
           staff_id: "s-sec",
-          payroll_tax_profile: { staff_is_tax_resident: true, secondary_employment: true },
-          staff: { ...supportedEntry.staff!, secondary_employment: true },
+          payroll_tax_profile: {
+            staff_is_tax_resident: true,
+            secondary_employment: true,
+            employment_type: "full_time",
+          },
+          staff: { ...supportedEntry.staff!, secondary_employment: false },
         },
       ],
     })
@@ -357,7 +527,7 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
     }
   })
 
-  it("blocks casual worker", () => {
+  it("blocks casual snapshot after live staff becomes full_time", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
       run: baseRun,
@@ -365,13 +535,103 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
         {
           ...supportedEntry,
           staff_id: "s-cas",
-          staff: { ...supportedEntry.staff!, employment_type: "casual" },
+          payroll_tax_profile: {
+            staff_is_tax_resident: true,
+            secondary_employment: false,
+            employment_type: "casual",
+          },
+          staff: { ...supportedEntry.staff!, employment_type: "full_time" },
         },
       ],
     })
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.affectedEmployees[0].unsupportedClassification).toBe("casual_worker")
+    }
+  })
+
+  it("blocks temporary snapshot after live staff becomes permanent", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: baseRun,
+      entries: [
+        {
+          ...supportedEntry,
+          staff_id: "s-tmp",
+          payroll_tax_profile: {
+            staff_is_tax_resident: true,
+            secondary_employment: false,
+            employment_type: "temporary",
+          },
+          staff: { ...supportedEntry.staff!, employment_type: "permanent" },
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe("temporary_worker")
+    }
+  })
+
+  it("blocks missing employment classification snapshot", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: baseRun,
+      entries: [
+        {
+          ...supportedEntry,
+          payroll_tax_profile: {
+            staff_is_tax_resident: true,
+            secondary_employment: false,
+          },
+          staff: { ...supportedEntry.staff!, employment_type: "full_time" },
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED")
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe("missing_tax_profile_snapshot")
+    }
+  })
+
+  it("blocks missing residency snapshot", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: baseRun,
+      entries: [
+        {
+          ...supportedEntry,
+          payroll_tax_profile: {
+            secondary_employment: false,
+            employment_type: "full_time",
+          },
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe("missing_tax_profile_snapshot")
+    }
+  })
+
+  it("blocks missing secondary-employment snapshot", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: baseRun,
+      entries: [
+        {
+          ...supportedEntry,
+          payroll_tax_profile: {
+            staff_is_tax_resident: true,
+            employment_type: "full_time",
+          },
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe("missing_tax_profile_snapshot")
     }
   })
 
@@ -395,7 +655,11 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
           ...supportedEntry,
           staff_id: "s-nr",
           is_included: true,
-          payroll_tax_profile: { staff_is_tax_resident: false },
+          payroll_tax_profile: {
+            staff_is_tax_resident: false,
+            secondary_employment: false,
+            employment_type: "full_time",
+          },
           staff: { ...supportedEntry.staff!, id: "s-nr", is_tax_resident: false },
         },
       ],
@@ -413,6 +677,98 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
       entries: [supportedEntry],
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+describe("Ghana statutory golden — version integrity", () => {
+  const baseRun = {
+    calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
+    paye_rate_version: "gh-paye-2024-01",
+    pension_rate_version: "gh-pension-2026-01",
+    calculation_jurisdiction: "GH",
+    statutory_period_basis: "2026-01-01",
+    payroll_frequency: "monthly",
+  }
+
+  const baseEntry = {
+    staff_id: "s-ok",
+    is_included: true,
+    calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
+    paye_rate_version: "gh-paye-2024-01",
+    pension_rate_version: "gh-pension-2026-01",
+    calculation_jurisdiction: "GH",
+    statutory_period_basis: "2026-01-01",
+    payroll_tax_profile: {
+      staff_is_tax_resident: true,
+      secondary_employment: false,
+      employment_type: "full_time",
+    },
+    filing_employee_name: "Ok",
+  }
+
+  it.each([
+    ["engine_version_mismatch", { calculation_engine_version: "legacy-ghana" }],
+    ["paye_version_mismatch", { paye_rate_version: "gh-paye-unknown" }],
+    ["pension_version_mismatch", { pension_rate_version: "gh-pension-2025-01" }],
+    ["jurisdiction_mismatch", { calculation_jurisdiction: "KE" }],
+    ["statutory_period_mismatch", { statutory_period_basis: "2025-01-01" }],
+  ] as const)("blocks entry %s", (classification, patch) => {
+    // For paye unknown on entry, first fail may be missing/unknown at run resolve — use known but different where needed
+    const entryPatch =
+      classification === "paye_version_mismatch"
+        ? { paye_rate_version: "gh-paye-2024-01", pension_rate_version: "gh-pension-2026-01" }
+        : patch
+    // Force paye mismatch with a second known version isn't available — use a fake id after run validates
+    const finalPatch =
+      classification === "paye_version_mismatch" ? { paye_rate_version: "gh-paye-not-real" } : entryPatch
+
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: baseRun,
+      entries: [{ ...baseEntry, ...finalPatch }],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED")
+      if (classification === "paye_version_mismatch") {
+        // Unknown fake version still mismatches run's stored paye id
+        expect(result.affectedEmployees[0].unsupportedClassification).toBe("paye_version_mismatch")
+      } else {
+        expect(result.affectedEmployees[0].unsupportedClassification).toBe(classification)
+      }
+    }
+  })
+
+  it("blocks run jurisdiction that is not GH", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: { ...baseRun, calculation_jurisdiction: "KE" },
+      entries: [baseEntry],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.code).toBe("GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED")
+  })
+
+  it("blocks when pension version does not cover period", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: {
+        ...baseRun,
+        pension_rate_version: "gh-pension-2024-01",
+        statutory_period_basis: "2026-01-01",
+      },
+      entries: [
+        {
+          ...baseEntry,
+          pension_rate_version: "gh-pension-2024-01",
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED")
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe("version_does_not_cover_period")
+    }
   })
 })
 
