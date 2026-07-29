@@ -31,6 +31,7 @@ describe("rollupPayrollRunTotals", () => {
       { is_included: true, gross_salary: 2000, allowances_total: 0, deductions_total: 20, net_salary: 1800, paye: 20, ssnit_employee: 100, ssnit_employer: 140 },
     ])
     expect(totals.total_gross_salary).toBe(3000)
+    expect(totals.total_basic_salary).toBe(0)
     expect(totals.total_net_salary).toBe(2700)
     expect(totals.total_paye).toBe(30)
   })

@@ -490,6 +490,7 @@ export async function POST(request: NextRequest) {
         staff_scope_fingerprint: staffScopeFingerprint,
         status: "draft",
         total_gross_salary: runTotals.total_gross_salary,
+        total_basic_salary: runTotals.total_basic_salary,
         total_allowances: runTotals.total_allowances,
         total_deductions: runTotals.total_deductions,
         total_ssnit_employee: runTotals.total_ssnit_employee,

@@ -52,4 +52,13 @@ describe("mapApprovePayrollRunAtomicError", () => {
     expect(mapped.code).toBe("PAYROLL_APPROVAL_PERIOD_CLOSED")
     expect(mapped.status).toBe(409)
   })
+
+  it("maps permission denied", () => {
+    const mapped = mapApprovePayrollRunAtomicError({
+      message: "Payroll approval permission required",
+      details: JSON.stringify({ code: "PAYROLL_APPROVAL_PERMISSION_DENIED" }),
+    })
+    expect(mapped.code).toBe("PAYROLL_APPROVAL_PERMISSION_DENIED")
+    expect(mapped.status).toBe(403)
+  })
 })

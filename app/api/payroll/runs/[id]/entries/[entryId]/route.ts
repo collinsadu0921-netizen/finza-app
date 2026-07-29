@@ -25,7 +25,7 @@ async function syncPayrollRunTotals(
   const { data: entries, error } = await supabase
     .from("payroll_entries")
     .select(
-      "is_included, gross_salary, allowances_total, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary"
+      "is_included, basic_salary, gross_salary, allowances_total, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary"
     )
     .eq("payroll_run_id", runId)
 

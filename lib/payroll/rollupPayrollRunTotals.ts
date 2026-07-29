@@ -1,5 +1,6 @@
 export type PayrollEntryTotalsRow = {
   is_included?: boolean | null
+  basic_salary?: number | null
   gross_salary?: number | null
   allowances_total?: number | null
   deductions_total?: number | null
@@ -10,6 +11,7 @@ export type PayrollEntryTotalsRow = {
 }
 
 export type PayrollRunTotals = {
+  total_basic_salary: number
   total_gross_salary: number
   total_allowances: number
   total_deductions: number
@@ -27,6 +29,7 @@ export function rollupPayrollRunTotals(entries: PayrollEntryTotalsRow[]): Payrol
     .filter((entry) => entry.is_included !== false)
     .reduce(
       (acc, entry) => {
+        acc.total_basic_salary += safe(entry.basic_salary)
         acc.total_gross_salary += safe(entry.gross_salary)
         acc.total_allowances += safe(entry.allowances_total)
         acc.total_deductions += safe(entry.deductions_total)
@@ -37,6 +40,7 @@ export function rollupPayrollRunTotals(entries: PayrollEntryTotalsRow[]): Payrol
         return acc
       },
       {
+        total_basic_salary: 0,
         total_gross_salary: 0,
         total_allowances: 0,
         total_deductions: 0,
