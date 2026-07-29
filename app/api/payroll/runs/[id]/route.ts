@@ -9,12 +9,12 @@ import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
 } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { generateOrSyncPayrollObligationsForRun } from "@/lib/payroll/obligations"
 import {
   isGhanaMonthlyStatutoryEngine,
   nonMonthlyApprovalBlockedMessage,
 } from "@/lib/payroll/salaryBasis"
 import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
+import { mapApprovePayrollRunAtomicError } from "@/lib/payroll/mapApprovePayrollAtomicError"
 
 export async function GET(
   request: NextRequest,
@@ -178,9 +178,6 @@ export async function PUT(
 
     const body = await request.json()
     const { status, notes } = body
-    let journalEntryId: string | null = null
-    let obligationsWarning: string | null = null
-    let obligationsGenerationError: string | null = null
 
     // Get existing payroll run
     const { data: existingRun } = await supabase
@@ -199,7 +196,8 @@ export async function PUT(
     }
 
     // Permission check — depends on the requested status transition
-    if (status && status !== existingRun.status) {
+    // Approve retries (idempotent) still require PAYROLL_APPROVE.
+    if (status === "approved" || (status && status !== existingRun.status)) {
       const permissionRequired =
         status === "locked"   ? PERMISSIONS.PAYROLL_LOCK    :
         status === "approved" ? PERMISSIONS.PAYROLL_APPROVE :
@@ -214,6 +212,7 @@ export async function PUT(
     }
 
     // Validate status transitions (enforce workflow: draft → approved → locked)
+    // Atomic approval may be retried when already approved (idempotent reuse).
     if (status && status !== existingRun.status) {
       const validTransitions: Record<string, string[]> = {
         'draft': ['approved'],
@@ -222,7 +221,11 @@ export async function PUT(
       }
 
       const allowedTransitions = validTransitions[existingRun.status] || []
-      if (!allowedTransitions.includes(status)) {
+      const isIdempotentApproveRetry =
+        status === "approved" &&
+        (existingRun.status === "approved" || existingRun.status === "locked")
+
+      if (!allowedTransitions.includes(status) && !isIdempotentApproveRetry) {
         return NextResponse.json(
           { error: `Invalid status transition from "${existingRun.status}" to "${status}". Allowed transitions: ${allowedTransitions.join(', ') || 'none'}` },
           { status: 400 }
@@ -230,11 +233,12 @@ export async function PUT(
       }
     }
 
-    // If approving, post to ledger (must succeed or approval fails)
-    if (status === "approved" && existingRun.status !== "approved") {
+    // Atomic approval: one RPC owns journal + advances + obligations + status + audit
+    if (status === "approved") {
       const frequency = String(existingRun.payroll_frequency || "monthly").toLowerCase()
       const businessCountry = business.address_country || business.country_code || null
       if (
+        existingRun.status === "draft" &&
         frequency !== "monthly" &&
         isGhanaMonthlyStatutoryEngine(businessCountry)
       ) {
@@ -247,203 +251,165 @@ export async function PUT(
         )
       }
 
-      const { data: approvalEntries, error: approvalEntriesError } = await supabase
-        .from("payroll_entries")
-        .select(
+      // Optional preflight (UI-friendly). Authoritative validation runs inside the RPC after lock.
+      if (existingRun.status === "draft") {
+        const { data: approvalEntries, error: approvalEntriesError } = await supabase
+          .from("payroll_entries")
+          .select(
+            `
+            staff_id,
+            is_included,
+            calculation_engine_version,
+            paye_rate_version,
+            pension_rate_version,
+            calculation_jurisdiction,
+            statutory_period_basis,
+            payroll_tax_profile,
+            filing_employee_name,
+            staff:staff_id (
+              id,
+              name,
+              employment_type,
+              is_tax_resident,
+              secondary_employment
+            )
           `
-          staff_id,
-          is_included,
-          calculation_engine_version,
-          paye_rate_version,
-          pension_rate_version,
-          calculation_jurisdiction,
-          statutory_period_basis,
-          payroll_tax_profile,
-          filing_employee_name,
-          staff:staff_id (
-            id,
-            name,
-            employment_type,
-            is_tax_resident,
-            secondary_employment
           )
-        `
-        )
-        .eq("payroll_run_id", runId)
+          .eq("payroll_run_id", runId)
 
-      if (approvalEntriesError) {
-        return NextResponse.json(
-          { error: `Failed to validate payroll entries before approval: ${approvalEntriesError.message}` },
-          { status: 500 }
-        )
+        if (approvalEntriesError) {
+          return NextResponse.json(
+            { error: `Failed to validate payroll entries before approval: ${approvalEntriesError.message}` },
+            { status: 500 }
+          )
+        }
+
+        const ghanaGuard = validateGhanaPayrollRunForApproval({
+          businessCountry,
+          run: existingRun,
+          entries: (approvalEntries || []) as any,
+        })
+        if (!ghanaGuard.ok) {
+          return NextResponse.json(
+            {
+              error: ghanaGuard.message,
+              code: ghanaGuard.code,
+              affectedEmployees: ghanaGuard.affectedEmployees,
+            },
+            { status: 400 }
+          )
+        }
+
+        const { data: entries, error: entriesError } = await supabase
+          .from("payroll_entries")
+          .select("is_included, gross_salary, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary")
+          .eq("payroll_run_id", runId)
+
+        if (entriesError) {
+          return NextResponse.json(
+            { error: `Failed to validate payroll entries before approval: ${entriesError.message}` },
+            { status: 500 }
+          )
+        }
+
+        const safe = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
+        const aggregated = (entries || [])
+          .filter((entry: { is_included?: boolean | null }) => entry.is_included !== false)
+          .reduce(
+            (acc, entry: any) => {
+              acc.gross += safe(entry.gross_salary)
+              acc.deductions += safe(entry.deductions_total)
+              acc.ssnitEmployee += safe(entry.ssnit_employee)
+              acc.ssnitEmployer += safe(entry.ssnit_employer)
+              acc.paye += safe(entry.paye)
+              acc.net += safe(entry.net_salary)
+              return acc
+            },
+            { gross: 0, deductions: 0, ssnitEmployee: 0, ssnitEmployer: 0, paye: 0, net: 0 }
+          )
+
+        const { data: runTotals, error: runTotalsError } = await supabase
+          .from("payroll_runs")
+          .select("total_gross_salary, total_deductions, total_ssnit_employee, total_ssnit_employer, total_paye, total_net_salary")
+          .eq("id", runId)
+          .single()
+
+        if (runTotalsError || !runTotals) {
+          return NextResponse.json(
+            { error: "Failed to load payroll run totals for reconciliation." },
+            { status: 500 }
+          )
+        }
+
+        const TOLERANCE = 0.01
+        const mismatches: string[] = []
+        if (Math.abs(safe(runTotals.total_gross_salary) - aggregated.gross) > TOLERANCE) mismatches.push("gross salary")
+        if (Math.abs(safe(runTotals.total_deductions) - aggregated.deductions) > TOLERANCE) mismatches.push("deductions")
+        if (Math.abs(safe(runTotals.total_ssnit_employee) - aggregated.ssnitEmployee) > TOLERANCE) mismatches.push("employee statutory")
+        if (Math.abs(safe(runTotals.total_ssnit_employer) - aggregated.ssnitEmployer) > TOLERANCE) mismatches.push("employer statutory")
+        if (Math.abs(safe(runTotals.total_paye) - aggregated.paye) > TOLERANCE) mismatches.push("income tax")
+        if (Math.abs(safe(runTotals.total_net_salary) - aggregated.net) > TOLERANCE) mismatches.push("net salary")
+
+        if (mismatches.length > 0) {
+          return NextResponse.json(
+            {
+              error: `Payroll reconciliation failed before approval. Please regenerate run totals (${mismatches.join(", ")} mismatch).`,
+              code: "PAYROLL_TOTALS_OUT_OF_SYNC",
+            },
+            { status: 400 }
+          )
+        }
       }
 
-      const ghanaGuard = validateGhanaPayrollRunForApproval({
-        businessCountry,
-        run: existingRun,
-        entries: (approvalEntries || []) as any,
-      })
-      if (!ghanaGuard.ok) {
-        return NextResponse.json(
-          {
-            error: ghanaGuard.message,
-            code: ghanaGuard.code,
-            affectedEmployees: ghanaGuard.affectedEmployees,
-          },
-          { status: 400 }
-        )
-      }
-
-      // Check if already posted
-      if (existingRun.journal_entry_id) {
-        return NextResponse.json(
-          { error: "Payroll run has already been posted to ledger" },
-          { status: 400 }
-        )
-      }
-
-      const { data: entries, error: entriesError } = await supabase
-        .from("payroll_entries")
-        .select("is_included, gross_salary, deductions_total, ssnit_employee, ssnit_employer, paye, net_salary")
-        .eq("payroll_run_id", runId)
-
-      if (entriesError) {
-        return NextResponse.json(
-          { error: `Failed to validate payroll entries before approval: ${entriesError.message}` },
-          { status: 500 }
-        )
-      }
-
-      const safe = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0)
-      const aggregated = (entries || [])
-        .filter((entry: { is_included?: boolean | null }) => entry.is_included !== false)
-        .reduce(
-        (acc, entry: any) => {
-          acc.gross += safe(entry.gross_salary)
-          acc.deductions += safe(entry.deductions_total)
-          acc.ssnitEmployee += safe(entry.ssnit_employee)
-          acc.ssnitEmployer += safe(entry.ssnit_employer)
-          acc.paye += safe(entry.paye)
-          acc.net += safe(entry.net_salary)
-          return acc
-        },
-        { gross: 0, deductions: 0, ssnitEmployee: 0, ssnitEmployer: 0, paye: 0, net: 0 }
-      )
-
-      const { data: runTotals, error: runTotalsError } = await supabase
-        .from("payroll_runs")
-        .select("total_gross_salary, total_deductions, total_ssnit_employee, total_ssnit_employer, total_paye, total_net_salary")
-        .eq("id", runId)
-        .single()
-
-      if (runTotalsError || !runTotals) {
-        return NextResponse.json(
-          { error: "Failed to load payroll run totals for reconciliation." },
-          { status: 500 }
-        )
-      }
-
-      const TOLERANCE = 0.01
-      const mismatches: string[] = []
-      if (Math.abs(safe(runTotals.total_gross_salary) - aggregated.gross) > TOLERANCE) mismatches.push("gross salary")
-      if (Math.abs(safe(runTotals.total_deductions) - aggregated.deductions) > TOLERANCE) mismatches.push("deductions")
-      if (Math.abs(safe(runTotals.total_ssnit_employee) - aggregated.ssnitEmployee) > TOLERANCE) mismatches.push("employee statutory")
-      if (Math.abs(safe(runTotals.total_ssnit_employer) - aggregated.ssnitEmployer) > TOLERANCE) mismatches.push("employer statutory")
-      if (Math.abs(safe(runTotals.total_paye) - aggregated.paye) > TOLERANCE) mismatches.push("income tax")
-      if (Math.abs(safe(runTotals.total_net_salary) - aggregated.net) > TOLERANCE) mismatches.push("net salary")
-
-      if (mismatches.length > 0) {
-        return NextResponse.json(
-          { error: `Payroll reconciliation failed before approval. Please regenerate run totals (${mismatches.join(", ")} mismatch).` },
-          { status: 400 }
-        )
-      }
-
-      // Post to ledger - if this fails, approval must fail
-      const { data: postedJournalId, error: ledgerError } = await supabase.rpc(
-        "post_payroll_to_ledger",
+      const { data: approvalResult, error: approvalError } = await supabase.rpc(
+        "approve_payroll_run_atomic",
         {
+          p_business_id: business.id,
           p_payroll_run_id: runId,
         }
       )
-      journalEntryId = postedJournalId ?? null
 
-      if (ledgerError || !journalEntryId) {
-        console.error("Error posting payroll to ledger:", ledgerError)
-        const detail = String(ledgerError?.details || ledgerError?.message || "")
-        if (/SALARY_ADVANCE_RECOVERY_EXCEEDS_OUTSTANDING/i.test(detail + (ledgerError?.message || ""))) {
-          let affected: Record<string, unknown> | null = null
-          try {
-            affected = JSON.parse(String(ledgerError?.details || "{}"))
-          } catch {
-            affected = null
-          }
-          return NextResponse.json(
-            {
-              error:
-                "One or more advance recoveries now exceed the outstanding balance. Recalculate the draft payroll before approving.",
-              code: "SALARY_ADVANCE_RECOVERY_EXCEEDS_OUTSTANDING",
-              affectedAdvances: affected
-                ? [
-                    {
-                      advanceId: affected.advanceId,
-                      staffId: affected.staffId,
-                      snapshottedAmount: affected.snapshottedAmount,
-                      currentOutstandingAmount: affected.currentOutstandingAmount,
-                    },
-                  ]
-                : [],
-            },
-            { status: 409 }
-          )
-        }
+      if (approvalError) {
+        console.error("Atomic payroll approval failed:", approvalError)
+        const mapped = mapApprovePayrollRunAtomicError(approvalError)
+        const { status: httpStatus, ...payload } = mapped
+        return NextResponse.json(payload, { status: httpStatus })
+      }
+
+      if (notes !== undefined) {
+        await supabase
+          .from("payroll_runs")
+          .update({ notes: notes?.trim() || null })
+          .eq("id", runId)
+          .eq("business_id", business.id)
+      }
+
+      const { data: payrollRun, error: reloadError } = await supabase
+        .from("payroll_runs")
+        .select("*")
+        .eq("id", runId)
+        .single()
+
+      if (reloadError || !payrollRun) {
         return NextResponse.json(
-          { error: ledgerError?.message || "Failed to post payroll to ledger. Approval cannot proceed." },
+          {
+            error: reloadError?.message || "Approved but failed to reload payroll run",
+            approval: approvalResult,
+          },
           { status: 500 }
         )
       }
 
-      console.log("Payroll posted to ledger:", journalEntryId)
-
-      // Audit payroll recoveries (once per approval success; retries that hit existing journal skip this block when journal already set earlier)
-      const { data: recovered } = await supabase
-        .from("salary_advance_repayments")
-        .select("id, salary_advance_id, amount, staff_id")
-        .eq("payroll_run_id", runId)
-        .eq("business_id", business.id)
-        .eq("status", "posted")
-        .eq("repayment_method", "payroll_deduction")
-
-      if ((recovered || []).length > 0) {
-        await logAudit({
-          businessId: business.id,
-          userId: user.id,
-          actionType: "salary_advance.recovered_via_payroll",
-          entityType: "payroll_run",
-          entityId: runId,
-          newValues: {
-            journal_entry_id: journalEntryId,
-            repayments: (recovered || []).map((r: any) => ({
-              repayment_id: r.id,
-              advance_id: r.salary_advance_id,
-              amount: r.amount,
-              staff_id: r.staff_id,
-            })),
-          },
-          description: "Salary advances recovered via payroll approval",
-          request,
-        })
-      }
+      return NextResponse.json({
+        payrollRun,
+        approval: approvalResult,
+        reused: Boolean((approvalResult as { reused?: boolean } | null)?.reused),
+      })
     }
 
     const updateData: any = {}
     if (status) {
       updateData.status = status
-      if (status === "approved") {
-        updateData.approved_by = user?.id || null
-        updateData.approved_at = new Date().toISOString()
-        if (journalEntryId) updateData.journal_entry_id = journalEntryId
-      }
     }
     if (notes !== undefined) updateData.notes = notes?.trim() || null
 
@@ -462,32 +428,10 @@ export async function PUT(
       )
     }
 
-    if (
-      status === "approved" &&
-      existingRun.status !== "approved" &&
-      payrollRun?.status === "approved"
-    ) {
-      try {
-        const result = await generateOrSyncPayrollObligationsForRun(
-          supabase as any,
-          business.id,
-          runId,
-          { allowLegacyDerivation: true }
-        )
-        obligationsWarning = result.warning
-      } catch (oblErr: any) {
-        console.error("Payroll obligations generation failed after approval:", oblErr)
-        obligationsGenerationError =
-          oblErr?.message || "Failed to generate payroll obligations after approval."
-      }
-    }
-
-    // Audit the status change
+    // Audit non-approval status changes only (approval audit is inside the DB transaction)
     if (status && status !== existingRun.status) {
       const actionType =
-        status === "approved" ? "payroll.run_approved" :
-        status === "locked"   ? "payroll.run_locked"   :
-        "payroll.run_updated"
+        status === "locked" ? "payroll.run_locked" : "payroll.run_updated"
 
       await logAudit({
         businessId: business.id,
@@ -496,7 +440,7 @@ export async function PUT(
         entityType: "payroll_run",
         entityId: runId,
         oldValues: { status: existingRun.status },
-        newValues: { status, journal_entry_id: journalEntryId ?? undefined },
+        newValues: { status },
         description: `Payroll run ${runId} status changed from ${existingRun.status} to ${status}`,
         request,
       })
@@ -504,8 +448,6 @@ export async function PUT(
 
     return NextResponse.json({
       payrollRun,
-      ...(obligationsWarning ? { obligationsWarning } : {}),
-      ...(obligationsGenerationError ? { obligationsGenerationError } : {}),
     })
   } catch (error: any) {
     console.error("Error updating payroll run:", error)

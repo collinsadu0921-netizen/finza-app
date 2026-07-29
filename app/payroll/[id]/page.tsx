@@ -429,12 +429,7 @@ export default function PayrollRunViewPage() {
       if (response.ok) {
         loadPayrollRun()
         loadObligations()
-        if (data.obligationsGenerationError) {
-          toast.showToast(data.obligationsGenerationError, "error")
-        } else if (data.obligationsWarning) {
-          toast.showToast(data.obligationsWarning, "info")
-        }
-        toast.showToast("Payroll approved", "success")
+        toast.showToast(data.reused ? "Payroll already approved" : "Payroll approved", "success")
       } else {
         const affected = Array.isArray(data.affectedEmployees) ? data.affectedEmployees : []
         const detail =
