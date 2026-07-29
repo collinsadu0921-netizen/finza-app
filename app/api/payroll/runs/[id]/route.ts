@@ -370,6 +370,33 @@ export async function PUT(
 
       if (ledgerError || !journalEntryId) {
         console.error("Error posting payroll to ledger:", ledgerError)
+        const detail = String(ledgerError?.details || ledgerError?.message || "")
+        if (/SALARY_ADVANCE_RECOVERY_EXCEEDS_OUTSTANDING/i.test(detail + (ledgerError?.message || ""))) {
+          let affected: Record<string, unknown> | null = null
+          try {
+            affected = JSON.parse(String(ledgerError?.details || "{}"))
+          } catch {
+            affected = null
+          }
+          return NextResponse.json(
+            {
+              error:
+                "One or more advance recoveries now exceed the outstanding balance. Recalculate the draft payroll before approving.",
+              code: "SALARY_ADVANCE_RECOVERY_EXCEEDS_OUTSTANDING",
+              affectedAdvances: affected
+                ? [
+                    {
+                      advanceId: affected.advanceId,
+                      staffId: affected.staffId,
+                      snapshottedAmount: affected.snapshottedAmount,
+                      currentOutstandingAmount: affected.currentOutstandingAmount,
+                    },
+                  ]
+                : [],
+            },
+            { status: 409 }
+          )
+        }
         return NextResponse.json(
           { error: ledgerError?.message || "Failed to post payroll to ledger. Approval cannot proceed." },
           { status: 500 }
@@ -377,6 +404,36 @@ export async function PUT(
       }
 
       console.log("Payroll posted to ledger:", journalEntryId)
+
+      // Audit payroll recoveries (once per approval success; retries that hit existing journal skip this block when journal already set earlier)
+      const { data: recovered } = await supabase
+        .from("salary_advance_repayments")
+        .select("id, salary_advance_id, amount, staff_id")
+        .eq("payroll_run_id", runId)
+        .eq("business_id", business.id)
+        .eq("status", "posted")
+        .eq("repayment_method", "payroll_deduction")
+
+      if ((recovered || []).length > 0) {
+        await logAudit({
+          businessId: business.id,
+          userId: user.id,
+          actionType: "salary_advance.recovered_via_payroll",
+          entityType: "payroll_run",
+          entityId: runId,
+          newValues: {
+            journal_entry_id: journalEntryId,
+            repayments: (recovered || []).map((r: any) => ({
+              repayment_id: r.id,
+              advance_id: r.salary_advance_id,
+              amount: r.amount,
+              staff_id: r.staff_id,
+            })),
+          },
+          description: "Salary advances recovered via payroll approval",
+          request,
+        })
+      }
     }
 
     const updateData: any = {}

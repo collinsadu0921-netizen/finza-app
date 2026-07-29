@@ -13,6 +13,11 @@ import {
   GHANA_CALCULATION_ENGINE_VERSION,
   resolveGhanaStatutoryRatesForPeriod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
+import {
+  applyAdvanceRecoveryCaps,
+  normalizeAdvanceRecoveriesSnapshot,
+  type AdvanceRecoverySnapshotItem,
+} from "@/lib/payroll/advanceRecoveriesSnapshot"
 
 export type StaffPayrollInput = {
   id: string
@@ -34,7 +39,20 @@ export type AllowanceRow = {
 }
 
 export type DeductionRow = {
+  id?: string | null
   amount?: number | null
+  advance_id?: string | null
+  type?: string | null
+}
+
+export type AdvanceBalanceForPayroll = {
+  id: string
+  staff_id: string
+  business_id?: string | null
+  amount: number
+  repaid_amount?: number | null
+  status?: string | null
+  cancelled_at?: string | null
 }
 
 export type GhanaRateVersionLock = {
@@ -65,6 +83,16 @@ export type ComputeStaffPayrollEntryParams = {
    * When omitted for GH, versions are resolved from effectiveDate.
    */
   ghanaRateVersions?: GhanaRateVersionLock | null
+  /** Business id used to validate advance ownership when capping recoveries. */
+  businessId?: string | null
+  /** Outstanding advances for this staff (draft-time cap source). */
+  salaryAdvances?: AdvanceBalanceForPayroll[] | null
+  /**
+   * When set (approved/locked recalc guard), reuse immutable snapshot and do not
+   * rebuild from live deductions.
+   */
+  existingAdvanceRecoveriesSnapshot?: unknown
+  lockAdvanceRecoveriesSnapshot?: boolean
 }
 
 export type ComputedPayrollEntryRow = {
@@ -113,6 +141,7 @@ export type ComputedPayrollEntryRow = {
   pension_rate_version: string | null
   calculation_jurisdiction: string | null
   statutory_period_basis: string | null
+  advance_recoveries_snapshot: AdvanceRecoverySnapshotItem[]
 }
 
 function isGhanaCountry(businessCountry: string): boolean {
@@ -179,6 +208,7 @@ function zeroEntry(
     pension_rate_version: versionFields.pension_rate_version ?? null,
     calculation_jurisdiction: versionFields.calculation_jurisdiction ?? null,
     statutory_period_basis: versionFields.statutory_period_basis ?? null,
+    advance_recoveries_snapshot: versionFields.advance_recoveries_snapshot ?? [],
     ...filing,
   }
 }
@@ -200,6 +230,10 @@ export function computeStaffPayrollEntry(
     salaryBasisSnapshot,
     oneOffItemsSnapshot = null,
     ghanaRateVersions = null,
+    businessId = null,
+    salaryAdvances = null,
+    existingAdvanceRecoveriesSnapshot = null,
+    lockAdvanceRecoveriesSnapshot = false,
   } = params
 
   const salaryBasis = parseSalaryBasis(salaryBasisSnapshot ?? staff.salary_basis ?? "monthly")
@@ -217,6 +251,7 @@ export function computeStaffPayrollEntry(
     pension_rate_version: null,
     calculation_jurisdiction: isGhanaCountry(businessCountry) ? "GH" : null,
     statutory_period_basis: null,
+    advance_recoveries_snapshot: [],
   }
 
   if (isGhanaCountry(businessCountry)) {
@@ -234,6 +269,7 @@ export function computeStaffPayrollEntry(
       pension_rate_version: lockedVersions.pensionRateVersion,
       calculation_jurisdiction: "GH",
       statutory_period_basis: lockedVersions.periodBasis,
+      advance_recoveries_snapshot: [],
     }
   }
 
@@ -247,7 +283,7 @@ export function computeStaffPayrollEntry(
       false,
       salaryBasis,
       oneOffSnapshot,
-      versionMeta
+      { ...versionMeta, advance_recoveries_snapshot: [] }
     )
   }
 
@@ -268,8 +304,32 @@ export function computeStaffPayrollEntry(
       .reduce((sum, a) => sum + Number(a.amount || 0), 0) || 0
   const allowancesTotal = regularAllowances + bonusAmount + overtimeAmount
 
+  let advanceRecoveriesSnapshot: AdvanceRecoverySnapshotItem[] = []
+  let deductionsForCalc = deductions || []
+
+  if (lockAdvanceRecoveriesSnapshot) {
+    advanceRecoveriesSnapshot = normalizeAdvanceRecoveriesSnapshot(existingAdvanceRecoveriesSnapshot)
+    const byAdvance = new Map(advanceRecoveriesSnapshot.map((item) => [item.advanceId, item.amount]))
+    deductionsForCalc = (deductions || []).map((ded) => {
+      const advanceId = ded.advance_id ? String(ded.advance_id) : ""
+      if (!advanceId) return { ...ded, amount: roundPayroll(Number(ded.amount || 0)) }
+      const snapped = byAdvance.get(advanceId)
+      if (snapped == null) return { ...ded, amount: 0 }
+      return { ...ded, amount: snapped }
+    })
+  } else {
+    const capped = applyAdvanceRecoveryCaps({
+      staffId: staff.id,
+      businessId,
+      deductions,
+      advances: salaryAdvances,
+    })
+    deductionsForCalc = capped.deductionsForCalc
+    advanceRecoveriesSnapshot = capped.advanceRecoveriesSnapshot
+  }
+
   const deductionsTotal =
-    deductions?.reduce((sum, d) => sum + Number(d.amount || 0), 0) || 0
+    deductionsForCalc?.reduce((sum, d) => sum + Number(d.amount || 0), 0) || 0
 
   const payrollResult = calculatePayroll(
     {
@@ -400,6 +460,7 @@ export function computeStaffPayrollEntry(
     pension_rate_version: versionMeta.pension_rate_version ?? null,
     calculation_jurisdiction: versionMeta.calculation_jurisdiction ?? null,
     statutory_period_basis: versionMeta.statutory_period_basis ?? null,
+    advance_recoveries_snapshot: advanceRecoveriesSnapshot,
   }
 }
 

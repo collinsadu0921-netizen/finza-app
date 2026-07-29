@@ -1,5 +1,5 @@
 /**
- * POST /api/payroll/advances/[id]/repayments
+ * POST /api/payroll/advances/[id]/repayments — direct repayment with accounting
  */
 
 import { POST } from "@/app/api/payroll/advances/[id]/repayments/route"
@@ -16,6 +16,9 @@ jest.mock("@/lib/userPermissions", () => ({
 }))
 jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
   enforceServiceIndustryMinTierWrite: jest.fn().mockResolvedValue(null),
+}))
+jest.mock("@/lib/auditLog", () => ({
+  logAudit: jest.fn().mockResolvedValue(undefined),
 }))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
@@ -36,203 +39,144 @@ const advance = {
   repaid_amount: 0,
   status: "outstanding",
   cancelled_at: null,
-  cleared_at: null,
 }
 
-function buildSupabase(overrides: {
-  advance?: typeof advance | null
-  payrollRun?: { id: string; business_id: string; status: string } | null
-  entry?: { id: string; staff_id: string; payroll_run_id: string } | null
-  repaymentInsert?: { data: unknown; error: unknown }
-  advanceUpdate?: { data: unknown; error: unknown }
+function buildClient(opts: {
+  rpc?: { data: unknown; error: unknown }
+  advanceUpdate?: any
 }) {
   return {
     auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "u1" } } }) },
+    rpc: jest.fn().mockResolvedValue(
+      opts.rpc ?? {
+        data: {
+          reused: false,
+          repayment_id: "rep-1",
+          journal_entry_id: "je-1",
+          amount: 300,
+          status: "posted",
+          repayment_method: "direct_bank",
+          repaid_amount: 300,
+          outstanding: 700,
+          advance_status: "partially_repaid",
+        },
+        error: null,
+      }
+    ),
     from: jest.fn((table: string) => {
       if (table === "salary_advances") {
         return {
           select: jest.fn().mockReturnThis(),
           eq: jest.fn().mockReturnThis(),
           single: jest.fn().mockResolvedValue({
-            data: overrides.advance === undefined ? advance : overrides.advance,
-            error: overrides.advance === null ? { message: "not found" } : null,
-          }),
-          update: jest.fn().mockReturnThis(),
-          delete: jest.fn().mockReturnThis(),
-        }
-      }
-      if (table === "payroll_runs") {
-        return {
-          select: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockReturnThis(),
-          is: jest.fn().mockReturnThis(),
-          single: jest.fn().mockResolvedValue({
-            data: overrides.payrollRun === undefined ? { id: "run-1", business_id: "biz-1", status: "draft" } : overrides.payrollRun,
-            error: overrides.payrollRun === null ? { message: "not found" } : null,
+            data: opts.advanceUpdate ?? { ...advance, repaid_amount: 300, status: "partially_repaid" },
+            error: null,
           }),
         }
-      }
-      if (table === "payroll_entries") {
-        return {
-          select: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockReturnThis(),
-          single: jest.fn().mockResolvedValue({
-            data: overrides.entry === undefined ? { id: "entry-1", staff_id: "staff-1", payroll_run_id: "run-1" } : overrides.entry,
-            error: overrides.entry === null ? { message: "not found" } : null,
-          }),
-        }
-      }
-      if (table === "salary_advance_repayments") {
-        const chain = {
-          insert: jest.fn().mockReturnThis(),
-          select: jest.fn().mockReturnThis(),
-          single: jest.fn().mockResolvedValue(
-            overrides.repaymentInsert ?? {
-              data: { id: "rep-1", amount: 300, status: "posted" },
-              error: null,
-            }
-          ),
-          delete: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockReturnThis(),
-        }
-        return chain
       }
       return {} as any
     }),
-  } as any
+  }
 }
 
-beforeEach(() => {
-  jest.clearAllMocks()
-  mockGetBusiness.mockResolvedValue({ id: "biz-1", address_country: "GH" } as any)
-  mockRequirePermission.mockResolvedValue({ allowed: true } as any)
-})
-
 describe("POST /api/payroll/advances/[id]/repayments", () => {
-  it("records partial repayment and returns updated advance", async () => {
-    const supabase = buildSupabase({
-      advanceUpdate: {
-        data: { ...advance, repaid_amount: 300, status: "partially_repaid" },
-        error: null,
-      },
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetBusiness.mockResolvedValue({ id: "biz-1" } as any)
+    mockRequirePermission.mockResolvedValue({ allowed: true } as any)
+  })
+
+  it("rejects legacy payroll_run_id repayment without payment_account_id", async () => {
+    mockCreateSupabase.mockResolvedValue(buildClient({}) as any)
+    const req = new NextRequest("http://localhost/api", {
+      method: "POST",
+      body: JSON.stringify({ amount: 100, payroll_run_id: "run-1" }),
     })
-    const updateChain = {
-      eq: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      single: jest.fn().mockResolvedValue({
-        data: { ...advance, repaid_amount: 300, status: "partially_repaid" },
-        error: null,
+    const res = await POST(req, { params: Promise.resolve({ id: "adv-1" }) })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.code).toBe("SALARY_ADVANCE_DIRECT_REPAYMENT_REQUIRES_ACCOUNTING")
+  })
+
+  it("posts cash/bank repayment via RPC", async () => {
+    const client = buildClient({})
+    mockCreateSupabase.mockResolvedValue(client as any)
+    const req = new NextRequest("http://localhost/api", {
+      method: "POST",
+      body: JSON.stringify({
+        amount: 300,
+        payment_account_id: "acct-bank",
+        payment_date: "2026-06-01",
+        idempotency_key: "key-1",
       }),
-    }
-    supabase.from = jest.fn((table: string) => {
-      const base = buildSupabase({}).from(table)
-      if (table === "salary_advances") {
-        return {
-          ...base,
-          update: jest.fn().mockReturnValue(updateChain),
-        }
-      }
-      return base
-    }) as any
-
-    mockCreateSupabase.mockResolvedValue(supabase)
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/payroll/advances/adv-1/repayments", {
-        method: "POST",
-        body: JSON.stringify({ amount: 300, payroll_run_id: "run-1", payroll_entry_id: "entry-1" }),
-      }),
-      { params: Promise.resolve({ id: "adv-1" }) }
-    )
-
+    })
+    const res = await POST(req, { params: Promise.resolve({ id: "adv-1" }) })
     expect(res.status).toBe(200)
+    expect(client.rpc).toHaveBeenCalledWith(
+      "post_salary_advance_direct_repayment",
+      expect.objectContaining({
+        p_business_id: "biz-1",
+        p_advance_id: "adv-1",
+        p_amount: 300,
+        p_payment_account_id: "acct-bank",
+        p_idempotency_key: "key-1",
+      })
+    )
     const body = await res.json()
-    expect(body.success).toBe(true)
-    expect(body.advance.status).toBe("partially_repaid")
     expect(body.outstanding_amount).toBe(700)
+    expect(body.repayment.journal_entry_id).toBe("je-1")
   })
 
-  it("rejects overpayment", async () => {
-    mockCreateSupabase.mockResolvedValue(buildSupabase({}))
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/payroll/advances/adv-1/repayments", {
-        method: "POST",
-        body: JSON.stringify({ amount: 1500, payroll_run_id: "run-1" }),
-      }),
-      { params: Promise.resolve({ id: "adv-1" }) }
-    )
-
-    expect(res.status).toBe(400)
-    const body = await res.json()
-    expect(body.error).toMatch(/exceeds outstanding/)
-  })
-
-  it("rejects advance from another tenant", async () => {
-    mockCreateSupabase.mockResolvedValue(buildSupabase({ advance: null }))
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/payroll/advances/adv-other/repayments", {
-        method: "POST",
-        body: JSON.stringify({ amount: 100, payroll_run_id: "run-1" }),
-      }),
-      { params: Promise.resolve({ id: "adv-other" }) }
-    )
-
-    expect(res.status).toBe(404)
-  })
-
-  it("rejects payroll run from another tenant", async () => {
-    mockCreateSupabase.mockResolvedValue(buildSupabase({ payrollRun: null }))
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/payroll/advances/adv-1/repayments", {
-        method: "POST",
-        body: JSON.stringify({ amount: 100, payroll_run_id: "run-other" }),
-      }),
-      { params: Promise.resolve({ id: "adv-1" }) }
-    )
-
-    expect(res.status).toBe(404)
-  })
-
-  it("rejects repayment on cleared advance", async () => {
+  it("returns existing repayment for duplicate idempotency key", async () => {
     mockCreateSupabase.mockResolvedValue(
-      buildSupabase({
-        advance: { ...advance, repaid_amount: 1000, status: "cleared" },
-      })
+      buildClient({
+        rpc: {
+          data: {
+            reused: true,
+            repayment_id: "rep-1",
+            journal_entry_id: "je-1",
+            amount: 300,
+            status: "posted",
+            outstanding: 700,
+          },
+          error: null,
+        },
+      }) as any
     )
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/payroll/advances/adv-1/repayments", {
-        method: "POST",
-        body: JSON.stringify({ amount: 100, payroll_run_id: "run-1" }),
+    const req = new NextRequest("http://localhost/api", {
+      method: "POST",
+      body: JSON.stringify({
+        amount: 300,
+        payment_account_id: "acct-bank",
+        payment_date: "2026-06-01",
+        idempotency_key: "key-1",
       }),
-      { params: Promise.resolve({ id: "adv-1" }) }
-    )
-
-    expect(res.status).toBe(400)
+    })
+    const res = await POST(req, { params: Promise.resolve({ id: "adv-1" }) })
     const body = await res.json()
-    expect(body.error).toMatch(/fully repaid/)
+    expect(res.status).toBe(200)
+    expect(body.reused).toBe(true)
   })
 
-  it("rejects entry staff mismatch", async () => {
+  it("blocks over-repayment from RPC error", async () => {
     mockCreateSupabase.mockResolvedValue(
-      buildSupabase({
-        entry: { id: "entry-1", staff_id: "staff-other", payroll_run_id: "run-1" },
-      })
+      buildClient({
+        rpc: {
+          data: null,
+          error: { message: "Repayment exceeds outstanding balance", details: null },
+        },
+      }) as any
     )
-
-    const res = await POST(
-      new NextRequest("http://localhost/api/payroll/advances/adv-1/repayments", {
-        method: "POST",
-        body: JSON.stringify({ amount: 100, payroll_run_id: "run-1", payroll_entry_id: "entry-1" }),
+    const req = new NextRequest("http://localhost/api", {
+      method: "POST",
+      body: JSON.stringify({
+        amount: 9999,
+        payment_account_id: "acct-bank",
+        payment_date: "2026-06-01",
+        idempotency_key: "key-2",
       }),
-      { params: Promise.resolve({ id: "adv-1" }) }
-    )
-
+    })
+    const res = await POST(req, { params: Promise.resolve({ id: "adv-1" }) })
     expect(res.status).toBe(400)
-    const body = await res.json()
-    expect(body.error).toMatch(/staff member/)
   })
 })

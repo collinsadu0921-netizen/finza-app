@@ -170,7 +170,7 @@ export async function PATCH(
       exclusionReason = exclusionReasonForSalaryBasisMismatch(salaryBasis, frequency)
     }
 
-    const [{ data: allowances }, { data: deductions }] = await Promise.all([
+    const [{ data: allowances }, { data: deductions }, { data: salaryAdvances }] = await Promise.all([
       supabase
         .from("allowances")
         .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
@@ -178,9 +178,16 @@ export async function PATCH(
         .is("deleted_at", null),
       supabase
         .from("deductions")
-        .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
+        .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id, advance_id")
         .eq("staff_id", staff.id)
         .is("deleted_at", null),
+      supabase
+        .from("salary_advances")
+        .select("id, staff_id, business_id, amount, repaid_amount, status, cancelled_at")
+        .eq("business_id", business.id)
+        .eq("staff_id", staff.id)
+        .is("cancelled_at", null)
+        .neq("status", "cancelled"),
     ])
 
     const filtered = filterPayrollItemsForRun({
@@ -216,6 +223,8 @@ export async function PATCH(
         salaryBasisSnapshot: salaryBasis,
         oneOffItemsSnapshot: isIncluded ? filtered.oneOffSnapshots : [],
         ghanaRateVersions,
+        businessId: business.id,
+        salaryAdvances: salaryAdvances || [],
       })
     } catch (error: unknown) {
       if (isPayrollEngineCountryError(error)) {

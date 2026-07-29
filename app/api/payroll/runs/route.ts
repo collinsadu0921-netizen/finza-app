@@ -80,7 +80,7 @@ async function fetchStaffAllowancesAndDeductions(
       .is("deleted_at", null),
     supabase
       .from("deductions")
-      .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id")
+      .select("id, type, amount, recurring, description, applies_to_month, payroll_run_id, advance_id")
       .eq("staff_id", staffId)
       .is("deleted_at", null),
   ])
@@ -382,6 +382,25 @@ export async function POST(request: NextRequest) {
     const payrollEntries = []
     const legacyItemWarnings: Array<{ staff_id: string; reason: string }> = []
 
+    const staffIds = (staffList || []).map((s: { id: string }) => s.id)
+    const { data: salaryAdvancesForRun } = staffIds.length
+      ? await supabase
+          .from("salary_advances")
+          .select("id, staff_id, business_id, amount, repaid_amount, status, cancelled_at")
+          .eq("business_id", business.id)
+          .in("staff_id", staffIds)
+          .is("cancelled_at", null)
+          .neq("status", "cancelled")
+      : { data: [] as any[] }
+
+    const advancesByStaff = new Map<string, any[]>()
+    for (const adv of salaryAdvancesForRun || []) {
+      const key = String(adv.staff_id)
+      const list = advancesByStaff.get(key) || []
+      list.push(adv)
+      advancesByStaff.set(key, list)
+    }
+
     for (const staff of staffList) {
       const salaryBasis = parseSalaryBasis(staff.salary_basis)
       const eligible = salaryBasisMatchesFrequency(salaryBasis, payroll_frequency)
@@ -416,6 +435,8 @@ export async function POST(request: NextRequest) {
               salaryBasisSnapshot: salaryBasis,
               oneOffItemsSnapshot: [],
               ghanaRateVersions,
+              businessId: business.id,
+              salaryAdvances: [],
             })
           )
           continue
@@ -431,6 +452,8 @@ export async function POST(request: NextRequest) {
           salaryBasisSnapshot: salaryBasis,
           oneOffItemsSnapshot: filtered.oneOffSnapshots,
           ghanaRateVersions,
+          businessId: business.id,
+          salaryAdvances: advancesByStaff.get(String(staff.id)) || [],
         })
 
         const allowancesTotal = computed.allowances_total

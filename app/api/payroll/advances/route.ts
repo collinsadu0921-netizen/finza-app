@@ -354,6 +354,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: dedError.message }, { status: 500 })
     }
 
+    const { logAudit } = await import("@/lib/auditLog")
+    await logAudit({
+      businessId: business.id,
+      userId: user.id,
+      actionType: "salary_advance.created",
+      entityType: "salary_advance",
+      entityId: advance.id,
+      newValues: {
+        staff_id,
+        amount: Number(amount),
+        monthly_repayment: Number(monthly_repayment),
+        journal_entry_id: je.id,
+      },
+      description: "Salary advance issued",
+      request,
+    })
+
     return NextResponse.json({ success: true, journal_entry_id: je.id, advance })
   } catch (err: any) {
     console.error("Error in POST /api/payroll/advances:", err)
