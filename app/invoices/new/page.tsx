@@ -22,6 +22,13 @@ import { formatMoney, formatMoneyWithSymbol } from "@/lib/money"
 import { openWhatsAppUrlInBrowser } from "@/lib/communication/openWhatsAppClient"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
+import {
+  fetchBillableMaterialsForInvoice,
+  materialsPickerButtonDisabled,
+  materialsPickerButtonLabel,
+  serviceMaterialsSetupHref,
+  type MaterialsPickerUiState,
+} from "@/lib/invoices/invoiceMaterialPickerUi"
 
 type Customer = {
   id: string
@@ -261,6 +268,9 @@ function NewInvoicePageContent() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
   const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
+  const [materialsPickerState, setMaterialsPickerState] =
+    useState<MaterialsPickerUiState>("idle")
+  const [materialsPickerMessage, setMaterialsPickerMessage] = useState<string>("")
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
   const [dueDate, setDueDate] = useState<string>("")
@@ -432,13 +442,7 @@ function NewInvoicePageContent() {
         } else {
           setJobs([])
         }
-        const materialsRes = await fetch("/api/service/materials/billable-list")
-        const materialsPayload = await materialsRes.json().catch(() => ({}))
-        if (materialsRes.ok && Array.isArray(materialsPayload.materials)) {
-          setMaterials(materialsPayload.materials as BillableMaterialOption[])
-        } else {
-          setMaterials([])
-        }
+        // Materials load in a dedicated effect keyed to businessId (see below).
       } else {
       // Load products_services (non-service workspace)
       const { data: productsData } = await supabase
@@ -500,7 +504,37 @@ function NewInvoicePageContent() {
     ])
   }, [])
 
+  const loadBillableMaterials = useCallback(async (bizId: string) => {
+    setMaterialsPickerState("loading")
+    setMaterialsPickerMessage("")
+    const result = await fetchBillableMaterialsForInvoice(bizId)
+    if (result.ok) {
+      setMaterials(result.materials as BillableMaterialOption[])
+      setMaterialsPickerState(result.state)
+      setMaterialsPickerMessage(
+        result.state === "empty"
+          ? "No billable materials are available. Mark a material as billable and set its selling price in Materials."
+          : ""
+      )
+      return
+    }
+    setMaterials([])
+    setMaterialsPickerState(result.state)
+    setMaterialsPickerMessage(result.message)
+  }, [])
+
+  useEffect(() => {
+    if (businessIndustry !== "service" || !businessId) {
+      setMaterials([])
+      setMaterialsPickerState("idle")
+      setMaterialsPickerMessage("")
+      return
+    }
+    void loadBillableMaterials(businessId)
+  }, [businessIndustry, businessId, loadBillableMaterials])
+
   const addMaterialLine = useCallback(() => {
+    if (materialsPickerButtonDisabled(materialsPickerState)) return
     setItems(prev => [
       ...prev,
       {
@@ -516,7 +550,7 @@ function NewInvoicePageContent() {
         total: 0,
       },
     ])
-  }, [])
+  }, [materialsPickerState])
 
   const removeItem = useCallback((id: string) => {
     setItems(prev => prev.filter((item) => item.id !== id))
@@ -1207,13 +1241,51 @@ function NewInvoicePageContent() {
                   <button
                     type="button"
                     onClick={addMaterialLine}
-                    className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
+                    disabled={materialsPickerButtonDisabled(materialsPickerState)}
+                    className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    Add material
+                    {materialsPickerButtonLabel(materialsPickerState)}
                   </button>
                 )}
               </div>
+              {businessIndustry === "service" &&
+                materialsPickerState !== "idle" &&
+                materialsPickerState !== "ready" &&
+                materialsPickerMessage && (
+                  <div
+                    className="border-b border-slate-200 bg-amber-50 px-4 py-2.5 sm:px-6 text-sm text-amber-900"
+                    role="status"
+                    data-testid="invoice-materials-picker-status"
+                  >
+                    <p>{materialsPickerMessage}</p>
+                    <div className="mt-1.5 flex flex-wrap gap-3">
+                      {(materialsPickerState === "empty" ||
+                        materialsPickerState === "tier-blocked") &&
+                        businessId && (
+                          <Link
+                            href={serviceMaterialsSetupHref(businessId)}
+                            className="font-medium text-blue-700 underline underline-offset-2"
+                          >
+                            Open Materials
+                          </Link>
+                        )}
+                      {(materialsPickerState === "error" ||
+                        materialsPickerState === "auth" ||
+                        materialsPickerState === "business-missing") && (
+                        <button
+                          type="button"
+                          className="font-medium text-blue-700 underline underline-offset-2"
+                          onClick={() => {
+                            if (businessId) void loadBillableMaterials(businessId)
+                          }}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[56rem] table-fixed text-sm text-left">
                   <colgroup>

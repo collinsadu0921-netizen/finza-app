@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useRouter, useParams, usePathname, useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { NativeSelect } from "@/components/ui/NativeSelect"
@@ -17,6 +18,13 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import {
+  fetchBillableMaterialsForInvoice,
+  materialsPickerButtonDisabled,
+  materialsPickerButtonLabel,
+  serviceMaterialsSetupHref,
+  type MaterialsPickerUiState,
+} from "@/lib/invoices/invoiceMaterialPickerUi"
 
 type Customer = {
   id: string
@@ -148,6 +156,9 @@ function InvoiceEditPageContent() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<any[]>([])
   const [materials, setMaterials] = useState<BillableMaterialOption[]>([])
+  const [materialsPickerState, setMaterialsPickerState] =
+    useState<MaterialsPickerUiState>("idle")
+  const [materialsPickerMessage, setMaterialsPickerMessage] = useState<string>("")
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("")
   const [invoiceNumber, setInvoiceNumber] = useState<string>("")
   const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split("T")[0])
@@ -355,15 +366,7 @@ function InvoiceEditPageContent() {
 
       setCustomers(customersData || [])
 
-      if (isUnderService) {
-        const materialsRes = await fetch("/api/service/materials/billable-list")
-        const materialsPayload = await materialsRes.json().catch(() => ({}))
-        if (materialsRes.ok && Array.isArray(materialsPayload.materials)) {
-          setMaterials(materialsPayload.materials as BillableMaterialOption[])
-        } else {
-          setMaterials([])
-        }
-      }
+      // Materials load in a dedicated effect keyed to businessId (see below).
 
       // Load invoice items AFTER products are loaded (for description fallback)
       if (invoiceItems && invoiceItems.length > 0) {
@@ -454,7 +457,37 @@ function InvoiceEditPageContent() {
     ])
   }
 
+  const loadBillableMaterials = useCallback(async (bizId: string) => {
+    setMaterialsPickerState("loading")
+    setMaterialsPickerMessage("")
+    const result = await fetchBillableMaterialsForInvoice(bizId)
+    if (result.ok) {
+      setMaterials(result.materials as BillableMaterialOption[])
+      setMaterialsPickerState(result.state)
+      setMaterialsPickerMessage(
+        result.state === "empty"
+          ? "No billable materials are available. Mark a material as billable and set its selling price in Materials."
+          : ""
+      )
+      return
+    }
+    setMaterials([])
+    setMaterialsPickerState(result.state)
+    setMaterialsPickerMessage(result.message)
+  }, [])
+
+  useEffect(() => {
+    if (!isUnderService || !businessId) {
+      setMaterials([])
+      setMaterialsPickerState("idle")
+      setMaterialsPickerMessage("")
+      return
+    }
+    void loadBillableMaterials(businessId)
+  }, [isUnderService, businessId, loadBillableMaterials])
+
   const addMaterialLine = () => {
+    if (materialsPickerButtonDisabled(materialsPickerState)) return
     setItems([
       ...items,
       {
@@ -1230,16 +1263,54 @@ function InvoiceEditPageContent() {
                   <button
                     type="button"
                     onClick={addMaterialLine}
-                    className="bg-white text-blue-700 border border-blue-200 px-4 py-2 rounded-lg hover:bg-blue-50 font-medium transition-colors flex items-center gap-2"
+                    disabled={materialsPickerButtonDisabled(materialsPickerState)}
+                    className="bg-white text-blue-700 border border-blue-200 px-4 py-2 rounded-lg hover:bg-blue-50 font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    Add material
+                    {materialsPickerButtonLabel(materialsPickerState)}
                   </button>
                 )}
               </div>
             </div>
+            {isUnderService &&
+              materialsPickerState !== "idle" &&
+              materialsPickerState !== "ready" &&
+              materialsPickerMessage && (
+                <div
+                  className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                  role="status"
+                  data-testid="invoice-materials-picker-status"
+                >
+                  <p>{materialsPickerMessage}</p>
+                  <div className="mt-1.5 flex flex-wrap gap-3">
+                    {(materialsPickerState === "empty" ||
+                      materialsPickerState === "tier-blocked") &&
+                      businessId && (
+                        <Link
+                          href={serviceMaterialsSetupHref(businessId)}
+                          className="font-medium text-blue-700 underline underline-offset-2"
+                        >
+                          Open Materials
+                        </Link>
+                      )}
+                    {(materialsPickerState === "error" ||
+                      materialsPickerState === "auth" ||
+                      materialsPickerState === "business-missing") && (
+                      <button
+                        type="button"
+                        className="font-medium text-blue-700 underline underline-offset-2"
+                        onClick={() => {
+                          if (businessId) void loadBillableMaterials(businessId)
+                        }}
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
             {items.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
