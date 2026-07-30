@@ -112,8 +112,13 @@ async function buildLegacyDt107aAuditExport(
     renderer_version: "gra-dt107a-renderer-v1",
     template_version: null,
     template_reference: null,
-    source_run_status: String(payrollRun.status ?? ""),
-    source_payload: { run: payrollRun },
+    source_run_status: "approved",
+    source_payload: {
+      run: {
+        ...payrollRun,
+        source_status: "approved",
+      },
+    },
     source_payload_sha256: "",
     row_count: tableRows.length - 1,
     control_totals: {},

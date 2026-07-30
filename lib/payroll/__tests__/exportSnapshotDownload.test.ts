@@ -1,7 +1,10 @@
 import {
+  buildDt107aAuditMetadataLines,
   buildSnapshotExportResponse,
   normalizePayrollExportMode,
+  payrollExportErrorStatus,
   rawCsvResponse,
+  renderPayrollExportContent,
   renderSnapshotCsvRows,
   rowsToCsv,
   sha256Hex,
@@ -51,11 +54,32 @@ function sampleDt107aSnapshot(overrides: Partial<PayrollExportSnapshotRow> = {})
     renderer_version: "gra-dt107a-renderer-v1",
     template_version: "gra-dt0107a-monthly-v1",
     template_reference: "GRA DT 0107A uploadable monthly PAYE employee format v1",
-    source_run_status: "draft",
+    source_run_status: "approved",
     source_payload: {
       schema: "gra-dt107a-schema-v1",
       header,
       expected_column_count: 27,
+      run: {
+        payroll_month: "2026-01-01",
+        pay_period_start: "2026-01-01",
+        pay_period_end: "2026-01-31",
+        payroll_frequency: "monthly",
+        run_type: "regular",
+        source_status: "approved",
+        approved_at: "2026-01-15T10:00:00.000Z",
+        approved_by: "user-1",
+        calculation_engine_version: "finza-ghana-v2",
+        paye_rate_version: "gh-paye-2026",
+        pension_rate_version: "gh-pension-2026",
+        calculation_jurisdiction: "GH",
+        statutory_period_basis: "2026-01-01",
+      },
+      business: {
+        id: "22222222-2222-2222-2222-222222222222",
+        legal_name: "Acme Ltd",
+        trading_name: "Acme",
+        tin: "C0000000000",
+      },
       rows: [
         {
           staff_id: "44444444-4444-4444-4444-444444444444",
@@ -96,6 +120,19 @@ describe("exportSnapshotDownload", () => {
 
   it("returns byte-identical DT107A preparation content without BOM", async () => {
     const snap = sampleDt107aSnapshot()
+    const rendered = renderPayrollExportContent({
+      snapshot: snap,
+      mode: "preparation",
+      payrollRun: { id: snap.payroll_run_id, status: "approved", payroll_month: "2026-01-01" },
+      filenamePrefix: "gra-dt107a-paye-preparation",
+    })
+    expect(rendered.content.startsWith("\uFEFF")).toBe(false)
+    expect(rendered.content).toBe(snap.rendered_content)
+    expect(rendered.content.split("\n")[0].split(",").length).toBe(27)
+    expect(rendered.contentSha256).toBe(snap.rendered_content_sha256)
+    expect(rendered.contentLength).toBe(Buffer.byteLength(rendered.content, "utf8"))
+    expect(rendered.content).toContain('Ada ""Lovelace""')
+
     const res = buildSnapshotExportResponse({
       snapshot: snap,
       mode: "preparation",
@@ -103,11 +140,60 @@ describe("exportSnapshotDownload", () => {
       filenamePrefix: "gra-dt107a-paye-preparation",
     })
     const csv = await res.text()
-    expect(csv.startsWith("\uFEFF")).toBe(false)
-    expect(csv).toBe(snap.rendered_content)
-    expect(csv.split("\n")[0].split(",").length).toBe(27)
-    expect(sha256Hex(csv)).toBe(snap.rendered_content_sha256)
-    expect(csv).toContain('Ada ""Lovelace""')
+    expect(csv).toBe(rendered.content)
+  })
+
+  it("uses different content hashes for DT107A preparation vs audit", () => {
+    const snap = sampleDt107aSnapshot()
+    const payrollRun = {
+      id: snap.payroll_run_id,
+      status: "approved",
+      payroll_month: "2026-01-01",
+      reversed_at: null,
+    }
+    const preparation = renderPayrollExportContent({
+      snapshot: snap,
+      mode: "preparation",
+      payrollRun,
+      filenamePrefix: "gra-dt107a-paye-preparation",
+    })
+    const audit = renderPayrollExportContent({
+      snapshot: snap,
+      mode: "audit",
+      payrollRun,
+      filenamePrefix: "gra-dt107a-paye-audit",
+    })
+    expect(preparation.contentSha256).toBe(snap.rendered_content_sha256)
+    expect(audit.contentSha256).not.toBe(preparation.contentSha256)
+    expect(audit.content).toContain("# Finza DT 107A audit export")
+    expect(audit.content.endsWith(snap.rendered_content || "")).toBe(true)
+  })
+
+  it("buildDt107aAuditMetadataLines uses snapshot payload for approval fields", () => {
+    const snap = sampleDt107aSnapshot()
+    const lines = buildDt107aAuditMetadataLines(snap, {
+      status: "reversed",
+      reversed_at: "2026-02-01T00:00:00.000Z",
+      approved_at: "2099-01-01T00:00:00.000Z",
+      approved_by: "live-user",
+    })
+    const flat = lines.flat().join("\n")
+    expect(flat).toContain("2026-01-15T10:00:00.000Z")
+    expect(flat).toContain("user-1")
+    expect(flat).not.toContain("2099-01-01T00:00:00.000Z")
+    expect(flat).not.toContain("live-user")
+    expect(flat).toContain("reversed")
+    expect(flat).toContain("approved")
+    expect(flat).toContain("Acme")
+    expect(flat).toContain("finza-ghana-v2")
+  })
+
+  it("maps hardened payroll export error codes to expected HTTP statuses", () => {
+    expect(payrollExportErrorStatus("PAYROLL_EXPORT_PERMISSION_DENIED")).toBe(403)
+    expect(payrollExportErrorStatus("PAYROLL_RUN_REVERSED")).toBe(409)
+    expect(payrollExportErrorStatus("PAYROLL_EXPORT_SNAPSHOT_CORRUPTED")).toBe(500)
+    expect(payrollExportErrorStatus("PAYROLL_EXPORT_EVENT_RECORDING_FAILED")).toBe(500)
+    expect(payrollExportErrorStatus("PAYROLL_EXPORT_SNAPSHOT_IMMUTABLE")).toBe(409)
   })
 
   it("escapes RFC-compatible CSV special characters through rowsToCsv", () => {

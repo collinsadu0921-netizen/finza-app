@@ -5,14 +5,14 @@ import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import {
-  buildSnapshotExportResponse,
   isImmutablePayrollRunStatus,
   legacySnapshotMissingResponse,
   loadPayrollExportSnapshot,
   normalizePayrollExportMode,
-  queryPayrollExportSnapshotFallback,
+  rawCsvResponse,
+  recordPayrollExportDownloadEvent,
+  renderPayrollExportContent,
   reversedPreparationBlockedResponse,
-  verifySnapshotContentHashes,
   type PayrollExportMode,
   type PayrollExportType,
 } from "@/lib/payroll/exportSnapshotDownload"
@@ -95,12 +95,10 @@ export async function serveImmutablePayrollExport(args: {
     business.id,
     String(payrollRun.id),
     exportType,
-    mode,
-    true
+    mode
   )
   if ("error" in loaded && loaded.error) return loaded.error
 
-  let snapshot = "snapshot" in loaded ? loaded.snapshot : null
   if ("notFound" in loaded && loaded.notFound) {
     if (mode === "preparation") {
       return legacySnapshotMissingResponse(mode)
@@ -112,41 +110,34 @@ export async function serveImmutablePayrollExport(args: {
     return legacySnapshotMissingResponse(mode)
   }
 
-  if (!snapshot) {
-    const fallback = await queryPayrollExportSnapshotFallback(
-      supabase,
-      business.id,
-      String(payrollRun.id),
-      exportType
-    )
-    if (!fallback) {
-      if (mode === "preparation") return legacySnapshotMissingResponse(mode)
-      if (legacyAuditContent) {
-        const legacy = await legacyAuditContent()
-        if (legacy) return legacy
-      }
-      return legacySnapshotMissingResponse(mode)
-    }
-    const verification = verifySnapshotContentHashes(fallback)
-    if (!verification.ok) {
-      return NextResponse.json(
-        {
-          error: `Payroll export snapshot failed hash verification (${verification.errors.join(", ")})`,
-          code: "PAYROLL_EXPORT_SNAPSHOT_CORRUPTED",
-        },
-        { status: 500 }
-      )
-    }
-    snapshot = fallback
+  if (!("snapshot" in loaded) || !loaded.snapshot) {
+    return legacySnapshotMissingResponse(mode)
   }
 
+  const snapshot = loaded.snapshot
+
   try {
-    return buildSnapshotExportResponse({
+    const rendered = renderPayrollExportContent({
       snapshot,
       mode,
       payrollRun,
       filenamePrefix,
     })
+
+    const recorded = await recordPayrollExportDownloadEvent(supabase, {
+      businessId: business.id,
+      payrollRunId: String(payrollRun.id),
+      snapshotId: snapshot.id,
+      exportType,
+      mode,
+      actualContentSha256: rendered.contentSha256,
+      filename: rendered.filename,
+      rendererVersion: snapshot.renderer_version,
+      contentLength: rendered.contentLength,
+    })
+    if (recorded.error) return recorded.error
+
+    return rawCsvResponse(rendered.filename, rendered.content)
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to render payroll export snapshot"
     return NextResponse.json({ error: message, code: "PAYROLL_EXPORT_RENDER_FAILED" }, { status: 500 })

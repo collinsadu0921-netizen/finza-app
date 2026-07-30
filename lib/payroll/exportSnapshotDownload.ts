@@ -106,6 +106,9 @@ function tryParseDetail(detail: unknown): Record<string, unknown> | null {
   return null
 }
 
+const PAYROLL_EXPORT_ERROR_CODE_PATTERN =
+  /\b(PAYROLL_EXPORT_PERMISSION_DENIED|PAYROLL_EXPORT_INVALID_MODE|PAYROLL_EXPORT_SNAPSHOT_NOT_FOUND|PAYROLL_EXPORT_SNAPSHOT_CORRUPTED|PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED|PAYROLL_EXPORT_SNAPSHOT_IMMUTABLE|PAYROLL_EXPORT_SNAPSHOT_INVALID_SOURCE_STATUS|PAYROLL_EXPORT_EVENT_IMMUTABLE|PAYROLL_EXPORT_EVENT_RECORDING_FAILED|PAYROLL_RUN_REVERSED|PAYROLL_EXPORT_LEGACY_SNAPSHOT_MISSING)\b/
+
 export function extractPayrollExportErrorCode(err: {
   message?: string | null
   details?: string | null
@@ -114,10 +117,26 @@ export function extractPayrollExportErrorCode(err: {
   const message = String(err?.message || "")
   const detail = tryParseDetail(err?.details) || tryParseDetail(err?.hint)
   if (detail?.code && typeof detail.code === "string") return detail.code
-  const fromMsg = message.match(
-    /\b(PAYROLL_EXPORT_PERMISSION_DENIED|PAYROLL_EXPORT_INVALID_MODE|PAYROLL_EXPORT_SNAPSHOT_NOT_FOUND|PAYROLL_EXPORT_SNAPSHOT_CORRUPTED|PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED|PAYROLL_RUN_REVERSED|PAYROLL_EXPORT_LEGACY_SNAPSHOT_MISSING)\b/
-  )
+  const fromMsg = message.match(PAYROLL_EXPORT_ERROR_CODE_PATTERN)
   return fromMsg?.[1] ?? null
+}
+
+export function payrollExportErrorStatus(code: string): number {
+  switch (code) {
+    case "PAYROLL_EXPORT_PERMISSION_DENIED":
+      return 403
+    case "PAYROLL_RUN_REVERSED":
+    case "PAYROLL_EXPORT_SNAPSHOT_INVALID_SOURCE_STATUS":
+    case "PAYROLL_EXPORT_SNAPSHOT_IMMUTABLE":
+    case "PAYROLL_EXPORT_EVENT_IMMUTABLE":
+      return 409
+    case "PAYROLL_EXPORT_SNAPSHOT_CORRUPTED":
+    case "PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED":
+    case "PAYROLL_EXPORT_EVENT_RECORDING_FAILED":
+      return 500
+    default:
+      return 400
+  }
 }
 
 export function mapPayrollExportRpcError(err: {
@@ -127,10 +146,7 @@ export function mapPayrollExportRpcError(err: {
 } | null): NextResponse {
   const message = String(err?.message || err?.details || "Payroll export failed")
   const code = extractPayrollExportErrorCode(err) || "PAYROLL_EXPORT_FAILED"
-  let status = 400
-  if (code === "PAYROLL_EXPORT_PERMISSION_DENIED") status = 403
-  if (code === "PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED") status = 500
-  return NextResponse.json({ error: message, code }, { status })
+  return NextResponse.json({ error: message, code }, { status: payrollExportErrorStatus(code) })
 }
 
 export async function loadPayrollExportSnapshot(
@@ -139,8 +155,7 @@ export async function loadPayrollExportSnapshot(
   businessId: string,
   payrollRunId: string,
   exportType: PayrollExportType,
-  mode: PayrollExportMode,
-  record = true
+  mode: PayrollExportMode
 ): Promise<
   | { snapshot: PayrollExportSnapshotRow }
   | { notFound: true }
@@ -151,12 +166,14 @@ export async function loadPayrollExportSnapshot(
     p_payroll_run_id: payrollRunId,
     p_export_type: exportType,
     p_mode: mode,
-    p_record: record,
   })
 
   if (error) {
     const code = extractPayrollExportErrorCode(error as { message?: string })
-    if (code === "PAYROLL_EXPORT_SNAPSHOT_NOT_FOUND") {
+    if (
+      code === "PAYROLL_EXPORT_SNAPSHOT_NOT_FOUND" ||
+      code === "PAYROLL_EXPORT_LEGACY_SNAPSHOT_MISSING"
+    ) {
       return { notFound: true }
     }
     return { error: mapPayrollExportRpcError(error as { message?: string; details?: string }) }
@@ -172,35 +189,14 @@ export async function loadPayrollExportSnapshot(
       error: NextResponse.json(
         {
           error: `Payroll export snapshot failed hash verification (${verification.errors.join(", ")})`,
-          code: "PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED",
+          code: "PAYROLL_EXPORT_SNAPSHOT_CORRUPTED",
         },
-        { status: 500 }
+        { status: payrollExportErrorStatus("PAYROLL_EXPORT_SNAPSHOT_CORRUPTED") }
       ),
     }
   }
 
   return { snapshot }
-}
-
-export async function queryPayrollExportSnapshotFallback(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  businessId: string,
-  payrollRunId: string,
-  exportType: PayrollExportType
-): Promise<PayrollExportSnapshotRow | null> {
-  const { data, error } = await supabase
-    .from("payroll_export_snapshots")
-    .select("*")
-    .eq("business_id", businessId)
-    .eq("payroll_run_id", payrollRunId)
-    .eq("export_type", exportType)
-    .order("created_at", { ascending: false })
-    .limit(1)
-
-  if (error || !data) return null
-  const rows = Array.isArray(data) ? data : [data]
-  return (rows[0] as PayrollExportSnapshotRow | undefined) ?? null
 }
 
 function sortPayloadRows(rows: PayloadRow[]): PayloadRow[] {
@@ -238,6 +234,7 @@ export function buildDt107aAuditMetadataLines(
 ): string[][] {
   const payload = snapshot.source_payload
   const run = (payload.run || {}) as Record<string, unknown>
+  const business = (payload.business || {}) as Record<string, unknown>
   return [
     ["# Finza DT 107A audit export — not for GRA portal upload"],
     ["Snapshot ID", snapshot.id],
@@ -247,17 +244,26 @@ export function buildDt107aAuditMetadataLines(
     ["Renderer version", snapshot.renderer_version],
     ["Template version", snapshot.template_version || ""],
     ["Template reference", snapshot.template_reference || ""],
+    ["Business name", businessDisplayName(payload)],
+    ["Business TIN", String(business.tin || "")],
     ["Pay period label", payrollPeriodCellValue(runFromPayload(payload))],
     ["Period start", String(run.pay_period_start || run.payroll_month || "").slice(0, 10)],
     ["Period end", String(run.pay_period_end || run.pay_period_start || run.payroll_month || "").slice(0, 10)],
     ["Pay frequency", String(run.payroll_frequency || "monthly")],
     ["Run type", String(run.run_type || "regular")],
-    ["Run status", String(payrollRun.status || snapshot.source_run_status || "")],
-    ["Approved at", String(payrollRun.approved_at || "")],
-    ["Approved by", String(payrollRun.approved_by || "")],
+    ["Snapshot source run status", String(snapshot.source_run_status || run.source_status || "")],
+    ["Current run status", String(payrollRun.status || "")],
+    ["Approved at", String(run.approved_at || "")],
+    ["Approved by", String(run.approved_by || "")],
+    ["Calculation engine version", String(run.calculation_engine_version || "")],
+    ["PAYE rate version", String(run.paye_rate_version || "")],
+    ["Pension rate version", String(run.pension_rate_version || "")],
+    ["Calculation jurisdiction", String(run.calculation_jurisdiction || "")],
+    ["Statutory period basis", String(run.statutory_period_basis || "")],
     ["Reversed at", String(payrollRun.reversed_at || "")],
     ["Reversed by", String(payrollRun.reversed_by || "")],
     ["Reversal reason", String(payrollRun.reversal_reason || "")],
+    ["Reversal journal ID", String(payrollRun.reversal_journal_id || "")],
     ["Correction of run ID", String(payrollRun.correction_of_run_id || "")],
     ["Corrected by run ID", String(payrollRun.corrected_by_run_id || "")],
     [],
@@ -500,13 +506,13 @@ export function resolveSnapshotFilename(
   return payrollExportFilename(fallbackPrefix, payrollRun)
 }
 
-export function buildSnapshotExportResponse(args: {
+export function renderPayrollExportContent(args: {
   snapshot: PayrollExportSnapshotRow
   mode: PayrollExportMode
   payrollRun: Record<string, unknown>
   filenamePrefix: string
   legacyBanner?: boolean
-}): NextResponse {
+}): { content: string; filename: string; contentSha256: string; contentLength: number } {
   const { snapshot, mode, payrollRun, filenamePrefix, legacyBanner } = args
   const runMeta = payrollRun as PayrollRunExportMeta
 
@@ -515,22 +521,32 @@ export function buildSnapshotExportResponse(args: {
     if (!tableContent) {
       throw new Error("GRA DT 107A snapshot is missing rendered_content")
     }
-    const renderedHash = sha256Hex(tableContent)
-    if (snapshot.rendered_content_sha256 && renderedHash !== snapshot.rendered_content_sha256) {
+    const tableHash = sha256Hex(tableContent)
+    if (snapshot.rendered_content_sha256 && tableHash !== snapshot.rendered_content_sha256) {
       throw new Error("GRA DT 107A rendered_content hash mismatch")
     }
 
     if (mode === "preparation") {
       const filename = resolveSnapshotFilename(snapshot, filenamePrefix, runMeta, mode)
-      return rawCsvResponse(filename, tableContent)
+      return {
+        content: tableContent,
+        filename,
+        contentSha256: tableHash,
+        contentLength: Buffer.byteLength(tableContent, "utf8"),
+      }
     }
 
     const metaLines = legacyBanner
       ? [[LEGACY_AUDIT_BANNER], []]
       : buildDt107aAuditMetadataLines(snapshot, payrollRun)
-    const auditCsv = rowsToCsv(metaLines) + tableContent
+    const content = rowsToCsv(metaLines) + tableContent
     const filename = resolveSnapshotFilename(snapshot, filenamePrefix, runMeta, mode)
-    return rawCsvResponse(filename, auditCsv)
+    return {
+      content,
+      filename,
+      contentSha256: sha256Hex(content),
+      contentLength: Buffer.byteLength(content, "utf8"),
+    }
   }
 
   const rows = renderSnapshotCsvRows(snapshot)
@@ -538,13 +554,72 @@ export function buildSnapshotExportResponse(args: {
     rows.unshift([], [LEGACY_AUDIT_BANNER])
   }
   const content = rowsToCsv(rows)
-  const contentHash = sha256Hex(content)
-  const expectedHash = snapshot.rendered_content_sha256 || snapshot.source_payload_sha256
-  if (contentHash !== expectedHash && snapshot.rendered_content == null) {
-    // Payload-rendered CSV may differ from payload hash by design; integrity is on payload.
-  }
   const filename = resolveSnapshotFilename(snapshot, filenamePrefix, runMeta, mode)
-  return rawCsvResponse(filename, content)
+  return {
+    content,
+    filename,
+    contentSha256: sha256Hex(content),
+    contentLength: Buffer.byteLength(content, "utf8"),
+  }
+}
+
+export async function recordPayrollExportDownloadEvent(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  args: {
+    businessId: string
+    payrollRunId: string
+    snapshotId: string
+    exportType: PayrollExportType
+    mode: PayrollExportMode
+    actualContentSha256: string
+    filename: string
+    rendererVersion: string
+    contentLength: number
+  }
+): Promise<{ error?: NextResponse }> {
+  const { error } = await supabase.rpc("record_payroll_export_event", {
+    p_business_id: args.businessId,
+    p_payroll_run_id: args.payrollRunId,
+    p_snapshot_id: args.snapshotId,
+    p_export_type: args.exportType,
+    p_mode: args.mode,
+    p_actual_content_sha256: args.actualContentSha256,
+    p_filename: args.filename,
+    p_renderer_version: args.rendererVersion,
+    p_content_length: args.contentLength,
+  })
+
+  if (error) {
+    const code = extractPayrollExportErrorCode(error as { message?: string; details?: string })
+    if (code && code !== "PAYROLL_EXPORT_FAILED") {
+      return { error: mapPayrollExportRpcError(error as { message?: string; details?: string }) }
+    }
+    return {
+      error: NextResponse.json(
+        {
+          error: String(
+            (error as { message?: string }).message || "Failed to record payroll export download event"
+          ),
+          code: "PAYROLL_EXPORT_EVENT_RECORDING_FAILED",
+        },
+        { status: payrollExportErrorStatus("PAYROLL_EXPORT_EVENT_RECORDING_FAILED") }
+      ),
+    }
+  }
+
+  return {}
+}
+
+export function buildSnapshotExportResponse(args: {
+  snapshot: PayrollExportSnapshotRow
+  mode: PayrollExportMode
+  payrollRun: Record<string, unknown>
+  filenamePrefix: string
+  legacyBanner?: boolean
+}): NextResponse {
+  const rendered = renderPayrollExportContent(args)
+  return rawCsvResponse(rendered.filename, rendered.content)
 }
 
 export function legacySnapshotMissingResponse(mode: PayrollExportMode): NextResponse {
@@ -572,7 +647,7 @@ export function reversedPreparationBlockedResponse(): NextResponse {
       error: "Preparation export is unavailable because this payroll run was reversed",
       code: "PAYROLL_RUN_REVERSED",
     },
-    { status: 400 }
+    { status: payrollExportErrorStatus("PAYROLL_RUN_REVERSED") }
   )
 }
 
