@@ -26,6 +26,11 @@ import {
   submitBatchItemPaymentRequest,
   tryCloseBatchItemPaymentModal,
 } from "@/lib/payroll/batchItemPaymentModalLifecycle"
+import PayrollBusinessTinWarning from "@/components/payroll/PayrollBusinessTinWarning"
+import {
+  shouldShowApprovedSnapshotBusinessTinWarning,
+  shouldShowDraftBusinessTinWarning,
+} from "@/lib/payroll/payrollBusinessTinWarning"
 import { submitManualSalaryPaymentRequest } from "@/lib/payroll/manualPaymentModalLifecycle"
 
 type PayrollEntry = {
@@ -329,6 +334,10 @@ export default function PayrollRunViewPage() {
     reference: "",
     notes: "",
   })
+  const [filingContext, setFilingContext] = useState<{
+    currentBusinessTin: string | null
+    approvedSnapshotBusinessTin: string | null
+  } | null>(null)
 
   const loadPayrollRun = useCallback(async () => {
     try {
@@ -339,6 +348,7 @@ export default function PayrollRunViewPage() {
         setEntries(data.entries || [])
         if (data.paymentSummary) setPaymentSummary(data.paymentSummary)
         if (Array.isArray(data.payments)) setSalaryPayments(data.payments)
+        if (data.filingContext) setFilingContext(data.filingContext)
       }
     } catch (err) {
       console.error("Error loading payroll run:", err)
@@ -1347,6 +1357,10 @@ export default function PayrollRunViewPage() {
             </div>
           )}
 
+          {shouldShowDraftBusinessTinWarning(payrollRun.status, filingContext?.currentBusinessTin) && (
+            <PayrollBusinessTinWarning variant="draft_missing" payrollBasePath={payrollBase} className="mb-4" />
+          )}
+
           {entries.some((e) => e.is_included === false) && (
             <div className="mb-4 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
               {entries.filter((e) => e.is_included === false).length} employee
@@ -2003,6 +2017,15 @@ export default function PayrollRunViewPage() {
           {(payrollRun.status === "approved" || payrollRun.status === "locked") && (
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 space-y-3">
               <h2 className="text-base font-semibold text-gray-900 dark:text-white">Reports & exports</h2>
+              {shouldShowApprovedSnapshotBusinessTinWarning(
+                payrollRun.status,
+                filingContext?.approvedSnapshotBusinessTin
+              ) && (
+                <PayrollBusinessTinWarning
+                  variant="approved_snapshot_missing"
+                  payrollBasePath={payrollBase}
+                />
+              )}
               <details className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/30 px-3 py-2">
                 <summary className="cursor-pointer text-sm font-medium text-gray-800 dark:text-gray-200 select-none">
                   Download CSV files

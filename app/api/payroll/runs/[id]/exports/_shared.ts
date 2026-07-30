@@ -9,7 +9,7 @@ import {
   legacySnapshotMissingResponse,
   loadPayrollExportSnapshot,
   normalizePayrollExportMode,
-  rawCsvResponse,
+  payrollCsvDownloadResponse,
   recordPayrollExportDownloadEvent,
   renderPayrollExportContent,
   reversedPreparationBlockedResponse,
@@ -124,20 +124,22 @@ export async function serveImmutablePayrollExport(args: {
       filenamePrefix,
     })
 
+    const delivered = payrollCsvDownloadResponse(rendered.filename, rendered.content)
+
     const recorded = await recordPayrollExportDownloadEvent(supabase, {
       businessId: business.id,
       payrollRunId: String(payrollRun.id),
       snapshotId: snapshot.id,
       exportType,
       mode,
-      actualContentSha256: rendered.contentSha256,
+      actualContentSha256: delivered.contentSha256,
       filename: rendered.filename,
       rendererVersion: snapshot.renderer_version,
-      contentLength: rendered.contentLength,
+      contentLength: delivered.contentLength,
     })
     if (recorded.error) return recorded.error
 
-    return rawCsvResponse(rendered.filename, rendered.content)
+    return delivered.response
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Failed to render payroll export snapshot"
     return NextResponse.json({ error: message, code: "PAYROLL_EXPORT_RENDER_FAILED" }, { status: 500 })

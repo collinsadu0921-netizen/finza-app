@@ -16,6 +16,11 @@ import {
 import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
 import { mapApprovePayrollRunAtomicError } from "@/lib/payroll/mapApprovePayrollAtomicError"
 import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
+import {
+  extractSnapshotBusinessTin,
+  normalizeBusinessTin,
+} from "@/lib/payroll/payrollBusinessTinWarning"
+import { isImmutablePayrollRunStatus } from "@/lib/payroll/exportSnapshotDownload"
 
 export async function GET(
   request: NextRequest,
@@ -132,11 +137,36 @@ export async function GET(
       latestPaymentDate
     )
 
+    let approvedSnapshotBusinessTin: string | null = null
+    if (isImmutablePayrollRunStatus(payrollRun.status)) {
+      const { data: snapshotRows, error: snapshotError } = await supabase.rpc(
+        "get_payroll_export_snapshot_for_download",
+        {
+          p_business_id: business.id,
+          p_payroll_run_id: runId,
+          p_export_type: "gra_dt107a",
+          p_mode: "preparation",
+        }
+      )
+      if (!snapshotError) {
+        const snapshot = (Array.isArray(snapshotRows) ? snapshotRows[0] : snapshotRows) as
+          | { source_payload?: Record<string, unknown> }
+          | undefined
+        if (snapshot?.source_payload) {
+          approvedSnapshotBusinessTin = extractSnapshotBusinessTin(snapshot.source_payload) || null
+        }
+      }
+    }
+
     return NextResponse.json({
       payrollRun,
       entries: entries || [],
       payments: payrollPayments || [],
       paymentSummary,
+      filingContext: {
+        currentBusinessTin: normalizeBusinessTin(business.tin) || null,
+        approvedSnapshotBusinessTin,
+      },
     })
   } catch (error: any) {
     console.error("Error fetching payroll run:", error)

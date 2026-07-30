@@ -47,10 +47,56 @@ export type PayrollExportSnapshotRow = {
 type PayloadRow = Record<string, unknown>
 
 const LEGACY_AUDIT_BANNER =
-  "# LEGACY EXPORT — NO APPROVAL-TIME SNAPSHOT (immutable filing fields only; not for portal upload)"
+  "# LEGACY EXPORT - NO APPROVAL-TIME SNAPSHOT (immutable filing fields only; not for portal upload)"
+
+export const PAYROLL_CSV_UTF8_BOM = "\uFEFF"
+
+export const DT107A_AUDIT_BANNER =
+  "# Finza DT 107A audit export - not for GRA portal upload"
 
 export function sha256Hex(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex")
+}
+
+/** Add UTF-8 BOM to final delivered CSV bytes without changing stored snapshot hashes. */
+export function deliverPayrollCsvContent(content: string): {
+  content: string
+  contentSha256: string
+  contentLength: number
+} {
+  const delivered = `${PAYROLL_CSV_UTF8_BOM}${content}`
+  return {
+    content: delivered,
+    contentSha256: sha256Hex(delivered),
+    contentLength: Buffer.byteLength(delivered, "utf8"),
+  }
+}
+
+export function payrollCsvDownloadResponse(
+  filename: string,
+  contentWithoutBom: string
+): {
+  response: NextResponse
+  contentSha256: string
+  contentLength: number
+} {
+  const delivered = deliverPayrollCsvContent(contentWithoutBom)
+  return {
+    contentSha256: delivered.contentSha256,
+    contentLength: delivered.contentLength,
+    response: new NextResponse(delivered.content, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv;charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(delivered.contentLength),
+      },
+    }),
+  }
+}
+
+export function rawCsvResponse(filename: string, content: string): NextResponse {
+  return payrollCsvDownloadResponse(filename, content).response
 }
 
 export function normalizePayrollExportMode(modeParam: string | null | undefined): PayrollExportMode {
@@ -64,16 +110,6 @@ export function normalizePayrollExportMode(modeParam: string | null | undefined)
 export function isImmutablePayrollRunStatus(status: string | null | undefined): boolean {
   const s = String(status || "").toLowerCase()
   return s === "approved" || s === "locked" || s === "reversed"
-}
-
-export function rawCsvResponse(filename: string, content: string): NextResponse {
-  return new NextResponse(content, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/csv;charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-    },
-  })
 }
 
 export function rowsToCsv(rows: string[][]): string {
@@ -208,6 +244,45 @@ function sortPayloadRows(rows: PayloadRow[]): PayloadRow[] {
   })
 }
 
+function payloadEntryRows(payload: Record<string, unknown>): PayloadRow[] {
+  const entries = payload.entries
+  if (Array.isArray(entries)) return entries as PayloadRow[]
+  const rows = payload.rows
+  if (Array.isArray(rows)) return rows as PayloadRow[]
+  return []
+}
+
+function controlTotal(totals: Record<string, unknown>, ...keys: string[]): number {
+  for (const key of keys) {
+    if (totals[key] != null && totals[key] !== "") return Number(totals[key])
+  }
+  return 0
+}
+
+const PAYE_SCHEDULE_V2_TAX_HEADERS = [
+  "Income Tax Method",
+  "Income Tax Method Version",
+  "Income Tax Regular Base",
+  "Income Tax Regular Amount",
+  "Income Tax Bonus Base",
+  "Income Tax Bonus Amount",
+  "Income Tax Overtime Base",
+  "Income Tax Overtime Amount",
+] as const
+
+function payeScheduleV2TaxCells(row: PayloadRow): string[] {
+  return [
+    String(row.income_tax_method ?? ""),
+    String(row.income_tax_method_version ?? ""),
+    formatNumeric(row.income_tax_regular_base),
+    formatNumeric(row.income_tax_regular_amount),
+    formatNumeric(row.income_tax_bonus_base),
+    formatNumeric(row.income_tax_bonus_amount),
+    formatNumeric(row.income_tax_overtime_base),
+    formatNumeric(row.income_tax_overtime_amount),
+  ]
+}
+
 function runFromPayload(payload: Record<string, unknown>): PayrollRunExportMeta {
   const run = (payload.run || {}) as Record<string, unknown>
   return {
@@ -236,7 +311,7 @@ export function buildDt107aAuditMetadataLines(
   const run = (payload.run || {}) as Record<string, unknown>
   const business = (payload.business || {}) as Record<string, unknown>
   return [
-    ["# Finza DT 107A audit export — not for GRA portal upload"],
+    [DT107A_AUDIT_BANNER],
     ["Snapshot ID", snapshot.id],
     ["Source payload SHA256", snapshot.source_payload_sha256],
     ["Rendered content SHA256", snapshot.rendered_content_sha256 || ""],
@@ -271,31 +346,60 @@ export function buildDt107aAuditMetadataLines(
 }
 
 function renderPayeSchedule(rendererVersion: string, payload: Record<string, unknown>): string[][] {
-  if (rendererVersion !== "paye-schedule-renderer-v1") {
-    throw new Error(`Unsupported PAYE schedule renderer: ${rendererVersion}`)
-  }
   const period = periodValuesFromPayload(payload)
-  const rows: string[][] = [
-    [
-      ...PAYROLL_EXPORT_PERIOD_HEADERS,
-      "Staff ID",
-      "TIN",
-      "Employee Name",
-      "Taxable Income",
-      "PAYE Withheld",
-    ],
-  ]
-  for (const row of sortPayloadRows(((payload.rows as PayloadRow[]) || []) as PayloadRow[])) {
-    rows.push([
-      ...period,
-      String(row.staff_id ?? ""),
-      String(row.filing_tin ?? ""),
-      String(row.filing_employee_name ?? ""),
-      formatNumeric(row.taxable_income),
-      formatNumeric(row.paye),
-    ])
+  const rows = sortPayloadRows(payloadEntryRows(payload))
+
+  if (rendererVersion === "paye-schedule-renderer-v1") {
+    const out: string[][] = [
+      [
+        ...PAYROLL_EXPORT_PERIOD_HEADERS,
+        "Staff ID",
+        "TIN",
+        "Employee Name",
+        "Taxable Income",
+        "PAYE Withheld",
+      ],
+    ]
+    for (const row of rows) {
+      out.push([
+        ...period,
+        String(row.staff_id ?? ""),
+        String(row.filing_tin ?? ""),
+        String(row.filing_employee_name ?? ""),
+        formatNumeric(row.taxable_income),
+        formatNumeric(row.paye),
+      ])
+    }
+    return out
   }
-  return rows
+
+  if (rendererVersion === "paye-schedule-renderer-v2") {
+    const out: string[][] = [
+      [
+        ...PAYROLL_EXPORT_PERIOD_HEADERS,
+        "Staff ID",
+        "TIN",
+        "Employee Name",
+        "Taxable Income",
+        "PAYE Withheld",
+        ...PAYE_SCHEDULE_V2_TAX_HEADERS,
+      ],
+    ]
+    for (const row of rows) {
+      out.push([
+        ...period,
+        String(row.staff_id ?? ""),
+        String(row.filing_tin ?? ""),
+        String(row.filing_employee_name ?? ""),
+        formatNumeric(row.taxable_income),
+        formatNumeric(row.paye),
+        ...payeScheduleV2TaxCells(row),
+      ])
+    }
+    return out
+  }
+
+  throw new Error(`Unsupported PAYE schedule renderer: ${rendererVersion}`)
 }
 
 function renderPensionTier1(rendererVersion: string, payload: Record<string, unknown>): string[][] {
@@ -418,15 +522,13 @@ function renderObligations(rendererVersion: string, payload: Record<string, unkn
   return rows
 }
 
-function renderPayrollRegister(rendererVersion: string, payload: Record<string, unknown>): string[][] {
-  if (rendererVersion !== "payroll-register-renderer-v1") {
-    throw new Error(`Unsupported payroll register renderer: ${rendererVersion}`)
-  }
+function renderPayrollRegisterV1(payload: Record<string, unknown>): string[][] {
   const period = periodValuesFromPayload(payload)
   const totals = (payload.control_totals || {}) as Record<string, unknown>
   const run = (payload.run || {}) as Record<string, unknown>
   const employerCost =
-    Number(totals.gross_salary ?? 0) + Number(totals.employer_social_security ?? 0)
+    controlTotal(totals, "gross_salary", "total_cash_emolument") +
+    controlTotal(totals, "employer_social_security")
   return [
     [
       ...PAYROLL_EXPORT_PERIOD_HEADERS,
@@ -449,20 +551,82 @@ function renderPayrollRegister(rendererVersion: string, payload: Record<string, 
       ...period,
       businessDisplayName(payload),
       String(run.source_status ?? ""),
-      formatNumeric(totals.gross_salary),
-      formatNumeric(totals.allowances),
-      formatNumeric(totals.employee_social_security),
-      formatNumeric(totals.employer_social_security),
-      formatNumeric(totals.taxable_income),
-      formatNumeric(totals.paye),
-      formatNumeric(totals.deductions),
-      formatNumeric(totals.net_salary),
-      formatNumeric(totals.tier1_remittance),
-      formatNumeric(totals.tier2_remittance),
+      formatNumeric(controlTotal(totals, "gross_salary", "total_cash_emolument")),
+      formatNumeric(controlTotal(totals, "allowances", "total_cash_allowances")),
+      formatNumeric(controlTotal(totals, "employee_social_security", "total_employee_social_security")),
+      formatNumeric(controlTotal(totals, "employer_social_security")),
+      formatNumeric(controlTotal(totals, "taxable_income", "total_chargeable_income")),
+      formatNumeric(controlTotal(totals, "paye", "total_paye")),
+      formatNumeric(controlTotal(totals, "deductions")),
+      formatNumeric(controlTotal(totals, "net_salary")),
+      formatNumeric(controlTotal(totals, "tier1_remittance")),
+      formatNumeric(controlTotal(totals, "tier2_remittance")),
       formatNumeric(employerCost),
-      String(totals.included_count ?? ""),
+      String(totals.included_count ?? totals.included_employee_count ?? ""),
     ],
   ]
+}
+
+const PAYROLL_REGISTER_V2_ENTRY_HEADERS = [
+  "Serial Number",
+  "Staff ID",
+  "TIN",
+  "Employee Name",
+  "GRA Position Code",
+  "Basic Salary",
+  "Cash Allowances",
+  "Bonus Income",
+  "Overtime Income",
+  "Total Cash Emolument",
+  "Chargeable Income",
+  "Total Tax Payable",
+  "Employee Social Security",
+  ...PAYE_SCHEDULE_V2_TAX_HEADERS,
+] as const
+
+function renderPayrollRegisterV2(payload: Record<string, unknown>): string[][] {
+  const summary = renderPayrollRegisterV1(payload)
+  const period = periodValuesFromPayload(payload)
+  const rows: string[][] = [
+    ["# Payroll register v2 — run summary (frozen at approval)"],
+    summary[0],
+    summary[1],
+    [],
+    ["# Included employees — tax method evidence (frozen at approval)"],
+    [...PAYROLL_EXPORT_PERIOD_HEADERS, ...PAYROLL_REGISTER_V2_ENTRY_HEADERS],
+  ]
+
+  for (const row of sortPayloadRows(payloadEntryRows(payload))) {
+    rows.push([
+      ...period,
+      String(row.serial_number ?? ""),
+      String(row.staff_id ?? ""),
+      String(row.filing_tin ?? ""),
+      String(row.filing_employee_name ?? ""),
+      String(row.gra_position_code ?? ""),
+      formatNumeric(row.basic_salary),
+      formatNumeric(row.cash_allowances),
+      formatNumeric(row.bonus_income),
+      formatNumeric(row.overtime_income),
+      formatNumeric(row.total_cash_emolument),
+      formatNumeric(row.chargeable_income),
+      formatNumeric(row.total_tax_payable ?? row.paye),
+      formatNumeric(row.employee_social_security),
+      ...payeScheduleV2TaxCells(row),
+    ])
+  }
+
+  return rows
+}
+
+function renderPayrollRegister(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion === "payroll-register-renderer-v1") {
+    return renderPayrollRegisterV1(payload)
+  }
+  if (rendererVersion === "payroll-register-renderer-v2") {
+    return renderPayrollRegisterV2(payload)
+  }
+  throw new Error(`Unsupported payroll register renderer: ${rendererVersion}`)
 }
 
 export function renderSnapshotCsvRows(
@@ -619,7 +783,7 @@ export function buildSnapshotExportResponse(args: {
   legacyBanner?: boolean
 }): NextResponse {
   const rendered = renderPayrollExportContent(args)
-  return rawCsvResponse(rendered.filename, rendered.content)
+  return payrollCsvDownloadResponse(rendered.filename, rendered.content).response
 }
 
 export function legacySnapshotMissingResponse(mode: PayrollExportMode): NextResponse {

@@ -132,7 +132,7 @@ async function buildLegacyDt107aAuditExport(
   }
 
   const metaLines = buildDt107aAuditMetadataLines(pseudoSnapshot, payrollRun)
-  metaLines.unshift(["# LEGACY EXPORT — NO APPROVAL-TIME SNAPSHOT"], [])
+    metaLines.unshift(["# LEGACY EXPORT - NO APPROVAL-TIME SNAPSHOT"], [])
   const auditCsv = rowsToCsv(metaLines) + tableContent
   const filename = payrollExportFilename("gra-dt107a-paye-audit", payrollRun)
   return rawCsvResponse(filename, auditCsv)
