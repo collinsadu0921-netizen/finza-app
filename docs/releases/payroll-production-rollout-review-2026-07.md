@@ -5,9 +5,9 @@ Read-only deployment review for Finza payroll hardening (migrations **525, 534, 
 | Field | Value |
 |---|---|
 | Review branch | `staging` |
-| **Release Git SHA** | **`44851d031694859773f159e3661b2b018047884b`** |
+| **Release Git SHA** | **`5c190906a80911065adb8b67dad3f6791914c848`** |
 | **Last runtime-code SHA** | **`4928f451b4eade514637fbf5aadb708bf238af8b`** |
-| Changes after runtime-code SHA | **Documentation only** (review commits `83280ed`, `96c20ca`, `44851d0`) |
+| Changes after runtime-code SHA | **Documentation only** (review commits `83280ed`, `96c20ca`, `44851d0`, `5c19090`) |
 | Production Supabase ref | `qjxhibvbmzogyzbhswjj` |
 | Staging Supabase ref | `adonhhtooawkeemdqqeo` |
 | Review type | Read-only (no production writes) |
@@ -34,7 +34,7 @@ This review **does not authorize deployment** until the live SQL audit completes
 - **Migration sequence** — `525, 534, 552–564` confirmed; no partial schema.
 - **REST data preflight** — no P0/P1 violations.
 - **Release tests** — passed at runtime-code SHA `4928f451`.
-- **Release identification** — deploy **`44851d`** via full staging merge; runtime payroll code unchanged since **`4928f451`**.
+- **Release identification** — deploy **`5c19090`** via full staging merge; runtime payroll code unchanged since **`4928f451`**.
 
 ### Known legacy states (non-blockers)
 
@@ -190,7 +190,7 @@ REST aggregates re-run **2026-07-30** (production project `qjxhibvbmzogyzbhswjj`
 | Field | Value |
 |---|---|
 | Release branch/source | **`staging`** (full merge to `main`) |
-| **Release Git SHA (deploy this)** | **`44851d031694859773f159e3661b2b018047884b`** |
+| **Release Git SHA (deploy this)** | **`5c190906a80911065adb8b67dad3f6791914c848`** |
 | **Last runtime-code SHA** | **`4928f451b4eade514637fbf5aadb708bf238af8b`** |
 | Commits after runtime-code | Documentation-only review commits |
 | Production app SHA (current) | `f3790e9f605336abbca148cc588090e387f48c12` |
@@ -212,12 +212,12 @@ Compatibility matrix references **runtime code at `4928f451`** (unchanged by doc
 ## Rollout sequence (execution — do not run from this review)
 
 1. ~~Confirm backup~~ — **satisfied**.
-2. Confirm production SHA and release SHA **`44851d031694859773f159e3661b2b018047884b`**.
+2. Confirm production SHA and release SHA **`5c190906a80911065adb8b67dad3f6791914c848`**.
 3. Start payroll write freeze.
 4. Run live SQL preflight: `PRODUCTION_DATABASE_URL=… node tmp/_payroll_final_prod_audit.mjs`.
 5. Apply **525, 534**, then **552 → 564** sequentially.
 6. Verify ledger, schema, grants, triggers (SQL).
-7. Deploy release SHA **`44851d031694859773f159e3661b2b018047884b`** (runtime code last changed at **`4928f451`**).
+7. Deploy release SHA **`5c190906a80911065adb8b67dad3f6791914c848`** (runtime code last changed at **`4928f451`**).
 8. Read-only smoke; lift write freeze.
 
 ---
