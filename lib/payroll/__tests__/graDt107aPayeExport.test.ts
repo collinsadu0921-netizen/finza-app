@@ -367,10 +367,13 @@ describe("GRA DT 107A PAYE export", () => {
   })
 
   describe("approved-run gate helpers", () => {
-    it("allows approved and locked only", () => {
+    it("allows approved and locked for preparation; reversed only for audit", () => {
       expect(isGraDt107aExportStatusAllowed("draft")).toBe(false)
       expect(isGraDt107aExportStatusAllowed("approved")).toBe(true)
       expect(isGraDt107aExportStatusAllowed("locked")).toBe(true)
+      expect(isGraDt107aExportStatusAllowed("reversed")).toBe(false)
+      expect(isGraDt107aExportStatusAllowed("reversed", "audit")).toBe(true)
+      expect(isGraDt107aExportStatusAllowed("approved", "audit")).toBe(true)
       expect(isGraDt107aExportStatusAllowed("deleted")).toBe(false)
       expect(isGraDt107aExportStatusAllowed(null)).toBe(false)
       expect(GRA_DT107A_REQUIRES_APPROVAL_MESSAGE).toBe(
@@ -378,7 +381,7 @@ describe("GRA DT 107A PAYE export", () => {
       )
     })
 
-    it("route enforces approval message and status helper", () => {
+    it("route enforces approval message and snapshot export wiring", () => {
       const file = join(
         process.cwd(),
         "app",
@@ -393,8 +396,9 @@ describe("GRA DT 107A PAYE export", () => {
       const src = readFileSync(file, "utf8")
       expect(src).toContain("isGraDt107aExportStatusAllowed")
       expect(src).toContain("GRA_DT107A_REQUIRES_APPROVAL_MESSAGE")
-      expect(src).toContain('mode === "audit"')
-      expect(src).toContain("gra-dt107a-paye-gra-ready")
+      expect(src).toContain("serveImmutablePayrollExport")
+      expect(src).toContain("gra-dt107a-paye-preparation")
+      expect(src).toContain("allowLiveStaffFallback: false")
     })
   })
 
@@ -459,7 +463,7 @@ describe("GRA DT 107A PAYE export", () => {
     })
   })
 
-  describe("clean GRA-ready CSV", () => {
+  describe("preparation CSV", () => {
     it("first row is official GRA header with 27 columns and no metadata preamble", () => {
       const rows: GraDt107aJoinedRow[] = [
         { staff: sampleStaff(), entry: sampleEntry(), is_included: true },
@@ -641,6 +645,19 @@ describe("GRA DT 107A PAYE export", () => {
       expect(export2[9]).toBe(formatNumeric(snapAllowances))
       expect(export2).toEqual(export1)
     })
+
+    it("snapshot-only filing mode does not fall back to live staff TIN or name", () => {
+      const rows: GraDt107aJoinedRow[] = [
+        {
+          staff: sampleStaff({ tin_number: "LIVE-TIN", name: "Live Name" }),
+          entry: sampleEntry({ filing_tin: null, filing_employee_name: null }),
+        },
+      ]
+      expect(effectiveFilingTin(rows[0].staff, rows[0].entry, { allowLiveStaffFallback: false })).toBe("")
+      expect(effectiveFilingEmployeeName(rows[0].staff, rows[0].entry, { allowLiveStaffFallback: false })).toBe("")
+      const validation = validateGraDt107aPayeExport(rows, { allowLiveStaffFallback: false })
+      expect(validation.ok).toBe(false)
+    })
   })
 
   describe("UX/API copy surfaces", () => {
@@ -654,7 +671,7 @@ describe("GRA DT 107A PAYE export", () => {
       expect(src).toContain("verify before submission")
       expect(src).not.toContain("GRA-ready DT 107A CSV")
       expect(src).not.toContain("Use the GRA-ready DT 107A CSV for portal filing")
-      expect(src).toContain("mode=gra-ready")
+      expect(src).toContain("mode=preparation")
       expect(src).toContain("mode=audit")
       expect(src).toContain("assessGraFilingReadiness")
     })

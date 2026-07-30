@@ -31,15 +31,18 @@ export async function GET(
     const tierDenied = await enforceServiceIndustryMinTier(supabase, user.id, business.id, "professional")
     if (tierDenied) return tierDenied
 
-    const canView = await hasPermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_VIEW)
+    const canExport = await hasPermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_EXPORT)
     const canPay = await hasPermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_PAY)
-    if (!canView && !canPay) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    if (!canExport && !canPay) {
+      return NextResponse.json(
+        { error: "Payroll export permission required", code: "PAYROLL_EXPORT_PERMISSION_DENIED" },
+        { status: 403 }
+      )
     }
 
     const { data: payrollRun, error: runErr } = await supabase
       .from("payroll_runs")
-      .select("id, payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type")
+      .select("id, status, payroll_month, pay_period_start, pay_period_end, payroll_frequency, run_type")
       .eq("id", runId)
       .eq("business_id", business.id)
       .is("deleted_at", null)
@@ -47,6 +50,16 @@ export async function GET(
 
     if (runErr || !payrollRun) {
       return NextResponse.json({ error: "Payroll run not found" }, { status: 404 })
+    }
+
+    if (String(payrollRun.status || "").toLowerCase() === "reversed") {
+      return NextResponse.json(
+        {
+          error: "Payment batch export is unavailable because this payroll run was reversed",
+          code: "PAYROLL_RUN_REVERSED",
+        },
+        { status: 400 }
+      )
     }
 
     const { data: batch, error: bErr } = await supabase

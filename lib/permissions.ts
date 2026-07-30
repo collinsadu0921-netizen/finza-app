@@ -64,6 +64,7 @@ export const PERMISSION_GROUPS = [
       { key: "payroll.run",     label: "Create payroll runs" },
       { key: "payroll.approve", label: "Approve payroll (posts to ledger)" },
       { key: "payroll.reverse", label: "Reverse approved payroll and create correction drafts" },
+      { key: "payroll.export",  label: "Download payroll exports and filing preparations" },
       { key: "payroll.pay",     label: "Record payroll salary payments" },
     ],
   },
@@ -239,6 +240,7 @@ export const PERMISSIONS = {
   PAYROLL_CREATE:        "payroll.run"               as Permission,
   PAYROLL_APPROVE:       "payroll.approve"           as Permission,
   PAYROLL_REVERSE:       "payroll.reverse"           as Permission,
+  PAYROLL_EXPORT:        "payroll.export"            as Permission,
   PAYROLL_LOCK:          "payroll.approve"           as Permission, // locking = highest payroll privilege
   PAYROLL_PAYSLIPS:      "payroll.approve"           as Permission, // generating payslips requires an approved run
   PAYROLL_PAY:           "payroll.pay"               as Permission,

@@ -5,7 +5,11 @@ import {
   payrollExportFilename,
   payrollPeriodCellValue,
 } from "@/lib/payroll/payrollExportMetadata"
-import { getAuthorizedPayrollRunForExport } from "../_shared"
+import {
+  getAuthorizedPayrollRunForExport,
+  isImmutablePayrollRunStatus,
+  serveImmutablePayrollExport,
+} from "../_shared"
 
 function staffPayoutFields(staff: {
   bank_name?: string | null
@@ -31,6 +35,17 @@ export async function GET(
     const auth = await getAuthorizedPayrollRunForExport(request, runId)
     if ("error" in auth) return auth.error
     const { supabase, payrollRun } = auth
+
+    if (isImmutablePayrollRunStatus(payrollRun.status)) {
+      return serveImmutablePayrollExport({
+        supabase,
+        business: { id: payrollRun.business_id },
+        payrollRun,
+        exportType: "net_salary",
+        mode: "preparation",
+        filenamePrefix: "finza-net-salary-schedule",
+      })
+    }
 
     const { data: entries } = await supabase
       .from("payroll_entries")

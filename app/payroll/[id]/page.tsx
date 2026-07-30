@@ -1914,7 +1914,7 @@ export default function PayrollRunViewPage() {
                     type="button"
                     onClick={() =>
                       downloadRunExport(
-                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=gra-ready`,
+                        `/api/payroll/runs/${runId}/exports/gra-dt107a-paye?mode=preparation`,
                         "DT 107A preparation export downloaded"
                       )
                     }

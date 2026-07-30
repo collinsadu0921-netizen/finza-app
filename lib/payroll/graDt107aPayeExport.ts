@@ -7,8 +7,8 @@
  * This is not statutory certification; employers must verify against current GRA guidance.
  *
  * Phase 2A (filing integrity, no PAYE math change):
- * - `filing_tin` / `filing_employee_name` on `payroll_entries`: frozen at payroll run creation for this export;
- *   legacy rows fall back to live `staff` values.
+ * - `filing_tin` / `filing_employee_name` on `payroll_entries`: frozen at payroll run creation for this export.
+ *   Draft-readiness checks may fall back to live `staff` values; approved/snapshot exports must not.
  * - `bonus_graduated_amount` on `payroll_entries`: engine snapshot for column (13) Excess Bonus; legacy rows
  *   fall back to profile-based derivation. Third-tier / benefits / reliefs / severance remain Phase 2B/2C.
  *
@@ -68,9 +68,17 @@ export const GRA_DT107A_ALLOWED_POSITIONS = new Set(["EXPT", "JUNR", "MNGT", "OT
 export const GRA_DT107A_REQUIRES_APPROVAL_MESSAGE =
   "DT 107A export is available only after payroll approval."
 
-export function isGraDt107aExportStatusAllowed(status: string | null | undefined): boolean {
+export type GraDt107aExportMode = "preparation" | "audit"
+
+export function isGraDt107aExportStatusAllowed(
+  status: string | null | undefined,
+  mode: GraDt107aExportMode = "preparation"
+): boolean {
   const s = String(status || "").toLowerCase()
-  // Reversed runs are historical only — never submission-ready.
+  if (mode === "audit") {
+    return s === "approved" || s === "locked" || s === "reversed"
+  }
+  // Preparation exports require an active approved/locked run (not reversed).
   return s === "approved" || s === "locked"
 }
 
@@ -209,15 +217,35 @@ export function parsePayrollTaxProfile(raw: unknown): Record<string, unknown> | 
   return raw as Record<string, unknown>
 }
 
-/** Effective TIN for GRA validation and column (3): filing snapshot first, then live staff (legacy). */
-export function effectiveFilingTin(staff: GraDt107aStaffRow, entry: GraDt107aPayrollEntryRow): string {
+export type FilingIdentityOptions = {
+  /**
+   * When false (approved/snapshot exports), only frozen filing_* columns are used.
+   * When true (default), draft-readiness may fall back to live staff profile values.
+   */
+  allowLiveStaffFallback?: boolean
+}
+
+/** Effective TIN for GRA validation and column (3). */
+export function effectiveFilingTin(
+  staff: GraDt107aStaffRow,
+  entry: GraDt107aPayrollEntryRow,
+  options: FilingIdentityOptions = {}
+): string {
+  const allowLive = options.allowLiveStaffFallback !== false
   if (entry.filing_tin != null) return String(entry.filing_tin).trim()
+  if (!allowLive) return ""
   return String(staff.tin_number ?? "").trim()
 }
 
-/** Effective employee name for column (2): filing snapshot first, then live staff (legacy). */
-export function effectiveFilingEmployeeName(staff: GraDt107aStaffRow, entry: GraDt107aPayrollEntryRow): string {
+/** Effective employee name for column (2). */
+export function effectiveFilingEmployeeName(
+  staff: GraDt107aStaffRow,
+  entry: GraDt107aPayrollEntryRow,
+  options: FilingIdentityOptions = {}
+): string {
+  const allowLive = options.allowLiveStaffFallback !== false
   if (entry.filing_employee_name != null) return String(entry.filing_employee_name).trim()
+  if (!allowLive) return ""
   return String(staff.name ?? "").trim()
 }
 
@@ -278,7 +306,10 @@ export function totalAssessableIncomePhase1(entry: GraDt107aPayrollEntryRow): nu
   return totalCashEmolument(entry)
 }
 
-export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
+export function validateGraDt107aPayeExport(
+  rows: GraDt107aJoinedRow[],
+  filingOptions: FilingIdentityOptions = {}
+): {
   ok: true
 } | {
   ok: false
@@ -298,7 +329,7 @@ export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
   const issues: GraDt107aValidationIssue[] = []
 
   for (const { staff, entry } of included) {
-    const tin = effectiveFilingTin(staff, entry)
+    const tin = effectiveFilingTin(staff, entry, filingOptions)
     const profile = parsePayrollTaxProfile(entry.payroll_tax_profile)
     const rawPos = profile?.gra_position_code
     const pos = typeof rawPos === "string" ? rawPos.trim().toUpperCase() : ""
@@ -308,7 +339,7 @@ export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
     if (missing.length) {
       issues.push({
         staff_id: String(staff.id),
-        staff_name: effectiveFilingEmployeeName(staff, entry) || "Unknown",
+        staff_name: effectiveFilingEmployeeName(staff, entry, filingOptions) || "Unknown",
         missing_fields: missing,
       })
     }
@@ -329,7 +360,10 @@ export function validateGraDt107aPayeExport(rows: GraDt107aJoinedRow[]): {
   return { ok: true }
 }
 
-export function buildGraDt107aPayeDataRows(rows: GraDt107aJoinedRow[]): string[][] {
+export function buildGraDt107aPayeDataRows(
+  rows: GraDt107aJoinedRow[],
+  filingOptions: FilingIdentityOptions = {}
+): string[][] {
   const included = filterIncludedGraDt107aRows(rows)
   const out: string[][] = []
   let serial = 1
@@ -345,8 +379,8 @@ export function buildGraDt107aPayeDataRows(rows: GraDt107aJoinedRow[]): string[]
     const excessBonus = graDt107aExcessBonusForExport(entry, profile)
 
     out.push([
-      effectiveFilingTin(staff, entry),
-      effectiveFilingEmployeeName(staff, entry),
+      effectiveFilingTin(staff, entry, filingOptions),
+      effectiveFilingEmployeeName(staff, entry, filingOptions),
       String(serial),
       pos,
       graNonResidentYN(profile),
@@ -378,6 +412,9 @@ export function buildGraDt107aPayeDataRows(rows: GraDt107aJoinedRow[]): string[]
   return out
 }
 
-export function buildGraDt107aPayeCsvRows(rows: GraDt107aJoinedRow[]): string[][] {
-  return [[...GRA_DT107A_PAYE_HEADER_ROW], ...buildGraDt107aPayeDataRows(rows)]
+export function buildGraDt107aPayeCsvRows(
+  rows: GraDt107aJoinedRow[],
+  filingOptions: FilingIdentityOptions = {}
+): string[][] {
+  return [[...GRA_DT107A_PAYE_HEADER_ROW], ...buildGraDt107aPayeDataRows(rows, filingOptions)]
 }

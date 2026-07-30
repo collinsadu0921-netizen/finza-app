@@ -4,9 +4,12 @@ import {
   PAYROLL_EXPORT_PERIOD_HEADERS,
   payrollExportFilename,
   payrollExportPeriodValues,
-  payrollPeriodCellValue,
 } from "@/lib/payroll/payrollExportMetadata"
-import { getAuthorizedPayrollRunForExport } from "../_shared"
+import {
+  getAuthorizedPayrollRunForExport,
+  isImmutablePayrollRunStatus,
+  serveImmutablePayrollExport,
+} from "../_shared"
 
 export async function GET(
   request: NextRequest,
@@ -19,6 +22,17 @@ export async function GET(
     if ("error" in auth) return auth.error
 
     const { supabase, business, payrollRun } = auth
+
+    if (isImmutablePayrollRunStatus(payrollRun.status)) {
+      return serveImmutablePayrollExport({
+        supabase,
+        business: { id: business.id },
+        payrollRun,
+        exportType: "payroll_register",
+        mode: "preparation",
+        filenamePrefix: "finza-payroll-summary",
+      })
+    }
 
     const { data: entries } = await supabase
       .from("payroll_entries")
@@ -89,4 +103,3 @@ export async function GET(
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }
 }
-

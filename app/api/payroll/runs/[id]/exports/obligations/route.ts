@@ -6,7 +6,11 @@ import {
   payrollExportFilename,
   payrollExportPeriodValues,
 } from "@/lib/payroll/payrollExportMetadata"
-import { getAuthorizedPayrollRunForExport } from "../_shared"
+import {
+  getAuthorizedPayrollRunForExport,
+  isImmutablePayrollRunStatus,
+  serveImmutablePayrollExport,
+} from "../_shared"
 
 export async function GET(
   request: NextRequest,
@@ -18,6 +22,17 @@ export async function GET(
     const auth = await getAuthorizedPayrollRunForExport(request, runId)
     if ("error" in auth) return auth.error
     const { supabase, payrollRun, business } = auth
+
+    if (isImmutablePayrollRunStatus(payrollRun.status)) {
+      return serveImmutablePayrollExport({
+        supabase,
+        business: { id: business.id },
+        payrollRun,
+        exportType: "obligations",
+        mode: "preparation",
+        filenamePrefix: "finza-payroll-obligations",
+      })
+    }
 
     const { data: obligations } = await supabase
       .from("payroll_obligations")
@@ -93,4 +108,3 @@ export async function GET(
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
   }
 }
-

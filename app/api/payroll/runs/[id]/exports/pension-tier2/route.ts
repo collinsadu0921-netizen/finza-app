@@ -5,7 +5,11 @@ import {
   payrollExportFilename,
   payrollPeriodCellValue,
 } from "@/lib/payroll/payrollExportMetadata"
-import { getAuthorizedPayrollRunForExport } from "../_shared"
+import {
+  getAuthorizedPayrollRunForExport,
+  isImmutablePayrollRunStatus,
+  serveImmutablePayrollExport,
+} from "../_shared"
 
 export async function GET(
   request: NextRequest,
@@ -17,6 +21,17 @@ export async function GET(
     const auth = await getAuthorizedPayrollRunForExport(request, runId)
     if ("error" in auth) return auth.error
     const { supabase, payrollRun } = auth
+
+    if (isImmutablePayrollRunStatus(payrollRun.status)) {
+      return serveImmutablePayrollExport({
+        supabase,
+        business: { id: payrollRun.business_id },
+        payrollRun,
+        exportType: "pension_tier2",
+        mode: "preparation",
+        filenamePrefix: "finza-pension-tier2-schedule",
+      })
+    }
 
     const { data: entries } = await supabase
       .from("payroll_entries")

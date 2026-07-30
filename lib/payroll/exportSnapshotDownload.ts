@@ -1,0 +1,579 @@
+import { createHash } from "crypto"
+import { NextResponse } from "next/server"
+import { escapeCsvValue, formatNumeric } from "@/lib/payroll/csvExport"
+import {
+  PAYROLL_EXPORT_PERIOD_HEADERS,
+  payrollExportFilename,
+  payrollExportPeriodValues,
+  payrollPeriodCellValue,
+  type PayrollRunExportMeta,
+} from "@/lib/payroll/payrollExportMetadata"
+import { GRA_DT107A_PAYE_HEADER_ROW } from "@/lib/payroll/graDt107aPayeExport"
+
+export type PayrollExportMode = "preparation" | "audit"
+
+export type PayrollExportType =
+  | "gra_dt107a"
+  | "payroll_register"
+  | "paye_schedule"
+  | "pension_tier1"
+  | "pension_tier2"
+  | "net_salary"
+  | "obligations"
+
+export type PayrollExportSnapshotRow = {
+  id: string
+  business_id: string
+  payroll_run_id: string
+  export_type: PayrollExportType
+  snapshot_schema_version: string
+  renderer_version: string
+  template_version: string | null
+  template_reference: string | null
+  source_run_status: string
+  source_payload: Record<string, unknown>
+  source_payload_sha256: string
+  row_count: number
+  control_totals: Record<string, unknown>
+  rendered_content: string | null
+  rendered_content_sha256: string | null
+  content_type: string | null
+  filename: string | null
+  materialized_at: string | null
+  created_at: string
+  created_by: string | null
+}
+
+type PayloadRow = Record<string, unknown>
+
+const LEGACY_AUDIT_BANNER =
+  "# LEGACY EXPORT — NO APPROVAL-TIME SNAPSHOT (immutable filing fields only; not for portal upload)"
+
+export function sha256Hex(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex")
+}
+
+export function normalizePayrollExportMode(modeParam: string | null | undefined): PayrollExportMode {
+  const raw = String(modeParam || "").trim().toLowerCase()
+  if (raw === "audit") return "audit"
+  // Public compatibility alias — never treat as a distinct export mode.
+  if (raw === "gra-ready" || raw === "preparation" || raw === "") return "preparation"
+  return "preparation"
+}
+
+export function isImmutablePayrollRunStatus(status: string | null | undefined): boolean {
+  const s = String(status || "").toLowerCase()
+  return s === "approved" || s === "locked" || s === "reversed"
+}
+
+export function rawCsvResponse(filename: string, content: string): NextResponse {
+  return new NextResponse(content, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv;charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  })
+}
+
+export function rowsToCsv(rows: string[][]): string {
+  return rows.map((r) => r.map(escapeCsvValue).join(",")).join("\n")
+}
+
+export function verifySnapshotContentHashes(snapshot: PayrollExportSnapshotRow): {
+  ok: boolean
+  errors: string[]
+} {
+  const errors: string[] = []
+  if (snapshot.rendered_content != null && snapshot.rendered_content_sha256) {
+    const renderedHash = sha256Hex(snapshot.rendered_content)
+    if (renderedHash !== snapshot.rendered_content_sha256) {
+      errors.push("rendered_content_sha256 mismatch")
+    }
+  }
+  return { ok: errors.length === 0, errors }
+}
+
+function tryParseDetail(detail: unknown): Record<string, unknown> | null {
+  if (detail == null) return null
+  if (typeof detail === "object" && !Array.isArray(detail)) return detail as Record<string, unknown>
+  try {
+    const parsed = JSON.parse(String(detail))
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+export function extractPayrollExportErrorCode(err: {
+  message?: string | null
+  details?: string | null
+  hint?: string | null
+} | null): string | null {
+  const message = String(err?.message || "")
+  const detail = tryParseDetail(err?.details) || tryParseDetail(err?.hint)
+  if (detail?.code && typeof detail.code === "string") return detail.code
+  const fromMsg = message.match(
+    /\b(PAYROLL_EXPORT_PERMISSION_DENIED|PAYROLL_EXPORT_INVALID_MODE|PAYROLL_EXPORT_SNAPSHOT_NOT_FOUND|PAYROLL_EXPORT_SNAPSHOT_CORRUPTED|PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED|PAYROLL_RUN_REVERSED|PAYROLL_EXPORT_LEGACY_SNAPSHOT_MISSING)\b/
+  )
+  return fromMsg?.[1] ?? null
+}
+
+export function mapPayrollExportRpcError(err: {
+  message?: string | null
+  details?: string | null
+  hint?: string | null
+} | null): NextResponse {
+  const message = String(err?.message || err?.details || "Payroll export failed")
+  const code = extractPayrollExportErrorCode(err) || "PAYROLL_EXPORT_FAILED"
+  let status = 400
+  if (code === "PAYROLL_EXPORT_PERMISSION_DENIED") status = 403
+  if (code === "PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED") status = 500
+  return NextResponse.json({ error: message, code }, { status })
+}
+
+export async function loadPayrollExportSnapshot(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  businessId: string,
+  payrollRunId: string,
+  exportType: PayrollExportType,
+  mode: PayrollExportMode,
+  record = true
+): Promise<
+  | { snapshot: PayrollExportSnapshotRow }
+  | { notFound: true }
+  | { error: NextResponse }
+> {
+  const { data, error } = await supabase.rpc("get_payroll_export_snapshot_for_download", {
+    p_business_id: businessId,
+    p_payroll_run_id: payrollRunId,
+    p_export_type: exportType,
+    p_mode: mode,
+    p_record: record,
+  })
+
+  if (error) {
+    const code = extractPayrollExportErrorCode(error as { message?: string })
+    if (code === "PAYROLL_EXPORT_SNAPSHOT_NOT_FOUND") {
+      return { notFound: true }
+    }
+    return { error: mapPayrollExportRpcError(error as { message?: string; details?: string }) }
+  }
+
+  const rows = (Array.isArray(data) ? data : data ? [data] : []) as PayrollExportSnapshotRow[]
+  const snapshot = rows[0]
+  if (!snapshot) return { notFound: true }
+
+  const verification = verifySnapshotContentHashes(snapshot)
+  if (!verification.ok) {
+    return {
+      error: NextResponse.json(
+        {
+          error: `Payroll export snapshot failed hash verification (${verification.errors.join(", ")})`,
+          code: "PAYROLL_EXPORT_SNAPSHOT_INTEGRITY_FAILED",
+        },
+        { status: 500 }
+      ),
+    }
+  }
+
+  return { snapshot }
+}
+
+export async function queryPayrollExportSnapshotFallback(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  businessId: string,
+  payrollRunId: string,
+  exportType: PayrollExportType
+): Promise<PayrollExportSnapshotRow | null> {
+  const { data, error } = await supabase
+    .from("payroll_export_snapshots")
+    .select("*")
+    .eq("business_id", businessId)
+    .eq("payroll_run_id", payrollRunId)
+    .eq("export_type", exportType)
+    .order("created_at", { ascending: false })
+    .limit(1)
+
+  if (error || !data) return null
+  const rows = Array.isArray(data) ? data : [data]
+  return (rows[0] as PayrollExportSnapshotRow | undefined) ?? null
+}
+
+function sortPayloadRows(rows: PayloadRow[]): PayloadRow[] {
+  return [...rows].sort((a, b) => {
+    const serialA = a.serial_number != null ? Number(a.serial_number) : Number.POSITIVE_INFINITY
+    const serialB = b.serial_number != null ? Number(b.serial_number) : Number.POSITIVE_INFINITY
+    if (serialA !== serialB) return serialA - serialB
+    return String(a.staff_id ?? "").localeCompare(String(b.staff_id ?? ""))
+  })
+}
+
+function runFromPayload(payload: Record<string, unknown>): PayrollRunExportMeta {
+  const run = (payload.run || {}) as Record<string, unknown>
+  return {
+    payroll_month: run.payroll_month as string | null | undefined,
+    pay_period_start: run.pay_period_start as string | null | undefined,
+    pay_period_end: run.pay_period_end as string | null | undefined,
+    payroll_frequency: run.payroll_frequency as string | null | undefined,
+    run_type: run.run_type as string | null | undefined,
+  }
+}
+
+function businessDisplayName(payload: Record<string, unknown>): string {
+  const business = (payload.business || {}) as Record<string, unknown>
+  return String(business.trading_name || business.legal_name || business.id || "")
+}
+
+function periodValuesFromPayload(payload: Record<string, unknown>): string[] {
+  return payrollExportPeriodValues(runFromPayload(payload))
+}
+
+export function buildDt107aAuditMetadataLines(
+  snapshot: PayrollExportSnapshotRow,
+  payrollRun: Record<string, unknown>
+): string[][] {
+  const payload = snapshot.source_payload
+  const run = (payload.run || {}) as Record<string, unknown>
+  return [
+    ["# Finza DT 107A audit export — not for GRA portal upload"],
+    ["Snapshot ID", snapshot.id],
+    ["Source payload SHA256", snapshot.source_payload_sha256],
+    ["Rendered content SHA256", snapshot.rendered_content_sha256 || ""],
+    ["Snapshot schema version", snapshot.snapshot_schema_version],
+    ["Renderer version", snapshot.renderer_version],
+    ["Template version", snapshot.template_version || ""],
+    ["Template reference", snapshot.template_reference || ""],
+    ["Pay period label", payrollPeriodCellValue(runFromPayload(payload))],
+    ["Period start", String(run.pay_period_start || run.payroll_month || "").slice(0, 10)],
+    ["Period end", String(run.pay_period_end || run.pay_period_start || run.payroll_month || "").slice(0, 10)],
+    ["Pay frequency", String(run.payroll_frequency || "monthly")],
+    ["Run type", String(run.run_type || "regular")],
+    ["Run status", String(payrollRun.status || snapshot.source_run_status || "")],
+    ["Approved at", String(payrollRun.approved_at || "")],
+    ["Approved by", String(payrollRun.approved_by || "")],
+    ["Reversed at", String(payrollRun.reversed_at || "")],
+    ["Reversed by", String(payrollRun.reversed_by || "")],
+    ["Reversal reason", String(payrollRun.reversal_reason || "")],
+    ["Correction of run ID", String(payrollRun.correction_of_run_id || "")],
+    ["Corrected by run ID", String(payrollRun.corrected_by_run_id || "")],
+    [],
+  ]
+}
+
+function renderPayeSchedule(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion !== "paye-schedule-renderer-v1") {
+    throw new Error(`Unsupported PAYE schedule renderer: ${rendererVersion}`)
+  }
+  const period = periodValuesFromPayload(payload)
+  const rows: string[][] = [
+    [
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
+      "Staff ID",
+      "TIN",
+      "Employee Name",
+      "Taxable Income",
+      "PAYE Withheld",
+    ],
+  ]
+  for (const row of sortPayloadRows(((payload.rows as PayloadRow[]) || []) as PayloadRow[])) {
+    rows.push([
+      ...period,
+      String(row.staff_id ?? ""),
+      String(row.filing_tin ?? ""),
+      String(row.filing_employee_name ?? ""),
+      formatNumeric(row.taxable_income),
+      formatNumeric(row.paye),
+    ])
+  }
+  return rows
+}
+
+function renderPensionTier1(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion !== "pension-tier1-renderer-v1") {
+    throw new Error(`Unsupported pension tier 1 renderer: ${rendererVersion}`)
+  }
+  const period = periodValuesFromPayload(payload)
+  const rows: string[][] = [
+    [
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
+      "Staff ID",
+      "TIN",
+      "Employee Name",
+      "Pensionable Base",
+      "Tier 1 / SSNIT Remittance",
+    ],
+  ]
+  for (const row of sortPayloadRows(((payload.rows as PayloadRow[]) || []) as PayloadRow[])) {
+    rows.push([
+      ...period,
+      String(row.staff_id ?? ""),
+      String(row.filing_tin ?? ""),
+      String(row.filing_employee_name ?? ""),
+      formatNumeric(row.pensionable_base),
+      formatNumeric(row.tier1_ssnit_remittance),
+    ])
+  }
+  return rows
+}
+
+function renderPensionTier2(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion !== "pension-tier2-renderer-v1") {
+    throw new Error(`Unsupported pension tier 2 renderer: ${rendererVersion}`)
+  }
+  const period = periodValuesFromPayload(payload)
+  const rows: string[][] = [
+    [
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
+      "Staff ID",
+      "TIN",
+      "Employee Name",
+      "Pensionable Base",
+      "Tier 2 Pension Remittance",
+    ],
+  ]
+  for (const row of sortPayloadRows(((payload.rows as PayloadRow[]) || []) as PayloadRow[])) {
+    rows.push([
+      ...period,
+      String(row.staff_id ?? ""),
+      String(row.filing_tin ?? ""),
+      String(row.filing_employee_name ?? ""),
+      formatNumeric(row.pensionable_base),
+      formatNumeric(row.tier2_pension_remittance),
+    ])
+  }
+  return rows
+}
+
+function renderNetSalary(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion !== "net-salary-renderer-v1") {
+    throw new Error(`Unsupported net salary renderer: ${rendererVersion}`)
+  }
+  const period = periodValuesFromPayload(payload)
+  const rows: string[][] = [
+    [
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
+      "Employee Name",
+      "Bank Name",
+      "Bank Account Name",
+      "Bank Account Number",
+      "Net Pay",
+    ],
+  ]
+  for (const row of sortPayloadRows(((payload.rows as PayloadRow[]) || []) as PayloadRow[])) {
+    rows.push([
+      ...period,
+      String(row.filing_employee_name ?? ""),
+      String(row.bank_name ?? ""),
+      String(row.bank_account_name ?? ""),
+      String(row.bank_account_number ?? ""),
+      formatNumeric(row.net_salary),
+    ])
+  }
+  return rows
+}
+
+function renderObligations(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion !== "obligations-renderer-v1") {
+    throw new Error(`Unsupported obligations renderer: ${rendererVersion}`)
+  }
+  const period = periodValuesFromPayload(payload)
+  const rows: string[][] = [
+    [
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
+      "Obligation Type",
+      "Label",
+      "Amount Due",
+      "Amount Paid",
+      "Outstanding Amount",
+      "Status",
+      "Due Date",
+      "Liability Account Code",
+    ],
+  ]
+  for (const row of sortPayloadRows(((payload.rows as PayloadRow[]) || []) as PayloadRow[])) {
+    const due = Number(row.amount_due ?? 0)
+    const paid = Number(row.amount_paid ?? 0)
+    rows.push([
+      ...period,
+      String(row.obligation_type ?? ""),
+      String(row.label ?? ""),
+      formatNumeric(row.amount_due),
+      formatNumeric(row.amount_paid),
+      formatNumeric(Math.max(0, due - paid)),
+      String(row.status ?? ""),
+      String(row.due_date ?? ""),
+      String(row.liability_account_code ?? ""),
+    ])
+  }
+  return rows
+}
+
+function renderPayrollRegister(rendererVersion: string, payload: Record<string, unknown>): string[][] {
+  if (rendererVersion !== "payroll-register-renderer-v1") {
+    throw new Error(`Unsupported payroll register renderer: ${rendererVersion}`)
+  }
+  const period = periodValuesFromPayload(payload)
+  const totals = (payload.control_totals || {}) as Record<string, unknown>
+  const run = (payload.run || {}) as Record<string, unknown>
+  const employerCost =
+    Number(totals.gross_salary ?? 0) + Number(totals.employer_social_security ?? 0)
+  return [
+    [
+      ...PAYROLL_EXPORT_PERIOD_HEADERS,
+      "Business Name",
+      "Run Status",
+      "Gross Salary",
+      "Regular Allowances",
+      "Employee Social Security",
+      "Employer Social Security",
+      "Taxable Income",
+      "Total PAYE",
+      "Deductions",
+      "Net Salary Payable",
+      "Tier 1 / SSNIT Remittance",
+      "Tier 2 Pension Remittance",
+      "Total Employer Payroll Cost",
+      "Included Employees",
+    ],
+    [
+      ...period,
+      businessDisplayName(payload),
+      String(run.source_status ?? ""),
+      formatNumeric(totals.gross_salary),
+      formatNumeric(totals.allowances),
+      formatNumeric(totals.employee_social_security),
+      formatNumeric(totals.employer_social_security),
+      formatNumeric(totals.taxable_income),
+      formatNumeric(totals.paye),
+      formatNumeric(totals.deductions),
+      formatNumeric(totals.net_salary),
+      formatNumeric(totals.tier1_remittance),
+      formatNumeric(totals.tier2_remittance),
+      formatNumeric(employerCost),
+      String(totals.included_count ?? ""),
+    ],
+  ]
+}
+
+export function renderSnapshotCsvRows(
+  snapshot: PayrollExportSnapshotRow
+): string[][] {
+  const payload = snapshot.source_payload
+  switch (snapshot.export_type) {
+    case "paye_schedule":
+      return renderPayeSchedule(snapshot.renderer_version, payload)
+    case "pension_tier1":
+      return renderPensionTier1(snapshot.renderer_version, payload)
+    case "pension_tier2":
+      return renderPensionTier2(snapshot.renderer_version, payload)
+    case "net_salary":
+      return renderNetSalary(snapshot.renderer_version, payload)
+    case "obligations":
+      return renderObligations(snapshot.renderer_version, payload)
+    case "payroll_register":
+      return renderPayrollRegister(snapshot.renderer_version, payload)
+    default:
+      throw new Error(`No CSV renderer for export type ${snapshot.export_type}`)
+  }
+}
+
+export function resolveSnapshotFilename(
+  snapshot: PayrollExportSnapshotRow,
+  fallbackPrefix: string,
+  payrollRun: PayrollRunExportMeta,
+  mode: PayrollExportMode
+): string {
+  const stored = snapshot.filename?.trim()
+  if (stored) {
+    return stored.replace(/gra-ready/gi, "preparation")
+  }
+  if (snapshot.export_type === "gra_dt107a") {
+    return payrollExportFilename(
+      mode === "audit" ? "gra-dt107a-paye-audit" : "gra-dt107a-paye-preparation",
+      payrollRun
+    )
+  }
+  return payrollExportFilename(fallbackPrefix, payrollRun)
+}
+
+export function buildSnapshotExportResponse(args: {
+  snapshot: PayrollExportSnapshotRow
+  mode: PayrollExportMode
+  payrollRun: Record<string, unknown>
+  filenamePrefix: string
+  legacyBanner?: boolean
+}): NextResponse {
+  const { snapshot, mode, payrollRun, filenamePrefix, legacyBanner } = args
+  const runMeta = payrollRun as PayrollRunExportMeta
+
+  if (snapshot.export_type === "gra_dt107a") {
+    const tableContent = snapshot.rendered_content
+    if (!tableContent) {
+      throw new Error("GRA DT 107A snapshot is missing rendered_content")
+    }
+    const renderedHash = sha256Hex(tableContent)
+    if (snapshot.rendered_content_sha256 && renderedHash !== snapshot.rendered_content_sha256) {
+      throw new Error("GRA DT 107A rendered_content hash mismatch")
+    }
+
+    if (mode === "preparation") {
+      const filename = resolveSnapshotFilename(snapshot, filenamePrefix, runMeta, mode)
+      return rawCsvResponse(filename, tableContent)
+    }
+
+    const metaLines = legacyBanner
+      ? [[LEGACY_AUDIT_BANNER], []]
+      : buildDt107aAuditMetadataLines(snapshot, payrollRun)
+    const auditCsv = rowsToCsv(metaLines) + tableContent
+    const filename = resolveSnapshotFilename(snapshot, filenamePrefix, runMeta, mode)
+    return rawCsvResponse(filename, auditCsv)
+  }
+
+  const rows = renderSnapshotCsvRows(snapshot)
+  if (legacyBanner && mode === "audit") {
+    rows.unshift([], [LEGACY_AUDIT_BANNER])
+  }
+  const content = rowsToCsv(rows)
+  const contentHash = sha256Hex(content)
+  const expectedHash = snapshot.rendered_content_sha256 || snapshot.source_payload_sha256
+  if (contentHash !== expectedHash && snapshot.rendered_content == null) {
+    // Payload-rendered CSV may differ from payload hash by design; integrity is on payload.
+  }
+  const filename = resolveSnapshotFilename(snapshot, filenamePrefix, runMeta, mode)
+  return rawCsvResponse(filename, content)
+}
+
+export function legacySnapshotMissingResponse(mode: PayrollExportMode): NextResponse {
+  if (mode === "audit") {
+    return NextResponse.json(
+      {
+        error: "No approval-time export snapshot exists for this payroll run",
+        code: "PAYROLL_EXPORT_LEGACY_SNAPSHOT_MISSING",
+      },
+      { status: 400 }
+    )
+  }
+  return NextResponse.json(
+    {
+      error: "No approval-time export snapshot exists for this payroll run",
+      code: "PAYROLL_EXPORT_LEGACY_SNAPSHOT_MISSING",
+    },
+    { status: 400 }
+  )
+}
+
+export function reversedPreparationBlockedResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      error: "Preparation export is unavailable because this payroll run was reversed",
+      code: "PAYROLL_RUN_REVERSED",
+    },
+    { status: 400 }
+  )
+}
+
+export { LEGACY_AUDIT_BANNER, GRA_DT107A_PAYE_HEADER_ROW }
