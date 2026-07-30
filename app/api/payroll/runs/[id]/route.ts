@@ -423,7 +423,6 @@ export async function PUT(
       const { data: lockResult, error: lockError } = await supabase.rpc("lock_payroll_run_atomic", {
         p_business_id: business.id,
         p_payroll_run_id: runId,
-        p_actor_id: user.id,
       })
 
       if (lockError) {

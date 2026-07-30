@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { randomUUID } from "crypto"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
 import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
+import { resolvePayrollIdempotencyKey } from "@/lib/payroll/resolvePayrollIdempotencyKey"
 import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
@@ -186,12 +186,10 @@ export async function POST(
     const paymentAccountId = String(body.payment_account_id || "")
     const reference = body.reference ? String(body.reference).trim() : null
     const notes = body.notes ? String(body.notes).trim() : null
-    const idempotencyKey = String(body.idempotency_key || body.idempotencyKey || randomUUID()).trim()
 
-    let batchId: string | null = null
-    if (body.batch_id != null && String(body.batch_id).trim()) {
-      batchId = String(body.batch_id).trim()
-    }
+    const idempotency = resolvePayrollIdempotencyKey(request, body)
+    if (!idempotency.ok) return idempotency.response
+    const idempotencyKey = idempotency.key
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
       return NextResponse.json({ error: "payment_date must be YYYY-MM-DD" }, { status: 400 })
@@ -202,9 +200,6 @@ export async function POST(
     if (!paymentAccountId) {
       return NextResponse.json({ error: "payment_account_id is required" }, { status: 400 })
     }
-    if (!idempotencyKey) {
-      return NextResponse.json({ error: "idempotency_key is required" }, { status: 400 })
-    }
 
     const { data: result, error: rpcError } = await supabase.rpc("record_payroll_payment_atomic", {
       p_business_id: business.id,
@@ -214,9 +209,6 @@ export async function POST(
       p_payment_account_id: paymentAccountId,
       p_reference: reference,
       p_notes: notes,
-      p_batch_id: batchId,
-      p_batch_item_id: null,
-      p_actor_id: user.id,
       p_idempotency_key: idempotencyKey,
     })
 
