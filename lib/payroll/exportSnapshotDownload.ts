@@ -588,11 +588,11 @@ function renderPayrollRegisterV2(payload: Record<string, unknown>): string[][] {
   const summary = renderPayrollRegisterV1(payload)
   const period = periodValuesFromPayload(payload)
   const rows: string[][] = [
-    ["# Payroll register v2 — run summary (frozen at approval)"],
+    ["# Payroll register v2 - run summary (frozen at approval)"],
     summary[0],
     summary[1],
     [],
-    ["# Included employees — tax method evidence (frozen at approval)"],
+    ["# Included employees - tax method evidence (frozen at approval)"],
     [...PAYROLL_EXPORT_PERIOD_HEADERS, ...PAYROLL_REGISTER_V2_ENTRY_HEADERS],
   ]
 
