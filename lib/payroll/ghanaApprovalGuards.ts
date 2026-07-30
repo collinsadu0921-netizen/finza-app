@@ -18,7 +18,12 @@ import {
   resolveGhanaIncomeTaxMethodFromProfile,
   type GhanaIncomeTaxMethod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
-import { resolveGhanaStatutoryRatesByVersions } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
+import {
+  calculateGhanaPayeFromBands,
+  clampGhanaPensionableBase,
+  computeGhanaPensionAmounts,
+  resolveGhanaStatutoryRatesByVersions,
+} from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfile"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
 import { roundPayroll, extractDatePart } from "@/lib/payrollEngine/versioning"
@@ -26,6 +31,8 @@ import { roundPayroll, extractDatePart } from "@/lib/payrollEngine/versioning"
 export const GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE = "GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE"
 export const GHANA_PAYROLL_UNKNOWN_RATE_VERSION = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
 export const GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED = "GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED"
+
+const AMOUNT_TOLERANCE = 0.01
 
 export type UnsupportedTaxProfileEmployee = {
   staffId: string
@@ -55,9 +62,39 @@ export type PayrollEntryForGhanaApproval = {
   paye?: number | null
   income_tax_method?: string | null
   income_tax_method_version?: string | null
+  income_tax_regular_base?: number | null
   income_tax_regular_amount?: number | null
+  income_tax_bonus_base?: number | null
   income_tax_bonus_amount?: number | null
+  income_tax_overtime_base?: number | null
   income_tax_overtime_amount?: number | null
+  basic_salary?: number | null
+  regular_allowances_amount?: number | null
+  bonus_amount?: number | null
+  overtime_amount?: number | null
+  allowances_total?: number | null
+  gross_salary?: number | null
+  employee_pension_contribution?: number | null
+  ssnit_employee?: number | null
+  net_salary?: number | null
+  deductions_total?: number | null
+  taxable_income?: number | null
+  bonus_tax_5?: number | null
+  bonus_tax_graduated?: number | null
+  overtime_tax_5?: number | null
+  overtime_tax_10?: number | null
+  overtime_tax_graduated?: number | null
+  pensionable_base?: number | null
+  employer_pension_contribution?: number | null
+  total_mandatory_pension?: number | null
+  tier1_ssnit_remittance?: number | null
+  tier2_pension_remittance?: number | null
+  ssnit_employer?: number | null
+  bonus_cap_amount?: number | null
+  bonus_concessional_amount?: number | null
+  bonus_graduated_amount?: number | null
+  overtime_threshold_amount?: number | null
+  is_qualifying_junior_employee?: boolean | null
   /** Display / legacy diagnostics only — never authoritative for finza-ghana-v2 classification. */
   staff?: {
     id?: string
@@ -78,6 +115,239 @@ function employeeName(entry: PayrollEntryForGhanaApproval): string | null {
 
 function profileHasBoolean(profile: Record<string, unknown>, key: string): boolean {
   return typeof profile[key] === "boolean"
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return value != null && Number.isFinite(Number(value))
+}
+
+function amountsMatch(a: number, b: number): boolean {
+  return Math.abs(roundPayroll(a) - roundPayroll(b)) <= AMOUNT_TOLERANCE
+}
+
+function profileString(profile: Record<string, unknown>, key: string): string | null {
+  const value = profile[key]
+  if (typeof value !== "string" || !value.trim()) return null
+  return value.trim()
+}
+
+function hasEarningsSnapshot(entry: PayrollEntryForGhanaApproval): boolean {
+  return (
+    isFiniteNumber(entry.basic_salary) &&
+    isFiniteNumber(entry.regular_allowances_amount) &&
+    isFiniteNumber(entry.bonus_amount) &&
+    isFiniteNumber(entry.overtime_amount) &&
+    isFiniteNumber(entry.gross_salary) &&
+    isFiniteNumber(entry.allowances_total)
+  )
+}
+
+function hasNetSalarySnapshot(entry: PayrollEntryForGhanaApproval): boolean {
+  return (
+    isFiniteNumber(entry.net_salary) &&
+    isFiniteNumber(entry.gross_salary) &&
+    isFiniteNumber(entry.paye) &&
+    isFiniteNumber(entry.deductions_total) &&
+    (isFiniteNumber(entry.employee_pension_contribution) || isFiniteNumber(entry.ssnit_employee))
+  )
+}
+
+function hasIncomeTaxBases(entry: PayrollEntryForGhanaApproval): boolean {
+  return (
+    isFiniteNumber(entry.income_tax_regular_base) &&
+    isFiniteNumber(entry.income_tax_bonus_base) &&
+    isFiniteNumber(entry.income_tax_overtime_base)
+  )
+}
+
+function resolveEmployeePension(entry: PayrollEntryForGhanaApproval): number | null {
+  if (isFiniteNumber(entry.employee_pension_contribution)) {
+    return roundPayroll(entry.employee_pension_contribution)
+  }
+  if (isFiniteNumber(entry.ssnit_employee)) {
+    return roundPayroll(entry.ssnit_employee)
+  }
+  return null
+}
+
+function resolveExpectedPension(
+  entry: PayrollEntryForGhanaApproval,
+  profile: Record<string, unknown>,
+  periodDate: string
+):
+  | {
+      pensionableBase: number
+      employeeContribution: number
+      employerContribution: number
+      tier1: number
+      tier2: number
+      totalMandatory: number
+    }
+  | null {
+  if (!isFiniteNumber(entry.basic_salary) || !entry.pension_rate_version) return null
+  if (typeof profile.staff_is_pensionable !== "boolean") return null
+
+  try {
+    const rates = resolveGhanaStatutoryRatesByVersions({
+      payeRateVersion: entry.paye_rate_version || "gh-paye-2024-01",
+      pensionRateVersion: entry.pension_rate_version,
+      periodBasis: periodDate,
+    })
+
+    if (profile.staff_is_pensionable !== true) {
+      return {
+        pensionableBase: 0,
+        employeeContribution: 0,
+        employerContribution: 0,
+        tier1: 0,
+        tier2: 0,
+        totalMandatory: 0,
+      }
+    }
+
+    const pensionableBase = clampGhanaPensionableBase(entry.basic_salary, rates.pension)
+    const amounts = computeGhanaPensionAmounts(pensionableBase, rates.pension)
+    return { pensionableBase, ...amounts }
+  } catch {
+    return null
+  }
+}
+
+function validatePensionSnapshot(
+  entry: PayrollEntryForGhanaApproval,
+  profile: Record<string, unknown>,
+  periodDate: string
+): string | null {
+  const expected = resolveExpectedPension(entry, profile, periodDate)
+  if (!expected) return null
+
+  const checks: Array<[unknown, number]> = [
+    [entry.pensionable_base, expected.pensionableBase],
+    [entry.employee_pension_contribution, expected.employeeContribution],
+    [entry.ssnit_employee, expected.employeeContribution],
+    [entry.employer_pension_contribution, expected.employerContribution],
+    [entry.ssnit_employer, expected.employerContribution],
+    [entry.total_mandatory_pension, expected.totalMandatory],
+    [entry.tier1_ssnit_remittance, expected.tier1],
+    [entry.tier2_pension_remittance, expected.tier2],
+  ]
+
+  const present = checks.filter(([value]) => isFiniteNumber(value))
+  if (present.length === 0) return null
+
+  for (const [actual, expectedValue] of present) {
+    if (!amountsMatch(Number(actual), expectedValue)) {
+      return "pension_snapshot_mismatch"
+    }
+  }
+
+  return null
+}
+
+function validateResidentGraduatedTax(
+  entry: PayrollEntryForGhanaApproval,
+  periodDate: string,
+  employeePension: number
+): string | null {
+  if (!hasEarningsSnapshot(entry) || !hasIncomeTaxBases(entry)) return null
+
+  let payeBands
+  try {
+    const rates = resolveGhanaStatutoryRatesByVersions({
+      payeRateVersion: entry.paye_rate_version || "gh-paye-2024-01",
+      pensionRateVersion: entry.pension_rate_version || "gh-pension-2026-01",
+      periodBasis: periodDate,
+    })
+    payeBands = rates.paye.bands
+  } catch {
+    return null
+  }
+
+  const basic = roundPayroll(entry.basic_salary!)
+  const regularAllowances = roundPayroll(entry.regular_allowances_amount!)
+  const bonus = roundPayroll(Math.max(0, entry.bonus_amount!))
+  const overtime = roundPayroll(Math.max(0, entry.overtime_amount!))
+  const gross = roundPayroll(basic + regularAllowances + bonus + overtime)
+
+  const bonusCap = roundPayroll(Math.max(0, basic * 12 * 0.15))
+  const bonusConcessional = Math.min(bonus, bonusCap)
+  const bonusGraduated = roundPayroll(Math.max(0, bonus - bonusConcessional))
+  const bonusTax5 = roundPayroll(bonusConcessional * 0.05)
+  const otThreshold = roundPayroll(Math.max(0, basic * 0.5))
+  const isJunior = entry.is_qualifying_junior_employee === true
+  const otAt5 = isJunior ? Math.min(overtime, otThreshold) : 0
+  const otAt10 = isJunior ? roundPayroll(Math.max(0, overtime - otAt5)) : 0
+  const otGraduated = isJunior ? 0 : overtime
+  const otTax5 = roundPayroll(otAt5 * 0.05)
+  const otTax10 = roundPayroll(otAt10 * 0.1)
+  const taxable = roundPayroll(Math.max(0, gross - employeePension))
+  const graduatedBase = roundPayroll(taxable - bonusConcessional - otAt5 - otAt10)
+  const regularGraduatedBase = roundPayroll(graduatedBase - bonusGraduated - otGraduated)
+  const regularPaye = calculateGhanaPayeFromBands(
+    Math.max(0, regularGraduatedBase),
+    payeBands
+  )
+  const regularPlusBonusPaye = calculateGhanaPayeFromBands(
+    Math.max(0, regularGraduatedBase + bonusGraduated),
+    payeBands
+  )
+  const graduatedPaye = calculateGhanaPayeFromBands(Math.max(0, graduatedBase), payeBands)
+  const bonusTaxGraduated = roundPayroll(Math.max(0, regularPlusBonusPaye - regularPaye))
+  const otTaxGraduated = roundPayroll(Math.max(0, graduatedPaye - regularPlusBonusPaye))
+  const paye = roundPayroll(graduatedPaye + bonusTax5 + otTax5 + otTax10)
+  const bonusComponentAmount = roundPayroll(bonusTax5 + bonusTaxGraduated)
+  const otComponentAmount = roundPayroll(otTax5 + otTax10 + otTaxGraduated)
+  const regularComponentAmount = roundPayroll(paye - bonusComponentAmount - otComponentAmount)
+  const regularComponentBase = roundPayroll(Math.max(0, taxable - bonus - overtime))
+
+  const baseChecks: Array<[unknown, number]> = [
+    [entry.taxable_income, taxable],
+    [entry.bonus_cap_amount, bonusCap],
+    [entry.bonus_concessional_amount, bonusConcessional],
+    [entry.bonus_graduated_amount, bonusGraduated],
+    [entry.overtime_threshold_amount, otThreshold],
+    [entry.income_tax_regular_base, regularComponentBase],
+    [entry.income_tax_bonus_base, bonus],
+    [entry.income_tax_overtime_base, overtime],
+  ]
+  if (baseChecks.some(([value]) => isFiniteNumber(value))) {
+    for (const [actual, expected] of baseChecks) {
+      if (isFiniteNumber(actual) && !amountsMatch(Number(actual), expected)) {
+        return "resident_tax_base_mismatch"
+      }
+    }
+  }
+
+  const amountChecks: Array<[unknown, number]> = [
+    [entry.bonus_tax_5, bonusTax5],
+    [entry.bonus_tax_graduated, bonusTaxGraduated],
+    [entry.overtime_tax_5, otTax5],
+    [entry.overtime_tax_10, otTax10],
+    [entry.overtime_tax_graduated, otTaxGraduated],
+    [entry.paye, paye],
+  ]
+  if (amountChecks.some(([value]) => isFiniteNumber(value))) {
+    for (const [actual, expected] of amountChecks) {
+      if (isFiniteNumber(actual) && !amountsMatch(Number(actual), expected)) {
+        return "resident_tax_amount_mismatch"
+      }
+    }
+  }
+
+  if (isFiniteNumber(entry.income_tax_regular_amount) &&
+      !amountsMatch(entry.income_tax_regular_amount, regularComponentAmount)) {
+    return "income_tax_component_mismatch"
+  }
+  if (isFiniteNumber(entry.income_tax_bonus_amount) &&
+      !amountsMatch(entry.income_tax_bonus_amount, bonusComponentAmount)) {
+    return "income_tax_component_mismatch"
+  }
+  if (isFiniteNumber(entry.income_tax_overtime_amount) &&
+      !amountsMatch(entry.income_tax_overtime_amount, otComponentAmount)) {
+    return "income_tax_component_mismatch"
+  }
+
+  return null
 }
 
 /**
@@ -158,6 +428,10 @@ export function classifyUnsupportedV3Entry(
     return "missing_tax_profile_snapshot"
   }
 
+  if (!profileHasBoolean(profile, "staff_is_pensionable")) {
+    return "missing_pensionability_snapshot"
+  }
+
   const resolved = resolveGhanaIncomeTaxMethodFromProfile(profile)
   if (!resolved.ok) {
     return resolved.unsupportedClassification
@@ -165,8 +439,15 @@ export function classifyUnsupportedV3Entry(
 
   const method = resolveEntryIncomeTaxMethod(entry)
   const methodVersion = resolveEntryIncomeTaxMethodVersion(entry)
-  if (!method || !methodVersion) {
+  const profileMethod = profileString(profile, "income_tax_method")
+  const profileMethodVersion = profileString(profile, "income_tax_method_version")
+
+  if (!method || !methodVersion || !profileMethod || !profileMethodVersion) {
     return "missing_income_tax_method_snapshot"
+  }
+
+  if (profileMethod !== method || profileMethodVersion !== methodVersion) {
+    return "income_tax_method_snapshot_mismatch"
   }
 
   if (!GHANA_INCOME_TAX_METHODS.includes(method as GhanaIncomeTaxMethod)) {
@@ -189,13 +470,81 @@ export function classifyUnsupportedV3Entry(
     return "profile_tax_version_does_not_cover_period"
   }
 
+  if (hasEarningsSnapshot(entry)) {
+    const expectedGross = roundPayroll(
+      entry.basic_salary! +
+        entry.regular_allowances_amount! +
+        entry.bonus_amount! +
+        entry.overtime_amount!
+    )
+    const expectedAllowances = roundPayroll(
+      entry.regular_allowances_amount! + entry.bonus_amount! + entry.overtime_amount!
+    )
+    if (
+      !amountsMatch(entry.gross_salary!, expectedGross) ||
+      !amountsMatch(entry.allowances_total!, expectedAllowances)
+    ) {
+      return "earnings_component_mismatch"
+    }
+  }
+
+  const pensionMismatch = validatePensionSnapshot(entry, profile, periodDate)
+  if (pensionMismatch) return pensionMismatch
+
+  const employeePension = resolveEmployeePension(entry) ?? 0
+
+  if (method === "gh_casual_flat_5" && hasIncomeTaxBases(entry) && hasEarningsSnapshot(entry)) {
+    const gross = roundPayroll(entry.gross_salary!)
+    if (
+      !amountsMatch(entry.income_tax_regular_base!, gross) ||
+      !amountsMatch(entry.income_tax_bonus_base!, 0) ||
+      !amountsMatch(entry.income_tax_overtime_base!, 0) ||
+      (isFiniteNumber(entry.taxable_income) && !amountsMatch(entry.taxable_income, gross))
+    ) {
+      return "income_tax_base_mismatch"
+    }
+    if (profile.casual_worker_flat_tax_applied !== true) {
+      return "income_tax_component_mismatch"
+    }
+  }
+
+  if (method === "gh_nonresident_split_25_20" && hasIncomeTaxBases(entry) && hasEarningsSnapshot(entry)) {
+    const regularEmployment = roundPayroll(entry.basic_salary! + entry.regular_allowances_amount!)
+    const bonus = roundPayroll(Math.max(0, entry.bonus_amount!))
+    const overtime = roundPayroll(Math.max(0, entry.overtime_amount!))
+    const regularBase = roundPayroll(Math.max(0, regularEmployment - employeePension))
+    if (
+      !amountsMatch(entry.income_tax_regular_base!, regularBase) ||
+      !amountsMatch(entry.income_tax_bonus_base!, bonus) ||
+      !amountsMatch(entry.income_tax_overtime_base!, overtime) ||
+      (isFiniteNumber(entry.taxable_income) && !amountsMatch(entry.taxable_income, regularBase))
+    ) {
+      return "income_tax_base_mismatch"
+    }
+  }
+
+  if (method === "gh_resident_graduated") {
+    const residentFailure = validateResidentGraduatedTax(entry, periodDate, employeePension)
+    if (residentFailure) return residentFailure
+  }
+
   const regular = roundPayroll(Number(entry.income_tax_regular_amount ?? 0))
   const bonus = roundPayroll(Number(entry.income_tax_bonus_amount ?? 0))
   const overtime = roundPayroll(Number(entry.income_tax_overtime_amount ?? 0))
   const componentSum = roundPayroll(regular + bonus + overtime)
   const paye = roundPayroll(Number(entry.paye ?? 0))
-  if (Math.abs(componentSum - paye) > 0.01) {
+  if (Math.abs(componentSum - paye) > AMOUNT_TOLERANCE) {
     return "income_tax_component_mismatch"
+  }
+
+  if (hasNetSalarySnapshot(entry)) {
+    const pensionForNet = resolveEmployeePension(entry) ?? 0
+    const expectedNet = roundPayroll(
+      entry.gross_salary! - pensionForNet - entry.paye! - entry.deductions_total!
+    )
+    if (!amountsMatch(entry.net_salary!, expectedNet)) {
+      return "net_salary_mismatch"
+    }
   }
 
   return null
@@ -266,6 +615,23 @@ function collectEntryVersionMismatches(
 
   return mismatches
 }
+
+const V3_STATUTORY_FAILURE_CLASSIFICATIONS = new Set([
+  "missing_pensionability_snapshot",
+  "missing_income_tax_method_snapshot",
+  "income_tax_method_snapshot_mismatch",
+  "unknown_income_tax_method",
+  "unknown_profile_tax_version",
+  "income_tax_method_mismatch",
+  "profile_tax_version_does_not_cover_period",
+  "income_tax_component_mismatch",
+  "income_tax_base_mismatch",
+  "earnings_component_mismatch",
+  "net_salary_mismatch",
+  "pension_snapshot_mismatch",
+  "resident_tax_base_mismatch",
+  "resident_tax_amount_mismatch",
+])
 
 export function validateGhanaPayrollRunForApproval(opts: {
   businessCountry: string | null | undefined
@@ -406,17 +772,7 @@ export function validateGhanaPayrollRunForApproval(opts: {
 
     if (classification === "missing_tax_profile_snapshot") {
       missingProfile.push(item)
-    } else if (
-      runEngine === GHANA_ENGINE_V3 &&
-      [
-        "missing_income_tax_method_snapshot",
-        "unknown_income_tax_method",
-        "unknown_profile_tax_version",
-        "income_tax_method_mismatch",
-        "profile_tax_version_does_not_cover_period",
-        "income_tax_component_mismatch",
-      ].includes(classification)
-    ) {
+    } else if (runEngine === GHANA_ENGINE_V3 && V3_STATUTORY_FAILURE_CLASSIFICATIONS.has(classification)) {
       statutoryFailures.push(item)
     } else {
       unsupported.push(item)

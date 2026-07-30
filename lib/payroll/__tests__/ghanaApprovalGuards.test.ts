@@ -10,6 +10,7 @@ import {
   GHANA_NEW_RUN_ENGINE_VERSION,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 import { GHANA_PROFILE_TAX_2024_01 } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
+import { GOLDEN_FULL_PAYROLL_1000 } from "@/lib/payrollEngine/__tests__/fixtures/ghanaStatutoryGolden"
 
 describe("Ghana payroll approval guards (API-facing)", () => {
   const run = {
@@ -181,9 +182,36 @@ describe("Ghana payroll approval guards — v3", () => {
     pension_rate_version: "gh-pension-2026-01",
     calculation_jurisdiction: "GH",
     statutory_period_basis: "2026-01-01",
-    paye: 56.13,
+    basic_salary: GOLDEN_FULL_PAYROLL_1000.basic,
+    regular_allowances_amount: 0,
+    bonus_amount: 0,
+    overtime_amount: 0,
+    allowances_total: 0,
+    gross_salary: GOLDEN_FULL_PAYROLL_1000.basic,
+    deductions_total: 0,
+    employee_pension_contribution: GOLDEN_FULL_PAYROLL_1000.employeeSsnit,
+    ssnit_employee: GOLDEN_FULL_PAYROLL_1000.employeeSsnit,
+    employer_pension_contribution: GOLDEN_FULL_PAYROLL_1000.employerSsnit,
+    ssnit_employer: GOLDEN_FULL_PAYROLL_1000.employerSsnit,
+    pensionable_base: GOLDEN_FULL_PAYROLL_1000.basic,
+    total_mandatory_pension: 185,
+    tier1_ssnit_remittance: GOLDEN_FULL_PAYROLL_1000.tier1,
+    tier2_pension_remittance: GOLDEN_FULL_PAYROLL_1000.tier2,
+    taxable_income: GOLDEN_FULL_PAYROLL_1000.chargeable,
+    paye: GOLDEN_FULL_PAYROLL_1000.paye,
+    net_salary: GOLDEN_FULL_PAYROLL_1000.net,
+    bonus_cap_amount: 1800,
+    bonus_concessional_amount: 0,
+    bonus_graduated_amount: 0,
+    overtime_threshold_amount: 500,
+    bonus_tax_5: 0,
+    bonus_tax_graduated: 0,
+    overtime_tax_5: 0,
+    overtime_tax_10: 0,
+    overtime_tax_graduated: 0,
     payroll_tax_profile: {
       staff_is_tax_resident: true,
+      staff_is_pensionable: true,
       secondary_employment: false,
       employment_type: "temporary",
       income_tax_method: "gh_resident_graduated",
@@ -191,8 +219,11 @@ describe("Ghana payroll approval guards — v3", () => {
     },
     income_tax_method: "gh_resident_graduated",
     income_tax_method_version: GHANA_PROFILE_TAX_2024_01.version,
-    income_tax_regular_amount: 56.13,
+    income_tax_regular_base: GOLDEN_FULL_PAYROLL_1000.chargeable,
+    income_tax_regular_amount: GOLDEN_FULL_PAYROLL_1000.paye,
+    income_tax_bonus_base: 0,
     income_tax_bonus_amount: 0,
+    income_tax_overtime_base: 0,
     income_tax_overtime_amount: 0,
     filing_employee_name: "Temp V3",
   }
@@ -207,6 +238,33 @@ describe("Ghana payroll approval guards — v3", () => {
     expect(result.ok).toBe(true)
   })
 
+  it("blocks missing pensionability snapshot on v3", () => {
+    const entry = {
+      ...v3TemporaryEntry,
+      payroll_tax_profile: {
+        staff_is_tax_resident: true,
+        secondary_employment: false,
+        employment_type: "temporary",
+        income_tax_method: "gh_resident_graduated",
+        income_tax_method_version: GHANA_PROFILE_TAX_2024_01.version,
+      },
+    }
+    expect(classifyUnsupportedV3Entry(entry, "2026-01-01")).toBe("missing_pensionability_snapshot")
+  })
+
+  it("blocks profile/entry income-tax method snapshot mismatch on v3", () => {
+    const entry = {
+      ...v3TemporaryEntry,
+      payroll_tax_profile: {
+        ...v3TemporaryEntry.payroll_tax_profile,
+        income_tax_method: "gh_casual_flat_5",
+      },
+    }
+    expect(classifyUnsupportedV3Entry(entry, "2026-01-01")).toBe(
+      "income_tax_method_snapshot_mismatch"
+    )
+  })
+
   it("blocks secondary employment on v3 with new classification", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
@@ -217,6 +275,7 @@ describe("Ghana payroll approval guards — v3", () => {
           staff_id: "e-sec-v3",
           payroll_tax_profile: {
             staff_is_tax_resident: true,
+            staff_is_pensionable: true,
             secondary_employment: true,
             employment_type: "full_time",
             income_tax_method: "gh_resident_graduated",
