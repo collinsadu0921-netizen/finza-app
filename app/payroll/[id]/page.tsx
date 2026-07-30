@@ -18,6 +18,15 @@ import { assessGraFilingReadiness } from "@/lib/payroll/graDt107aPayeExport"
 import GhanaV3IncomeTaxBreakdown from "@/components/payroll/GhanaV3IncomeTaxBreakdown"
 import { hasGhanaV3IncomeTaxSnapshot } from "@/lib/payroll/ghanaIncomeTaxDisplay"
 import { createPayrollPaymentIdempotencyKey } from "@/lib/payroll/createPayrollPaymentIdempotencyKey"
+import {
+  BATCH_ITEM_PAYMENT_CONFLICT_MESSAGE,
+  BATCH_ITEM_PAYMENT_NETWORK_UNCERTAINTY_MESSAGE,
+  batchItemPaymentSuccessReset,
+  canStartBatchItemPaymentSubmit,
+  submitBatchItemPaymentRequest,
+  tryCloseBatchItemPaymentModal,
+} from "@/lib/payroll/batchItemPaymentModalLifecycle"
+import { submitManualSalaryPaymentRequest } from "@/lib/payroll/manualPaymentModalLifecycle"
 
 type PayrollEntry = {
   id: string
@@ -777,11 +786,18 @@ export default function PayrollRunViewPage() {
     })
   }
 
-  const closeBatchItemPaymentModal = (clearKey = false) => {
-    if (recordingBatchItemPayment) return
+  const resetBatchItemPaymentAfterSuccess = () => {
+    const reset = batchItemPaymentSuccessReset()
+    if (reset.clearTarget) setBatchItemPaymentTarget(null)
+    if (reset.clearError) setBatchItemPaymentError("")
+    if (reset.clearIdempotencyKey) batchItemPaymentIdempotencyKeyRef.current = null
+  }
+
+  const closeBatchItemPaymentModal = () => {
+    if (tryCloseBatchItemPaymentModal(recordingBatchItemPayment).kind === "blocked") return
     setBatchItemPaymentTarget(null)
     setBatchItemPaymentError("")
-    if (clearKey) batchItemPaymentIdempotencyKeyRef.current = null
+    batchItemPaymentIdempotencyKeyRef.current = null
   }
 
   const handleRecordSalaryPayment = async () => {
@@ -817,47 +833,52 @@ export default function PayrollRunViewPage() {
       setRecordingPayment(true)
       setPaymentError("")
       try {
-        const res = await fetch(`/api/payroll/runs/${runId}/payments`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Idempotency-Key": idempotencyKey,
-          },
-          body: JSON.stringify({
-            payment_date: paymentForm.payment_date,
-            amount,
-            payment_account_id: paymentForm.payment_account_id,
-            reference: paymentForm.reference || null,
-            notes: paymentForm.notes || null,
-          }),
+        const outcome = await submitManualSalaryPaymentRequest({
+          postPayment: () =>
+            fetch(`/api/payroll/runs/${runId}/payments`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                payment_date: paymentForm.payment_date,
+                amount,
+                payment_account_id: paymentForm.payment_account_id,
+                reference: paymentForm.reference || null,
+                notes: paymentForm.notes || null,
+              }),
+            }),
+          parseJson: (res) => res.json(),
         })
-        const data = await res.json()
-        if (!res.ok) {
-          if (data.code === "PAYROLL_PAYMENT_IDEMPOTENCY_CONFLICT") {
-            setPaymentError(
-              "This payment key was already used with different details. Reload the payroll payments before trying again."
-            )
-            await loadPayrollPayments()
-            await loadObligations()
-            return
-          }
-          setPaymentError(data.error || "Failed to record salary payment.")
+        if (outcome.kind === "conflict") {
+          setPaymentError(
+            "This payment key was already used with different details. Reload the payroll payments before trying again."
+          )
+          await loadPayrollPayments()
+          await loadObligations()
+          return
+        }
+        if (outcome.kind === "error") {
+          setPaymentError(outcome.message)
+          return
+        }
+        if (outcome.kind === "network") {
+          setPaymentError(
+            "Finza did not receive a conclusive response. Retrying this payment will use the same reference key and will not create a duplicate."
+          )
           return
         }
         setShowPaymentModal(false)
         salaryPaymentIdempotencyKeyRef.current = null
         toast.showToast(
-          data.reused
+          outcome.reused
             ? "Salary payment already recorded — reused existing result"
             : "Salary payment recorded in your accounting records",
           "success"
         )
         await loadPayrollPayments()
         await loadObligations()
-      } catch {
-        setPaymentError(
-          "Finza did not receive a conclusive response. Retrying this payment will use the same reference key and will not create a duplicate."
-        )
       } finally {
         setRecordingPayment(false)
       }
@@ -867,11 +888,19 @@ export default function PayrollRunViewPage() {
   }
 
   const handleRecordBatchItemPayment = async () => {
-    if (!batchItemPaymentTarget) return
-    if (batchItemPaymentSubmittingRef.current || recordingBatchItemPayment) return
+    if (
+      !canStartBatchItemPaymentSubmit(
+        Boolean(batchItemPaymentTarget),
+        batchItemPaymentSubmittingRef.current,
+        recordingBatchItemPayment
+      )
+    ) {
+      return
+    }
     batchItemPaymentSubmittingRef.current = true
 
     try {
+      if (!batchItemPaymentTarget) return
       if (!batchItemPaymentForm.payment_date) {
         setBatchItemPaymentError("Payment date is required.")
         return
@@ -889,40 +918,45 @@ export default function PayrollRunViewPage() {
       setRecordingBatchItemPayment(true)
       setBatchItemPaymentError("")
       try {
-        const res = await fetch(
-          `/api/payroll/runs/${runId}/payment-batches/${batchId}/items/${itemId}/record-payment`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Idempotency-Key": idempotencyKey,
-            },
-            body: JSON.stringify({
-              payment_date: batchItemPaymentForm.payment_date,
-              payment_account_id: batchItemPaymentForm.payment_account_id,
-              reference: batchItemPaymentForm.reference || null,
-              notes: batchItemPaymentForm.notes || null,
-            }),
-          }
-        )
-        const data = await res.json()
-        if (!res.ok) {
-          if (data.code === "PAYROLL_PAYMENT_IDEMPOTENCY_CONFLICT") {
-            setBatchItemPaymentError(
-              "This payment key was already used with different details. Reload the batch before trying again."
-            )
-            await loadPaymentBatches()
-            if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
-            await loadPayrollPayments()
-            await loadObligations()
-            return
-          }
-          setBatchItemPaymentError(data.error || "Failed to record item payment.")
+        const outcome = await submitBatchItemPaymentRequest({
+          postRecordPayment: () =>
+            fetch(
+              `/api/payroll/runs/${runId}/payment-batches/${batchId}/items/${itemId}/record-payment`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Idempotency-Key": idempotencyKey,
+                },
+                body: JSON.stringify({
+                  payment_date: batchItemPaymentForm.payment_date,
+                  payment_account_id: batchItemPaymentForm.payment_account_id,
+                  reference: batchItemPaymentForm.reference || null,
+                  notes: batchItemPaymentForm.notes || null,
+                }),
+              }
+            ),
+          parseJson: (res) => res.json(),
+        })
+        if (outcome.kind === "conflict") {
+          setBatchItemPaymentError(BATCH_ITEM_PAYMENT_CONFLICT_MESSAGE)
+          await loadPaymentBatches()
+          if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
+          await loadPayrollPayments()
+          await loadObligations()
           return
         }
-        closeBatchItemPaymentModal(true)
+        if (outcome.kind === "error") {
+          setBatchItemPaymentError(outcome.message)
+          return
+        }
+        if (outcome.kind === "network") {
+          setBatchItemPaymentError(BATCH_ITEM_PAYMENT_NETWORK_UNCERTAINTY_MESSAGE)
+          return
+        }
+        resetBatchItemPaymentAfterSuccess()
         toast.showToast(
-          data.reused
+          outcome.reused
             ? "Employee payment already recorded — reused existing result"
             : "Employee salary payment recorded in accounting",
           "success"
@@ -931,10 +965,6 @@ export default function PayrollRunViewPage() {
         if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
         await loadPayrollPayments()
         await loadObligations()
-      } catch {
-        setBatchItemPaymentError(
-          "Finza did not receive a conclusive response. Retrying will use the same reference key and will not create a duplicate."
-        )
       } finally {
         setRecordingBatchItemPayment(false)
       }
@@ -2590,7 +2620,7 @@ export default function PayrollRunViewPage() {
             <div className="shrink-0 flex justify-end gap-2 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
               <button
                 type="button"
-                onClick={() => closeBatchItemPaymentModal(false)}
+                onClick={() => closeBatchItemPaymentModal()}
                 disabled={recordingBatchItemPayment}
                 className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
               >
