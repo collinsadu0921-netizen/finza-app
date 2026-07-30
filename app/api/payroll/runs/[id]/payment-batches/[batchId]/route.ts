@@ -3,8 +3,8 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { hasPermission, requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { assertManualBatchStatusTransition } from "@/lib/payroll/paymentBatchItems"
+import { enforceServiceIndustryMinTier, enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { mapPayrollBatchWorkflowError } from "@/lib/payroll/mapPayrollBatchWorkflowError"
 
 async function loadBatchForRun(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -81,6 +81,8 @@ export async function GET(
   }
 }
 
+const ALLOWED_STATUSES = new Set(["draft", "ready", "processing", "cancelled"])
+
 export async function PATCH(
   request: NextRequest,
   {
@@ -98,47 +100,67 @@ export async function PATCH(
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business) return NextResponse.json({ error: "Business not found" }, { status: 404 })
 
-    const tierDenied = await enforceServiceIndustryMinTier(supabase, user.id, business.id, "professional")
+    const tierDenied = await enforceServiceIndustryMinTierWrite(
+      supabase,
+      user.id,
+      business.id,
+      "professional"
+    )
     if (tierDenied) return tierDenied
 
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_PAY)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
 
-    const loaded = await loadBatchForRun(supabase, business.id, runId, batchId)
-    if ("error" in loaded) {
-      return NextResponse.json({ error: loaded.error }, { status: 500 })
-    }
-    if ("notFound" in loaded) {
-      return NextResponse.json({ error: "Batch not found" }, { status: 404 })
-    }
-
-    const batchRow = loaded.batch as { id: string; status: string }
     const body = await request.json().catch(() => ({}))
     const nextStatus = typeof body.status === "string" ? body.status.trim() : ""
-    if (!nextStatus) {
-      return NextResponse.json({ error: "status is required" }, { status: 400 })
+    if (!nextStatus || !ALLOWED_STATUSES.has(nextStatus)) {
+      return NextResponse.json(
+        {
+          error: "status must be one of: draft, ready, processing, cancelled",
+          code: "PAYROLL_BATCH_INVALID_STATUS_TRANSITION",
+        },
+        { status: 400 }
+      )
     }
 
-    try {
-      assertManualBatchStatusTransition(batchRow.status, nextStatus)
-    } catch (err: any) {
-      return NextResponse.json({ error: err?.message || "Invalid status transition" }, { status: 400 })
+    const { data: result, error: rpcError } = await supabase.rpc(
+      "transition_payroll_payment_batch_status_atomic",
+      {
+        p_business_id: business.id,
+        p_payroll_run_id: runId,
+        p_batch_id: batchId,
+        p_next_status: nextStatus,
+      }
+    )
+
+    if (rpcError) {
+      const mapped = mapPayrollBatchWorkflowError(rpcError)
+      const { status, ...payload } = mapped
+      return NextResponse.json(payload, { status })
     }
 
-    const { data: updated, error: uErr } = await supabase
+    const { data: batch, error: reloadError } = await supabase
       .from("payroll_payment_batches")
-      .update({ status: nextStatus })
-      .eq("id", batchRow.id)
+      .select("*")
+      .eq("id", batchId)
       .eq("business_id", business.id)
-      .select()
       .single()
 
-    if (uErr || !updated) {
-      console.error("[payment-batch PATCH]", uErr)
-      return NextResponse.json({ error: uErr?.message || "Failed to update batch" }, { status: 500 })
+    if (reloadError || !batch) {
+      return NextResponse.json(
+        {
+          ...(result as Record<string, unknown>),
+          warning: "Transition succeeded but batch reload failed",
+        },
+        { status: 200 }
+      )
     }
 
-    return NextResponse.json({ batch: updated })
+    return NextResponse.json({
+      batch,
+      ...(result as Record<string, unknown>),
+      reused: Boolean((result as { reused?: boolean } | null)?.reused),
+    })
   } catch (e: any) {
     console.error("[payment-batch PATCH]", e)
     return NextResponse.json({ error: e.message || "Internal server error" }, { status: 500 })

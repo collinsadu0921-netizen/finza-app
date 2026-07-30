@@ -17,6 +17,7 @@ import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTyp
 import { assessGraFilingReadiness } from "@/lib/payroll/graDt107aPayeExport"
 import GhanaV3IncomeTaxBreakdown from "@/components/payroll/GhanaV3IncomeTaxBreakdown"
 import { hasGhanaV3IncomeTaxSnapshot } from "@/lib/payroll/ghanaIncomeTaxDisplay"
+import { createPayrollPaymentIdempotencyKey } from "@/lib/payroll/createPayrollPaymentIdempotencyKey"
 
 type PayrollEntry = {
   id: string
@@ -201,13 +202,11 @@ type SendModalState = {
   staffPhone: string | null
 } | null
 
-type PaymentBatchSummary = {
+type BatchItemPaymentTarget = {
   batchId: string
-  total: number
-  paidTotal: number
-  pendingTotal: number
-  failedOrSkippedCount: number
-  paidCount: number
+  itemId: string
+  employeeName: string
+  amount: number
 }
 
 function isPaymentDateBeforePayrollPeriod(
@@ -254,6 +253,7 @@ export default function PayrollRunViewPage() {
   const [sendingAll, setSendingAll] = useState(false)
   const [recordingPayment, setRecordingPayment] = useState(false)
   const salaryPaymentSubmittingRef = useRef(false)
+  const salaryPaymentIdempotencyKeyRef = useRef<string | null>(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [salaryPayments, setSalaryPayments] = useState<PayrollPayment[]>([])
   const [paymentSummary, setPaymentSummary] = useState<PayrollPaymentSummary | null>(null)
@@ -265,7 +265,6 @@ export default function PayrollRunViewPage() {
     payment_account_id: "",
     reference: "",
     notes: "",
-    batch_id: "",
   })
 
   const [paymentBatches, setPaymentBatches] = useState<PayrollPaymentBatch[]>([])
@@ -278,8 +277,17 @@ export default function PayrollRunViewPage() {
   } | null>(null)
   const [loadingBatchDetail, setLoadingBatchDetail] = useState(false)
   const [batchActionLoading, setBatchActionLoading] = useState<string | null>(null)
-  const [selectedBatchSummary, setSelectedBatchSummary] = useState<PaymentBatchSummary | null>(null)
-  const [loadingSelectedBatchSummary, setLoadingSelectedBatchSummary] = useState(false)
+  const [batchItemPaymentTarget, setBatchItemPaymentTarget] = useState<BatchItemPaymentTarget | null>(null)
+  const [batchItemPaymentError, setBatchItemPaymentError] = useState("")
+  const [recordingBatchItemPayment, setRecordingBatchItemPayment] = useState(false)
+  const batchItemPaymentIdempotencyKeyRef = useRef<string | null>(null)
+  const batchItemPaymentSubmittingRef = useRef(false)
+  const [batchItemPaymentForm, setBatchItemPaymentForm] = useState({
+    payment_date: new Date().toISOString().split("T")[0],
+    payment_account_id: "",
+    reference: "",
+    notes: "",
+  })
 
   // Send modal state
   const [sendModal, setSendModal] = useState<SendModalState>(null)
@@ -733,55 +741,48 @@ export default function PayrollRunViewPage() {
     const outstanding = Number(paymentSummary?.outstanding_amount || 0)
     const defaultAccountId = paymentAccounts[0]?.id || ""
     setPaymentError("")
-    setSelectedBatchSummary(null)
+    salaryPaymentIdempotencyKeyRef.current = createPayrollPaymentIdempotencyKey("payroll-payment")
     setPaymentForm({
       payment_date: new Date().toISOString().split("T")[0],
       amount: outstanding > 0 ? outstanding.toFixed(2) : "",
       payment_account_id: defaultAccountId,
       reference: "",
       notes: "",
-      batch_id: "",
     })
     setShowPaymentModal(true)
   }
 
-  const loadSelectedBatchSummary = useCallback(
-    async (batchId: string): Promise<PaymentBatchSummary | null> => {
-      if (!batchId) return null
-      setLoadingSelectedBatchSummary(true)
-      try {
-        const res = await fetch(`/api/payroll/runs/${runId}/payment-batches/${batchId}`)
-        const data = await res.json()
-        if (!res.ok) {
-          toast.showToast(data.error || "Failed to load selected batch summary", "error")
-          return null
-        }
-        const items = (data.items || []) as PayrollPaymentBatchItem[]
-        const total = items.reduce((sum, i) => sum + Number(i.amount || 0), 0)
-        const paidItems = items.filter((i) => i.status === "paid")
-        const paidTotal = paidItems.reduce((sum, i) => sum + Number(i.amount || 0), 0)
-        const pendingTotal = items
-          .filter((i) => i.status === "pending")
-          .reduce((sum, i) => sum + Number(i.amount || 0), 0)
-        const failedOrSkippedCount = items.filter((i) => i.status === "failed" || i.status === "skipped").length
+  const closePaymentModal = () => {
+    if (recordingPayment) return
+    setShowPaymentModal(false)
+    setPaymentError("")
+    salaryPaymentIdempotencyKeyRef.current = null
+  }
 
-        return {
-          batchId,
-          total,
-          paidTotal,
-          pendingTotal,
-          failedOrSkippedCount,
-          paidCount: paidItems.length,
-        }
-      } catch {
-        toast.showToast("Failed to load selected batch summary", "error")
-        return null
-      } finally {
-        setLoadingSelectedBatchSummary(false)
-      }
-    },
-    [runId, toast]
-  )
+  const openBatchItemPaymentModal = (batchId: string, item: PayrollPaymentBatchItem) => {
+    const defaultAccountId = paymentAccounts[0]?.id || ""
+    batchItemPaymentIdempotencyKeyRef.current = createPayrollPaymentIdempotencyKey("payroll-batch-item")
+    setBatchItemPaymentTarget({
+      batchId,
+      itemId: item.id,
+      employeeName: item.employee_name || "Employee",
+      amount: Number(item.amount || 0),
+    })
+    setBatchItemPaymentError("")
+    setBatchItemPaymentForm({
+      payment_date: new Date().toISOString().split("T")[0],
+      payment_account_id: defaultAccountId,
+      reference: "",
+      notes: "",
+    })
+  }
+
+  const closeBatchItemPaymentModal = (clearKey = false) => {
+    if (recordingBatchItemPayment) return
+    setBatchItemPaymentTarget(null)
+    setBatchItemPaymentError("")
+    if (clearKey) batchItemPaymentIdempotencyKeyRef.current = null
+  }
 
   const handleRecordSalaryPayment = async () => {
     if (salaryPaymentSubmittingRef.current || recordingPayment) return
@@ -808,43 +809,55 @@ export default function PayrollRunViewPage() {
         return
       }
 
-      if (
-        paymentForm.batch_id.trim() &&
-        (loadingSelectedBatchSummary ||
-          (selectedBatchSummary !== null && selectedBatchSummary.paidCount === 0))
-      ) {
-        setPaymentError(
-          "This batch has no lines marked paid yet. Mark batch lines paid first, or clear the batch link to record a manual aggregate salary payment."
-        )
-        return
+      if (!salaryPaymentIdempotencyKeyRef.current) {
+        salaryPaymentIdempotencyKeyRef.current = createPayrollPaymentIdempotencyKey("payroll-payment")
       }
+      const idempotencyKey = salaryPaymentIdempotencyKeyRef.current
 
       setRecordingPayment(true)
       setPaymentError("")
       try {
         const res = await fetch(`/api/payroll/runs/${runId}/payments`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKey,
+          },
           body: JSON.stringify({
             payment_date: paymentForm.payment_date,
             amount,
             payment_account_id: paymentForm.payment_account_id,
             reference: paymentForm.reference || null,
             notes: paymentForm.notes || null,
-            ...(paymentForm.batch_id.trim() ? { batch_id: paymentForm.batch_id.trim() } : {}),
           }),
         })
         const data = await res.json()
         if (!res.ok) {
+          if (data.code === "PAYROLL_PAYMENT_IDEMPOTENCY_CONFLICT") {
+            setPaymentError(
+              "This payment key was already used with different details. Reload the payroll payments before trying again."
+            )
+            await loadPayrollPayments()
+            await loadObligations()
+            return
+          }
           setPaymentError(data.error || "Failed to record salary payment.")
           return
         }
         setShowPaymentModal(false)
-        toast.showToast("Salary payment recorded in your accounting records", "success")
+        salaryPaymentIdempotencyKeyRef.current = null
+        toast.showToast(
+          data.reused
+            ? "Salary payment already recorded — reused existing result"
+            : "Salary payment recorded in your accounting records",
+          "success"
+        )
         await loadPayrollPayments()
         await loadObligations()
       } catch {
-        setPaymentError("Failed to record salary payment. Please try again.")
+        setPaymentError(
+          "Finza did not receive a conclusive response. Retrying this payment will use the same reference key and will not create a duplicate."
+        )
       } finally {
         setRecordingPayment(false)
       }
@@ -853,25 +866,81 @@ export default function PayrollRunViewPage() {
     }
   }
 
-  const handleSelectBatchForPayment = async (nextBatchId: string) => {
-    setPaymentForm((f) => ({ ...f, batch_id: nextBatchId }))
-    if (!nextBatchId) {
-      setSelectedBatchSummary(null)
-      return
+  const handleRecordBatchItemPayment = async () => {
+    if (!batchItemPaymentTarget) return
+    if (batchItemPaymentSubmittingRef.current || recordingBatchItemPayment) return
+    batchItemPaymentSubmittingRef.current = true
+
+    try {
+      if (!batchItemPaymentForm.payment_date) {
+        setBatchItemPaymentError("Payment date is required.")
+        return
+      }
+      if (!batchItemPaymentForm.payment_account_id) {
+        setBatchItemPaymentError("Select a payment account.")
+        return
+      }
+      if (!batchItemPaymentIdempotencyKeyRef.current) {
+        batchItemPaymentIdempotencyKeyRef.current = createPayrollPaymentIdempotencyKey("payroll-batch-item")
+      }
+      const idempotencyKey = batchItemPaymentIdempotencyKeyRef.current
+      const { batchId, itemId } = batchItemPaymentTarget
+
+      setRecordingBatchItemPayment(true)
+      setBatchItemPaymentError("")
+      try {
+        const res = await fetch(
+          `/api/payroll/runs/${runId}/payment-batches/${batchId}/items/${itemId}/record-payment`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": idempotencyKey,
+            },
+            body: JSON.stringify({
+              payment_date: batchItemPaymentForm.payment_date,
+              payment_account_id: batchItemPaymentForm.payment_account_id,
+              reference: batchItemPaymentForm.reference || null,
+              notes: batchItemPaymentForm.notes || null,
+            }),
+          }
+        )
+        const data = await res.json()
+        if (!res.ok) {
+          if (data.code === "PAYROLL_PAYMENT_IDEMPOTENCY_CONFLICT") {
+            setBatchItemPaymentError(
+              "This payment key was already used with different details. Reload the batch before trying again."
+            )
+            await loadPaymentBatches()
+            if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
+            await loadPayrollPayments()
+            await loadObligations()
+            return
+          }
+          setBatchItemPaymentError(data.error || "Failed to record item payment.")
+          return
+        }
+        closeBatchItemPaymentModal(true)
+        toast.showToast(
+          data.reused
+            ? "Employee payment already recorded — reused existing result"
+            : "Employee salary payment recorded in accounting",
+          "success"
+        )
+        await loadPaymentBatches()
+        if (expandedPaymentBatchId === batchId) await expandPaymentBatch(batchId)
+        await loadPayrollPayments()
+        await loadObligations()
+      } catch {
+        setBatchItemPaymentError(
+          "Finza did not receive a conclusive response. Retrying will use the same reference key and will not create a duplicate."
+        )
+      } finally {
+        setRecordingBatchItemPayment(false)
+      }
+    } finally {
+      batchItemPaymentSubmittingRef.current = false
     }
-
-    const summary = await loadSelectedBatchSummary(nextBatchId)
-    setSelectedBatchSummary(summary)
-    if (!summary) return
-
-    const outstanding = Number(paymentSummary?.outstanding_amount || 0)
-    if (summary.paidTotal > 0) {
-      const suggested = Math.min(summary.paidTotal, outstanding)
-      setPaymentForm((f) => ({ ...f, amount: suggested.toFixed(2) }))
-      return
-    }
-
-    setPaymentForm((f) => ({ ...f, amount: "" }))
   }
 
   const expandPaymentBatch = async (batchId: string) => {
@@ -1003,19 +1072,11 @@ export default function PayrollRunViewPage() {
     expandedBatchDetail &&
     expandedBatchDetail.items.length > 0 &&
     expandedBatchDetail.items.every((i) => i.status === "paid")
-  const selectedBatchOverpaidWarning =
-    selectedBatchSummary &&
-    Number(paymentForm.amount || 0) > 0 &&
-    Number(paymentForm.amount || 0) - Number(selectedBatchSummary.paidTotal || 0) > 0.01
   const salaryPaymentEnteredAmount = Number(paymentForm.amount)
   const salaryPaymentAmountExceedsOutstanding =
     paymentForm.amount.trim() !== "" &&
     Number.isFinite(salaryPaymentEnteredAmount) &&
     salaryPaymentEnteredAmount - outstandingAmount > 0.01
-  const salaryPaymentBatchSubmitBlocked =
-    Boolean(paymentForm.batch_id.trim()) &&
-    (loadingSelectedBatchSummary ||
-      (selectedBatchSummary !== null && selectedBatchSummary.paidCount === 0))
   const totals = entries.reduce(
     (acc, entry) => {
       if (entry.is_included === false) return acc
@@ -1611,16 +1672,29 @@ export default function PayrollRunViewPage() {
                               </button>
                             )}
                             {!readOnly && b.status === "ready" && (
-                              <button
-                                type="button"
-                                disabled={batchBusy}
-                                onClick={() => guardWriteAction(() => patchPaymentBatchStatus(b.id, "processing"))}
-                                className="px-2.5 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-                              >
-                                Start processing
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={batchBusy}
+                                  onClick={() => guardWriteAction(() => patchPaymentBatchStatus(b.id, "draft"))}
+                                  className="px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                                >
+                                  Return to draft
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={batchBusy}
+                                  onClick={() => guardWriteAction(() => patchPaymentBatchStatus(b.id, "processing"))}
+                                  className="px-2.5 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                                >
+                                  Start processing
+                                </button>
+                              </>
                             )}
-                            {!readOnly && b.status !== "cancelled" && b.status !== "paid" && (
+                            {!readOnly &&
+                              b.status !== "cancelled" &&
+                              b.status !== "paid" &&
+                              b.status !== "partially_paid" && (
                               <button
                                 type="button"
                                 disabled={batchBusy}
@@ -1699,23 +1773,26 @@ export default function PayrollRunViewPage() {
                                                   <button
                                                     type="button"
                                                     disabled={busy || b.status === "cancelled"}
-                                                    onClick={() => {
-                                                      if (
-                                                        !window.confirm(
-                                                          "Confirm this employee was paid outside Finza? This does not update your accounting records."
-                                                        )
-                                                      )
-                                                        return
-                                                      guardWriteAction(() =>
-                                                        patchPaymentBatchItem(b.id, item.id, {
-                                                          status: "paid",
-                                                          manual_confirm: true,
-                                                        })
-                                                      )
-                                                    }}
+                                                    onClick={() =>
+                                                      guardWriteAction(() => openBatchItemPaymentModal(b.id, item))
+                                                    }
                                                     className="px-2 py-0.5 text-[11px] rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                                                   >
-                                                    Mark paid
+                                                    Record payment
+                                                  </button>
+                                                ) : null}
+                                                {item.status === "failed" ? (
+                                                  <button
+                                                    type="button"
+                                                    disabled={busy || b.status === "cancelled"}
+                                                    onClick={() =>
+                                                      guardWriteAction(() =>
+                                                        patchPaymentBatchItem(b.id, item.id, { status: "pending" })
+                                                      )
+                                                    }
+                                                    className="px-2 py-0.5 text-[11px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                                                  >
+                                                    Return to pending
                                                   </button>
                                                 ) : null}
                                                 {item.status === "pending" ? (
@@ -2313,12 +2390,7 @@ export default function PayrollRunViewPage() {
                 </p>
               </div>
               <button
-                onClick={() => {
-                  if (!recordingPayment) {
-                    setShowPaymentModal(false)
-                    setPaymentError("")
-                  }
-                }}
+                onClick={closePaymentModal}
                 className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2347,13 +2419,6 @@ export default function PayrollRunViewPage() {
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 dark:bg-red-950/30 dark:border-red-900 dark:text-red-300">
                   Amount exceeds remaining outstanding (₵{outstandingAmount.toFixed(2)}). Adjust the amount or refresh
                   the page if you already recorded a payment.
-                </div>
-              )}
-
-              {salaryPaymentBatchSubmitBlocked && (
-                <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-200">
-                  No batch lines are marked paid. Either mark lines paid first, or remove the batch link and record a
-                  manual aggregate salary payment.
                 </div>
               )}
 
@@ -2422,71 +2487,15 @@ export default function PayrollRunViewPage() {
                 />
               </label>
 
-              {paymentBatches.some((x) => x.status !== "cancelled") && (
-                <label className="space-y-1 block">
-                  <span className="text-sm text-gray-700 dark:text-gray-300">
-                    Link to salary batch (optional)
-                  </span>
-                  <select
-                    value={paymentForm.batch_id}
-                    onChange={(e) => handleSelectBatchForPayment(e.target.value)}
-                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
-                  >
-                    <option value="">None</option>
-                    {paymentBatches
-                      .filter((x) => x.status !== "cancelled")
-                      .map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.status.replace(/_/g, " ")} · {x.item_count} lines ·{" "}
-                          {new Date(x.created_at).toLocaleDateString("en-GH")}
-                        </option>
-                      ))}
-                  </select>
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                    For traceability only; does not change how the payment posts.
-                  </span>
-                </label>
-              )}
-
-              {paymentForm.batch_id && (
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-3 space-y-1.5">
-                  <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Selected batch summary</p>
-                  {loadingSelectedBatchSummary ? (
-                    <p className="text-xs text-gray-500">Loading batch summary…</p>
-                  ) : selectedBatchSummary ? (
-                    <>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
-                        Batch total: ₵{selectedBatchSummary.total.toFixed(2)} · Confirmed paid lines: ₵
-                        {selectedBatchSummary.paidTotal.toFixed(2)} · Pending total: ₵
-                        {selectedBatchSummary.pendingTotal.toFixed(2)}
-                      </p>
-                      {selectedBatchSummary.failedOrSkippedCount > 0 && (
-                        <p className="text-xs text-amber-700 dark:text-amber-300">
-                          Failed/skipped lines: {selectedBatchSummary.failedOrSkippedCount}
-                        </p>
-                      )}
-                      {selectedBatchSummary.paidCount === 0 ? (
-                        <p className="text-xs text-amber-800 dark:text-amber-200">
-                          No batch lines are marked paid. Either mark lines paid first, or clear the batch link above to
-                          record a manual aggregate salary payment.
-                        </p>
-                      ) : null}
-                      {selectedBatchOverpaidWarning ? (
-                        <p className="text-xs text-amber-700 dark:text-amber-300">
-                          This amount is higher than the confirmed paid lines in the selected batch.
-                        </p>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="text-xs text-gray-500">Batch summary unavailable.</p>
-                  )}
-                </div>
-              )}
+              <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+                Finza records salary disbursement against net salaries payable. Use batch item payments for
+                per-employee payments; use this form for aggregate run-level payments.
+              </div>
             </div>
 
             <div className="shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2 bg-white dark:bg-gray-800">
               <button
-                onClick={() => setShowPaymentModal(false)}
+                onClick={closePaymentModal}
                 disabled={recordingPayment}
                 className="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
               >
@@ -2494,14 +2503,106 @@ export default function PayrollRunViewPage() {
               </button>
               <button
                 onClick={() => guardWriteAction(handleRecordSalaryPayment)}
-                disabled={
-                  recordingPayment ||
-                  salaryPaymentAmountExceedsOutstanding ||
-                  salaryPaymentBatchSubmitBlocked
-                }
+                disabled={recordingPayment || salaryPaymentAmountExceedsOutstanding}
                 className="px-4 py-2 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50"
               >
                 {recordingPayment ? "Posting..." : "Record Payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {batchItemPaymentTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-base font-bold text-gray-900 dark:text-white">Record employee payment</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Record that {batchItemPaymentTarget.employeeName} was paid outside Finza. Finza will record the salary
+                payment in the accounting ledger. Finza will not send money to the employee.
+              </p>
+            </div>
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {batchItemPaymentError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {batchItemPaymentError}
+                </div>
+              )}
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-900/50 px-3 py-2 space-y-1">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {batchItemPaymentTarget.employeeName}
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Amount: ₵{batchItemPaymentTarget.amount.toFixed(2)} (from batch item)
+                </p>
+              </div>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Payment Date</span>
+                <input
+                  type="date"
+                  value={batchItemPaymentForm.payment_date}
+                  onChange={(e) =>
+                    setBatchItemPaymentForm((f) => ({ ...f, payment_date: e.target.value }))
+                  }
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Payment Account</span>
+                <select
+                  value={batchItemPaymentForm.payment_account_id}
+                  onChange={(e) =>
+                    setBatchItemPaymentForm((f) => ({ ...f, payment_account_id: e.target.value }))
+                  }
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Select account</option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.code} - {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">External payment reference (optional)</span>
+                <input
+                  type="text"
+                  value={batchItemPaymentForm.reference}
+                  onChange={(e) =>
+                    setBatchItemPaymentForm((f) => ({ ...f, reference: e.target.value }))
+                  }
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  placeholder="Bank transfer ref / cheque no"
+                />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Notes (optional)</span>
+                <textarea
+                  value={batchItemPaymentForm.notes}
+                  onChange={(e) => setBatchItemPaymentForm((f) => ({ ...f, notes: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                  rows={2}
+                />
+              </label>
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+              <button
+                type="button"
+                onClick={() => closeBatchItemPaymentModal(false)}
+                disabled={recordingBatchItemPayment}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => guardWriteAction(handleRecordBatchItemPayment)}
+                disabled={recordingBatchItemPayment}
+                className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {recordingBatchItemPayment ? "Posting..." : "Record payment"}
               </button>
             </div>
           </div>
