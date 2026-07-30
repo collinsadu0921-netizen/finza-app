@@ -3,6 +3,7 @@ import {
   computeStaffPayrollEntry,
   isPayrollEngineCountryError,
 } from "@/lib/payroll/computeStaffPayrollEntry"
+import { GHANA_ENGINE_V2, GHANA_ENGINE_V3 } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
 import { filterPayrollItemsForRun } from "@/lib/payroll/periodPayrollItems"
 import { rollupPayrollRunTotals } from "@/lib/payroll/rollupPayrollRunTotals"
 import {
@@ -122,6 +123,25 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
       ghanaRateVersions,
       businessId,
       salaryAdvances: salaryAdvances || [],
+      calculationEngineVersion:
+        payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+          ? GHANA_ENGINE_V3
+          : payrollRun.calculation_engine_version === GHANA_ENGINE_V2
+            ? GHANA_ENGINE_V2
+            : undefined,
+      lockTaxProfile: payrollRun.calculation_engine_version === GHANA_ENGINE_V3,
+      existingPayrollTaxProfile:
+        payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+          ? (existingEntry.payroll_tax_profile as Record<string, unknown> | null)
+          : null,
+      existingIncomeTaxMethod:
+        payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+          ? (existingEntry.income_tax_method as string | null)
+          : null,
+      existingIncomeTaxMethodVersion:
+        payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+          ? (existingEntry.income_tax_method_version as string | null)
+          : null,
     })
 
     const { staff_id: _sid, ...entryUpdate } = computed

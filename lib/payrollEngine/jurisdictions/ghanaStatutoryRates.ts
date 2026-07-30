@@ -14,8 +14,17 @@
  */
 
 import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
+import { GHANA_ENGINE_V2 } from "./ghanaProfileTax"
 
-export const GHANA_CALCULATION_ENGINE_VERSION = "finza-ghana-v2"
+export const GHANA_CALCULATION_ENGINE_VERSION = GHANA_ENGINE_V2
+
+export {
+  GHANA_ENGINE_V2,
+  GHANA_ENGINE_V3,
+  GHANA_NEW_RUN_ENGINE_VERSION,
+  SUPPORTED_GHANA_ENGINE_VERSIONS,
+  isSupportedGhanaEngineVersion,
+} from "./ghanaProfileTax"
 
 /** Inclusive verified statutory configuration window for Finza Ghana payroll. */
 export const GHANA_STATUTORY_VERIFIED_FROM = "2024-01-01"

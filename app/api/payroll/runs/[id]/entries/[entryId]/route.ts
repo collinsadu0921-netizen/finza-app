@@ -9,6 +9,7 @@ import {
   computeStaffPayrollEntry,
   isPayrollEngineCountryError,
 } from "@/lib/payroll/computeStaffPayrollEntry"
+import { GHANA_ENGINE_V2, GHANA_ENGINE_V3 } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
 import { rollupPayrollRunTotals } from "@/lib/payroll/rollupPayrollRunTotals"
 import { syncPayrollRunStaffScopeFingerprint } from "@/lib/payroll/syncPayrollRunStaffScope"
 import { filterPayrollItemsForRun } from "@/lib/payroll/periodPayrollItems"
@@ -85,7 +86,7 @@ export async function PATCH(
     const { data: payrollRun } = await supabase
       .from("payroll_runs")
       .select(
-        "id, business_id, status, payroll_month, payroll_frequency, paye_rate_version, pension_rate_version, statutory_period_basis"
+        "id, business_id, status, payroll_month, payroll_frequency, paye_rate_version, pension_rate_version, statutory_period_basis, calculation_engine_version"
       )
       .eq("id", runId)
       .eq("business_id", business.id)
@@ -225,6 +226,25 @@ export async function PATCH(
         ghanaRateVersions,
         businessId: business.id,
         salaryAdvances: salaryAdvances || [],
+        calculationEngineVersion:
+          payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+            ? GHANA_ENGINE_V3
+            : payrollRun.calculation_engine_version === GHANA_ENGINE_V2
+              ? GHANA_ENGINE_V2
+              : undefined,
+        lockTaxProfile: payrollRun.calculation_engine_version === GHANA_ENGINE_V3,
+        existingPayrollTaxProfile:
+          payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+            ? (existingEntry.payroll_tax_profile as Record<string, unknown> | null)
+            : null,
+        existingIncomeTaxMethod:
+          payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+            ? (existingEntry.income_tax_method as string | null)
+            : null,
+        existingIncomeTaxMethodVersion:
+          payrollRun.calculation_engine_version === GHANA_ENGINE_V3
+            ? (existingEntry.income_tax_method_version as string | null)
+            : null,
       })
     } catch (error: unknown) {
       if (isPayrollEngineCountryError(error)) {

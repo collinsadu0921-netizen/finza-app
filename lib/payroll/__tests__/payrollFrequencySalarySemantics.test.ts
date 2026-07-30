@@ -9,21 +9,45 @@ import { salaryBasisMatchesFrequency } from "@/lib/payroll/salaryBasis"
 describe("payroll frequency salary semantics (Phase 1B)", () => {
   it("uses stored basic_salary as period pay for matching basis (no conversion)", () => {
     const monthly = computeStaffPayrollEntry({
-      staff: { id: "m", basic_salary: 4000, salary_basis: "monthly" },
+      staff: {
+        id: "m",
+        basic_salary: 4000,
+        salary_basis: "monthly",
+        employment_type: "full_time",
+        is_tax_resident: true,
+        is_pensionable: true,
+        secondary_employment: false,
+      },
       businessCountry: "GH",
       effectiveDate: "2026-06-01",
       allowances: [],
       deductions: [],
     })
     const weekly = computeStaffPayrollEntry({
-      staff: { id: "w", basic_salary: 800, salary_basis: "weekly" },
+      staff: {
+        id: "w",
+        basic_salary: 800,
+        salary_basis: "weekly",
+        employment_type: "full_time",
+        is_tax_resident: true,
+        is_pensionable: true,
+        secondary_employment: false,
+      },
       businessCountry: "GH",
       effectiveDate: "2026-06-03",
       allowances: [],
       deductions: [],
     })
     const fortnightly = computeStaffPayrollEntry({
-      staff: { id: "f", basic_salary: 1600, salary_basis: "fortnightly" },
+      staff: {
+        id: "f",
+        basic_salary: 1600,
+        salary_basis: "fortnightly",
+        employment_type: "full_time",
+        is_tax_resident: true,
+        is_pensionable: true,
+        secondary_employment: false,
+      },
       businessCountry: "GH",
       effectiveDate: "2026-06-01",
       allowances: [],
@@ -38,7 +62,15 @@ describe("payroll frequency salary semantics (Phase 1B)", () => {
 
   it("rejects monthly×12÷52 as a conversion rule", () => {
     const entry = computeStaffPayrollEntry({
-      staff: { id: "s", basic_salary: 4000, salary_basis: "monthly" },
+      staff: {
+        id: "s",
+        basic_salary: 4000,
+        salary_basis: "monthly",
+        employment_type: "full_time",
+        is_tax_resident: true,
+        is_pensionable: true,
+        secondary_employment: false,
+      },
       businessCountry: "GH",
       effectiveDate: "2026-06-03",
       allowances: [],

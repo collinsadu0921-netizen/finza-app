@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { getCurrencySymbol } from "@/lib/currency"
 import { formatPayrollRunLabel } from "@/lib/payroll/payrollRunLabels"
+import GhanaV3IncomeTaxBreakdown from "@/components/payroll/GhanaV3IncomeTaxBreakdown"
 
 type PayslipData = {
   id: string
@@ -27,6 +28,9 @@ type PayslipData = {
     overtime_tax_5?: number
     overtime_tax_10?: number
     overtime_tax_graduated?: number
+    income_tax_method?: string | null
+    income_tax_bonus_amount?: number | null
+    income_tax_overtime_amount?: number | null
     net_salary: number
   }
   staff: {
@@ -134,11 +138,16 @@ export default function PublicPayslipPage() {
   const bonusAmount = Number(entry.bonus_amount ?? 0)
   const overtimeAmount = Number(entry.overtime_amount ?? 0)
   const regularAllowancesAmount = Math.max(0, Number(entry.regular_allowances_amount ?? Number(entry.allowances_total ?? 0) - bonusAmount - overtimeAmount))
-  const bonusTax5 = Number(entry.bonus_tax_5 ?? 0)
-  const bonusTaxGraduated = Number(entry.bonus_tax_graduated ?? 0)
-  const overtimeTax5 = Number(entry.overtime_tax_5 ?? 0)
-  const overtimeTax10 = Number(entry.overtime_tax_10 ?? 0)
-  const overtimeTaxGraduated = Number(entry.overtime_tax_graduated ?? 0)
+  const payeSubBreakdownEntry = {
+    income_tax_method: entry.income_tax_method,
+    income_tax_bonus_amount: entry.income_tax_bonus_amount,
+    income_tax_overtime_amount: entry.income_tax_overtime_amount,
+    bonus_tax_5: entry.bonus_tax_5,
+    bonus_tax_graduated: entry.bonus_tax_graduated,
+    overtime_tax_5: entry.overtime_tax_5,
+    overtime_tax_10: entry.overtime_tax_10,
+    overtime_tax_graduated: entry.overtime_tax_graduated,
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 py-10 px-4 print:bg-white print:py-0">
@@ -260,16 +269,11 @@ export default function PublicPayslipPage() {
                     <span className="text-sm font-medium text-red-600">−{fmt(entry.paye, sym)}</span>
                   </div>
                 )}
-                {(bonusTax5 > 0 || bonusTaxGraduated > 0 || overtimeTax5 > 0 || overtimeTax10 > 0 || overtimeTaxGraduated > 0) && (
-                  <div className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
-                    {(bonusTax5 > 0 || bonusTaxGraduated > 0) && (
-                      <div>Bonus tax: {fmt(bonusTax5 + bonusTaxGraduated, sym)} ({fmt(bonusTax5, sym)} @ 5%{bonusTaxGraduated > 0 ? `, ${fmt(bonusTaxGraduated, sym)} graduated` : ""})</div>
-                    )}
-                    {(overtimeTax5 > 0 || overtimeTax10 > 0 || overtimeTaxGraduated > 0) && (
-                      <div>Overtime tax: {fmt(overtimeTax5 + overtimeTax10 + overtimeTaxGraduated, sym)} ({fmt(overtimeTax5, sym)} @ 5%, {fmt(overtimeTax10, sym)} @ 10%{overtimeTaxGraduated > 0 ? `, ${fmt(overtimeTaxGraduated, sym)} graduated` : ""})</div>
-                    )}
-                  </div>
-                )}
+                <GhanaV3IncomeTaxBreakdown
+                  entry={payeSubBreakdownEntry}
+                  variant="employee"
+                  currencySymbol={sym}
+                />
                 {Number(entry.ssnit_employee) > 0 && (
                   <div className="flex justify-between items-center py-2 border-b border-slate-50">
                     <span className="text-sm text-slate-600">SSNIT (Employee 5.5%)</span>

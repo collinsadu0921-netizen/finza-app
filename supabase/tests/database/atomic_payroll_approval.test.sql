@@ -100,7 +100,7 @@ BEGIN
     tier1_ssnit_remittance, tier2_pension_remittance,
     calculation_engine_version, paye_rate_version, pension_rate_version,
     calculation_jurisdiction, statutory_period_basis,
-    payroll_tax_profile
+    payroll_tax_profile, filing_tin, filing_employee_name
   ) VALUES (
     gen_random_uuid(), v_run, v_staff, 5000, 0, 0,
     5000, 275, 650, 200, 4525, true,
@@ -110,8 +110,10 @@ BEGIN
     jsonb_build_object(
       'staff_is_tax_resident', true,
       'secondary_employment', false,
-      'employment_type', 'permanent'
-    )
+      'employment_type', 'permanent',
+      'gra_position_code', '001'
+    ),
+    'C0000000001', 'Test Employee'
   );
 
   v_result := public.approve_payroll_run_atomic(v_biz, v_run);
@@ -185,7 +187,7 @@ BEGIN
     tier1_ssnit_remittance, tier2_pension_remittance,
     calculation_engine_version, paye_rate_version, pension_rate_version,
     calculation_jurisdiction, statutory_period_basis,
-    payroll_tax_profile,
+    payroll_tax_profile, filing_tin, filing_employee_name,
     advance_recoveries_snapshot
   ) VALUES (
     v_run2, v_staff, 5000, 0, 100,
@@ -196,8 +198,10 @@ BEGIN
     jsonb_build_object(
       'staff_is_tax_resident', true,
       'secondary_employment', false,
-      'employment_type', 'permanent'
+      'employment_type', 'permanent',
+      'gra_position_code', '001'
     ),
+    'C0000000001', 'Test Employee',
     jsonb_build_array(jsonb_build_object(
       'advanceId', v_advance,
       'staffId', v_staff,
@@ -255,7 +259,7 @@ BEGIN
     tier1_ssnit_remittance, tier2_pension_remittance,
     calculation_engine_version, paye_rate_version, pension_rate_version,
     calculation_jurisdiction, statutory_period_basis,
-    payroll_tax_profile
+    payroll_tax_profile, filing_tin, filing_employee_name
   ) VALUES (
     v_run3, v_staff, 5000, 0, 0,
     5000, 275, 650, 200, 4525, true,
@@ -265,8 +269,10 @@ BEGIN
     jsonb_build_object(
       'staff_is_tax_resident', true,
       'secondary_employment', false,
-      'employment_type', 'permanent'
-    )
+      'employment_type', 'permanent',
+      'gra_position_code', '001'
+    ),
+    'C0000000001', 'Test Employee'
   );
 
   -- Conflicting paid obligation with wrong amount

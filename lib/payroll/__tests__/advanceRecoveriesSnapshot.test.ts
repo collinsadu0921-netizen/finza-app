@@ -101,7 +101,15 @@ describe("advance recovery snapshots", () => {
       { advanceId: "adv-1", deductionId: "ded-1", staffId: "staff-1", amount: 180 },
     ]
     const entry = computeStaffPayrollEntry({
-      staff: { id: "staff-1", name: "A", basic_salary: 2000, is_pensionable: false },
+      staff: {
+        id: "staff-1",
+        name: "A",
+        basic_salary: 2000,
+        is_pensionable: false,
+        employment_type: "full_time",
+        is_tax_resident: true,
+        secondary_employment: false,
+      },
       businessCountry: "GH",
       effectiveDate: "2026-01-01",
       allowances: [],

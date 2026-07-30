@@ -1,10 +1,15 @@
 import {
   validateGhanaPayrollRunForApproval,
+  classifyUnsupportedV3Entry,
   GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE,
   GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
   GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
 } from "@/lib/payroll/ghanaApprovalGuards"
-import { GHANA_CALCULATION_ENGINE_VERSION } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
+import {
+  GHANA_CALCULATION_ENGINE_VERSION,
+  GHANA_NEW_RUN_ENGINE_VERSION,
+} from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
+import { GHANA_PROFILE_TAX_2024_01 } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
 
 describe("Ghana payroll approval guards (API-facing)", () => {
   const run = {
@@ -154,6 +159,79 @@ describe("Ghana payroll approval guards (API-facing)", () => {
     if (!result.ok) {
       expect(result.code).toBe(GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED)
       expect(result.affectedEmployees[0].unsupportedClassification).toBe("missing_tax_profile_snapshot")
+    }
+  })
+})
+
+describe("Ghana payroll approval guards — v3", () => {
+  const runV3 = {
+    calculation_engine_version: GHANA_NEW_RUN_ENGINE_VERSION,
+    paye_rate_version: "gh-paye-2024-01",
+    pension_rate_version: "gh-pension-2026-01",
+    calculation_jurisdiction: "GH",
+    statutory_period_basis: "2026-01-01",
+    payroll_frequency: "monthly",
+  }
+
+  const v3TemporaryEntry = {
+    staff_id: "e-tmp-v3",
+    is_included: true,
+    calculation_engine_version: GHANA_NEW_RUN_ENGINE_VERSION,
+    paye_rate_version: "gh-paye-2024-01",
+    pension_rate_version: "gh-pension-2026-01",
+    calculation_jurisdiction: "GH",
+    statutory_period_basis: "2026-01-01",
+    paye: 56.13,
+    payroll_tax_profile: {
+      staff_is_tax_resident: true,
+      secondary_employment: false,
+      employment_type: "temporary",
+      income_tax_method: "gh_resident_graduated",
+      income_tax_method_version: GHANA_PROFILE_TAX_2024_01.version,
+    },
+    income_tax_method: "gh_resident_graduated",
+    income_tax_method_version: GHANA_PROFILE_TAX_2024_01.version,
+    income_tax_regular_amount: 56.13,
+    income_tax_bonus_amount: 0,
+    income_tax_overtime_amount: 0,
+    filing_employee_name: "Temp V3",
+  }
+
+  it("allows resident temporary worker on v3 when income-tax snapshot is complete", () => {
+    expect(classifyUnsupportedV3Entry(v3TemporaryEntry, "2026-01-01")).toBeNull()
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: runV3,
+      entries: [v3TemporaryEntry],
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it("blocks secondary employment on v3 with new classification", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: runV3,
+      entries: [
+        {
+          ...v3TemporaryEntry,
+          staff_id: "e-sec-v3",
+          payroll_tax_profile: {
+            staff_is_tax_resident: true,
+            secondary_employment: true,
+            employment_type: "full_time",
+            income_tax_method: "gh_resident_graduated",
+            income_tax_method_version: GHANA_PROFILE_TAX_2024_01.version,
+          },
+          filing_employee_name: "Secondary V3",
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe(GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE)
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe(
+        "secondary_employment_requires_verified_withholding_method"
+      )
     }
   })
 })

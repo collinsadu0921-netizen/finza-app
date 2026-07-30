@@ -38,7 +38,14 @@ describe("rollupPayrollRunTotals", () => {
 })
 
 describe("computeStaffPayrollEntry", () => {
-  const staff = { id: "s1", basic_salary: 3000, name: "Alex" }
+  const staff = {
+    id: "s1",
+    basic_salary: 3000,
+    name: "Alex",
+    employment_type: "full_time",
+    is_tax_resident: true,
+    secondary_employment: false,
+  }
 
   it("includes active employee with default snapshot", () => {
     const row = computeStaffPayrollEntry({

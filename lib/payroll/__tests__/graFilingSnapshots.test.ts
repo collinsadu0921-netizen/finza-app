@@ -14,6 +14,7 @@ const completeStaff = {
   name: "Ada Mensah",
   basic_salary: 5000,
   tin_number: "C0001111222",
+  employment_type: "full_time",
   is_tax_resident: true,
   is_pensionable: true,
   gra_position_code: "MNGT",

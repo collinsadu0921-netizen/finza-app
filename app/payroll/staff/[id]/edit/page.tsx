@@ -46,7 +46,13 @@ export default function EditStaffPage() {
     email: "",
     basic_salary: "",
     salary_basis: "monthly" as "monthly" | "weekly" | "fortnightly",
-    employment_type: "full_time" as "full_time" | "part_time" | "casual",
+    employment_type: "full_time" as
+      | "full_time"
+      | "part_time"
+      | "permanent"
+      | "temporary"
+      | "contract"
+      | "casual",
     bank_name: "",
     bank_account: "",
     ssnit_number: "",
@@ -309,8 +315,20 @@ export default function EditStaffPage() {
                 >
                   <option value="full_time">Full Time</option>
                   <option value="part_time">Part Time</option>
+                  <option value="permanent">Permanent</option>
+                  <option value="temporary">Temporary</option>
+                  <option value="contract">Contract</option>
                   <option value="casual">Casual</option>
                 </select>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {formData.employment_type === "temporary"
+                    ? "Resident temporary workers use the normal graduated PAYE calculation."
+                    : formData.employment_type === "casual"
+                      ? "Casual-worker remuneration is subject to flat 5% PAYE on the amount paid. Pension remains separate when the employee is pensionable."
+                      : formData.employment_type === "contract" || formData.employment_type === "part_time"
+                        ? "Resident contract and part-time workers use the normal graduated PAYE calculation when not on secondary employment."
+                        : "Employment classification is snapshotted into each payroll run and drives Ghana PAYE method selection."}
+                </p>
               </div>
 
               <div>
@@ -385,6 +403,16 @@ export default function EditStaffPage() {
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-300">Tax resident (Ghana PAYE)</span>
                   </label>
+                  {!formData.is_tax_resident && formData.employment_type === "casual" ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 md:col-span-2">
+                      This profile combination is not supported. Confirm the correct treatment with GRA before
+                      including the employee.
+                    </p>
+                  ) : !formData.is_tax_resident ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 md:col-span-2">
+                      Regular employment income uses 25%. Bonus and overtime use 20%.
+                    </p>
+                  ) : null}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -403,6 +431,13 @@ export default function EditStaffPage() {
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-300">Secondary employment</span>
                   </label>
+                  {formData.secondary_employment ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 md:col-span-2">
+                      Finza does not yet automate secondary-employment PAYE because a verified secondary-employer
+                      monthly withholding method is required. Income from multiple employments may need to be
+                      combined in the employee’s annual return.
+                    </p>
+                  ) : null}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       GRA position code (optional)

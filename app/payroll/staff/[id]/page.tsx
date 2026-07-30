@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
+import { formatEmploymentTypeLabel } from "@/lib/payroll/ghanaIncomeTaxDisplay"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 
 type Staff = {
@@ -475,6 +476,10 @@ export default function StaffViewPage() {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Email</p>
                   <p className="text-gray-900 dark:text-white">{staff.email || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Employment type</p>
+                  <p className="text-gray-900 dark:text-white">{formatEmploymentTypeLabel(staff.employment_type)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Start Date</p>

@@ -15,6 +15,8 @@ import {
 } from "@/lib/payroll/payrollDraftDeleteUi"
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
 import { assessGraFilingReadiness } from "@/lib/payroll/graDt107aPayeExport"
+import GhanaV3IncomeTaxBreakdown from "@/components/payroll/GhanaV3IncomeTaxBreakdown"
+import { hasGhanaV3IncomeTaxSnapshot } from "@/lib/payroll/ghanaIncomeTaxDisplay"
 
 type PayrollEntry = {
   id: string
@@ -37,6 +39,19 @@ type PayrollEntry = {
   taxable_income: number
   paye: number
   net_salary: number
+  bonus_tax_5?: number | null
+  bonus_tax_graduated?: number | null
+  overtime_tax_5?: number | null
+  overtime_tax_10?: number | null
+  overtime_tax_graduated?: number | null
+  income_tax_method?: string | null
+  income_tax_method_version?: string | null
+  income_tax_regular_base?: number | null
+  income_tax_regular_amount?: number | null
+  income_tax_bonus_base?: number | null
+  income_tax_bonus_amount?: number | null
+  income_tax_overtime_base?: number | null
+  income_tax_overtime_amount?: number | null
   filing_tin?: string | null
   filing_employee_name?: string | null
   payroll_tax_profile?: Record<string, unknown> | null
@@ -1268,11 +1283,11 @@ export default function PayrollRunViewPage() {
                   ssnit_employee: e.ssnit_employee,
                   taxable_income: e.taxable_income,
                   paye: e.paye,
-                  bonus_tax_5: null,
-                  bonus_tax_graduated: null,
-                  overtime_tax_5: null,
-                  overtime_tax_10: null,
-                  overtime_tax_graduated: null,
+                  bonus_tax_5: e.bonus_tax_5 ?? null,
+                  bonus_tax_graduated: e.bonus_tax_graduated ?? null,
+                  overtime_tax_5: e.overtime_tax_5 ?? null,
+                  overtime_tax_10: e.overtime_tax_10 ?? null,
+                  overtime_tax_graduated: e.overtime_tax_graduated ?? null,
                   payroll_tax_profile: e.payroll_tax_profile ?? null,
                   filing_tin: e.filing_tin ?? null,
                   filing_employee_name: e.filing_employee_name ?? null,
@@ -2218,7 +2233,19 @@ export default function PayrollRunViewPage() {
                         <td className="px-4 py-4 text-right text-indigo-600 dark:text-indigo-400 tabular-nums">₵{Number(entry.overtime_amount ?? 0).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right font-medium text-gray-900 dark:text-white tabular-nums">₵{Number(entry.gross_salary).toFixed(2)}</td>
                         <td className="px-4 py-4 text-right text-orange-600 dark:text-orange-400 tabular-nums">₵{Number(entry.ssnit_employee).toFixed(2)}</td>
-                        <td className="px-4 py-4 text-right text-red-600 dark:text-red-400 tabular-nums">₵{Number(entry.paye).toFixed(2)}</td>
+                        <td className="px-4 py-4 text-right text-red-600 dark:text-red-400 tabular-nums">
+                          <div>₵{Number(entry.paye).toFixed(2)}</div>
+                          {hasGhanaV3IncomeTaxSnapshot(entry) && (
+                            <details className="mt-1.5 text-left">
+                              <summary className="cursor-pointer text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300">
+                                v3 tax breakdown
+                              </summary>
+                              <div className="mt-2 min-w-[220px]">
+                                <GhanaV3IncomeTaxBreakdown entry={entry} variant="admin" />
+                              </div>
+                            </details>
+                          )}
+                        </td>
                         <td className="px-4 py-4 text-right font-bold text-green-600 dark:text-green-400 tabular-nums">₵{Number(entry.net_salary).toFixed(2)}</td>
                         <td className="px-5 py-4 text-center">
                           {payslip ? (

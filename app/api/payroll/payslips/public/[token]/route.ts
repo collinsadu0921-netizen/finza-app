@@ -41,6 +41,9 @@ export async function GET(
           overtime_tax_5,
           overtime_tax_10,
           overtime_tax_graduated,
+          income_tax_method,
+          income_tax_bonus_amount,
+          income_tax_overtime_amount,
           net_salary
         ),
         staff (

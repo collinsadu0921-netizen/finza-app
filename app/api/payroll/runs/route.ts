@@ -35,9 +35,10 @@ import {
   salaryBasisMatchesFrequency,
 } from "@/lib/payroll/salaryBasis"
 import {
-  GHANA_CALCULATION_ENGINE_VERSION,
+  GHANA_NEW_RUN_ENGINE_VERSION,
   resolveGhanaStatutoryRatesForPeriod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
+import { resolveGhanaProfileTaxRatesForPeriod } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
 
 const DEFAULT_PAYROLL_RUNS_LIMIT = 24
 const MAX_PAYROLL_RUNS_LIMIT = 100
@@ -357,13 +358,14 @@ export async function POST(request: NextRequest) {
     if (isGhanaMonthlyStatutoryEngine(businessCountry)) {
       try {
         const resolved = resolveGhanaStatutoryRatesForPeriod(effectiveDate)
+        resolveGhanaProfileTaxRatesForPeriod(effectiveDate)
         ghanaRateVersions = {
           payeRateVersion: resolved.paye.version,
           pensionRateVersion: resolved.pension.version,
           periodBasis: resolved.periodBasis,
         }
         runStatutoryFields = {
-          calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
+          calculation_engine_version: GHANA_NEW_RUN_ENGINE_VERSION,
           paye_rate_version: resolved.paye.version,
           pension_rate_version: resolved.pension.version,
           calculation_jurisdiction: "GH",
@@ -437,6 +439,9 @@ export async function POST(request: NextRequest) {
               ghanaRateVersions,
               businessId: business.id,
               salaryAdvances: [],
+              calculationEngineVersion: ghanaRateVersions
+                ? GHANA_NEW_RUN_ENGINE_VERSION
+                : undefined,
             })
           )
           continue
@@ -454,6 +459,7 @@ export async function POST(request: NextRequest) {
           ghanaRateVersions,
           businessId: business.id,
           salaryAdvances: advancesByStaff.get(String(staff.id)) || [],
+          calculationEngineVersion: ghanaRateVersions ? GHANA_NEW_RUN_ENGINE_VERSION : undefined,
         })
 
         const allowancesTotal = computed.allowances_total

@@ -3,15 +3,25 @@
  *
  * For finza-ghana-v2 entries, payroll_entries.payroll_tax_profile is authoritative.
  * Live staff fields must not determine classification or repair missing snapshots.
+ *
+ * For finza-ghana-v3, profile method resolution uses exact employment_type matching.
  */
 
 import {
-  GHANA_CALCULATION_ENGINE_VERSION,
-  resolveGhanaStatutoryRatesByVersions,
-} from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
+  GHANA_ENGINE_V2,
+  GHANA_ENGINE_V3,
+  GHANA_INCOME_TAX_METHODS,
+  assertGhanaProfileTaxVersionCoversPeriod,
+  getGhanaProfileTaxRatesByVersion,
+  isSupportedGhanaEngineVersion,
+  methodMatchesProfile,
+  resolveGhanaIncomeTaxMethodFromProfile,
+  type GhanaIncomeTaxMethod,
+} from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
+import { resolveGhanaStatutoryRatesByVersions } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfile"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
-import { extractDatePart } from "@/lib/payrollEngine/versioning"
+import { roundPayroll, extractDatePart } from "@/lib/payrollEngine/versioning"
 
 export const GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE = "GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE"
 export const GHANA_PAYROLL_UNKNOWN_RATE_VERSION = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
@@ -42,6 +52,12 @@ export type PayrollEntryForGhanaApproval = {
   statutory_period_basis?: string | null
   payroll_tax_profile?: Record<string, unknown> | null
   filing_employee_name?: string | null
+  paye?: number | null
+  income_tax_method?: string | null
+  income_tax_method_version?: string | null
+  income_tax_regular_amount?: number | null
+  income_tax_bonus_amount?: number | null
+  income_tax_overtime_amount?: number | null
   /** Display / legacy diagnostics only — never authoritative for finza-ghana-v2 classification. */
   staff?: {
     id?: string
@@ -100,6 +116,87 @@ export function classifyUnsupportedFromTaxProfileSnapshot(
   }
 
   if (profile.casual_worker_flat_tax_applied === true) return "casual_worker"
+
+  return null
+}
+
+function resolveEntryIncomeTaxMethod(entry: PayrollEntryForGhanaApproval): string | null {
+  const fromColumn = entry.income_tax_method ? String(entry.income_tax_method).trim() : ""
+  if (fromColumn) return fromColumn
+  const profile = entry.payroll_tax_profile
+  if (profile && typeof profile.income_tax_method === "string" && profile.income_tax_method.trim()) {
+    return profile.income_tax_method.trim()
+  }
+  return null
+}
+
+function resolveEntryIncomeTaxMethodVersion(entry: PayrollEntryForGhanaApproval): string | null {
+  const fromColumn = entry.income_tax_method_version
+    ? String(entry.income_tax_method_version).trim()
+    : ""
+  if (fromColumn) return fromColumn
+  const profile = entry.payroll_tax_profile
+  if (
+    profile &&
+    typeof profile.income_tax_method_version === "string" &&
+    profile.income_tax_method_version.trim()
+  ) {
+    return profile.income_tax_method_version.trim()
+  }
+  return null
+}
+
+/**
+ * V3 approval classifier — exact employment_type match via resolveGhanaIncomeTaxMethodFromProfile.
+ */
+export function classifyUnsupportedV3Entry(
+  entry: PayrollEntryForGhanaApproval,
+  periodDate: string
+): string | null {
+  const profile = entry.payroll_tax_profile
+  if (!profile || typeof profile !== "object") {
+    return "missing_tax_profile_snapshot"
+  }
+
+  const resolved = resolveGhanaIncomeTaxMethodFromProfile(profile)
+  if (!resolved.ok) {
+    return resolved.unsupportedClassification
+  }
+
+  const method = resolveEntryIncomeTaxMethod(entry)
+  const methodVersion = resolveEntryIncomeTaxMethodVersion(entry)
+  if (!method || !methodVersion) {
+    return "missing_income_tax_method_snapshot"
+  }
+
+  if (!GHANA_INCOME_TAX_METHODS.includes(method as GhanaIncomeTaxMethod)) {
+    return "unknown_income_tax_method"
+  }
+
+  if (!methodMatchesProfile(method as GhanaIncomeTaxMethod, profile)) {
+    return "income_tax_method_mismatch"
+  }
+
+  try {
+    getGhanaProfileTaxRatesByVersion(methodVersion)
+  } catch {
+    return "unknown_profile_tax_version"
+  }
+
+  try {
+    assertGhanaProfileTaxVersionCoversPeriod(methodVersion, periodDate)
+  } catch {
+    return "profile_tax_version_does_not_cover_period"
+  }
+
+  const regular = roundPayroll(Number(entry.income_tax_regular_amount ?? 0))
+  const bonus = roundPayroll(Number(entry.income_tax_bonus_amount ?? 0))
+  const overtime = roundPayroll(Number(entry.income_tax_overtime_amount ?? 0))
+  const componentSum = roundPayroll(regular + bonus + overtime)
+  const paye = roundPayroll(Number(entry.paye ?? 0))
+  if (Math.abs(componentSum - paye) > 0.01) {
+    return "income_tax_component_mismatch"
+  }
 
   return null
 }
@@ -209,11 +306,11 @@ export function validateGhanaPayrollRunForApproval(opts: {
     }
   }
 
-  if (runEngine !== GHANA_CALCULATION_ENGINE_VERSION) {
+  if (!isSupportedGhanaEngineVersion(runEngine)) {
     return {
       ok: false,
       code: GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
-      message: `Unrecognized Ghana calculation engine version "${runEngine}". Expected ${GHANA_CALCULATION_ENGINE_VERSION}.`,
+      message: `Unrecognized Ghana calculation engine version "${runEngine}". Expected ${GHANA_ENGINE_V2} or ${GHANA_ENGINE_V3}.`,
       affectedEmployees: [],
     }
   }
@@ -291,17 +388,36 @@ export function validateGhanaPayrollRunForApproval(opts: {
 
   const unsupported: UnsupportedTaxProfileEmployee[] = []
   const missingProfile: UnsupportedTaxProfileEmployee[] = []
+  const statutoryFailures: UnsupportedTaxProfileEmployee[] = []
 
   for (const entry of included) {
-    const classification = classifyUnsupportedFromTaxProfileSnapshot(entry.payroll_tax_profile)
+    const classification =
+      runEngine === GHANA_ENGINE_V3
+        ? classifyUnsupportedV3Entry(entry, runPeriod)
+        : classifyUnsupportedFromTaxProfileSnapshot(entry.payroll_tax_profile)
+
     if (!classification) continue
+
     const item = {
       staffId: entry.staff_id,
       employeeName: employeeName(entry),
       unsupportedClassification: classification,
     }
+
     if (classification === "missing_tax_profile_snapshot") {
       missingProfile.push(item)
+    } else if (
+      runEngine === GHANA_ENGINE_V3 &&
+      [
+        "missing_income_tax_method_snapshot",
+        "unknown_income_tax_method",
+        "unknown_profile_tax_version",
+        "income_tax_method_mismatch",
+        "profile_tax_version_does_not_cover_period",
+        "income_tax_component_mismatch",
+      ].includes(classification)
+    ) {
+      statutoryFailures.push(item)
     } else {
       unsupported.push(item)
     }
@@ -317,12 +433,26 @@ export function validateGhanaPayrollRunForApproval(opts: {
     }
   }
 
+  if (statutoryFailures.length > 0) {
+    return {
+      ok: false,
+      code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+      message:
+        "One or more included employees have invalid or incomplete Ghana v3 income-tax method snapshots. Recalculate draft entries before approval.",
+      affectedEmployees: statutoryFailures,
+    }
+  }
+
   if (unsupported.length > 0) {
+    const v3Message =
+      runEngine === GHANA_ENGINE_V3
+        ? "This payroll includes employees with tax classifications Finza cannot yet calculate correctly (secondary employment, non-resident casual, or unknown employment type). Remove or exclude them before approval."
+        : "This payroll includes employees with tax classifications Finza cannot yet calculate correctly (non-resident, secondary employment, or casual/temporary). Remove or exclude them before approval."
+
     return {
       ok: false,
       code: GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE,
-      message:
-        "This payroll includes employees with tax classifications Finza cannot yet calculate correctly (non-resident, secondary employment, or casual/temporary). Remove or exclude them before approval.",
+      message: v3Message,
       affectedEmployees: unsupported,
     }
   }

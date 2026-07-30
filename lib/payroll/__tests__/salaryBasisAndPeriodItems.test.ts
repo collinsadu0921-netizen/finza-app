@@ -37,7 +37,14 @@ describe("salary basis Phase 1B", () => {
 
   it("does not convert monthly salary for any effective date", () => {
     const entry = computeStaffPayrollEntry({
-      staff: { id: "s1", basic_salary: 4000, salary_basis: "monthly" },
+      staff: {
+        id: "s1",
+        basic_salary: 4000,
+        salary_basis: "monthly",
+        employment_type: "full_time",
+        is_tax_resident: true,
+        secondary_employment: false,
+      },
       businessCountry: "GH",
       effectiveDate: "2026-06-03",
       allowances: [],
