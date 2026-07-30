@@ -1,15 +1,17 @@
-# Payroll production rollout review — 2026-07-30 (gate-closing)
+# Payroll production rollout review — 2026-07-30 (final gate-closing)
 
-Read-only deployment review for Finza payroll hardening (migrations **525, 534, 552–564**, application SHA **`4928f451b4eade514637fbf5aadb708bf238af8b`**).
+Read-only deployment review for Finza payroll hardening (migrations **525, 534, 552–564**).
 
 | Field | Value |
 |---|---|
 | Review branch | `staging` |
-| Review SHA | `4928f451b4eade514637fbf5aadb708bf238af8b` |
+| **Release Git SHA** | **`44851d031694859773f159e3661b2b018047884b`** |
+| **Last runtime-code SHA** | **`4928f451b4eade514637fbf5aadb708bf238af8b`** |
+| Changes after runtime-code SHA | **Documentation only** (review commits `83280ed`, `96c20ca`, `44851d0`) |
 | Production Supabase ref | `qjxhibvbmzogyzbhswjj` |
 | Staging Supabase ref | `adonhhtooawkeemdqqeo` |
 | Review type | Read-only (no production writes) |
-| Gate-closing session | 2026-07-30 |
+| Final gate-closing session | 2026-07-30 |
 
 ---
 
@@ -17,28 +19,28 @@ Read-only deployment review for Finza payroll hardening (migrations **525, 534, 
 
 **PAYROLL PRODUCTION DEPLOYMENT REVIEW FAILED**
 
-Technical payroll preflight, migration dependency analysis, and release tests support proceeding **after** operational gates are cleared. This review **does not authorize deployment**.
+All non-SQL gates are satisfied (backup, migration dependencies, REST preflight, release tests, release SHA identification). The **single remaining technical blocker** is the live production SQL security audit: **`PRODUCTION_DATABASE_URL` was not available** in the agent review environment when `tmp/_payroll_final_prod_audit.mjs` was executed.
 
-### Blockers (must resolve before execution)
+This review **does not authorize deployment** until the live SQL audit completes successfully.
 
-1. **PITR status and retention not verified** — scheduled physical backups are confirmed (see Backup and recovery); PITR enabled/disabled and configured retention period were **not shown** in dashboard evidence supplied for this review.
-2. **Production SQL grant audit incomplete** — `PRODUCTION_DATABASE_URL` is **not present** in the review environment (`.env.local` has production REST keys only). Live `has_function_privilege` / `proconfig` audit was **not executed**. OpenAPI proxy audit completed (see Security review).
+### Blocker
 
-### Resolved in this gate-closing session
+1. **Live production SQL audit not executed** — `PRODUCTION_DATABASE_URL` absent from process environment and `.env.local`. Fail-closed per review policy. Run: `PRODUCTION_DATABASE_URL=… node tmp/_payroll_final_prod_audit.mjs` (or equivalent) before deployment.
 
-- Review document pushed to remote `staging` (see Review document section).
-- Migrations **522–551** dependency decision finalized (**525, 534 required** before 552).
-- Production migration ledger revalidated (cached read-only SQL + REST schema fingerprints).
-- Vercel production deployment metadata fetched; production SHA corroborated against GitHub `main`.
-- Production data preflight re-run (REST aggregates).
-- Release test bundle re-run at `4928f451`.
-- **Scheduled physical backups verified** for project `qjxhibvbmzogyzbhswjj`; restore owner assigned (**Collins**).
+### Satisfied gates
 
-### Non-blockers (noted)
+- **Backup gate satisfied** — scheduled physical backups verified; PITR disabled/not purchased (not required for this controlled rollout).
+- **Restore owner** — Collins.
+- **Migration sequence** — `525, 534, 552–564` confirmed; no partial schema.
+- **REST data preflight** — no P0/P1 violations.
+- **Release tests** — passed at runtime-code SHA `4928f451`.
+- **Release identification** — deploy **`44851d`** via full staging merge; runtime payroll code unchanged since **`4928f451`**.
 
-- Eleven historical posted payments have **null idempotency keys** — expected pre-563.
-- Five batch items with `status = paid` without `payroll_payment_id` column (pre-562 schema) — **not** a 563 duplicate-link violation.
-- **Current production** exposes `post_payroll_payment_to_ledger` to authenticated users (migration 445). Migration **562** revokes this; expected end-state is postgres-only.
+### Known legacy states (non-blockers)
+
+- **11** posted payments with null idempotency key (pre-563; allowed).
+- **5** legacy paid batch items without `payroll_payment_id` link (pre-562; allowed).
+- **`post_payroll_payment_to_ledger`** currently exposed to `authenticated` (migration 445); migration **562** revokes this — expected pre-migration state, not a deployment blocker.
 
 ---
 
@@ -47,34 +49,153 @@ Technical payroll preflight, migration dependency analysis, and release tests su
 | Field | Value |
 |---|---|
 | Path | `docs/releases/payroll-production-rollout-review-2026-07.md` |
-| Local existence | Yes |
-| Remote push | See commit SHA after push (gate-closing update) |
+| Remote commit SHA | See latest push on `origin/staging` |
 
 ---
 
 ## Backup and recovery
 
-Verified from Supabase Dashboard evidence (project `qjxhibvbmzogyzbhswjj`, supplied 2026-07-30):
+**Backup gate: SATISFIED**
 
 | Field | Value |
 |---|---|
 | Scheduled physical backups | **Enabled** |
-| Latest successful backup | **2026-07-30 05:36:49 UTC** (07:36:49 Sweden time) |
-| Daily restore points visible | **26–30 July 2026** |
-| Restore UI | Restore buttons available in Dashboard |
-| PITR enabled | **Not shown in supplied evidence** — confirm in Dashboard → Database → Backups / PITR |
-| Retention period | **Not shown in supplied evidence** — confirm configured retention in Dashboard |
+| Latest successful backup | **2026-07-30T05:36:49Z** (07:36:49 Sweden time) |
+| Daily restore points | **2026-07-26 through 2026-07-30** |
+| Restore UI | Available (restore buttons visible in Dashboard) |
+| PITR | **Disabled / not purchased** — **not required** for this controlled rollout |
 | Restore owner | **Collins** |
 
 ```text
 BACKUP_ENABLED=yes
 LATEST_BACKUP_AT=2026-07-30T05:36:49Z
-PITR_ENABLED=<not shown in dashboard evidence — verify before deploy>
-RETENTION=<not shown in dashboard evidence — verify before deploy>
+DAILY_RESTORE_POINTS=2026-07-26 through 2026-07-30
+RESTORE_UI_AVAILABLE=yes
+PITR_ENABLED=no / not purchased
 RESTORE_OWNER=Collins
 ```
 
-Restore procedure: Collins initiates restore via Supabase Dashboard if rollback is required; coordinate with approved payroll production deployment runbook before any restore during or after rollout.
+Rollout relies on: scheduled physical backup, payroll write freeze, final SQL preflight immediately before migration apply, controlled sequential migration execution, immediate application deployment.
+
+Restore procedure: Collins initiates restore via Supabase Dashboard; coordinate with approved payroll production deployment runbook.
+
+---
+
+## Production connection (Part A)
+
+| Field | Result |
+|---|---|
+| `PRODUCTION_DATABASE_URL` in process env | **Not present** |
+| `.env.local` | Production REST keys only; no `PRODUCTION_DATABASE_URL` |
+| Project identity confirmed | **Not reached** (connection not established) |
+| Read-only transaction | **Not executed** (audit script exit code 2) |
+| Audit script | `tmp/_payroll_final_prod_audit.mjs` |
+
+**Fail-closed:** Production database identity and live privilege audit could not be completed in this session.
+
+---
+
+## SQL function security (Part B)
+
+**Status: NOT LIVE-AUDITED** (blocked on connection).
+
+### Supplementary OpenAPI proxy (production REST, 2026-07-30)
+
+PostgREST exposure only; does not report `has_function_privilege`, `SECURITY DEFINER`, or `search_path`:
+
+| Function | PostgREST exposed |
+|---|---|
+| `approve_payroll_run_atomic` | No |
+| `reverse_payroll_run_atomic` | No |
+| `create_payroll_correction_draft_from_reversed` | No |
+| `record_payroll_payment_atomic` | No |
+| `record_payroll_batch_item_payment_atomic` | No |
+| `lock_payroll_run_atomic` | No |
+| `transition_payroll_payment_batch_status_atomic` | No |
+| `transition_payroll_payment_batch_item_status_atomic` | No |
+| **`post_payroll_payment_to_ledger`** | **Yes** |
+| `_record_payroll_payment_atomic_impl` | No |
+| `_post_payroll_payment_journal_internal` | No |
+| `finza_set/clear_payroll_mutation_context` | No |
+| Legacy `p_actor_id` RPC paths (OpenAPI) | **None found** |
+
+**Current-state expectation (pre-552):** `post_payroll_payment_to_ledger` authenticated access is **expected** from migration 445. Migration **562** explicitly `REVOKE`s authenticated and grants postgres-only. No partial 562–564 helpers should exist yet.
+
+**Expected post-564:** Public payroll RPCs → `authenticated` EXECUTE (actor from `auth.uid()`); internal helpers → postgres only.
+
+---
+
+## Table grants and RLS (Part C)
+
+**Status: NOT LIVE-AUDITED** (blocked on connection).
+
+Tables to audit at deploy preflight: `payroll_runs`, `payroll_entries`, `payroll_payments`, `payroll_obligations`, `payroll_obligation_payments`, `payroll_payment_batches`, `payroll_payment_batch_items`, `journal_entries`, `journal_entry_lines`.
+
+**Expected post-564:** Migrations 552–564 install immutability triggers, controlled RPC paths, and revoke direct journal posting from authenticated users. No partial 525/534/552–564 schema detected via REST OpenAPI fingerprints (525/534/552 columns wholly absent).
+
+---
+
+## Journal integrity (Part D)
+
+**Status: NOT SQL-VERIFIED** in final session (blocked on connection).
+
+Prior REST preflight: **0** posted payments missing journal. Unbalanced journal count requires live SQL (`tmp/_payroll_final_prod_audit.mjs`).
+
+---
+
+## Duplicate and reconciliation preflight (Part E)
+
+REST aggregates re-run **2026-07-30** (production project `qjxhibvbmzogyzbhswjj`):
+
+| Check | Count |
+|---|---:|
+| Duplicate active idempotency groups | **0** |
+| Same idempotency key, conflicting payment details | **0** (column sparse pre-563) |
+| Multiple active batch items → one payment | **0** |
+| Multiple active payments → one batch item | **0** |
+| Batch total mismatch | **0** |
+| Paid item without reciprocal posted payment | **5** (legacy pre-562; **allowed**) |
+| Cancelled batch with posted payment | **0** |
+| Paid batch with unpaid active item | **0** |
+| Salary obligation due mismatch | **0** |
+| Salary obligation paid/status mismatch | **0** |
+| Overpaid salary obligation | **0** |
+| Legacy null idempotency (posted) | **11** (**allowed**) |
+| Legacy paid items without payment link | **5** (**allowed**) |
+
+**P0/P1 blockers:** none.
+
+---
+
+## Migration sequence (Part F)
+
+**Approved sequence (unchanged):**
+
+```text
+525 → 534 → 552 → 553 → 554 → 555 → 556 → 557 → 558 → 559 → 560 → 561 → 562 → 563 → 564
+```
+
+| Confirmation | Result |
+|---|---|
+| 525, 534 required | **Yes** (557–564 SQL + app depend on period/salary-basis columns) |
+| 522–524, 526–533, 535–551 not required | **Yes** (no payroll dependency found) |
+| Hidden SQL dependency | **None found** |
+| Partial 525/534/552–564 schema | **None** (fingerprints present-or-absent) |
+| Latest ledger (numeric) | **521** |
+
+---
+
+## Release identification (Part G)
+
+| Field | Value |
+|---|---|
+| Release branch/source | **`staging`** (full merge to `main`) |
+| **Release Git SHA (deploy this)** | **`44851d031694859773f159e3661b2b018047884b`** |
+| **Last runtime-code SHA** | **`4928f451b4eade514637fbf5aadb708bf238af8b`** |
+| Commits after runtime-code | Documentation-only review commits |
+| Production app SHA (current) | `f3790e9f605336abbca148cc588090e387f48c12` |
+
+Compatibility matrix references **runtime code at `4928f451`** (unchanged by doc commits).
 
 ---
 
@@ -84,237 +205,34 @@ Restore procedure: Collins initiates restore via Supabase Dashboard if rollback 
 |---|---|
 | Domain | `app.finza.africa` |
 | Deployment ID | `dpl_CQMkQ1sLyzzmw8M65Uw7jbgSnwFi` |
-| Deployment URL | `https://finza-5h7d2igc8-collins-projects-f49524b8.vercel.app` |
-| Created | 2026-07-29T01:15:55Z (~03:15 GMT+2) |
-| Target / status | production / Ready |
-| Git branch (alias) | `main` (`finza-app-git-main-collins-projects-f49524b8.vercel.app`) |
-| Active Git SHA | `f3790e9f605336abbca148cc588090e387f48c12` |
-| GitHub `main` SHA (public API) | `f3790e9f605336abbca148cc588090e387f48c12` (2026-07-29T01:02:57Z) |
-| Classification | **production matches main** |
-
-Evidence: Vercel `inspect app.finza.africa` (deployment ID, alias, timestamp); GitHub public API `repos/collinsadu0921-netizen/finza-app/commits/main`. Vercel deployment JSON did not expose `meta.githubCommitSha` (no local `~/.vercel/auth.json` token file for API meta fetch); SHA corroborated via git-main alias + commit timestamp correlation.
-
----
-
-## Migration dependency decision (522–551)
-
-Production ledger stops at **521**. Migrations **522–551** are absent from the ledger. Schema fingerprints (production REST OpenAPI, 2026-07-30):
-
-| Fingerprint | Production schema |
-|---|---|
-| 521 (`is_included`, `base_salary_snapshot`, `adjustment_amount` on `payroll_entries`) | **Present** |
-| 525 (`pay_period_start`, `payroll_frequency`, `staff_scope_fingerprint` on `payroll_runs`) | **Absent** |
-| 534 (`salary_basis` on `staff`; entry snapshots; `payroll_run_id` on allowances/deductions) | **Absent** |
-| 552 (`calculation_engine_version`, `paye_rate_version` on `payroll_runs`) | **Absent** |
-
-### Dependency matrix (522–551)
-
-| Version | Filename | Production ledger | Production schema | Payroll dependency | App dependency | Decision |
-| ------- | -------- | ----------------- | ----------------- | ------------------ | -------------- | -------- |
-| 522 | `522_accounting_snapshot_read_model.sql` | Missing | n/a (accounting) | None | None | SAFE TO SKIP FOR PAYROLL |
-| 523 | `523_accounting_snapshot_reliability.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 524 | `524_fix_dashboard_positions_ar_sum.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 525 | `525_payroll_period_duplicate_guard.sql` | Missing | **Absent** | **557–564 use `pay_period_start`, `staff_scope_fingerprint`, `payroll_frequency`** | **App writes/reads period fields** (`app/payroll/run`, period utils) | **REQUIRED BEFORE PAYROLL** |
-| 526 | `526_asset_depreciation_atomic_posting.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 527 | `527_asset_depreciation_phase1a_safety_corrections.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 528 | `528_asset_depreciation_phase1a_sql_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 529 | `529_asset_disposal_hardening.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 530 | `530_asset_bulk_and_backfill_integrity.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 531 | `531_asset_phase1b_sql_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 532 | `532_asset_phase1b_sql_test_corrections.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 533 | `533_asset_disposal_journal_balance_fix.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 534 | `534_payroll_salary_basis_and_period_items.sql` | Missing | **Absent** | **557–564 use `salary_basis`, `period_basic_pay`, `one_off_items_snapshot`, `allowances.payroll_run_id`** | **App reads/writes `salary_basis`, `period_basic_pay`** | **REQUIRED BEFORE PAYROLL** |
-| 535 | `535_service_job_material_usage_return_integrity.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 536 | `536_service_job_material_usage_return_sql_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 537 | `537_activate_service_material_accounts.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 538 | `538_harden_service_job_material_return_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 539 | `539_accounting_snapshot_queue_reliability.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 540 | `540_accounting_snapshot_queue_sql_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 541 | `541_accounting_snapshot_queue_sql_tests_fix.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 542 | `542_accounting_snapshot_queue_sql_tests_immutability.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 543 | `543_accounting_snapshot_queue_sql_tests_cleanup.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 544 | `544_claim_accounting_snapshot_refresh_jobs_for_period.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 545 | `545_claim_accounting_snapshot_refresh_jobs_for_period_sql_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 546 | `546_accounting_snapshot_recovery_cron.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 547 | `547_accounting_snapshot_recovery_cron_sql_tests.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 548 | `548_bill_material_inventory_posting.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 549 | `549_invoice_material_fulfilment.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 550 | `550_invoice_material_fulfilment_return_undo.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-| 551 | `551_invoice_sales_revenue_wording.sql` | Missing | n/a | None | None | SAFE TO SKIP FOR PAYROLL |
-
-### Conclusion (522–551)
-
-```text
-Apply only these specific versions before 552: 525, 534
-```
-
-Evidence: SQL in migrations **557, 558, 560, 562** references 525/534 columns; application **`4928f451`** reads/writes `pay_period_start`, `salary_basis`, `period_basic_pay`; production OpenAPI confirms those columns are absent while 521 columns are present. No partial application detected for 525/534 (columns wholly absent).
-
----
-
-## Migration gap (522–564)
-
-| Range | Ledger state | Schema state (production) | Classification |
-|---|---|---|---|
-| 522–524 | Missing | n/a / non-payroll | not applied |
-| **525** | Missing | Expected columns **absent** | not applied |
-| 526–533 | Missing | n/a / non-payroll | not applied |
-| **534** | Missing | Expected columns **absent** | not applied |
-| 535–551 | Missing | n/a / non-payroll | not applied |
-| **552–564** | **All missing** | Pre-552 payroll payment/batch schema | not applied |
-
-| Item | Finding |
-|---|---|
-| Latest production migration (numeric) | **521** `payroll_entry_run_adjustments` |
-| 522–551 ledger | **All missing** |
-| 552–564 ledger | **All missing** |
-| Unexpected production-only versions | None observed in cached ledger (`tmp/_prod_preflight_sql_ro2.out.json`) |
-| Repository versions missing from ledger | **522–564** (30 versions) |
-| Partial migrations | **None detected** (fingerprints are present-or-absent, not mixed) |
-
-Legacy timestamp-style migration rows (e.g. `20260622233209`) coexist with numeric versions; latest numeric remains **521**.
-
----
-
-## Security review
-
-### CURRENT PRODUCTION STATE (OpenAPI + migration 445 baseline; SQL privileges not live-verified)
-
-| Function | Exists (RPC exposed) | Notes |
-|---|---|---|
-| `approve_payroll_run_atomic` | No (pre-554) | — |
-| `reverse_payroll_run_atomic` | No (pre-557) | — |
-| `create_payroll_correction_draft_from_reversed` | No | — |
-| `record_payroll_payment_atomic` | No (pre-554/562 path) | — |
-| `record_payroll_batch_item_payment_atomic` | No (pre-564) | — |
-| `lock_payroll_run_atomic` | No | — |
-| `transition_payroll_payment_batch_*` | No (pre-564) | — |
-| **`post_payroll_payment_to_ledger`** | **Yes (PostgREST exposed)** | **Granted to `authenticated` in migration 445 — legacy exposure** |
-| `_record_payroll_payment_atomic_impl` | No | — |
-| `_post_payroll_payment_journal_internal` | No | — |
-| `finza_set/clear_payroll_mutation_context` | No | — |
-| Legacy `p_actor_id` overloads (OpenAPI) | **None found** | — |
-
-Payroll tables exist with RLS (PostgREST exposes SELECT/INSERT/UPDATE per policies). Direct mutation of approved runs/payments is constrained by pre-552 triggers/policies; full RLS/grant matrix requires `PRODUCTION_DATABASE_URL` SQL audit.
-
-### EXPECTED STATE AFTER 564 (from migration definitions at `4928f451`)
-
-| Function | Public access |
-|---|---|
-| `approve_payroll_run_atomic` | `authenticated` EXECUTE |
-| `reverse_payroll_run_atomic` | `authenticated` EXECUTE |
-| `create_payroll_correction_draft_from_reversed` | `authenticated` EXECUTE |
-| `record_payroll_payment_atomic` | `authenticated` EXECUTE (563 signature; actor from `auth.uid()`) |
-| `record_payroll_batch_item_payment_atomic` | `authenticated` EXECUTE |
-| `lock_payroll_run_atomic` | `authenticated` EXECUTE |
-| `transition_payroll_payment_batch_status_atomic` | `authenticated` EXECUTE |
-| `transition_payroll_payment_batch_item_status_atomic` | `authenticated` EXECUTE |
-| `_record_payroll_payment_atomic_impl` | **postgres only** |
-| `_post_payroll_payment_journal_internal` | **postgres only** |
-| **`post_payroll_payment_to_ledger`** | **postgres only** (562 revokes authenticated) |
-| `finza_set/clear_payroll_mutation_context` | **postgres only** |
-
-563 drops legacy RPC signatures accepting `p_actor_id`. `SECURITY DEFINER` functions use fixed `search_path` per 554–564 definitions.
-
-**Migration path note:** Current `post_payroll_payment_to_ledger` authenticated grant does **not** block 562 from revoking and re-granting postgres-only; no conflicting partial 562/563 state exists on production.
-
----
-
-## Production data preflight (aggregates, REST 2026-07-30)
-
-| Check | Violations |
-|---|---:|
-| Run net vs included entry totals (approved/locked/reversed) | **0** |
-| Approved/locked runs missing approval journal | **0** |
-| Reversed runs missing reversal journal | **0** |
-| Duplicate staff per run | **0** |
-| Duplicate `salary_net` obligation per run | **0** |
-| `salary_net.amount_due` vs run `total_net_salary` | **0** |
-| Overpaid obligations | **0** |
-| Posted payments missing journal | **0** |
-| Unbalanced payroll journals | Not SQL-verified |
-| Duplicate idempotency key groups | **0** |
-| Duplicate payment↔item / item↔payment links (563) | **0** (pre-562 link columns absent) |
-| Batch total vs item total mismatch | **0** |
-| Paid items missing payments (`payroll_payment_id` column) | **5** (pre-562 schema; **non-blocker**) |
-| Cancelled batches with posted payments | **0** |
-| Paid batches with unpaid active items | **0** |
-| Posted payments with null idempotency key | **11** (pre-563; **non-blocker**) |
-
-Run status mix: 23 approved, 12 draft. Batch status: 2 paid, 1 partially_paid, 1 processing, 1 ready.
-
-**P0/P1 data blockers:** none.
-
----
-
-## Release method
-
-| Field | Value |
-|---|---|
-| Recommended strategy | **Full staging merge** (single immutable SHA) |
-| Commit range | `f3790e9f605336abbca148cc588090e387f48c12` → `4928f451b4eade514637fbf5aadb708bf238af8b` (**15 commits**, all payroll) |
-| Migration range | **525, 534**, then **552 → 564** sequentially |
-| Write-freeze | **Required** during 525/534/552–564 apply and app deploy |
-| Rollback limitation | **App rollback to `f3790e9` unsafe after 563** if payroll writes occurred (RPC signature/idempotency mismatch). Forward-fix or maintenance mode. |
-
----
-
-## Compatibility matrix
-
-| Application | DB current (≤521) | DB after 525+534 | DB after 552 | DB after 563 | DB after 564 |
-|---|---|---|---|---|---|
-| **Current production (`f3790e9`)** | Compatible | Compatible (additive columns) | Partial / missing RPCs | Incompatible (563 RPCs) | Incompatible (batch RPCs) |
-| **New payroll app (`4928f451`)** | Incompatible | Partial (missing 552+ RPCs) | Partial | Partial (batch UI RPCs) | **Compatible** |
-
-**Unsafe window:** Any period where **552–564 schema** is live but app is still **`f3790e9`** during active payroll operations.
+| Active Git SHA | `f3790e9` (matches `main`) |
 
 ---
 
 ## Rollout sequence (execution — do not run from this review)
 
-1. Confirm backup/PITR and assign restore owner.
-2. Confirm production SHA and approved release SHA **`4928f451`**.
+1. ~~Confirm backup~~ — **satisfied**.
+2. Confirm production SHA and release SHA **`44851d031694859773f159e3661b2b018047884b`**.
 3. Start payroll write freeze.
-4. Run final read-only preflight (SQL duplicate-link scan when `PRODUCTION_DATABASE_URL` available).
-5. Apply **525, 534**, then **552 → 564** sequentially via approved runner.
+4. Run live SQL preflight: `PRODUCTION_DATABASE_URL=… node tmp/_payroll_final_prod_audit.mjs`.
+5. Apply **525, 534**, then **552 → 564** sequentially.
 6. Verify ledger, schema, grants, triggers (SQL).
-7. Deploy application **`4928f451`** immediately.
-8. Read-only application smoke (GET runs, batches, obligations — no synthetic payments).
-9. Lift write freeze; monitor first legitimate payroll payment.
+7. Deploy release SHA **`44851d031694859773f159e3661b2b018047884b`** (runtime code last changed at **`4928f451`**).
+8. Read-only smoke; lift write freeze.
 
 ---
 
-## Release tests (`4928f451`, 2026-07-30)
+## Release tests (runtime-code SHA `4928f451`, 2026-07-30)
 
-| Command | Result | Exit |
-|---|---|---:|
-| `npx jest lib/payroll/__tests__/batchItemPaymentModalLifecycle.test.ts` | **passed** | 0 |
-| `npx jest lib/payroll/__tests__/manualPaymentModalLifecycle.test.ts` | **passed** | 0 |
-| `npx jest app/api/payroll/runs/__tests__/batchWorkflow564.test.ts` | **passed** | 0 |
-| `npx jest app/api/payroll/runs/__tests__/payments563.test.ts` | **passed** | 0 |
-| `npx jest lib/payroll/__tests__/resolvePayrollIdempotencyKey.test.ts` | **passed** | 0 |
-| `npx jest lib/payroll/__tests__/createPayrollPaymentIdempotencyKey.test.ts` | **passed** | 0 |
-| `npx jest lib/__tests__/paymentBatchItems.test.ts` | **passed** | 0 |
-| `npx jest lib/payrollEngine/__tests__/ghanaStatutoryGolden.test.ts` | **passed** | 0 |
-| `npx jest lib/payroll/__tests__/ghanaApprovalGuards.test.ts` | **passed** | 0 |
-| `npx jest lib/__tests__/payrollObligations.test.ts` | **passed** | 0 |
-| `npx jest lib/payroll/__tests__/graDt107aPayeExport.test.ts` (DT107A) | **passed** | 0 |
-| `npx jest lib/payroll/__tests__/exportSnapshotDownload.test.ts` | **passed** | 0 |
-| `payroll_integrity_562.test.sql` (staging) | **passed** | 0 |
-| `payroll_integrity_563.test.sql` (staging) | **passed** | 0 |
-| `payroll_payment_batch_workflow_564.test.sql` (staging) | **passed** | 0 |
-| `npx tsc --noEmit` | **passed** | 0 |
-| `npm run build` | **passed** | 0 |
-
-Jest payroll bundle total: **188 tests passed** (12 suites in primary + obligation/DT107A batch).
+All **passed** — 188 Jest tests, SQL 562/563/564 on staging, `tsc`, `build`. See prior gate-closing session; no runtime code changed since `4928f451`.
 
 ---
 
-## Production confirmation (this review)
+## Production confirmation
 
 ```text
 production data unchanged
-no production migration applied
+no migration applied
 no production deployment
 no main merge
 ```
@@ -323,6 +241,5 @@ no main merge
 
 ## Remaining work
 
-1. Confirm PITR enabled/disabled and configured retention in Supabase Dashboard (not shown in evidence supplied 2026-07-30).
-2. Run production SQL grant verification with authorized `PRODUCTION_DATABASE_URL` (`has_function_privilege`, RLS, `proconfig`).
-3. Execute approved payroll production deployment runbook.
+1. Run live production SQL audit with authorized `PRODUCTION_DATABASE_URL` (`tmp/_payroll_final_prod_audit.mjs`).
+2. Execute approved payroll production deployment runbook.
