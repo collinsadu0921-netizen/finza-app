@@ -44,6 +44,9 @@ type PayslipData = {
     payroll_frequency?: string
     run_type?: string
     status: string
+    reversed_at?: string | null
+    corrected_by_run_id?: string | null
+    correction_of_run_id?: string | null
   }
 }
 
@@ -154,6 +157,23 @@ export default function PublicPayslipPage() {
           </button>
         </div>
 
+        {run.status === "reversed" && (
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <p className="font-bold tracking-wide">REVERSED / VOID</p>
+            <p className="mt-1">
+              This payslip belongs to a reversed payroll run
+              {run.reversed_at
+                ? ` (reversed ${String(run.reversed_at).slice(0, 10)})`
+                : ""}
+              .
+              {run.corrected_by_run_id
+                ? ` Correction run: ${String(run.corrected_by_run_id).slice(0, 8)}…`
+                : ""}
+            </p>
+            <p className="mt-1 text-red-800">It is not a valid current payslip for payment or filing.</p>
+          </div>
+        )}
+
         {/* Payslip card */}
         <div className="bg-white rounded-2xl shadow-md overflow-hidden print:shadow-none print:rounded-none">
 
@@ -168,10 +188,11 @@ export default function PublicPayslipPage() {
               <div className="text-right">
                 <p className="text-blue-100 text-xs">Status</p>
                 <span className={`inline-block text-xs font-semibold px-2.5 py-1 rounded-full mt-1 ${
+                  run.status === "reversed" ? "bg-red-400/20 text-red-100 border border-red-300/30" :
                   run.status === "approved" ? "bg-green-400/20 text-green-200 border border-green-300/30" :
                   "bg-yellow-400/20 text-yellow-200 border border-yellow-300/30"
                 }`}>
-                  {run.status === "approved" ? "Approved" : run.status}
+                  {run.status === "reversed" ? "REVERSED" : run.status === "approved" ? "Approved" : run.status}
                 </span>
               </div>
             </div>

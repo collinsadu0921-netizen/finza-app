@@ -134,14 +134,20 @@ export function computePayrollObligationDisplayFields(
   const amountDue = Number(o.amount_due ?? 0)
   const savedPaid = Number(o.amount_paid ?? 0)
   const obligationType = String(o.obligation_type ?? "")
+  const storedStatus = String(o.status ?? "unpaid")
   const isSalaryNet = obligationType === "salary_net"
   const isOtherDeductions = obligationType === "other_employee_deductions"
+  const isReversed = storedStatus === "reversed"
 
   let amountPaid: number
   let outstanding: number
   let computedStatus: string
 
-  if (isSalaryNet) {
+  if (isReversed) {
+    amountPaid = savedPaid
+    outstanding = 0
+    computedStatus = "reversed"
+  } else if (isSalaryNet) {
     const merged = mergeSalaryNetObligationPaid({
       amountDue,
       obligationSavedPaid: savedPaid,
@@ -158,12 +164,18 @@ export function computePayrollObligationDisplayFields(
   }
 
   const label = String(o.label ?? "")
-  const status = isSalaryNet ? computedStatus : String(o.status ?? computedStatus)
-  const status_display = isSalaryNet ? computedStatus : status
-  const internal_note = isOtherDeductions
-    ? "External employee deductions payable. Salary-advance recoveries clear separately via 2241→1110 and are not obligation payments."
-    : null
-  const is_payable = outstanding > 0.01
+  const status = isReversed ? "reversed" : isSalaryNet ? computedStatus : String(o.status ?? computedStatus)
+  const status_display = isReversed
+    ? "Reversed"
+    : isSalaryNet
+      ? computedStatus
+      : status
+  const internal_note = isReversed
+    ? "This obligation was reversed with its payroll run and is not payable."
+    : isOtherDeductions
+      ? "External employee deductions payable. Salary-advance recoveries clear separately via 2241→1110 and are not obligation payments."
+      : null
+  const is_payable = !isReversed && outstanding > 0.01
 
   return {
     label,

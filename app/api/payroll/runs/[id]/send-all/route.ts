@@ -58,6 +58,15 @@ export async function POST(
     if (payrollRun.status === "draft") {
       return NextResponse.json({ error: "Payroll must be approved before sending payslips." }, { status: 400 })
     }
+    if (payrollRun.status === "reversed") {
+      return NextResponse.json(
+        {
+          error: "Payslips cannot be sent for a reversed payroll run",
+          code: "PAYROLL_RUN_REVERSED",
+        },
+        { status: 409 }
+      )
+    }
 
     // Fetch all payslips with staff + entry data
     const { data: payslips, error: psError } = await supabase

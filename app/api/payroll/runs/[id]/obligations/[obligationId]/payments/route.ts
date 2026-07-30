@@ -67,7 +67,16 @@ export async function POST(
     if (runError || !payrollRun) return NextResponse.json({ error: "Payroll run not found" }, { status: 404 })
 
     if (!["approved", "locked"].includes(String(payrollRun.status || ""))) {
-      return NextResponse.json({ error: `Payroll run status "${payrollRun.status}" is not payable` }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: `Payroll run status "${payrollRun.status}" is not payable`,
+          code:
+            String(payrollRun.status) === "reversed"
+              ? "PAYROLL_RUN_REVERSED"
+              : "PAYROLL_REVERSAL_INVALID_STATUS",
+        },
+        { status: 400 }
+      )
     }
 
     const { data: obligation, error: obligationError } = await supabase
@@ -79,6 +88,16 @@ export async function POST(
       .is("deleted_at", null)
       .single()
     if (obligationError || !obligation) return NextResponse.json({ error: "Payroll obligation not found" }, { status: 404 })
+
+    if (String(obligation.status || "") === "reversed") {
+      return NextResponse.json(
+        {
+          error: "Reversed payroll obligations cannot accept payments",
+          code: "PAYROLL_RUN_REVERSED",
+        },
+        { status: 409 }
+      )
+    }
 
     const obligationDue = Number(obligation.amount_due || 0)
     const obligationPaid = Number(obligation.amount_paid || 0)

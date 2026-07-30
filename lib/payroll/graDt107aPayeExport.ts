@@ -70,6 +70,7 @@ export const GRA_DT107A_REQUIRES_APPROVAL_MESSAGE =
 
 export function isGraDt107aExportStatusAllowed(status: string | null | undefined): boolean {
   const s = String(status || "").toLowerCase()
+  // Reversed runs are historical only — never submission-ready.
   return s === "approved" || s === "locked"
 }
 

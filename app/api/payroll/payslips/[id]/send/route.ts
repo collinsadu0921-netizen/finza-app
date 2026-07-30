@@ -118,6 +118,15 @@ export async function POST(
     if (run?.business_id !== business.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
+    if (String(run?.status || "") === "reversed") {
+      return NextResponse.json(
+        {
+          error: "Payslips cannot be sent for a reversed payroll run",
+          code: "PAYROLL_RUN_REVERSED",
+        },
+        { status: 409 }
+      )
+    }
 
     const staff = payslip.staff as any
     const entry = payslip.payroll_entries as any

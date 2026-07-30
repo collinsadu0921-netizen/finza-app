@@ -61,6 +61,15 @@ export async function POST(
         { status: 400 }
       )
     }
+    if (payrollRun.status === "reversed") {
+      return NextResponse.json(
+        {
+          error: "Payslips cannot be generated for a reversed payroll run",
+          code: "PAYROLL_RUN_REVERSED",
+        },
+        { status: 409 }
+      )
+    }
 
     // Get all payroll entries for this run
     const { data: entries, error: entriesError } = await supabase

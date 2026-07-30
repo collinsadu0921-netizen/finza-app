@@ -218,12 +218,23 @@ export async function PUT(
         'draft': ['approved'],
         'approved': ['locked'],
         'locked': [], // Locked payroll cannot be changed
+        'reversed': [], // Reversed payroll is immutable
       }
 
       const allowedTransitions = validTransitions[existingRun.status] || []
       const isIdempotentApproveRetry =
         status === "approved" &&
         (existingRun.status === "approved" || existingRun.status === "locked")
+
+      if (existingRun.status === "reversed") {
+        return NextResponse.json(
+          {
+            error: "Payroll run has been reversed and cannot be modified",
+            code: "PAYROLL_RUN_REVERSED",
+          },
+          { status: 409 }
+        )
+      }
 
       if (!allowedTransitions.includes(status) && !isIdempotentApproveRetry) {
         return NextResponse.json(

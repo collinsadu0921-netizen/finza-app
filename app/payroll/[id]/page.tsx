@@ -59,6 +59,9 @@ type PayrollRun = {
   payroll_frequency?: string
   run_type?: string
   corrects_payroll_run_id?: string | null
+  correction_of_run_id?: string | null
+  corrected_by_run_id?: string | null
+  reversed_at?: string | null
   status: string
   total_gross_salary: number
   total_allowances: number
@@ -1057,17 +1060,42 @@ export default function PayrollRunViewPage() {
                     : ""}
                 </p>
               )}
-              {payrollRun.corrects_payroll_run_id ? (
-                <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
-                  Correction run for{" "}
+              {(payrollRun.correction_of_run_id || payrollRun.corrects_payroll_run_id) ? (
+                <p className="text-sm text-amber-800 dark:text-amber-200 mt-1 font-medium">
+                  Correction of reversed payroll{" "}
                   <button
                     type="button"
-                    onClick={() => router.push(`${payrollBase}/${payrollRun.corrects_payroll_run_id}`)}
-                    className="underline font-medium hover:text-amber-900 dark:hover:text-amber-100"
+                    onClick={() =>
+                      router.push(
+                        `${payrollBase}/${payrollRun.correction_of_run_id || payrollRun.corrects_payroll_run_id}`
+                      )
+                    }
+                    className="underline font-semibold hover:text-amber-900 dark:hover:text-amber-100"
                   >
-                    original payroll run
+                    {String(payrollRun.correction_of_run_id || payrollRun.corrects_payroll_run_id).slice(0, 8)}…
                   </button>
+                </p>
+              ) : null}
+              {payrollRun.status === "reversed" ? (
+                <p className="text-sm text-red-800 dark:text-red-200 mt-1 font-medium">
+                  This payroll has been reversed
+                  {payrollRun.reversed_at
+                    ? ` on ${String(payrollRun.reversed_at).slice(0, 10)}`
+                    : ""}
                   .
+                  {payrollRun.corrected_by_run_id ? (
+                    <>
+                      {" "}
+                      Correction draft:{" "}
+                      <button
+                        type="button"
+                        onClick={() => router.push(`${payrollBase}/${payrollRun.corrected_by_run_id}`)}
+                        className="underline font-semibold"
+                      >
+                        {String(payrollRun.corrected_by_run_id).slice(0, 8)}…
+                      </button>
+                    </>
+                  ) : null}
                 </p>
               ) : null}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -1084,6 +1112,8 @@ export default function PayrollRunViewPage() {
                     ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400"
                     : payrollRun.status === "locked"
                     ? "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400"
+                    : payrollRun.status === "reversed"
+                    ? "bg-red-100 text-red-900 dark:bg-red-900/50 dark:text-red-200"
                     : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-400"
                 }`}>
                   {payrollRun.status.charAt(0).toUpperCase() + payrollRun.status.slice(1)}

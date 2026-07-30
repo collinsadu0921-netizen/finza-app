@@ -60,7 +60,10 @@ export async function GET(
           payroll_frequency,
           run_type,
           status,
-          business_id
+          business_id,
+          reversed_at,
+          corrected_by_run_id,
+          correction_of_run_id
         )
       `)
       .eq("public_token", token)

@@ -132,8 +132,14 @@ export async function POST(
 
     if (!["approved", "locked"].includes(run.status)) {
       return NextResponse.json(
-        { error: "Payment batches can only be created for approved or locked payroll runs." },
-        { status: 400 }
+        {
+          error:
+            run.status === "reversed"
+              ? "Payment batches cannot be created for a reversed payroll run"
+              : "Payment batches can only be created for approved or locked payroll runs.",
+          code: run.status === "reversed" ? "PAYROLL_RUN_REVERSED" : undefined,
+        },
+        { status: run.status === "reversed" ? 409 : 400 }
       )
     }
 
