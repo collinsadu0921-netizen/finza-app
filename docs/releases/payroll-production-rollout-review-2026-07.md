@@ -21,9 +21,8 @@ Technical payroll preflight, migration dependency analysis, and release tests su
 
 ### Blockers (must resolve before execution)
 
-1. **Backup / PITR not verified** — values below remain placeholders until confirmed in Supabase Dashboard.
+1. **PITR status and retention not verified** — scheduled physical backups are confirmed (see Backup and recovery); PITR enabled/disabled and configured retention period were **not shown** in dashboard evidence supplied for this review.
 2. **Production SQL grant audit incomplete** — `PRODUCTION_DATABASE_URL` is **not present** in the review environment (`.env.local` has production REST keys only). Live `has_function_privilege` / `proconfig` audit was **not executed**. OpenAPI proxy audit completed (see Security review).
-3. **Restore owner not assigned** — placeholder below.
 
 ### Resolved in this gate-closing session
 
@@ -33,6 +32,7 @@ Technical payroll preflight, migration dependency analysis, and release tests su
 - Vercel production deployment metadata fetched; production SHA corroborated against GitHub `main`.
 - Production data preflight re-run (REST aggregates).
 - Release test bundle re-run at `4928f451`.
+- **Scheduled physical backups verified** for project `qjxhibvbmzogyzbhswjj`; restore owner assigned (**Collins**).
 
 ### Non-blockers (noted)
 
@@ -54,17 +54,27 @@ Technical payroll preflight, migration dependency analysis, and release tests su
 
 ## Backup and recovery
 
-**Not verified in this session.** Confirm in Supabase Dashboard → Project `qjxhibvbmzogyzbhswjj` → Database → Backups / Point in Time Recovery.
+Verified from Supabase Dashboard evidence (project `qjxhibvbmzogyzbhswjj`, supplied 2026-07-30):
+
+| Field | Value |
+|---|---|
+| Scheduled physical backups | **Enabled** |
+| Latest successful backup | **2026-07-30 05:36:49 UTC** (07:36:49 Sweden time) |
+| Daily restore points visible | **26–30 July 2026** |
+| Restore UI | Restore buttons available in Dashboard |
+| PITR enabled | **Not shown in supplied evidence** — confirm in Dashboard → Database → Backups / PITR |
+| Retention period | **Not shown in supplied evidence** — confirm configured retention in Dashboard |
+| Restore owner | **Collins** |
 
 ```text
-BACKUP_ENABLED=<verified value>
-LATEST_BACKUP_AT=<verified value>
-PITR_ENABLED=<verified value>
-RETENTION=<verified value>
-RESTORE_OWNER=<verified value>
+BACKUP_ENABLED=yes
+LATEST_BACKUP_AT=2026-07-30T05:36:49Z
+PITR_ENABLED=<not shown in dashboard evidence — verify before deploy>
+RETENTION=<not shown in dashboard evidence — verify before deploy>
+RESTORE_OWNER=Collins
 ```
 
-Restore procedure / runbook: assign owner and link to approved payroll production deployment runbook before execution.
+Restore procedure: Collins initiates restore via Supabase Dashboard if rollback is required; coordinate with approved payroll production deployment runbook before any restore during or after rollout.
 
 ---
 
@@ -313,6 +323,6 @@ no main merge
 
 ## Remaining work
 
-1. Verify Supabase backup/PITR in Dashboard; fill placeholders above; assign restore owner.
+1. Confirm PITR enabled/disabled and configured retention in Supabase Dashboard (not shown in evidence supplied 2026-07-30).
 2. Run production SQL grant verification with authorized `PRODUCTION_DATABASE_URL` (`has_function_privilege`, RLS, `proconfig`).
 3. Execute approved payroll production deployment runbook.
