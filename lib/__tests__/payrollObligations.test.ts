@@ -1,5 +1,6 @@
 import {
   computePayrollObligationDisplayFields,
+  deriveExternalEmployeeDeductionsDue,
   deriveOtherDeductionsRecoveryPaid,
   mergeSalaryNetObligationPaid,
   nextMonthPayeDueDate,
@@ -113,23 +114,23 @@ describe("payroll obligations helpers", () => {
     expect(v.status).toBe("partially_paid")
   })
 
-  it("computePayrollObligationDisplayFields marks advance recoveries recovered when cleared on approval", () => {
+  it("computePayrollObligationDisplayFields does not treat advance recovery as obligation paid", () => {
     const v = computePayrollObligationDisplayFields(
       {
         obligation_type: "other_employee_deductions",
-        label: "Other deductions",
+        label: "Employee deductions / recoveries",
         amount_due: 150,
         amount_paid: 0,
         status: "unpaid",
       },
-      { payrollPaymentsSum: 0, salaryAdvanceRecoveredOnApproval: 150 }
+      { payrollPaymentsSum: 0, salaryAdvanceRecoveredOnApproval: 100 }
     )
-    expect(v.label).toBe("Salary advance recoveries")
-    expect(v.amount_paid).toBe(150)
-    expect(v.outstanding_amount).toBe(0)
-    expect(v.status_display).toBe("Recovered")
-    expect(v.is_payable).toBe(false)
-    expect(v.internal_note).toContain("Internal recoveries")
+    expect(v.label).toBe("Employee deductions / recoveries")
+    expect(v.amount_paid).toBe(0)
+    expect(v.outstanding_amount).toBe(150)
+    expect(v.status_display).toBe("unpaid")
+    expect(v.is_payable).toBe(true)
+    expect(v.internal_note).toContain("2241→1110")
   })
 
   it("sets partially_paid and paid correctly", () => {
@@ -139,10 +140,11 @@ describe("payroll obligations helpers", () => {
     expect(statusFromAmounts(100, 120)).toBe("paid")
   })
 
-  it("treats salary advance recoveries as internal cleared amount", () => {
-    expect(deriveOtherDeductionsRecoveryPaid(100, 0)).toBe(0)
-    expect(deriveOtherDeductionsRecoveryPaid(100, 40)).toBe(40)
-    expect(deriveOtherDeductionsRecoveryPaid(100, 140)).toBe(100)
+  it("derives residual external deductions excluding advance recovery", () => {
+    expect(deriveExternalEmployeeDeductionsDue(100, 100)).toBe(0)
+    expect(deriveExternalEmployeeDeductionsDue(250, 100)).toBe(150)
+    expect(deriveExternalEmployeeDeductionsDue(250, 0)).toBe(250)
+    expect(deriveOtherDeductionsRecoveryPaid(100, 40)).toBe(0)
   })
 
   it("uses snapshot tier totals when they match total pension", () => {

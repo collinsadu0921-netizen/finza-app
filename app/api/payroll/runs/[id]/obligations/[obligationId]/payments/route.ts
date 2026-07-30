@@ -82,38 +82,9 @@ export async function POST(
 
     const obligationDue = Number(obligation.amount_due || 0)
     const obligationPaid = Number(obligation.amount_paid || 0)
-    const isOtherDeductions = obligation.obligation_type === "other_employee_deductions"
 
-    let salaryAdvanceRecoveredOnApproval = 0
-    if (isOtherDeductions) {
-      const { data: postedAdvanceRepayments } = await supabase
-        .from("salary_advance_repayments")
-        .select("amount")
-        .eq("business_id", business.id)
-        .eq("payroll_run_id", runId)
-        .eq("status", "posted")
-
-      salaryAdvanceRecoveredOnApproval = (postedAdvanceRepayments || []).reduce(
-        (sum, row: any) => sum + Number(row.amount || 0),
-        0
-      )
-
-      const recoveredAmount = Math.min(obligationDue, salaryAdvanceRecoveredOnApproval)
-      if (recoveredAmount >= obligationDue - 0.01) {
-        return NextResponse.json(
-          {
-            error:
-              "This deduction obligation is an internal salary advance recovery already cleared on payroll approval. No payment is required.",
-          },
-          { status: 400 }
-        )
-      }
-    }
-
-    const effectivePaid = isOtherDeductions
-      ? Math.min(obligationDue, Math.max(obligationPaid, salaryAdvanceRecoveredOnApproval))
-      : obligationPaid
-    const outstanding = Math.max(0, obligationDue - effectivePaid)
+    // Salary-advance recoveries are internal 2241→1110 clearing, not obligation payments.
+    const outstanding = Math.max(0, obligationDue - obligationPaid)
     if (amount - outstanding > 0.01) {
       return NextResponse.json(
         { error: `Payment amount exceeds outstanding obligation (outstanding: ${outstanding.toFixed(2)})` },
@@ -185,9 +156,7 @@ export async function POST(
       .order("created_at", { ascending: false })
 
     const totalPaid = (paidRows || []).reduce((sum, row: any) => sum + Number(row.amount || 0), 0)
-    const effectiveTotalPaid = isOtherDeductions
-      ? Math.min(obligationDue, Math.max(totalPaid, salaryAdvanceRecoveredOnApproval))
-      : totalPaid
+    const effectiveTotalPaid = totalPaid
     const newStatus = deriveStatus(obligationDue, effectiveTotalPaid)
     const latest = (paidRows || [])[0]
 

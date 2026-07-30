@@ -50,14 +50,28 @@ type GenerateOptions = {
   allowLegacyDerivation?: boolean
 }
 
-export function deriveOtherDeductionsRecoveryPaid(
-  amountDue: number,
+/**
+ * Residual external employee deductions payable (excludes salary-advance recovery).
+ * Advance recovery clears 2241→1110 internally and must not seed obligation amount_paid.
+ */
+export function deriveExternalEmployeeDeductionsDue(
+  totalDeductions: number,
   salaryAdvanceRecoveredOnApproval: number
 ): number {
-  const due = Number(amountDue || 0)
+  const total = Number(totalDeductions || 0)
   const recovered = Number(salaryAdvanceRecoveredOnApproval || 0)
-  if (due <= 0.01 || recovered <= 0.01) return 0
-  return Math.min(due, recovered)
+  return Math.round(Math.max(0, total - recovered) * 100) / 100
+}
+
+/**
+ * @deprecated Salary-advance recovery is not an obligation payment.
+ * Prefer deriveExternalEmployeeDeductionsDue for amount_due; amount_paid stays 0 until posted payments.
+ */
+export function deriveOtherDeductionsRecoveryPaid(
+  _amountDue: number,
+  _salaryAdvanceRecoveredOnApproval: number
+): number {
+  return 0
 }
 
 export function nextMonthPayeDueDate(payrollMonth: string): string {
@@ -137,33 +151,19 @@ export function computePayrollObligationDisplayFields(
     outstanding = merged.outstandingAmount
     computedStatus = merged.status
   } else {
-    const recoveredPaid = isOtherDeductions
-      ? Math.min(amountDue, ctx.salaryAdvanceRecoveredOnApproval)
-      : 0
-    amountPaid = Math.min(amountDue, Math.max(savedPaid, recoveredPaid))
+    // External payables only: never treat salary-advance recovery as amount_paid.
+    amountPaid = Math.min(amountDue, Math.max(0, savedPaid))
     outstanding = Math.max(0, amountDue - amountPaid)
-    computedStatus = String(o.status ?? "unpaid")
+    computedStatus = String(o.status ?? statusFromAmounts(amountDue, amountPaid))
   }
 
-  const internallyCleared = isOtherDeductions && outstanding <= 0.01
-
-  const label =
-    isOtherDeductions && internallyCleared
-      ? "Salary advance recoveries"
-      : String(o.label ?? "")
-
-  const status = isSalaryNet ? computedStatus : String(o.status ?? "unpaid")
-  const status_display = internallyCleared
-    ? "Recovered"
-    : isSalaryNet
-      ? computedStatus
-      : String(o.status ?? "unpaid")
-
-  const internal_note = internallyCleared
-    ? "Internal recoveries are deducted from net salary and cleared through payroll accounting."
+  const label = String(o.label ?? "")
+  const status = isSalaryNet ? computedStatus : String(o.status ?? computedStatus)
+  const status_display = isSalaryNet ? computedStatus : status
+  const internal_note = isOtherDeductions
+    ? "External employee deductions payable. Salary-advance recoveries clear separately via 2241→1110 and are not obligation payments."
     : null
-
-  const is_payable = isSalaryNet ? outstanding > 0.01 : !internallyCleared
+  const is_payable = outstanding > 0.01
 
   return {
     label,
@@ -251,14 +251,16 @@ export async function generateOrSyncPayrollObligationsForRun(
 
   const { data: entries } = await supabase
     .from("payroll_entries")
-    .select("tier1_ssnit_remittance,tier2_pension_remittance")
+    .select("tier1_ssnit_remittance,tier2_pension_remittance,is_included")
     .eq("payroll_run_id", payrollRunId)
 
-  const tier1FromSnapshot = (entries || []).reduce(
+  const includedEntries = (entries || []).filter((e: any) => e.is_included !== false)
+
+  const tier1FromSnapshot = includedEntries.reduce(
     (sum, e: any) => sum + Number(e.tier1_ssnit_remittance || 0),
     0
   )
-  const tier2FromSnapshot = (entries || []).reduce(
+  const tier2FromSnapshot = includedEntries.reduce(
     (sum, e: any) => sum + Number(e.tier2_pension_remittance || 0),
     0
   )
@@ -347,23 +349,17 @@ export async function generateOrSyncPayrollObligationsForRun(
     liability_account_code: pensionLiabCodes.tier2,
   }, existingByType)
 
-  const otherDeductionsDue = Number(run.total_deductions || 0)
-  const otherDeductionsRecovered = deriveOtherDeductionsRecoveryPaid(
-    otherDeductionsDue,
+  const otherDeductionsDue = deriveExternalEmployeeDeductionsDue(
+    Number(run.total_deductions || 0),
     salaryAdvanceRecoveredOnApproval
   )
 
-  // TODO(payroll): add deduction destination taxonomy so this can split internal
-  // recoveries vs true external remittances:
-  // internal_recovery | external_payable | staff_loan_recovery | union_dues | court_order | other
+  // Residual external payable only. Advance recoveries never seed amount_paid.
   await syncObligation(supabase, businessId, payrollRunId, {
     obligation_type: "other_employee_deductions",
-    label:
-      otherDeductionsRecovered >= otherDeductionsDue - 0.01
-        ? "Salary advance recoveries"
-        : "Employee deductions / recoveries",
+    label: "Employee deductions / recoveries",
     amount_due: otherDeductionsDue,
-    minimum_amount_paid: otherDeductionsRecovered,
+    minimum_amount_paid: 0,
     due_date: null,
     liability_account_code: "2241",
   }, existingByType)

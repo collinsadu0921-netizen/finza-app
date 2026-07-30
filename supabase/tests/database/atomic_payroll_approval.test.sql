@@ -50,7 +50,7 @@ BEGIN
   VALUES (v_biz, '554 Atomic Approval Test Biz', 'Ghana', v_owner, NOW(), NOW());
 
   INSERT INTO public.business_users (business_id, user_id, role, created_at)
-  VALUES (v_biz, v_owner, 'owner', NOW())
+  VALUES (v_biz, v_owner, 'admin', NOW())
   ON CONFLICT DO NOTHING;
 
   -- Minimal COA for payroll posting
@@ -73,23 +73,25 @@ BEGIN
   INSERT INTO public.staff (
     id, business_id, name, basic_salary, employment_type, is_tax_resident, secondary_employment
   ) VALUES (
-    v_staff, v_biz, 'Test Employee', 5000, 'permanent', true, false
+    v_staff, v_biz, 'Test Employee', 5000, 'full_time', true, false
   );
 
   -- -------------------------------------------------------------------------
   -- Scenario A: normal Ghana monthly approve
   -- -------------------------------------------------------------------------
   INSERT INTO public.payroll_runs (
-    id, business_id, payroll_month, status, payroll_frequency,
-    total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
+    id, business_id, payroll_month, pay_period_start, pay_period_end, status, payroll_frequency,
+    total_basic_salary, total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
     total_paye, total_deductions, total_net_salary,
     calculation_engine_version, paye_rate_version, pension_rate_version,
-    calculation_jurisdiction, statutory_period_basis
+    calculation_jurisdiction, statutory_period_basis,
+    notes, staff_scope_fingerprint
   ) VALUES (
-    v_run, v_biz, v_month, 'draft', 'monthly',
-    5000, 0, 275, 650, 200, 0, 4475,
+    v_run, v_biz, v_month, v_month, v_month, 'draft', 'monthly',
+    5000, 5000, 0, 275, 650, 200, 0, 4525,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
-    'GH', '2026-03-01'
+    'GH', '2026-03-01',
+    'atomic-approval-test', 'atomic-approval-test-a'
   );
 
   INSERT INTO public.payroll_entries (
@@ -101,7 +103,7 @@ BEGIN
     payroll_tax_profile
   ) VALUES (
     gen_random_uuid(), v_run, v_staff, 5000, 0, 0,
-    5000, 275, 650, 200, 4475, true,
+    5000, 275, 650, 200, 4525, true,
     675, 250,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
     'GH', '2026-03-01',
@@ -153,25 +155,28 @@ BEGIN
   RAISE NOTICE 'PASS B retry reuse';
 
   -- -------------------------------------------------------------------------
-  -- Scenario C: salary advance recovery + other deductions paid internally
+  -- Scenario C: salary advance recovery is NOT an external obligation payment
+  -- advance-only: total deductions 100, recovery 100 → no other_employee_deductions
   -- -------------------------------------------------------------------------
   INSERT INTO public.salary_advances (
-    id, business_id, staff_id, amount, outstanding_amount, status, advance_date
+    id, business_id, staff_id, amount, monthly_repayment, date_issued, repaid_amount, status, created_at, updated_at
   ) VALUES (
-    v_advance, v_biz, v_staff, 500, 500, 'active', v_month
+    v_advance, v_biz, v_staff, 500, 100, v_month, 0, 'outstanding', NOW(), NOW()
   );
 
   INSERT INTO public.payroll_runs (
-    id, business_id, payroll_month, status, payroll_frequency,
-    total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
+    id, business_id, payroll_month, pay_period_start, pay_period_end, status, payroll_frequency,
+    total_basic_salary, total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
     total_paye, total_deductions, total_net_salary,
     calculation_engine_version, paye_rate_version, pension_rate_version,
-    calculation_jurisdiction, statutory_period_basis
+    calculation_jurisdiction, statutory_period_basis,
+    notes, staff_scope_fingerprint
   ) VALUES (
-    v_run2, v_biz, v_month, 'draft', 'monthly',
-    5000, 0, 275, 650, 200, 100, 4375,
+    v_run2, v_biz, v_month, v_month, v_month, 'draft', 'monthly',
+    5000, 5000, 0, 275, 650, 200, 100, 4425,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
-    'GH', '2026-03-01'
+    'GH', '2026-03-01',
+    'atomic-approval-test', 'atomic-approval-test-c'
   );
 
   INSERT INTO public.payroll_entries (
@@ -184,7 +189,7 @@ BEGIN
     advance_recoveries_snapshot
   ) VALUES (
     v_run2, v_staff, 5000, 0, 100,
-    5000, 275, 650, 200, 4375, true,
+    5000, 275, 650, 200, 4425, true,
     675, 250,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
     'GH', '2026-03-01',
@@ -204,32 +209,40 @@ BEGIN
   IF COALESCE((v_result->>'ok')::boolean, false) IS NOT TRUE THEN
     RAISE EXCEPTION 'C: approval failed: %', v_result;
   END IF;
+  IF ABS(COALESCE((v_result->>'externalDeductions')::numeric, -1) - 0) > 0.01 THEN
+    RAISE EXCEPTION 'C: externalDeductions should be 0, got %', v_result;
+  END IF;
+  IF ABS(COALESCE((v_result->>'advanceRecovered')::numeric, -1) - 100) > 0.01 THEN
+    RAISE EXCEPTION 'C: advanceRecovered should be 100, got %', v_result;
+  END IF;
 
   SELECT COUNT(*) INTO v_repay_count FROM public.salary_advance_repayments
   WHERE payroll_run_id = v_run2 AND status = 'posted';
   IF v_repay_count < 1 THEN RAISE EXCEPTION 'C: expected posted repayments'; END IF;
 
-  SELECT amount_paid INTO v_other_paid FROM public.payroll_obligations
+  SELECT COUNT(*) INTO v_obl_count FROM public.payroll_obligations
   WHERE payroll_run_id = v_run2 AND obligation_type = 'other_employee_deductions' AND deleted_at IS NULL;
-  IF ABS(COALESCE(v_other_paid, 0) - 100) > 0.01 THEN
-    RAISE EXCEPTION 'C: other paid should mark advance recovery paid, got %', v_other_paid;
+  IF v_obl_count <> 0 THEN
+    RAISE EXCEPTION 'C: advance-only must not create other_employee_deductions, count=%', v_obl_count;
   END IF;
-  RAISE NOTICE 'PASS C salary advance';
+  RAISE NOTICE 'PASS C salary advance (external obligation absent; repayments only)';
 
   -- -------------------------------------------------------------------------
   -- Scenario D: obligation conflict rolls back
   -- -------------------------------------------------------------------------
   INSERT INTO public.payroll_runs (
-    id, business_id, payroll_month, status, payroll_frequency,
-    total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
+    id, business_id, payroll_month, pay_period_start, pay_period_end, status, payroll_frequency,
+    total_basic_salary, total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
     total_paye, total_deductions, total_net_salary,
     calculation_engine_version, paye_rate_version, pension_rate_version,
-    calculation_jurisdiction, statutory_period_basis
+    calculation_jurisdiction, statutory_period_basis,
+    notes, staff_scope_fingerprint
   ) VALUES (
-    v_run3, v_biz, DATE '2026-04-01', 'draft', 'monthly',
-    5000, 0, 275, 650, 200, 0, 4475,
+    v_run3, v_biz, DATE '2026-04-01', DATE '2026-04-01', DATE '2026-04-01', 'draft', 'monthly',
+    5000, 5000, 0, 275, 650, 200, 0, 4525,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
-    'GH', '2026-04-01'
+    'GH', '2026-04-01',
+    'atomic-approval-test', 'atomic-approval-test-d'
   );
 
   INSERT INTO public.accounting_periods (business_id, period_start, period_end, status)
@@ -245,7 +258,7 @@ BEGIN
     payroll_tax_profile
   ) VALUES (
     v_run3, v_staff, 5000, 0, 0,
-    5000, 275, 650, 200, 4475, true,
+    5000, 275, 650, 200, 4525, true,
     675, 250,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
     'GH', '2026-04-01',
@@ -283,16 +296,18 @@ BEGIN
   -- Scenario F: Ghana unsupported profile blocked
   -- -------------------------------------------------------------------------
   INSERT INTO public.payroll_runs (
-    id, business_id, payroll_month, status, payroll_frequency,
-    total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
+    id, business_id, payroll_month, pay_period_start, pay_period_end, status, payroll_frequency,
+    total_basic_salary, total_gross_salary, total_allowances, total_ssnit_employee, total_ssnit_employer,
     total_paye, total_deductions, total_net_salary,
     calculation_engine_version, paye_rate_version, pension_rate_version,
-    calculation_jurisdiction, statutory_period_basis
+    calculation_jurisdiction, statutory_period_basis,
+    notes, staff_scope_fingerprint
   ) VALUES (
-    v_run_bad, v_biz, DATE '2026-05-01', 'draft', 'monthly',
-    5000, 0, 0, 0, 0, 0, 5000,
+    v_run_bad, v_biz, DATE '2026-05-01', DATE '2026-05-01', DATE '2026-05-01', 'draft', 'monthly',
+    5000, 5000, 0, 0, 0, 0, 0, 5000,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01',
-    'GH', '2026-05-01'
+    'GH', '2026-05-01',
+    'atomic-approval-test', 'atomic-approval-test-f'
   );
   INSERT INTO public.accounting_periods (business_id, period_start, period_end, status)
   VALUES (v_biz, DATE '2026-05-01', DATE '2026-05-31', 'open');
