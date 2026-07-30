@@ -5,9 +5,9 @@ Read-only deployment review for Finza payroll hardening (migrations **525, 534, 
 | Field | Value |
 |---|---|
 | Review branch | `staging` |
-| **Release Git SHA** | **`5c190906a80911065adb8b67dad3f6791914c848`** |
+| **Release Git SHA** | **`e6b07b35ab4792180068179621400d1ad1222ae5`** (current `origin/staging`) |
 | **Last runtime-code SHA** | **`4928f451b4eade514637fbf5aadb708bf238af8b`** |
-| Changes after runtime-code SHA | **Documentation only** (review commits `83280ed`, `96c20ca`, `44851d0`, `5c19090`) |
+| Changes after runtime-code SHA | **Documentation only** (review doc commits only; no payroll runtime changes) |
 | Production Supabase ref | `qjxhibvbmzogyzbhswjj` |
 | Staging Supabase ref | `adonhhtooawkeemdqqeo` |
 | Review type | Read-only (no production writes) |
