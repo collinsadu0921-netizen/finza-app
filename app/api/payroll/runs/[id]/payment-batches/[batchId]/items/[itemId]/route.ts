@@ -89,13 +89,14 @@ export async function PATCH(
       )
     }
 
-    if (nextStatus === "paid" && body.manual_confirm !== true) {
+    if (nextStatus === "paid") {
       return NextResponse.json(
         {
           error:
-            'Marking an item paid requires manual_confirm: true (confirms the transfer was done outside Finza; this does not post to the ledger).',
+            "Batch items cannot be marked paid directly. Use POST .../record-payment to record salary payment and accounting.",
+          code: "PAYROLL_BATCH_ITEM_PAYMENT_REQUIRED",
         },
-        { status: 400 }
+        { status: 409 }
       )
     }
 
@@ -113,12 +114,7 @@ export async function PATCH(
           ? null
           : String(body.payment_reference).trim() || null
 
-    const paid_at: string | null =
-      nextStatus === "paid"
-        ? body.paid_at !== undefined
-          ? parseIsoDateOrNull(body.paid_at) ?? new Date().toISOString()
-          : new Date().toISOString()
-        : null
+    const paid_at: string | null = null
 
     const patch: Record<string, unknown> = { status: nextStatus, paid_at }
     if (failure_reason !== undefined) patch.failure_reason = failure_reason

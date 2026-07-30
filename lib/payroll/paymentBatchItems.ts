@@ -291,7 +291,7 @@ export function assertManualBatchStatusTransition(from: string, to: string): voi
 }
 
 export const BATCH_EXPORT_DISCLAIMER =
-  "IMPORTANT: This file does not send money. Confirm transfers externally and record salary payment in Finza after funds leave the account."
+  "IMPORTANT: This file does not send money. Recording an item as paid in Finza creates the corresponding salary-payment accounting entry."
 
 export const BATCH_EXPORT_HEADERS = [
   "Batch ID",

@@ -15,6 +15,7 @@ import {
 } from "@/lib/payroll/salaryBasis"
 import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
 import { mapApprovePayrollRunAtomicError } from "@/lib/payroll/mapApprovePayrollAtomicError"
+import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
 
 export async function GET(
   request: NextRequest,
@@ -416,6 +417,35 @@ export async function PUT(
         approval: approvalResult,
         reused: Boolean((approvalResult as { reused?: boolean } | null)?.reused),
       })
+    }
+
+    if (status === "locked" && existingRun.status === "approved") {
+      const { data: lockResult, error: lockError } = await supabase.rpc("lock_payroll_run_atomic", {
+        p_business_id: business.id,
+        p_payroll_run_id: runId,
+        p_actor_id: user.id,
+      })
+
+      if (lockError) {
+        const mapped = mapPayrollPaymentAtomicError(lockError)
+        const { status: httpStatus, ...payload } = mapped
+        return NextResponse.json(payload, { status: httpStatus })
+      }
+
+      const { data: payrollRun, error: reloadError } = await supabase
+        .from("payroll_runs")
+        .select("*")
+        .eq("id", runId)
+        .single()
+
+      if (reloadError || !payrollRun) {
+        return NextResponse.json(
+          { error: reloadError?.message || "Locked but failed to reload payroll run", lock: lockResult },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json({ payrollRun, lock: lockResult, reused: Boolean((lockResult as { reused?: boolean } | null)?.reused) })
     }
 
     const updateData: any = {}

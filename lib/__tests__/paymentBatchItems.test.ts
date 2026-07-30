@@ -7,6 +7,7 @@ import {
   BATCH_EXPORT_HEADERS,
 } from "@/lib/payroll/paymentBatchItems"
 import { formatNumeric } from "@/lib/payroll/csvExport"
+import { PAYROLL_EXPORT_PERIOD_HEADERS, payrollExportPeriodValues } from "@/lib/payroll/payrollExportMetadata"
 
 describe("paymentBatchItems helpers", () => {
   it("snapshots net salary and destination from default staff_payment_method", () => {
@@ -139,10 +140,20 @@ describe("paymentBatchItems helpers", () => {
     expect(BATCH_EXPORT_HEADERS).toContain("Batch ID")
     expect(BATCH_EXPORT_HEADERS).toContain("Destination Source")
     expect(BATCH_EXPORT_HEADERS).toContain("Failure Reason")
+
+    const runMeta = {
+      payroll_month: "2026-05-01",
+      pay_period_start: "2026-05-01",
+      pay_period_end: "2026-05-31",
+      payroll_frequency: "monthly",
+      run_type: "regular",
+    }
+    const periodValues = payrollExportPeriodValues(runMeta)
+
     const row = [
       "batch-uuid",
       "run-uuid",
-      "2026-05",
+      ...periodValues,
       "Staff Name",
       "staff-uuid",
       "entry-uuid",
@@ -162,6 +173,10 @@ describe("paymentBatchItems helpers", () => {
       "",
     ]
     expect(row.length).toBe(BATCH_EXPORT_HEADERS.length)
-    expect(BATCH_EXPORT_DISCLAIMER.length).toBeGreaterThan(20)
+    expect(BATCH_EXPORT_DISCLAIMER).toContain("salary-payment accounting entry")
+  })
+
+  it("rejects status-only paid transitions at API contract level", () => {
+    expect(BATCH_EXPORT_DISCLAIMER).not.toContain("Confirm transfers externally")
   })
 })

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
+import { randomUUID } from "crypto"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { derivePayrollPaymentSummary } from "@/lib/payroll/payrollPaymentSummary"
-import { statusFromAmounts } from "@/lib/payroll/obligations"
+import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
 import {
   enforceServiceIndustryMinTier,
   enforceServiceIndustryMinTierWrite,
@@ -39,6 +40,7 @@ async function getRunPaymentData(
       reference,
       notes,
       journal_entry_id,
+      idempotency_key,
       created_at,
       payment_account:payment_account_id (
         id,
@@ -52,6 +54,7 @@ async function getRunPaymentData(
     .eq("business_id", businessId)
     .eq("payroll_run_id", runId)
     .is("deleted_at", null)
+    .not("journal_entry_id", "is", null)
     .order("payment_date", { ascending: false })
     .order("created_at", { ascending: false })
 
@@ -183,22 +186,11 @@ export async function POST(
     const paymentAccountId = String(body.payment_account_id || "")
     const reference = body.reference ? String(body.reference).trim() : null
     const notes = body.notes ? String(body.notes).trim() : null
+    const idempotencyKey = String(body.idempotency_key || body.idempotencyKey || randomUUID()).trim()
 
     let batchId: string | null = null
     if (body.batch_id != null && String(body.batch_id).trim()) {
       batchId = String(body.batch_id).trim()
-      const { data: batchRow, error: batchErr } = await supabase
-        .from("payroll_payment_batches")
-        .select("id")
-        .eq("id", batchId)
-        .eq("business_id", business.id)
-        .eq("payroll_run_id", runId)
-        .is("deleted_at", null)
-        .maybeSingle()
-
-      if (batchErr || !batchRow) {
-        return NextResponse.json({ error: "Invalid batch_id for this payroll run." }, { status: 400 })
-      }
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
@@ -210,138 +202,50 @@ export async function POST(
     if (!paymentAccountId) {
       return NextResponse.json({ error: "payment_account_id is required" }, { status: 400 })
     }
-
-    const runData = await getRunPaymentData(supabase, business.id, runId)
-    if ("error" in runData) {
-      return NextResponse.json({ error: runData.error }, { status: runData.status })
+    if (!idempotencyKey) {
+      return NextResponse.json({ error: "idempotency_key is required" }, { status: 400 })
     }
 
-    if (runData.payrollRun.status === "draft") {
-      return NextResponse.json(
-        { error: "Cannot record salary payment for draft payroll runs" },
-        { status: 400 }
-      )
-    }
-    if (!["approved", "locked"].includes(runData.payrollRun.status)) {
-      return NextResponse.json(
-        { error: `Payroll run status "${runData.payrollRun.status}" is not payable` },
-        { status: 400 }
-      )
-    }
+    const { data: result, error: rpcError } = await supabase.rpc("record_payroll_payment_atomic", {
+      p_business_id: business.id,
+      p_payroll_run_id: runId,
+      p_payment_date: paymentDate,
+      p_amount: amount,
+      p_payment_account_id: paymentAccountId,
+      p_reference: reference,
+      p_notes: notes,
+      p_batch_id: batchId,
+      p_batch_item_id: null,
+      p_actor_id: user.id,
+      p_idempotency_key: idempotencyKey,
+    })
 
-    if (amount - runData.summary.outstanding_amount > 0.01) {
-      return NextResponse.json(
-        {
-          error: `Payment amount exceeds outstanding net salaries payable (outstanding: ${runData.summary.outstanding_amount.toFixed(2)})`,
-        },
-        { status: 400 }
-      )
-    }
-
-    const { data: paymentAccount } = await supabase
-      .from("accounts")
-      .select("id, code, sub_type, type, deleted_at, business_id")
-      .eq("id", paymentAccountId)
-      .eq("business_id", business.id)
-      .single()
-
-    const subType = String(paymentAccount?.sub_type || "").toLowerCase()
-    const code = String(paymentAccount?.code || "")
-    const isAllowedAssetAccount =
-      paymentAccount &&
-      paymentAccount.type === "asset" &&
-      paymentAccount.deleted_at == null &&
-      (["cash", "bank", "momo", "mobile_money"].includes(subType) || ["1000", "1010", "1020"].includes(code))
-
-    if (!isAllowedAssetAccount) {
-      return NextResponse.json(
-        { error: "Selected payment account is invalid. Choose an active cash/bank/momo asset account." },
-        { status: 400 }
-      )
-    }
-
-    const { data: payment, error: insertError } = await supabase
-      .from("payroll_payments")
-      .insert({
-        business_id: business.id,
-        payroll_run_id: runId,
-        payment_date: paymentDate,
-        amount,
-        payment_account_id: paymentAccountId,
-        reference: reference || null,
-        notes: notes || null,
-        created_by: user.id,
-        ...(batchId ? { batch_id: batchId } : {}),
-      })
-      .select("*")
-      .single()
-
-    if (insertError || !payment) {
-      return NextResponse.json({ error: insertError?.message || "Failed to create payroll payment" }, { status: 500 })
-    }
-
-    const { data: journalEntryId, error: postError } = await supabase.rpc(
-      "post_payroll_payment_to_ledger",
-      { p_payroll_payment_id: payment.id }
-    )
-
-    if (postError || !journalEntryId) {
-      await supabase.from("payroll_payments").delete().eq("id", payment.id)
-      return NextResponse.json(
-        { error: postError?.message || "Failed to post payroll payment to ledger" },
-        { status: 500 }
-      )
+    if (rpcError) {
+      const mapped = mapPayrollPaymentAtomicError(rpcError)
+      const { status, ...payload } = mapped
+      return NextResponse.json(payload, { status })
     }
 
     const refreshed = await getRunPaymentData(supabase, business.id, runId)
     if ("error" in refreshed) {
       return NextResponse.json(
         {
-          payment: { ...payment, journal_entry_id: journalEntryId },
+          payment: result,
           summary: null,
-          warning: "Payment posted but summary refresh failed",
+          warning: "Payment recorded but summary refresh failed",
         },
-        { status: 201 }
+        { status: (result as { reused?: boolean })?.reused ? 200 : 201 }
       )
-    }
-
-    const { data: salaryNetObligation } = await supabase
-      .from("payroll_obligations")
-      .select("id, amount_due")
-      .eq("business_id", business.id)
-      .eq("payroll_run_id", runId)
-      .eq("obligation_type", "salary_net")
-      .is("deleted_at", null)
-      .maybeSingle()
-
-    if (salaryNetObligation) {
-      const due = Number(salaryNetObligation.amount_due || 0)
-      const paidTotal = Number(refreshed.summary.paid_amount || 0)
-      const amountPaidForObligation = Math.min(due, paidTotal)
-      const obligationStatus = statusFromAmounts(due, amountPaidForObligation)
-      const latestPay = (refreshed.payments || [])[0] as
-        | { payment_date?: string; reference?: string | null; payment_account_id?: string }
-        | undefined
-
-      await supabase
-        .from("payroll_obligations")
-        .update({
-          amount_paid: amountPaidForObligation,
-          status: obligationStatus,
-          latest_payment_date: latestPay?.payment_date ?? null,
-          latest_payment_reference: latestPay?.reference ?? null,
-          payment_account_id: latestPay?.payment_account_id ?? null,
-        })
-        .eq("id", salaryNetObligation.id)
     }
 
     return NextResponse.json(
       {
-        payment: { ...payment, journal_entry_id: journalEntryId },
+        payment: result,
         summary: refreshed.summary,
         payments: refreshed.payments,
+        reused: Boolean((result as { reused?: boolean } | null)?.reused),
       },
-      { status: 201 }
+      { status: (result as { reused?: boolean })?.reused ? 200 : 201 }
     )
   } catch (error: any) {
     console.error("Error creating payroll payment:", error)
