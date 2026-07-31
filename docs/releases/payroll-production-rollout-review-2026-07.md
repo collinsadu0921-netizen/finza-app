@@ -1,6 +1,6 @@
-# Payroll production rollout review — 2026-07-30 (closeout)
+# Payroll production rollout review — 2026-07-31 (closeout)
 
-Read-only deployment review for Finza payroll hardening (migrations **525, 534, 552–564**).
+Read-only deployment review for Finza payroll hardening (migrations **525, 534, 552–565**).
 
 | Field | Value |
 |---|---|
@@ -8,14 +8,15 @@ Read-only deployment review for Finza payroll hardening (migrations **525, 534, 
 | Production Supabase ref | `qjxhibvbmzogyzbhswjj` |
 | Staging Supabase ref | `adonhhtooawkeemdqqeo` |
 | Review type | Read-only (no production writes) |
-| Gate-closing session | 2026-07-30 |
+| Gate-closing session | 2026-07-31 |
 | **Live SQL audit session** | **2026-07-30** (`tmp/_payroll_final_prod_audit.json`) |
+| **Migration 565 gate session** | **2026-07-31** (`tmp/_payroll_release_gate_audit.json`) |
 
 ```text
 Release source: staging
-Last runtime-code SHA: 4928f451b4eade514637fbf5aadb708bf238af8b
+Last runtime-code SHA: 07a755dac2185a43702cc9535193bfbec29fdefc
 Exact deployment SHA: pending immutable release tag/commit
-Changes after runtime-code SHA: documentation only
+Changes after runtime-code SHA: documentation and release-gate evidence only
 ```
 
 ---
@@ -24,16 +25,19 @@ Changes after runtime-code SHA: documentation only
 
 **PAYROLL PRODUCTION DEPLOYMENT REVIEW PASSED**
 
-All technical gates are satisfied, including the **live production SQL security and integrity audit**. This review **authorizes proceeding** with the approved payroll production deployment runbook (write freeze → migrations → deploy → smoke). **No migrations or production deploy were executed as part of this review.**
+All technical gates are satisfied, including the **live production SQL security and integrity audit**, **full production build at runtime SHA `07a755d`**, and **migration 565 staging verification**. This review **authorizes proceeding** with the approved payroll production deployment runbook (write freeze → migrations → deploy → smoke). **No migrations or production deploy were executed as part of this review.**
 
 ### Satisfied gates
 
 | Gate | Status |
 |---|---|
 | Backup / restore | **Satisfied** |
-| Migration dependency analysis | **Satisfied** |
+| Migration dependency analysis | **Satisfied** (through **565**) |
 | REST data preflight | **Satisfied** (0 P0/P1) |
-| Release tests at `4928f451` | **Passed** |
+| Release tests at `07a755d` | **Passed** |
+| Full production build at `07a755d` | **Passed** (`npm run build`) |
+| Migration 565 security audit | **Passed** |
+| Staging export UAT (565) | **Passed** |
 | Release identification | **Satisfied** |
 | **Live production SQL audit** | **Passed** (11 queries executed; 0 blockers) |
 
@@ -55,6 +59,7 @@ Nine reconciliation checks require columns introduced by migration **562** (`ide
 |---|---|
 | Path | `docs/releases/payroll-production-rollout-review-2026-07.md` |
 | Authoritative live audit | `tmp/_payroll_final_prod_audit.json` |
+| Migration 565 gate audit | `tmp/_payroll_release_gate_audit.json` |
 
 ---
 
@@ -109,10 +114,11 @@ All 14 inventoried tables exist. Key migration fingerprints on production:
 | **534** (`staff.salary_basis`, entry period columns) | **No** |
 | **552** (`calculation_engine_version`, `paye_rate_version`) | **No** |
 | **562** (`reversed_at`, `idempotency_key`, `batch_item_id`, batch/obligation payment links) | **No** |
+| **565** (`record_payroll_export_event` BOM delivery hash alignment) | **No** |
 
 `journal_entry_lines` confirmed **without** `business_id` (columns: `journal_entry_id`, `account_id`, `debit`, `credit`, `description`, `created_at`). Cross-business integrity uses payment vs journal header (`pp.business_id` vs `je.business_id`).
 
-Latest **payroll** migration in ledger: **521** (`payroll_entry_run_adjustments`). Non-payroll migrations **535–551** are present in the ledger (applied out of payroll sequence); payroll path **525, 534, 552–564** remain unapplied — **no partial payroll schema detected**.
+Latest **payroll** migration in ledger: **521** (`payroll_entry_run_adjustments`). Non-payroll migrations **535–551** are present in the ledger (applied out of payroll sequence); payroll path **525, 534, 552–565** remain unapplied — **no partial payroll schema detected**.
 
 ---
 
@@ -120,7 +126,7 @@ Latest **payroll** migration in ledger: **521** (`payroll_entry_run_adjustments`
 
 **Status: LIVE-AUDITED**
 
-Live `has_function_privilege` audit (read-only). Target payroll hardening RPCs from migrations **552–564** are **not present** on production — expected at ledger **521**.
+Live `has_function_privilege` audit (read-only). Target payroll hardening RPCs from migrations **552–565** are **not present** on production — expected at ledger **521**.
 
 | Function | Found | `authenticated` EXECUTE | Notes |
 |---|---:|---:|---|
@@ -131,6 +137,7 @@ Live `has_function_privilege` audit (read-only). Target payroll hardening RPCs f
 | `record_payroll_batch_item_payment_atomic` | No | — | Post-562 |
 | `lock_payroll_run_atomic` | No | — | Post-554 |
 | `transition_payroll_payment_batch_*_atomic` | No | — | Post-564 |
+| `record_payroll_export_event` (9-arg, post-565) | No | — | Post-559/565 |
 | **`post_payroll_payment_to_ledger`** | **Yes** | **Yes** | Migration **445**; `SECURITY DEFINER`, `search_path=public` |
 | `_record_payroll_payment_atomic_impl` | No | — | Post-562 internal |
 | `_post_payroll_payment_journal_internal` | No | — | Post-562 internal |
@@ -139,7 +146,7 @@ Live `has_function_privilege` audit (read-only). Target payroll hardening RPCs f
 
 **Pre-migration expectation:** `post_payroll_payment_to_ledger` authenticated access is **expected**. Migration **562** explicitly `REVOKE`s authenticated and grants postgres-only.
 
-**Post-564 expectation:** Public payroll RPCs → `authenticated` EXECUTE (actor from `auth.uid()`); internal helpers → postgres only.
+**Post-565 expectation:** `record_payroll_export_event(uuid,uuid,uuid,text,text,text,text,text,bigint)` → `authenticated` EXECUTE only (anon/public denied); internal snapshot helpers → postgres only.
 
 ### Supplementary OpenAPI proxy (production REST, 2026-07-30)
 
@@ -165,7 +172,7 @@ All nine audit tables exist with **RLS enabled** (not forced). Summary:
 | `journal_entries` | On | SELECT + INSERT policies; **no authenticated UPDATE/DELETE** |
 | `journal_entry_lines` | On | SELECT + INSERT policies; **no authenticated UPDATE/DELETE** |
 
-**Pre-migration note:** Direct journal line INSERT remains available to `authenticated` (pre-562). Migrations **552–564** install immutability triggers, controlled RPC paths, and revoke direct journal posting from authenticated users.
+**Pre-migration note:** Direct journal line INSERT remains available to `authenticated` (pre-562). Migrations **552–565** install immutability triggers, controlled RPC paths, and revoke direct journal posting from authenticated users.
 
 ---
 
@@ -236,19 +243,101 @@ All nine audit tables exist with **RLS enabled** (not forced). Summary:
 
 ## Migration sequence (Part F)
 
-**Approved sequence (unchanged):**
+**Approved sequence:**
 
 ```text
-525 → 534 → 552 → 553 → 554 → 555 → 556 → 557 → 558 → 559 → 560 → 561 → 562 → 563 → 564
+525 → 534 → 552 → 553 → 554 → 555 → 556 → 557 → 558 → 559 → 560 → 561 → 562 → 563 → 564 → 565
 ```
 
 | Confirmation | Result |
 |---|---|
-| 525, 534 required | **Yes** (557–564 SQL + app depend on period/salary-basis columns) |
+| 525, 534 required | **Yes** (557–565 SQL + app depend on period/salary-basis columns) |
+| 558–559 required before 565 | **Yes** (export snapshots + `record_payroll_export_event` foundation) |
+| 560–564 required before 565 | **Yes** (approval snapshots use v2 renderers; payment integrity unchanged by 565) |
 | 522–524, 526–533, 535–551 not required for payroll | **Yes** |
 | Hidden SQL dependency | **None found** |
-| Partial 525/534/552–564 payroll schema | **None** (live fingerprints: present-or-absent) |
-| Latest payroll ledger migration | **521** |
+| Partial 525/534/552–565 payroll schema | **None** (live fingerprints: present-or-absent) |
+| Latest payroll ledger migration (production) | **521** |
+| Latest payroll ledger migration (staging) | **565** (once) |
+
+---
+
+## Migration 565 review (2026-07-31)
+
+### Purpose
+
+Align `record_payroll_export_event` with UTF-8 BOM delivery: immutable snapshot `rendered_content` and `rendered_content_sha256` remain BOM-free; HTTP-delivered CSV bytes include BOM (`EF BB BF`); download events record SHA-256 and byte length of the **exact delivered bytes**.
+
+### Dependencies
+
+| Migration | Requirement |
+|---|---|
+| **558** | `payroll_export_snapshots`, `payroll_export_events`, `verify_payroll_export_snapshot`, `payroll_sha256_hex` |
+| **559** | Nine-argument `record_payroll_export_event`, permission gates, DT107A preparation hash guard |
+| **560–564** | Approval-time v2 snapshots and payroll integrity (565 does not alter payment/batch logic) |
+
+565 **replaces** the 559 function body only. It does **not** re-grant privileges (`CREATE OR REPLACE` preserves 559 grants).
+
+### Security-definer review
+
+Staging catalog inspection (2026-07-31):
+
+| Property | Value |
+|---|---|
+| Signature | `record_payroll_export_event(uuid,uuid,uuid,text,text,text,text,text,bigint)` |
+| Overload count | **1** |
+| Owner | `postgres` |
+| `SECURITY DEFINER` | **Yes** |
+| `search_path` | `public, extensions, pg_catalog` |
+
+**Preserved controls from 559:** `auth.uid()` actor resolution; business access; `payroll.export` permission; mode validation; lowercase 64-char SHA-256 validation; safe filename validation; non-negative content length; snapshot ownership/export-type validation; approved snapshot-source validation; `verify_payroll_export_snapshot`; renderer-version equality; payroll-run existence; reversed-run preparation blocking; append-only event insert; structured fail-closed errors.
+
+**565 change only:** DT107A preparation hash/length validation now expects `SHA-256(BOM || rendered_content)` and matching byte length instead of raw snapshot hash.
+
+### Privileges (staging live)
+
+| Role | EXECUTE |
+|---|---|
+| `authenticated` | **Yes** |
+| `service_role` | **Yes** |
+| `postgres` | **Yes** |
+| `anon` | **No** |
+| `public` | **No** |
+
+No unintended overload or widened access detected.
+
+### BOM byte verification
+
+PostgreSQL expression `decode('efbbbf','hex')` verified on staging:
+
+```text
+bom_hex=efbbbf  bom_len=3  bytes=[239,187,191]
+```
+
+Snapshot stored content remains BOM-free; delivered preparation = BOM + `rendered_content`.
+
+### Staging verification
+
+| Check | Result |
+|---|---|
+| Migration 565 in ledger (once) | **Pass** |
+| All 8 export modes HTTP 200 | **Pass** |
+| Single UTF-8 BOM per download | **Pass** |
+| No double BOM | **Pass** |
+| Event hash = HTTP bytes SHA-256 | **Pass** (all modes) |
+| Event length = HTTP byte length | **Pass** (all modes) |
+| DT107A preparation 27-column header | **Pass** |
+| DT107A preparation no audit metadata | **Pass** |
+| Audit banner ASCII hyphen | **Pass** |
+| No `â€”` mojibake | **Pass** |
+
+### Rollback / stop conditions
+
+- Stop rollout if migration 565 fails to apply or post-apply function catalog differs (overload ≠ 1, anon/public granted).
+- Stop if DT107A preparation downloads fail hash/length reconciliation after deploy.
+- Rollback: do **not** partially revert 565 alone; restore from backup and redeploy prior release if post-migration verification fails.
+
+**Production status:** migration **565 has not been applied to production**.
 
 ---
 
@@ -256,16 +345,17 @@ All nine audit tables exist with **RLS enabled** (not forced). Summary:
 
 ```text
 Release source: staging
-Last runtime-code SHA: 4928f451b4eade514637fbf5aadb708bf238af8b
+Last runtime-code SHA: 07a755dac2185a43702cc9535193bfbec29fdefc
 Exact deployment SHA: pending immutable release tag/commit
-Changes after runtime-code SHA: documentation only
+Changes after runtime-code SHA: documentation and release-gate evidence only
 ```
 
 | Field | Value |
 |---|---|
+| Staging runtime SHA | `07a755d` |
 | Production app SHA (current) | `f3790e9f605336abbca148cc588090e387f48c12` |
 
-Compatibility matrix references **runtime code at `4928f451`** (unchanged by doc commits). The exact deployment SHA must be pinned as an immutable release tag or commit at deploy time — not inferred from `staging` HEAD.
+Compatibility matrix references **runtime code at `07a755d`**. The exact deployment SHA must be pinned as an immutable release tag or commit at deploy time — not inferred from `staging` HEAD after documentation commits.
 
 ---
 
@@ -281,20 +371,60 @@ Compatibility matrix references **runtime code at `4928f451`** (unchanged by doc
 
 ## Rollout sequence (execution — do not run from this review)
 
-1. ~~Confirm backup~~ — **satisfied**.
-2. ~~Run live SQL preflight~~ — **satisfied** (`tmp/_payroll_final_prod_audit.json`, 2026-07-30).
-3. Pin **exact deployment SHA** as immutable release tag/commit (runtime code unchanged since **`4928f451`**).
-4. Start payroll write freeze.
-5. Apply **525, 534**, then **552 → 564** sequentially.
-6. Verify ledger, schema, grants, triggers (SQL).
-7. Deploy pinned immutable release SHA (runtime code last changed at **`4928f451`**).
-8. Read-only smoke; lift write freeze.
+1. Start payroll write freeze.
+2. Pin an immutable release tag/commit (**runtime SHA `07a755d`** or later doc-only commits on top — pin the exact commit deployed).
+3. Re-run final read-only production preflight (`tmp/_payroll_final_prod_audit.mjs`).
+4. Apply **525**.
+5. Apply **534**.
+6. Apply **552** through **565** sequentially.
+7. Stop immediately on any migration or verification failure.
+8. Verify schema, functions, grants, triggers, and migration ledger (including single 565 row and 9-arg `record_payroll_export_event`).
+9. Deploy the exact pinned application release immediately.
+10. Run production smoke tests (exports, payments, approval, TIN warnings).
+11. Lift payroll write freeze only after all checks pass.
+
+**Production deployment still requires explicit user authorization.**
 
 ---
 
-## Release tests (runtime-code SHA `4928f451`, 2026-07-30)
+## Release tests (runtime-code SHA `07a755d`, 2026-07-31)
 
-All **passed** — 188 Jest tests, SQL 562/563/564 on staging, `tsc`, `build`. No runtime code changed since `4928f451`.
+| Command | Result |
+|---|---|
+| `npx jest lib/payroll/__tests__/exportSnapshotDownload.test.ts lib/payroll/__tests__/payrollBusinessTinWarning.test.ts` | **20 passed** |
+| `node tmp/_run_565_sql_test_staging.mjs` (565 SQL test on staging) | **Passed** |
+| `node tmp/_payroll_release_gate_audit.mjs` (staging export integrity) | **Passed** |
+| `npx tsc --noEmit` | **Passed** |
+| `npm run build` | **Passed** (Next.js 16.2.10 production build at `07a755d`) |
+
+### Staging UAT results (export fixes)
+
+| Scenario | Result |
+|---|---|
+| Payroll register renderer v2 | **Passed** |
+| PAYE schedule renderer v2 | **Passed** |
+| Missing business TIN warnings (draft + approved snapshot) | **Passed** |
+| DT107A preparation (27 columns, no audit metadata) | **Passed** |
+| DT107A audit (ASCII hyphen banner) | **Passed** |
+| UTF-8 BOM on all CSV downloads | **Passed** |
+| Download-event hash and byte-length reconciliation | **Passed** |
+
+Coverage includes: renderer v1/v2, unsupported renderer fail-closed, malformed v2 payload, TIN warning logic, BOM delivery, ASCII audit wording, delivered-byte hash/length, DT107A 27-column header, stored snapshot hash BOM-free.
+
+---
+
+## Application CSV delivery integrity (audit summary)
+
+Single authoritative BOM path: `deliverPayrollCsvContent()` → `payrollCsvDownloadResponse()` in `lib/payroll/exportSnapshotDownload.ts`, used by `app/api/payroll/runs/[id]/exports/_shared.ts` and legacy DT107A audit via `rawCsvResponse()`.
+
+| Requirement | Status |
+|---|---|
+| One BOM prefix only | **Confirmed** |
+| Hash computed on delivered bytes (with BOM) | **Confirmed** |
+| `Buffer.byteLength(..., "utf8")` for content length | **Confirmed** |
+| Stored snapshot hash unchanged (BOM-free) | **Confirmed** |
+| No live-data substitution into snapshots | **Confirmed** |
+| No route-specific double BOM | **Confirmed** |
 
 ---
 
@@ -302,14 +432,15 @@ All **passed** — 188 Jest tests, SQL 562/563/564 on staging, `tsc`, `build`. N
 
 ```text
 production data unchanged
-no migration applied
+no production migration applied
 no production deployment
 no main merge
 live SQL audit: read-only (BEGIN READ ONLY → ROLLBACK)
+migration 565: applied on staging only; not on production
 ```
 
 ---
 
 ## Remaining work
 
-Execute the approved **payroll production deployment runbook** (steps in Rollout sequence above). Re-run `tmp/_payroll_final_prod_audit.mjs` immediately before migration apply if material time elapses between closeout and execution.
+Execute the controlled payroll production deployment only after explicit user authorization.
