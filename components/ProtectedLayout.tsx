@@ -334,6 +334,11 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
     }
   }, [isNestedProtectedLayout])
 
+  const workspaceContextValue = useMemo(
+    () => ({ business: workspaceBusiness, sessionUser: workspaceSessionUser }),
+    [workspaceBusiness, workspaceSessionUser]
+  )
+
   if (isNestedProtectedLayout) {
     return <>{children}</>
   }
@@ -351,11 +356,6 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
 
   const showAppSidebar = !hideRetailOwnerChrome && !isAccountingRoute
   const mainSidebarOffset = showAppSidebar ? SIDEBAR_MAIN_OFFSET_CLASS : ""
-
-  const workspaceContextValue = useMemo(
-    () => ({ business: workspaceBusiness, sessionUser: workspaceSessionUser }),
-    [workspaceBusiness, workspaceSessionUser]
-  )
 
   return (
     <ProtectedLayoutContext.Provider value={true}>
