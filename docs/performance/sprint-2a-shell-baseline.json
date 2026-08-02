@@ -1,0 +1,51 @@
+{
+  "capturedAt": "2026-08-02",
+  "branch": "staging",
+  "note": "Structural baseline from Sprint 2 trace audit (no live E2E credentials). Warm nav: /service/dashboard → /service/invoices.",
+  "beforeSprint2A": {
+    "protectedLayoutPerPathnameChange": {
+      "getCurrentBusiness_select_star": 3,
+      "getUserRole_owner_id": 2,
+      "business_users_custom_permissions": "0 owner / 1+ non-owner",
+      "accounting_firm_users": 0
+    },
+    "sidebarPerPathnameChange": {
+      "getCurrentBusiness_select_star": 0,
+      "getUserRole_owner_id": 1,
+      "business_users_custom_permissions": "1 even for owner",
+      "accounting_firm_users": 1
+    },
+    "serviceSubscriptionProvider": {
+      "getCurrentBusiness_select_star": "shell mount only (not per pathname)",
+      "service_columns_query": "when ?business_id= override only"
+    },
+    "warmNavigationTotalsEstimate": {
+      "businesses_select_star": 3,
+      "businesses_owner_id": 3,
+      "business_users": 1,
+      "accounting_firm_users": 1,
+      "subscription_business_query": 0,
+      "platform_announcements_active": 1
+    }
+  },
+  "afterSprint2AExpected": {
+    "sidebarPerPathnameChange": {
+      "getCurrentBusiness_select_star": 0,
+      "getUserRole_owner_id": 0,
+      "business_users_custom_permissions": "0 for owner",
+      "accounting_firm_users": 0
+    },
+    "serviceSubscriptionProvider": {
+      "getCurrentBusiness_select_star": 0,
+      "service_columns_query": "only when URL override differs from context"
+    },
+    "warmNavigationTotalsEstimate": {
+      "businesses_select_star": 3,
+      "businesses_owner_id": 2,
+      "business_users": 0,
+      "accounting_firm_users": 0,
+      "subscription_business_query": 0,
+      "note": "ProtectedLayout unchanged in 2A; remaining duplicates are Phase 2B"
+    }
+  }
+}

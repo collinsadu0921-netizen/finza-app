@@ -25,6 +25,17 @@ import {
 } from "@/lib/business/businessBrandingEvents"
 import { getUserRole } from "@/lib/userRoles"
 import type { CustomPermissions } from "@/lib/permissions"
+import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
+import {
+  clearAccountantFirmUserSessionCache,
+  resolveIsAccountantFirmUser,
+} from "@/lib/accounting/accountantFirmUserSession"
+import {
+  isWorkspaceBusinessOwner,
+  sidebarBrandingFromWorkspaceBusiness,
+  sidebarBusinessLabel,
+  workspaceBusinessIndustry,
+} from "@/lib/sidebar/sidebarWorkspaceBusiness"
 import { filterServiceNavSections } from "@/lib/nav/filterServiceNavSections"
 import {
   getServiceSidebarNavIcon,
@@ -34,15 +45,6 @@ import {
 import { ChevronDown, Lock, LogOut, PanelLeft, PanelLeftClose } from "lucide-react"
 import { useSidebarLayout } from "@/components/sidebar/SidebarLayoutContext"
 import SidebarNavTooltip from "@/components/sidebar/SidebarNavTooltip"
-
-/** Match service dashboard + public documents — not `name` first (legal entity vs trading name). */
-function sidebarBusinessLabel(row: {
-  trading_name?: string | null
-  legal_name?: string | null
-  name?: string | null
-}): string | null {
-  return row.trading_name?.trim() || row.legal_name?.trim() || row.name?.trim() || null
-}
 
 type MenuSection = {
   title: string
@@ -63,6 +65,7 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { collapsed: desktopCollapsed, toggleCollapsed, enabled: sidebarLayoutEnabled } =
     useSidebarLayout()
+  const { business: ctxBusiness, sessionUser } = useWorkspaceBusiness()
   const isDesktopRail = sidebarLayoutEnabled && desktopCollapsed
   // Initialize from sessionStorage immediately to prevent flash
   const [businessIndustry, setBusinessIndustry] = useState<string | null>(() => {
@@ -100,9 +103,32 @@ export default function Sidebar() {
   }, [pathname, urlBusinessId])
 
   useEffect(() => {
-    loadIndustry(urlBusinessId, pathname ?? "")
-    checkAccountantFirmUser()
-  }, [pathname, urlBusinessId])
+    loadIndustry(urlBusinessId, pathname ?? "", ctxBusiness)
+  }, [pathname, urlBusinessId, ctxBusiness?.id])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) {
+          clearAccountantFirmUserSessionCache()
+          if (!cancelled) setIsAccountantFirmUser(false)
+          return
+        }
+        const isFirm = await resolveIsAccountantFirmUser(supabase, user.id)
+        if (!cancelled) setIsAccountantFirmUser(isFirm)
+      } catch (err) {
+        console.error("Error checking accountant firm user:", err)
+        if (!cancelled) setIsAccountantFirmUser(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   /** Firm users on `/service/*` without `business_id` never hit `getCurrentBusiness` branding — unblock resolved state. */
   useEffect(() => {
@@ -132,7 +158,11 @@ export default function Sidebar() {
     }
 
     let bid =
-      resolvedIndustry === "service" ? urlBusinessId ?? serviceBusinessId : urlBusinessId ?? getSelectedBusinessId()
+      resolvedIndustry === "service"
+        ? urlBusinessId ??
+          serviceBusinessId ??
+          (!urlBusinessId && ctxBusiness?.id ? ctxBusiness.id : null)
+        : urlBusinessId ?? getSelectedBusinessId()
     if (resolvedIndustry === "retail" && !bid) {
       setNavPermsResolved(false)
       ;(async () => {
@@ -189,6 +219,18 @@ export default function Sidebar() {
       return
     }
 
+    if (
+      resolvedIndustry === "service" &&
+      bid &&
+      isWorkspaceBusinessOwner(ctxBusiness, sessionUser) &&
+      ctxBusiness?.id === bid
+    ) {
+      setNavRole("owner")
+      setNavCustomPermissions(null)
+      setNavPermsResolved(true)
+      return
+    }
+
     setNavPermsResolved(false)
     ;(async () => {
       try {
@@ -222,7 +264,7 @@ export default function Sidebar() {
     return () => {
       cancelled = true
     }
-  }, [businessIndustry, pathname, urlBusinessId, serviceBusinessId, isAccountantFirmUser])
+  }, [businessIndustry, pathname, urlBusinessId, serviceBusinessId, isAccountantFirmUser, ctxBusiness?.id, sessionUser?.id])
 
   // Resolve current service business only when URL has no business_id and not on accounting route.
   // Do NOT run getCurrentBusiness when urlBusinessId exists (e.g. direct /service/* deep link).
@@ -231,6 +273,14 @@ export default function Sidebar() {
       if (urlBusinessId) setServiceBusinessId(null)
       return
     }
+
+    if (ctxBusiness?.id) {
+      setServiceBusinessId(ctxBusiness.id)
+      const branding = sidebarBrandingFromWorkspaceBusiness(ctxBusiness)
+      commitSidebarBranding(branding ?? { name: null, logo_url: null })
+      return
+    }
+
     let cancelled = false
     ;(async () => {
       try {
@@ -242,8 +292,8 @@ export default function Sidebar() {
           commitSidebarBranding(
             business
               ? {
-                  name: sidebarBusinessLabel(business as any),
-                  logo_url: (business as any).logo_url ?? null,
+                  name: sidebarBusinessLabel(business as Parameters<typeof sidebarBusinessLabel>[0]),
+                  logo_url: (business as { logo_url?: string | null }).logo_url ?? null,
                 }
               : { name: null, logo_url: null }
           )
@@ -256,7 +306,7 @@ export default function Sidebar() {
       }
     })()
     return () => { cancelled = true }
-  }, [urlBusinessId, isAccountingPath, businessIndustry, isAccountantFirmUser, commitSidebarBranding])
+  }, [urlBusinessId, isAccountingPath, businessIndustry, isAccountantFirmUser, commitSidebarBranding, ctxBusiness?.id])
 
   // Logo upload/remove on Business Profile: refresh sidebar branding without full page reload.
   useEffect(() => {
@@ -308,7 +358,11 @@ export default function Sidebar() {
     setMobileOpen(false)
   }, [pathname])
 
-  const loadIndustry = async (accountingBusinessId: string | null, path: string) => {
+  const loadIndustry = async (
+    accountingBusinessId: string | null,
+    path: string,
+    workspaceBusiness: typeof ctxBusiness
+  ) => {
     try {
       const { isCashierAuthenticated } = await import("@/lib/cashierSession")
       if (isCashierAuthenticated()) {
@@ -344,8 +398,18 @@ export default function Sidebar() {
         }
       }
 
-      // Service routes without business_id: keep sidebar branding — filled by getCurrentBusiness effect (avoid logo/name flash on refresh).
+      // Service routes without business_id: prefer workspace context, then sessionStorage industry.
       if (isServicePath && !accountingBusinessId) {
+        if (workspaceBusiness?.id) {
+          setBusinessIndustry(
+            workspaceBusinessIndustry(workspaceBusiness) ?? getTabIndustryMode()
+          )
+          const branding = sidebarBrandingFromWorkspaceBusiness(workspaceBusiness)
+          if (branding) {
+            commitSidebarBranding(branding)
+          }
+          return
+        }
         setBusinessIndustry(getTabIndustryMode())
         return
       }
@@ -380,27 +444,6 @@ export default function Sidebar() {
       console.error("Error loading industry:", err)
       setBusinessIndustry(null)
       commitSidebarBranding({ name: null, logo_url: null })
-    }
-  }
-
-  const checkAccountantFirmUser = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setIsAccountantFirmUser(false)
-        return
-      }
-
-      const { data: firmUsers } = await supabase
-        .from("accounting_firm_users")
-        .select("firm_id")
-        .eq("user_id", user.id)
-        .limit(1)
-
-      setIsAccountantFirmUser(!!(firmUsers && firmUsers.length > 0))
-    } catch (err) {
-      console.error("Error checking accountant firm user:", err)
-      setIsAccountantFirmUser(false)
     }
   }
 

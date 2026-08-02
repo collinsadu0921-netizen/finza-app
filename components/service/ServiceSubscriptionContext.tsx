@@ -12,6 +12,7 @@ import {
 import { usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
+import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
 import { shouldMountServiceSubscriptionProvider } from "@/lib/serviceWorkspace/serviceSubscriptionSurface"
 import {
   type ServiceSubscriptionTier,
@@ -20,10 +21,15 @@ import {
 } from "@/lib/serviceWorkspace/subscriptionTiers"
 import {
   resolveServiceEntitlement,
-  type RawBusinessSubscriptionRow,
   type ServiceEntitlement,
 } from "@/lib/serviceWorkspace/resolveServiceEntitlement"
 import { tierIncludes } from "@/lib/serviceWorkspace/subscriptionTiers"
+import {
+  resolveSubscriptionEntitlementScopeMode,
+  SERVICE_SUBSCRIPTION_BUSINESS_COLUMNS,
+  subscriptionEntitlementFromBusinessRow,
+  workspaceBusinessSubscriptionKey,
+} from "@/lib/serviceWorkspace/subscriptionEntitlementFromBusinessRow"
 
 export type ServiceSubscriptionContextValue = {
   /** Effective tier — what the user actually has access to. */
@@ -109,33 +115,15 @@ const defaultValue: ServiceSubscriptionContextValue = {
 const ServiceSubscriptionContext =
   createContext<ServiceSubscriptionContextValue>(defaultValue)
 
-const SERVICE_COLUMNS =
-  "id, service_subscription_tier, service_subscription_status, subscription_grace_until, trial_started_at, trial_ends_at, current_period_ends_at, billing_cycle, subscription_started_at, billing_exempt, billing_exempt_reason"
-
-function rowToEntitlement(row: Record<string, unknown> | null): ServiceEntitlement {
-  const r: RawBusinessSubscriptionRow = {
-    service_subscription_tier:   (row?.service_subscription_tier   as string) ?? null,
-    service_subscription_status: (row?.service_subscription_status as string) ?? null,
-    trial_started_at:            (row?.trial_started_at            as string) ?? null,
-    trial_ends_at:               (row?.trial_ends_at               as string) ?? null,
-    subscription_grace_until:    (row?.subscription_grace_until    as string) ?? null,
-    current_period_ends_at:      (row?.current_period_ends_at      as string) ?? null,
-    billing_cycle:               (row?.billing_cycle               as string) ?? null,
-    subscription_started_at:     (row?.subscription_started_at     as string) ?? null,
-    billing_exempt:              (row?.billing_exempt              as boolean) ?? null,
-    billing_exempt_reason:       (row?.billing_exempt_reason       as string) ?? null,
-  }
-  return resolveServiceEntitlement(r)
-}
-
 export function ServiceSubscriptionProvider({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const pathname     = usePathname()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const prevScopeRef = useRef<string | undefined>(undefined)
+  const { business: ctxBusiness, sessionUser } = useWorkspaceBusiness()
 
   const shouldMount = shouldMountServiceSubscriptionProvider(pathname)
 
@@ -147,6 +135,15 @@ export function ServiceSubscriptionProvider({
   const [entitlementResolved, setEntitlementResolved] = useState(false)
 
   const urlBusinessId = searchParams.get("business_id")?.trim() || null
+  const ctxBusinessId = ctxBusiness?.id ?? null
+  const ctxSubscriptionKey = workspaceBusinessSubscriptionKey(
+    ctxBusiness as Record<string, unknown> | null
+  )
+
+  const scopeMode = resolveSubscriptionEntitlementScopeMode(
+    ctxBusinessId,
+    urlBusinessId
+  )
 
   useEffect(() => {
     if (!shouldMount) {
@@ -155,7 +152,7 @@ export function ServiceSubscriptionProvider({
       return
     }
 
-    const scopeKey = urlBusinessId ?? "__session__"
+    const scopeKey = urlBusinessId ?? ctxBusinessId ?? "__session__"
     const scopeChanged =
       prevScopeRef.current !== undefined && prevScopeRef.current !== scopeKey
     prevScopeRef.current = scopeKey
@@ -168,21 +165,43 @@ export function ServiceSubscriptionProvider({
     ;(async () => {
       setLoading(true)
       try {
-        if (urlBusinessId) {
+        if (scopeMode === "context" && ctxBusiness?.id) {
+          if (cancelled) return
+          setBusinessId(ctxBusiness.id)
+          setEntitlement(
+            subscriptionEntitlementFromBusinessRow(
+              ctxBusiness as Record<string, unknown>
+            )
+          )
+          return
+        }
+
+        if (scopeMode === "url_query" && urlBusinessId) {
           const { data } = await supabase
             .from("businesses")
-            .select(SERVICE_COLUMNS)
+            .select(SERVICE_SUBSCRIPTION_BUSINESS_COLUMNS)
             .eq("id", urlBusinessId)
             .is("archived_at", null)
             .maybeSingle()
           if (cancelled) return
-          setBusinessId((data as any)?.id ?? urlBusinessId)
-          setEntitlement(rowToEntitlement(data as Record<string, unknown> | null))
+          setBusinessId((data as { id?: string } | null)?.id ?? urlBusinessId)
+          setEntitlement(
+            subscriptionEntitlementFromBusinessRow(
+              data as Record<string, unknown> | null
+            )
+          )
           return
         }
 
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user || cancelled) {
+        let userId = sessionUser?.id ?? null
+        if (!userId) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser()
+          userId = user?.id ?? null
+        }
+
+        if (!userId || cancelled) {
           if (!cancelled) {
             setBusinessId(null)
             setEntitlement(resolveServiceEntitlement({}))
@@ -190,10 +209,14 @@ export function ServiceSubscriptionProvider({
           return
         }
 
-        const b = await getCurrentBusiness(supabase, user.id)
+        const b = await getCurrentBusiness(supabase, userId)
         if (cancelled) return
-        setBusinessId((b as any)?.id ?? null)
-        setEntitlement(rowToEntitlement(b as Record<string, unknown> | null))
+        setBusinessId((b as { id?: string } | null)?.id ?? null)
+        setEntitlement(
+          subscriptionEntitlementFromBusinessRow(
+            b as Record<string, unknown> | null
+          )
+        )
       } finally {
         if (!cancelled) {
           setEntitlementResolved(true)
@@ -205,7 +228,14 @@ export function ServiceSubscriptionProvider({
     return () => {
       cancelled = true
     }
-  }, [shouldMount, urlBusinessId])
+  }, [
+    shouldMount,
+    urlBusinessId,
+    ctxBusinessId,
+    ctxSubscriptionKey,
+    scopeMode,
+    sessionUser?.id,
+  ])
 
   const canAccessTier = useCallback(
     (required: ServiceSubscriptionTier) => {
@@ -217,29 +247,29 @@ export function ServiceSubscriptionProvider({
 
   const value = useMemo<ServiceSubscriptionContextValue>(
     () => ({
-      effectiveTier:      entitlement.effectiveTier,
-      tier:               entitlement.rawTier,
-      status:             entitlement.status,
+      effectiveTier: entitlement.effectiveTier,
+      tier: entitlement.rawTier,
+      status: entitlement.status,
       businessId,
       loading,
       entitlementResolved,
       canAccessTier,
-      isTrialing:         entitlement.isTrialing,
-      trialExpired:       entitlement.trialExpired,
+      isTrialing: entitlement.isTrialing,
+      trialExpired: entitlement.trialExpired,
       trialExpiredWithoutPayment: entitlement.trialExpiredWithoutPayment,
-      trialGraceActive:   entitlement.trialGraceActive,
-      trialGraceExpired:  entitlement.trialGraceExpired,
-      trialEndsAt:        entitlement.trialEndsAt,
-      trialStartedAt:     entitlement.trialStartedAt,
-      trialDaysLeft:      entitlement.trialDaysLeft,
+      trialGraceActive: entitlement.trialGraceActive,
+      trialGraceExpired: entitlement.trialGraceExpired,
+      trialEndsAt: entitlement.trialEndsAt,
+      trialStartedAt: entitlement.trialStartedAt,
+      trialDaysLeft: entitlement.trialDaysLeft,
       canWriteFinancialRecords: entitlement.canWriteFinancialRecords,
-      billingCycle:       entitlement.billingCycle,
+      billingCycle: entitlement.billingCycle,
       currentPeriodEndsAt: entitlement.currentPeriodEndsAt,
       subscriptionStartedAt: entitlement.subscriptionStartedAt,
-      periodExpired:      entitlement.periodExpired,
-      daysUntilRenewal:   entitlement.daysUntilRenewal,
-      inGracePeriod:      entitlement.inGracePeriod,
-      graceEndsAt:        entitlement.graceEndsAt,
+      periodExpired: entitlement.periodExpired,
+      daysUntilRenewal: entitlement.daysUntilRenewal,
+      inGracePeriod: entitlement.inGracePeriod,
+      graceEndsAt: entitlement.graceEndsAt,
       subscriptionLocked: entitlement.isSubscriptionLocked,
       billingExempt: entitlement.billingExempt,
       billingExemptReason: entitlement.billingExemptReason,
