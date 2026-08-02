@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
+import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate, formatYesNo } from "@/lib/exportUtils"
 import { formatMoney } from "@/lib/money"
@@ -55,8 +55,37 @@ export default function ExpensesPage() {
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
   const { readOnly, guardWriteAction, upgradeHref } = useServiceFinancialWrite("expenses")
+  const {
+    businessId,
+    business: workspaceBusiness,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = useServicePageBusiness()
+  const categoriesLoadedForRef = useRef<string | null>(null)
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    if (!workspaceReady) return
+    if (workspaceError) {
+      setError(workspaceError)
+      setLoading(false)
+      return
+    }
+    if (!businessId || !workspaceBusiness) {
+      setError("Business not found")
+      setLoading(false)
+      return
+    }
+    setBusiness({
+      currency_code:
+        typeof workspaceBusiness.default_currency === "string"
+          ? workspaceBusiness.default_currency
+          : undefined,
+    })
+    if (categoriesLoadedForRef.current !== businessId) {
+      categoriesLoadedForRef.current = businessId
+      void loadCategories(businessId)
+    }
+  }, [workspaceReady, workspaceError, businessId, workspaceBusiness])
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
@@ -69,38 +98,29 @@ export default function ExpensesPage() {
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current) }
   }, [searchInput])
 
-  useEffect(() => { loadExpenses() }, [filters, searchQuery, page])
+  useEffect(() => { loadExpenses() }, [filters, searchQuery, page, businessId])
 
-  const loadData = async () => {
+  const loadCategories = async (bid: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) return
-      setBusiness(business)
       const { data: categoriesData } = await supabase
         .from("expense_categories")
         .select("*")
-        .eq("business_id", business.id)
+        .eq("business_id", bid)
         .order("name", { ascending: true })
       setCategories(categoriesData || [])
-      loadExpenses()
-    } catch (err: any) {
-      setError(err.message || "Failed to load data")
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load categories")
       setLoading(false)
     }
   }
 
   const loadExpenses = async () => {
+    if (!businessId) return
     try {
       setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) return
 
       let query = `/api/expenses/list?`
-      if (business?.id) query += `business_id=${business.id}&`
+      query += `business_id=${businessId}&`
       if (filters.category_id) query += `category_id=${filters.category_id}&`
       if (filters.start_date) query += `start_date=${filters.start_date}&`
       if (filters.end_date) query += `end_date=${filters.end_date}&`

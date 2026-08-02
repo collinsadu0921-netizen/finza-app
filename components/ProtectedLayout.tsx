@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MutableRefObject,
@@ -351,11 +352,14 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const showAppSidebar = !hideRetailOwnerChrome && !isAccountingRoute
   const mainSidebarOffset = showAppSidebar ? SIDEBAR_MAIN_OFFSET_CLASS : ""
 
+  const workspaceContextValue = useMemo(
+    () => ({ business: workspaceBusiness, sessionUser: workspaceSessionUser }),
+    [workspaceBusiness, workspaceSessionUser]
+  )
+
   return (
     <ProtectedLayoutContext.Provider value={true}>
-      <WorkspaceBusinessProvider
-        value={{ business: workspaceBusiness, sessionUser: workspaceSessionUser }}
-      >
+      <WorkspaceBusinessProvider value={workspaceContextValue}>
       <Suspense fallback={null}>
         <ServiceSubscriptionProvider>
           <SidebarLayoutProvider enabled={showAppSidebar}>

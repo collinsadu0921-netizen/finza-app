@@ -1,10 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabaseClient"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { replaceIfChanged } from "@/lib/navigation/safeReplace"
-import { getCurrentBusiness } from "@/lib/business"
+import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import Link from "next/link"
 
@@ -40,32 +39,34 @@ export default function ServiceCustomersPage() {
     return Number.isFinite(p) && p > 0 ? p : 1
   })
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
+  const {
+    businessId,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = useServicePageBusiness()
 
   useEffect(() => {
-    loadCustomers()
-  }, [statusFilter, submittedSearch, page])
+    if (!workspaceReady) return
+    if (workspaceError) {
+      setError(workspaceError)
+      setLoading(false)
+      return
+    }
+    if (!businessId) {
+      setError("Business not found")
+      setLoading(false)
+      return
+    }
+    void loadCustomers(businessId)
+  }, [workspaceReady, workspaceError, businessId, statusFilter, submittedSearch, page])
 
-  const loadCustomers = async () => {
+  const loadCustomers = async (bid: string) => {
     try {
       setLoading(true)
       setError("")
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setError("You must be logged in")
-        setLoading(false)
-        return
-      }
-
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setError("Business not found")
-        setLoading(false)
-        return
-      }
-
       const params = new URLSearchParams()
-      params.append("business_id", business.id)
+      params.append("business_id", bid)
       if (statusFilter !== "all") params.append("status", statusFilter)
       if (submittedSearch) params.append("search", submittedSearch)
       params.append("page", String(page))

@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { replaceIfChanged } from "@/lib/navigation/safeReplace"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
+import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import {
   getLastCalendarMonthRange,
   getThisCalendarMonthRange,
@@ -65,45 +64,40 @@ export default function ServicePaymentsPage() {
   })
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
   const [rangeTotals, setRangeTotals] = useState({ totalAmount: 0, totalCount: 0 })
+  const {
+    businessId: workspaceBusinessId,
+    business: workspaceBusiness,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = useServicePageBusiness()
 
   useEffect(() => {
-    loadBusiness()
-  }, [])
+    if (!workspaceReady) return
+    if (workspaceError) {
+      setError(workspaceError)
+      setLoading(false)
+      return
+    }
+    if (!workspaceBusinessId || !workspaceBusiness) {
+      setError("Business not found")
+      setLoading(false)
+      return
+    }
+    setBusinessId(workspaceBusinessId)
+    setBusinessTimezone(
+      (typeof workspaceBusiness.timezone === "string"
+        ? workspaceBusiness.timezone
+        : "UTC"
+      ).trim() || "UTC"
+    )
+    setCurrencyCode(workspaceBusiness.default_currency ?? null)
+  }, [workspaceReady, workspaceError, workspaceBusinessId, workspaceBusiness])
 
   useEffect(() => {
     if (businessId) {
       loadPayments()
     }
   }, [businessId, dateRange, customStartDate, customEndDate, page, businessTimezone])
-
-  const loadBusiness = async () => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        setError("Not logged in")
-        setLoading(false)
-        return
-      }
-
-      const business = await getCurrentBusiness(supabase, user.id)
-      if (!business) {
-        setError("Business not found")
-        setLoading(false)
-        return
-      }
-
-      setBusinessId(business.id)
-      setBusinessTimezone((business.timezone ?? "UTC").trim() || "UTC")
-      setCurrencyCode(business.default_currency ?? null)
-    } catch (err: any) {
-      console.error("Error loading business:", err)
-      setError(err.message || "Failed to load business")
-      setLoading(false)
-    }
-  }
 
   const getDateRange = (): { startDate: string; endDate: string } => {
     if (dateRange === "this_month") {

@@ -24,6 +24,7 @@ import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
 
 function devInvoiceTiming(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
@@ -189,8 +190,9 @@ function InvoicesPageContent() {
     ? pathname
     : SERVICE_INVOICES_LIST_PATH
   const toast = useToast()
+  const { business: ctxBusiness, sessionUser } = useWorkspaceBusiness()
   const { format, formatWithCode, currencyCode: businessCurrencyCode } =
-    useBusinessCurrency()
+    useBusinessCurrency({ business: ctxBusiness })
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("invoices")
 
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -235,15 +237,32 @@ function InvoicesPageContent() {
 
   const resolveAuthBusiness = useCallback(async () => {
     const tAuth = performance.now()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return { ok: false as const, error: "Not logged in" }
-    const scope = await resolvePreferredBusinessForUser(supabase, user.id, urlBusinessIdParam)
+    const trimmedUrl = urlBusinessIdParam?.trim() || null
+
+    if (!trimmedUrl && ctxBusiness?.id) {
+      devInvoiceTiming("auth+business resolution (workspace context)", tAuth)
+      return { ok: true as const, business: ctxBusiness }
+    }
+
+    let userId = sessionUser?.id ?? null
+    if (!userId) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return { ok: false as const, error: "Not logged in" }
+      userId = user.id
+    }
+
+    const scope = await resolvePreferredBusinessForUser(supabase, userId, trimmedUrl)
     devInvoiceTiming("auth+business resolution", tAuth)
     if (!scope.ok) {
       return { ok: false as const, error: scope.error }
     }
+
+    if (ctxBusiness?.id === scope.businessId) {
+      return { ok: true as const, business: ctxBusiness }
+    }
+
     const { data: business, error: businessError } = await supabase
       .from("businesses")
       .select("*")
@@ -254,7 +273,7 @@ function InvoicesPageContent() {
       return { ok: false as const, error: "Business not found" }
     }
     return { ok: true as const, business }
-  }, [urlBusinessIdParam])
+  }, [urlBusinessIdParam, ctxBusiness, sessionUser?.id])
 
   const buildInvoiceListParams = useCallback(
     (bid: string) => {
@@ -429,17 +448,36 @@ function InvoicesPageContent() {
     ;(async () => {
       setLoading(true)
       setError("")
-      const resolved = await resolveAuthBusiness()
-      if (cancelled) return
-      if (!resolved.ok) {
-        setError(resolved.error)
-        setLoading(false)
-        isInitialLoadRef.current = false
+
+      let bid: string | null = null
+      if (!urlBusinessIdParam && ctxBusiness?.id) {
+        bid = ctxBusiness.id
+        setSelectedBusinessId(bid)
+        setBusinessId(bid)
+      } else {
+        const resolved = await resolveAuthBusiness()
+        if (cancelled) return
+        if (!resolved.ok) {
+          setError(resolved.error)
+          setLoading(false)
+          isInitialLoadRef.current = false
+          return
+        }
+        bid = resolved.business.id ?? null
+        if (bid) {
+          setSelectedBusinessId(bid)
+          setBusinessId(bid)
+        }
+      }
+
+      if (!bid) {
+        if (!cancelled) {
+          setError("Business not found")
+          setLoading(false)
+          isInitialLoadRef.current = false
+        }
         return
       }
-      const bid = resolved.business.id
-      setSelectedBusinessId(bid)
-      setBusinessId(bid)
 
       try {
         await Promise.all([

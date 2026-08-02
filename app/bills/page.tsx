@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/ToastProvider"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { formatMoney } from "@/lib/money"
-import { supabase } from "@/lib/supabaseClient"
-import { getCurrentBusiness } from "@/lib/business"
+import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
@@ -95,6 +94,11 @@ export default function BillsPage() {
   const toast = useToast()
   const { format, currencyCode: businessHomeCode } = useBusinessCurrency()
   const { readOnly, guardWriteAction } = useServiceFinancialWrite("bills")
+  const {
+    businessId: workspaceBusinessId,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = useServicePageBusiness()
   const [loading, setLoading] = useState(true)
   const [bills, setBills] = useState<Bill[]>([])
   const [error, setError] = useState("")
@@ -106,36 +110,18 @@ export default function BillsPage() {
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user || cancelled) {
-          if (!cancelled) {
-            setError("Not logged in")
-            setLoading(false)
-          }
-          return
-        }
-        const b = await getCurrentBusiness(supabase, user.id)
-        if (cancelled) return
-        if (!b) {
-          setError("Business not found")
-          setLoading(false)
-          return
-        }
-        setBusinessId(b.id)
-      } catch {
-        if (!cancelled) {
-          setError("Failed to resolve business")
-          setLoading(false)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
+    if (!workspaceReady) return
+    if (workspaceError) {
+      setError(workspaceError)
+      setLoading(false)
+      return
     }
-  }, [])
+    setBusinessId(workspaceBusinessId)
+    if (!workspaceBusinessId) {
+      setError("Business not found")
+      setLoading(false)
+    }
+  }, [workspaceReady, workspaceError, workspaceBusinessId])
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
