@@ -16,6 +16,7 @@ export type ActivityItem = {
   currencyCode?: string
   timestamp: string
   href?: string
+  lenderName?: string | null
 }
 
 export type RecentActivityFeedProps = {
@@ -38,6 +39,9 @@ const TYPE_DOT: Record<string, string> = {
   bill_payment: "bg-violet-400",
   customer: "bg-purple-500",
   email: "bg-sky-500",
+  loan_drawdown: "bg-teal-500",
+  loan_repayment: "bg-orange-500",
+  loan_interest: "bg-amber-600",
 }
 
 const DEFAULT_MAX_ITEMS = 5
@@ -90,7 +94,11 @@ export default function RecentActivityFeed({
               const dot = TYPE_DOT[item.type] ?? "bg-slate-400"
               const displayCurrency = item.currencyCode ?? currencyCode
               const isFx = item.currencyCode && item.currencyCode !== currencyCode
-              const label = formatServiceActivityDescription(item)
+              const label = formatServiceActivityDescription({
+                type: item.type,
+                description: item.description,
+                lenderName: item.lenderName,
+              })
 
               const row = (
                 <div className="flex items-start gap-3 px-4 py-2.5 text-sm">

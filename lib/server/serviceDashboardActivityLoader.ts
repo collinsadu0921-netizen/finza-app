@@ -7,6 +7,7 @@ import { supabaseErrorDiag, timedStepMs, type createRouteDiag } from "@/lib/serv
 import {
   expenseDetailHref,
   supplierBillDetailHref,
+  classifyLoanActivityKind,
   type ServiceActivityType,
 } from "@/lib/dashboard/formatServiceActivityDescription"
 
@@ -20,6 +21,7 @@ export type ServiceDashboardActivityItem = {
   currencyCode?: string
   timestamp: string
   href?: string
+  lenderName?: string | null
 }
 
 const SOURCE_TYPE_MAP: Record<string, Exclude<ActivityType, "email">> = {
@@ -94,6 +96,9 @@ function journalAmountFromRow(e: JournalActivityRow): number {
 }
 
 function mapActivityType(e: JournalActivityRow): Exclude<ActivityType, "email"> {
+  const loanKind = classifyLoanActivityKind(e.description, e.reference_type)
+  if (loanKind) return loanKind
+
   const srcRaw = ((e.source_type ?? e.reference_type ?? "journal") as string).toLowerCase()
   return SOURCE_TYPE_MAP[srcRaw] ?? "expense"
 }
@@ -126,10 +131,15 @@ async function buildJournalActivityItems(
   const expenseIds: string[] = []
   const paymentIds: string[] = []
   const billPaymentIds: string[] = []
+  const loanIds: string[] = []
 
   for (const e of entries) {
     const refId = e.reference_id
     const refType = e.reference_type?.toLowerCase()
+    const loanKind = classifyLoanActivityKind(e.description, e.reference_type)
+    if (loanKind && refId && refType === "loan") {
+      loanIds.push(refId)
+    }
     if (!refId) continue
     if (refType === "invoice") invoiceIds.push(refId)
     else if (refType === "bill") billIds.push(refId)
@@ -145,6 +155,7 @@ async function buildJournalActivityItems(
     { data: expDocs },
     { data: paymentRows },
     { data: billPaymentRows },
+    { data: loanRows },
   ] = await Promise.all([
     invoiceIds.length
       ? supabase.from("invoices").select("id, currency_code, total").in("id", invoiceIds)
@@ -183,6 +194,11 @@ async function buildJournalActivityItems(
       : Promise.resolve({
           data: [] as { id: string; bill_id: string; amount: number | null }[],
         }),
+    loanIds.length
+      ? supabase.from("loans").select("id, lender_name").in("id", loanIds)
+      : Promise.resolve({
+          data: [] as { id: string; lender_name: string | null }[],
+        }),
   ])
 
   const docMap = new Map<string, DocCurrency>()
@@ -209,6 +225,11 @@ async function buildJournalActivityItems(
   const billPaymentMap = new Map<string, { bill_id: string; amount: number | null }>()
   for (const p of billPaymentRows ?? []) {
     billPaymentMap.set(p.id, { bill_id: p.bill_id, amount: p.amount })
+  }
+
+  const loanLenderMap = new Map<string, string | null>()
+  for (const loan of loanRows ?? []) {
+    loanLenderMap.set(loan.id, loan.lender_name)
   }
 
   // Resolve bill docs referenced via bill_payment only
@@ -333,6 +354,8 @@ async function buildJournalActivityItems(
       currencyCode,
       timestamp: e.created_at,
       href,
+      lenderName:
+        refType === "loan" && refId ? loanLenderMap.get(refId) ?? null : undefined,
     }
   })
 }

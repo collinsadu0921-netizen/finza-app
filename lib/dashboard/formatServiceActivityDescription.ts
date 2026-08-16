@@ -11,10 +11,56 @@ export type ServiceActivityType =
   | "email"
   | "bill"
   | "bill_payment"
+  | "loan_drawdown"
+  | "loan_repayment"
+  | "loan_interest"
 
 export type ServiceActivityItemLike = {
   type: ServiceActivityType
   description?: string | null
+  /** Optional lender name from loans register (display only). */
+  lenderName?: string | null
+}
+
+export type LoanActivityKind = "loan_drawdown" | "loan_repayment" | "loan_interest"
+
+/** Classify loan principal/interest journal activity from description + reference metadata. */
+export function classifyLoanActivityKind(
+  description: string | null | undefined,
+  referenceType?: string | null
+): LoanActivityKind | null {
+  const raw = (description ?? "").trim()
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  const ref = referenceType?.toLowerCase()
+
+  if (/loan interest payment/i.test(raw) || /\bloan interest\b/.test(lower)) {
+    return "loan_interest"
+  }
+  if (/loan repayment/i.test(raw) || (ref === "loan" && /\brepayment\b/.test(lower))) {
+    return "loan_repayment"
+  }
+  if (/loan drawdown/i.test(raw) || (ref === "loan" && /\bdrawdown\b/.test(lower))) {
+    return "loan_drawdown"
+  }
+  if (ref === "loan" && !/\b(interest|repayment)\b/.test(lower)) {
+    return "loan_drawdown"
+  }
+  return null
+}
+
+export function formatLoanActivityLabel(
+  kind: LoanActivityKind,
+  lenderName?: string | null
+): string {
+  const lender = lenderName?.trim()
+  const prefix =
+    kind === "loan_drawdown"
+      ? "Loan received"
+      : kind === "loan_repayment"
+        ? "Loan repayment"
+        : "Loan interest paid"
+  return lender ? `${prefix} — ${lender}` : prefix
 }
 
 const INVOICE_NUMBER_RE = /\b(INV-[\w-]+)\b/i
@@ -39,6 +85,10 @@ export function formatServiceActivityDescription(item: ServiceActivityItemLike):
       return raw ? `Invoice created — ${raw}` : "Invoice activity"
     }
     case "expense": {
+      const loanKind = classifyLoanActivityKind(raw, null)
+      if (loanKind) {
+        return formatLoanActivityLabel(loanKind, item.lenderName)
+      }
       if (/^expense recorded/i.test(raw)) return raw
       if (/^expense/i.test(raw)) return raw.replace(/^expense/i, "Expense recorded")
       return raw ? `Expense recorded — ${raw}` : "Expense recorded"
@@ -59,6 +109,12 @@ export function formatServiceActivityDescription(item: ServiceActivityItemLike):
       }
       return raw ? `Supplier bill payment recorded — ${raw}` : "Supplier bill payment recorded"
     }
+    case "loan_drawdown":
+      return formatLoanActivityLabel("loan_drawdown", item.lenderName)
+    case "loan_repayment":
+      return formatLoanActivityLabel("loan_repayment", item.lenderName)
+    case "loan_interest":
+      return formatLoanActivityLabel("loan_interest", item.lenderName)
     case "customer": {
       if (/^new customer/i.test(raw)) return raw
       return raw ? `New customer — ${raw}` : "New customer added"

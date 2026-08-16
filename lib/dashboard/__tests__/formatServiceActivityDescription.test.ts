@@ -3,7 +3,9 @@
  */
 import { describe, it, expect } from "@jest/globals"
 import {
+  classifyLoanActivityKind,
   expenseDetailHref,
+  formatLoanActivityLabel,
   formatServiceActivityDescription,
   supplierBillDetailHref,
 } from "../formatServiceActivityDescription"
@@ -50,6 +52,73 @@ describe("formatServiceActivityDescription", () => {
         description: "Payment for Bill #SB-1001",
       })
     ).toMatch(/^Supplier bill payment recorded/)
+  })
+
+  it("never labels loan drawdown as Expense recorded", () => {
+    const label = formatServiceActivityDescription({
+      type: "loan_drawdown",
+      description: "Loan Drawdown",
+      lenderName: "GCB Bank",
+    })
+    expect(label).toBe("Loan received — GCB Bank")
+    expect(label).not.toMatch(/Expense recorded/i)
+  })
+
+  it("never labels loan principal repayment as Expense recorded", () => {
+    const label = formatServiceActivityDescription({
+      type: "loan_repayment",
+      description: "Loan Repayment",
+      lenderName: "Ecobank",
+    })
+    expect(label).toBe("Loan repayment — Ecobank")
+    expect(label).not.toMatch(/Expense recorded/i)
+  })
+
+  it("labels loan interest with interest semantics", () => {
+    expect(
+      formatServiceActivityDescription({
+        type: "loan_interest",
+        description: "Loan Interest Payment",
+      })
+    ).toBe("Loan interest paid")
+    expect(
+      formatServiceActivityDescription({
+        type: "loan_interest",
+        description: "Loan Interest Payment",
+        lenderName: "Stanbic",
+      })
+    ).toBe("Loan interest paid — Stanbic")
+  })
+
+  it("falls back without lender name", () => {
+    expect(formatLoanActivityLabel("loan_drawdown", null)).toBe("Loan received")
+    expect(formatLoanActivityLabel("loan_repayment", "  ")).toBe("Loan repayment")
+  })
+
+  it("guards misclassified expense rows that are loan journal descriptions", () => {
+    const drawdown = formatServiceActivityDescription({
+      type: "expense",
+      description: "Loan Drawdown",
+    })
+    expect(drawdown).toBe("Loan received")
+    expect(drawdown).not.toMatch(/Expense recorded/i)
+
+    const repayment = formatServiceActivityDescription({
+      type: "expense",
+      description: "Loan Repayment",
+      lenderName: "GCB Bank",
+    })
+    expect(repayment).toBe("Loan repayment — GCB Bank")
+  })
+})
+
+describe("classifyLoanActivityKind", () => {
+  it("detects drawdown, repayment, and interest from descriptions", () => {
+    expect(classifyLoanActivityKind("Loan Drawdown", "loan")).toBe("loan_drawdown")
+    expect(classifyLoanActivityKind("Loan Repayment", "loan")).toBe("loan_repayment")
+    expect(classifyLoanActivityKind("Loan Interest Payment", "manual")).toBe(
+      "loan_interest"
+    )
   })
 })
 
