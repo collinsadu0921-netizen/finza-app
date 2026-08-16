@@ -32,6 +32,14 @@ export interface AccessDecision {
   allowed: boolean
   redirectTo?: string
   reason?: string
+  /**
+   * Orchestration reuse only — populated when access is granted after business+role
+   * resolution in STEP 5. Does not alter allow/deny decisions.
+   */
+  resolvedContext?: {
+    business: NonNullable<Awaited<ReturnType<typeof getCurrentBusiness>>>
+    role: UserRole
+  }
 }
 
 function normalizePathnameForAccess(pathname: string | null | undefined): string {
@@ -581,7 +589,17 @@ export async function resolveAccess(
   }
 
   // STEP 9: Access granted
-  return debugDecision({ allowed: true })
+  return debugDecision({
+    allowed: true,
+    ...(business
+      ? {
+          resolvedContext: {
+            business,
+            role,
+          },
+        }
+      : {}),
+  })
 }
 
 /**

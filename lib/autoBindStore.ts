@@ -17,6 +17,13 @@ import { getActiveStoreId, setActiveStoreId } from "./storeSession"
 import { getStores } from "./stores"
 import { isCashierAuthenticated } from "./cashierSession"
 
+export type AutoBindSingleStoreOptions = {
+  /** When provided, skips getCurrentBusiness() inside auto-bind. */
+  business?: Awaited<ReturnType<typeof getCurrentBusiness>> | null
+  /** When provided with business, skips getUserRole() inside auto-bind. */
+  role?: string | null
+}
+
 /**
  * Auto-bind single store for Admin/Manager users
  * If user has exactly one store, automatically set it as activeStoreId
@@ -27,7 +34,8 @@ import { isCashierAuthenticated } from "./cashierSession"
  */
 export async function autoBindSingleStore(
   supabase: SupabaseClient,
-  userId: string
+  userId: string,
+  options?: AutoBindSingleStoreOptions
 ): Promise<boolean> {
   try {
     // STORE CONTEXT: Cashiers have implicit store from cashier session (skip auto-bind)
@@ -42,13 +50,24 @@ export async function autoBindSingleStore(
     }
 
     // Get business
-    const business = await getCurrentBusiness(supabase, userId)
+    const business =
+      options?.business !== undefined
+        ? options.business
+        : await getCurrentBusiness(supabase, userId)
     if (!business) {
       return false
     }
 
+    const industry = (business.industry || "").toLowerCase()
+    if (industry !== "retail") {
+      return false
+    }
+
     // Get user role
-    const role = await getUserRole(supabase, userId, business.id)
+    const role =
+      options?.role !== undefined
+        ? options.role
+        : await getUserRole(supabase, userId, business.id)
     
     // STORE CONTEXT: Only auto-bind for Admin/Manager (cashiers skipped above)
     if (role !== "admin" && role !== "owner" && role !== "manager") {

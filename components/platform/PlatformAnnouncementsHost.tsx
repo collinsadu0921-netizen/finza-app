@@ -1,11 +1,30 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { usePathname } from "next/navigation"
 import type { PlatformAnnouncementRow } from "@/lib/platform/announcementsTypes"
 import { isWorkspaceDashboardPath } from "@/lib/platform/announcementAudience"
+import {
+  announcementsFetchCacheKey,
+  clearAnnouncementsClientCache,
+  readFreshAnnouncementsCache,
+  removeAnnouncementFromCacheEntries,
+  writeAnnouncementsCache,
+  type AnnouncementsCacheEntry,
+  type AnnouncementsCacheKey,
+} from "@/lib/platform/announcementsActiveClientCache"
 
 const SESSION_MODAL_KEY = "platform_announcement_modal_session_ok"
+
+const announcementsCache = new Map<AnnouncementsCacheKey, AnnouncementsCacheEntry>()
+const inflightByKey = new Map<AnnouncementsCacheKey, Promise<PlatformAnnouncementRow[]>>()
 
 function readSessionModalOk(): Set<string> {
   if (typeof window === "undefined") return new Set()
@@ -41,43 +60,146 @@ function severityBannerClass(severity: PlatformAnnouncementRow["severity"]): str
 }
 
 type Props = {
-  /** Current business industry (e.g. service, retail) for "core" route audience matching */
   businessIndustry: string | null | undefined
   children?: ReactNode
 }
 
 export default function PlatformAnnouncementsHost({ businessIndustry, children }: Props) {
   const pathname = usePathname() || "/"
+  const industryKey = businessIndustry || ""
   const [rows, setRows] = useState<PlatformAnnouncementRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sessionModalOk, setSessionModalOk] = useState<Set<string>>(() => readSessionModalOk())
+  const sessionScopeRef = useRef("anon")
+  const requestGenRef = useRef(0)
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true)
-      const qs = new URLSearchParams({
+  const resolveCacheKey = useCallback(
+    () =>
+      announcementsFetchCacheKey({
         pathname,
-        businessIndustry: businessIndustry || "",
-      })
-      const res = await fetch(`/api/platform/announcements/active?${qs.toString()}`, {
-        credentials: "same-origin",
-      })
-      if (!res.ok) {
-        setRows([])
-        return
+        businessIndustry: industryKey,
+        sessionScope: sessionScopeRef.current,
+      }),
+    [pathname, industryKey]
+  )
+
+  const fetchAnnouncementsNetwork = useCallback(
+    async (key: AnnouncementsCacheKey, signal: AbortSignal): Promise<PlatformAnnouncementRow[]> => {
+      const existing = inflightByKey.get(key)
+      if (existing) return existing
+
+      const promise = (async () => {
+        const qs = new URLSearchParams({
+          pathname,
+          businessIndustry: industryKey,
+        })
+        const res = await fetch(`/api/platform/announcements/active?${qs.toString()}`, {
+          credentials: "same-origin",
+          signal,
+        })
+        if (!res.ok) return []
+        const json = (await res.json()) as { announcements?: PlatformAnnouncementRow[] }
+        return json.announcements ?? []
+      })()
+
+      inflightByKey.set(key, promise)
+      try {
+        return await promise
+      } finally {
+        if (inflightByKey.get(key) === promise) {
+          inflightByKey.delete(key)
+        }
       }
-      const json = (await res.json()) as { announcements?: PlatformAnnouncementRow[] }
-      setRows(json.announcements ?? [])
-    } catch {
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [pathname, businessIndustry])
+    },
+    [pathname, industryKey]
+  )
+
+  const loadFromNetwork = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const key = resolveCacheKey()
+
+      if (!opts?.force) {
+        const cached = readFreshAnnouncementsCache(announcementsCache, key)
+        if (cached) {
+          setRows(cached)
+          setLoading(false)
+          return
+        }
+      }
+
+      const gen = ++requestGenRef.current
+      const controller = new AbortController()
+
+      try {
+        setLoading(true)
+        const fetched = await fetchAnnouncementsNetwork(key, controller.signal)
+        if (gen !== requestGenRef.current) return
+        writeAnnouncementsCache(announcementsCache, key, fetched)
+        setRows(fetched)
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        if (gen !== requestGenRef.current) return
+        setRows([])
+      } finally {
+        if (gen === requestGenRef.current) {
+          setLoading(false)
+        }
+      }
+    },
+    [fetchAnnouncementsNetwork, resolveCacheKey]
+  )
 
   useEffect(() => {
-    void load()
-  }, [load])
+    let aborted = false
+    const key = resolveCacheKey()
+
+    const cached = readFreshAnnouncementsCache(announcementsCache, key)
+    if (cached) {
+      setRows(cached)
+      setLoading(false)
+      return
+    }
+
+    const gen = ++requestGenRef.current
+    const controller = new AbortController()
+
+    ;(async () => {
+      try {
+        setLoading(true)
+        const fetched = await fetchAnnouncementsNetwork(key, controller.signal)
+        if (aborted || gen !== requestGenRef.current) return
+        writeAnnouncementsCache(announcementsCache, key, fetched)
+        setRows(fetched)
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        if (aborted || gen !== requestGenRef.current) return
+        setRows([])
+      } finally {
+        if (!aborted && gen === requestGenRef.current) {
+          setLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      aborted = true
+      controller.abort()
+    }
+  }, [fetchAnnouncementsNetwork, resolveCacheKey])
+
+  useEffect(() => {
+    const onAuthScopeChange = () => {
+      sessionScopeRef.current = `s-${Date.now()}`
+      clearAnnouncementsClientCache(announcementsCache)
+      inflightByKey.clear()
+      requestGenRef.current += 1
+      setRows([])
+      setLoading(true)
+    }
+
+    window.addEventListener("finza:auth-session-changed", onAuthScopeChange)
+    return () => window.removeEventListener("finza:auth-session-changed", onAuthScopeChange)
+  }, [])
 
   const byPlacement = useMemo(() => {
     const banner = rows.filter((r) => r.placement === "global_banner")
@@ -107,7 +229,9 @@ export default function PlatformAnnouncementsHost({ businessIndustry, children }
       credentials: "same-origin",
     })
     if (!res.ok) return
-    await load()
+    removeAnnouncementFromCacheEntries(announcementsCache, id)
+    setRows((prev) => prev.filter((r) => r.id !== id))
+    await loadFromNetwork({ force: true })
   }
 
   const acknowledgeModalSessionOnly = (id: string) => {

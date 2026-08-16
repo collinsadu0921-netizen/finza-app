@@ -117,6 +117,8 @@ describe("GET /api/invoices/list", () => {
     const body = await res.json()
     expect(body.invoices).toHaveLength(1)
     expect(body.pagination.totalCount).toBe(1)
+    expect(res.headers.get("Server-Timing")).toMatch(/auth;dur=/)
+    expect(res.headers.get("Server-Timing")).toMatch(/db_query;dur=/)
   })
 
   it("applies approval_status filter on standard list query", async () => {

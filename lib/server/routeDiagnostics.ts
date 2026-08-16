@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseErrorLike } from "@/lib/server/logSupabaseRpcError"
+import { NextResponse } from "next/server"
 
 export function isRouteDiagnosticsEnabled(): boolean {
   const v = process.env.FINZA_ROUTE_DIAG?.trim().toLowerCase()
@@ -47,6 +48,7 @@ export function logRouteDiag(route: string, fields: RouteDiagFields): void {
 export function createRouteDiag(route: string, businessId?: string | null) {
   const routeT0 = performance.now()
   const base: RouteDiagFields = businessId ? { business_id: businessId } : {}
+  const serverTimings: Array<{ name: string; dur: number; desc?: string }> = []
 
   return {
     step(step: string, extra?: RouteDiagFields) {
@@ -56,6 +58,17 @@ export function createRouteDiag(route: string, businessId?: string | null) {
         ms: Math.round((performance.now() - routeT0) * 10) / 10,
         ...extra,
       })
+    },
+    /** Record a named duration for Server-Timing (milliseconds). */
+    recordTiming(name: string, durMs: number, desc?: string) {
+      serverTimings.push({
+        name,
+        dur: Math.round(durMs * 10) / 10,
+        desc,
+      })
+    },
+    serverTimingHeader(extra?: Array<{ name: string; dur: number; desc?: string }>) {
+      return buildServerTimingHeader([...serverTimings, ...(extra ?? [])])
     },
     finish(status: number, extra?: RouteDiagFields) {
       logRouteDiag(route, {
@@ -77,4 +90,29 @@ export function createRouteDiag(route: string, businessId?: string | null) {
       })
     },
   }
+}
+
+/** Build a `Server-Timing` header value (no sensitive data). */
+export function buildServerTimingHeader(
+  entries: Array<{ name: string; dur: number; desc?: string }>
+): string | null {
+  if (entries.length === 0) return null
+  return entries
+    .map((e) => {
+      const parts = [`${e.name};dur=${e.dur}`]
+      if (e.desc) parts.push(`desc="${e.desc.replace(/"/g, "'")}"`)
+      return parts.join(";")
+    })
+    .join(", ")
+}
+
+export function jsonResponseWithServerTiming<T>(
+  body: T,
+  init: { status?: number; serverTiming?: string | null }
+): NextResponse {
+  const headers = new Headers({ "Content-Type": "application/json" })
+  if (init.serverTiming) {
+    headers.set("Server-Timing", init.serverTiming)
+  }
+  return NextResponse.json(body, { status: init.status ?? 200, headers })
 }

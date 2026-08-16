@@ -31,6 +31,7 @@ import RetailPosIdleSessionWatcher from "@/components/RetailPosIdleSessionWatche
 import AppIdleTimeoutWatcher from "@/components/AppIdleTimeoutWatcher"
 import { getCurrentBusiness } from "@/lib/business"
 import AiAssistant from "@/components/AiAssistant"
+import { isServiceWorkspacePath } from "@/lib/protectedLayout/routeWorkspace"
 import {
   WorkspaceBusinessProvider,
   type WorkspaceBusiness,
@@ -168,9 +169,8 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
       
       const userId = sessionData?.session?.user?.id || null
       
-      // STORE CONTEXT AUTO-BIND: Auto-set activeStoreId if user has exactly one store
-      // This prevents unnecessary redirects to /select-store for single-store users
-      if (userId) {
+      // STORE CONTEXT AUTO-BIND: Retail-only — Service routes never query stores.
+      if (userId && !isServiceWorkspacePath(pathname)) {
         await autoBindSingleStore(supabase, userId)
       }
 
@@ -209,7 +209,9 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
 
       if (userId) {
         try {
-          const business = await getCurrentBusiness(supabase, userId)
+          const business =
+            decision.resolvedContext?.business ??
+            (await getCurrentBusiness(supabase, userId))
           if (stale()) return
           setAiBusinessId(business?.id || null)
           setWorkspaceBusiness((business as WorkspaceBusiness) ?? null)
@@ -224,7 +226,9 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
           )
           let restrictChrome = false
           if (business?.id && (business.industry || "").toLowerCase() === "retail") {
-            const role = await getUserRole(supabase, userId, business.id)
+            const role =
+              decision.resolvedContext?.role ??
+              (await getUserRole(supabase, userId, business.id))
             restrictChrome = role === "cashier"
           }
           if (!stale()) setRestrictRetailCashierChrome(restrictChrome)

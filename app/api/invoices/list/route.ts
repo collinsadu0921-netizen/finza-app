@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import {
   loadOrComputeOperationalListCache,
 } from "@/lib/server/operationalListCache"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
-import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
+import { createRouteDiag, supabaseErrorDiag, timedStepMs, jsonResponseWithServerTiming } from "@/lib/server/routeDiagnostics"
 import { isCustomerApprovalStatus } from "@/lib/invoices/customerApproval"
 
 const INVOICE_SELECT = `
@@ -24,8 +24,7 @@ const INVOICE_SELECT = `
         tax_lines,
         customers (
           id,
-          name,
-          email
+          name
         )
       `
 
@@ -190,10 +189,19 @@ async function fetchOverdueInvoicesPage(
 }
 
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
   const { searchParams } = new URL(request.url)
   const status = searchParams.get("status")
   const routeName = status === "overdue" ? "invoices_overdue" : "invoices_list"
   let diag = createRouteDiag(routeName)
+
+  const respond = <T>(body: T, statusCode: number) =>
+    jsonResponseWithServerTiming(body, {
+      status: statusCode,
+      serverTiming: diag.serverTimingHeader([
+        { name: "total", dur: timedStepMs(routeT0), desc: "handler" },
+      ]),
+    })
 
   try {
     const tAuth = performance.now()
@@ -201,28 +209,32 @@ export async function GET(request: NextRequest) {
     const auth = await resolveAuthenticatedApiUser(supabase, {
       cookieHeader: request.headers.get("cookie"),
     })
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
 
     if (!auth.ok) {
       diag.fail(auth.status, auth.error, { auth_failure_stage: auth.authFailureStage })
-      return NextResponse.json(
+      return respond(
         { error: auth.error, auth_failure_stage: auth.authFailureStage },
-        { status: auth.status }
+        auth.status
       )
     }
     const user = auth.user
 
+    const tScope = performance.now()
     const scope = await resolveBusinessScopeForUser(
       supabase,
       user.id,
       searchParams.get("business_id") ?? searchParams.get("businessId")
     )
-    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+    diag.recordTiming("scope", timedStepMs(tScope), "tenant")
+    diag.step("auth", { ms_auth: timedStepMs(tAuth), auth_source: auth.authSource })
+    diag.step("scope", { ms_scope: timedStepMs(tScope) })
 
     if (!scope.ok) {
       diag.fail(scope.status, scope.error)
-      return NextResponse.json({ error: scope.error }, { status: scope.status })
+      return respond({ error: scope.error }, scope.status)
     }
-    diag = createRouteDiag(routeName, scope.businessId)
+    diag.step("tenant", { business_id: scope.businessId })
 
     const business = { id: scope.businessId }
     const customerId = searchParams.get("customer_id")
@@ -234,7 +246,7 @@ export async function GET(request: NextRequest) {
       approvalStatusRaw && isCustomerApprovalStatus(approvalStatusRaw) ? approvalStatusRaw : null
     if (approvalStatusRaw && !approvalStatus) {
       diag.fail(400, "invalid approval_status")
-      return NextResponse.json({ error: "Invalid approval_status filter" }, { status: 400 })
+      return respond({ error: "Invalid approval_status filter" }, 400)
     }
     const page = Math.max(1, Number.parseInt(searchParams.get("page") || "1", 10) || 1)
     const limitRaw = Number.parseInt(searchParams.get("limit") || "25", 10) || 25
@@ -268,7 +280,7 @@ export async function GET(request: NextRequest) {
       })
 
       diag.finish(200, { page, limit })
-      return NextResponse.json(payload)
+      return respond(payload, 200)
     }
 
     let query = supabase
@@ -329,24 +341,25 @@ export async function GET(request: NextRequest) {
 
     const tList = performance.now()
     const { data: invoices, error, count } = await query
+    const dbMs = timedStepMs(tList)
+    diag.recordTiming("db_query", dbMs, "invoices")
     diag.step("invoices_query", {
-      ms_query: timedStepMs(tList),
+      ms_query: dbMs,
       row_count: (invoices ?? []).length,
       total_count: count ?? 0,
+      count_mode: "exact",
+      page,
+      limit,
     })
 
     if (error) {
       console.error("Error fetching invoices:", error)
       diag.fail(500, error.message, supabaseErrorDiag(error))
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      )
+      return respond({ error: error.message }, 500)
     }
 
     const totalCount = count ?? 0
-    diag.finish(200, { page, limit })
-    return NextResponse.json({
+    const payload = {
       invoices: invoices || [],
       pagination: {
         page,
@@ -354,11 +367,22 @@ export async function GET(request: NextRequest) {
         totalCount,
         totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       },
+    }
+
+    const tSerialize = performance.now()
+    const serialized = JSON.stringify(payload)
+    diag.recordTiming("serialize", timedStepMs(tSerialize), "json")
+    diag.step("serialize", {
+      ms_serialize: timedStepMs(tSerialize),
+      payload_bytes: serialized.length,
     })
+
+    diag.finish(200, { page, limit, payload_bytes: serialized.length })
+    return respond(payload, 200)
   } catch (error: unknown) {
     console.error("Error in invoice list:", error)
     const message = error instanceof Error ? error.message : "Internal server error"
     diag.fail(500, message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    return respond({ error: message }, 500)
   }
 }

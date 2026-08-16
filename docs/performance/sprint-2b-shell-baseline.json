@@ -1,0 +1,39 @@
+{
+  "capturedAt": "2026-08-16",
+  "branch": "staging",
+  "sprint": "2B",
+  "note": "Structural target after Sprint 2B implementation. Runtime counts require staging deploy verification.",
+  "serviceOwnerWarmNav": {
+    "before2B": {
+      "businesses_select_star": 3,
+      "businesses_owner_id": 2,
+      "stores_select_star": 1,
+      "announcements_active": 1,
+      "invoice_list_ms": 1250
+    },
+    "after2BExpected": {
+      "businesses_select_star": 1,
+      "businesses_owner_id": 1,
+      "stores_select_star": 0,
+      "announcements_active": "0-1 (cache hit on repeat pathname)",
+      "invoice_list_ms": "measure via Server-Timing header"
+    }
+  },
+  "protectedLayoutChanges": [
+    "Skip autoBindSingleStore on /service/*",
+    "Reuse resolveAccess.resolvedContext for workspace (no post-access getCurrentBusiness)",
+    "Reuse resolvedContext.role for retail cashier chrome check",
+    "autoBindSingleStore skips non-retail industry and accepts pre-resolved business/role"
+  ],
+  "invoiceListChanges": [
+    "Server-Timing: auth, scope, db_query, serialize, total",
+    "FINZA_ROUTE_DIAG steps: auth, scope, invoices_query, serialize",
+    "Removed unused customers.email from list embed"
+  ],
+  "announcementsChanges": [
+    "60s session-scoped cache keyed by sessionScope|pathname|industry",
+    "Inflight dedupe per cache key",
+    "AbortController on pathname change",
+    "Cache invalidation on dismiss and finza:auth-session-changed"
+  ]
+}

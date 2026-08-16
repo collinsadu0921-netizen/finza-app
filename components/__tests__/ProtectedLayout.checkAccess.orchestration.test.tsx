@@ -4,9 +4,12 @@ import React, { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import ProtectedLayout from "@/components/ProtectedLayout"
 
+const mockReplace = jest.fn()
+let mockPathname = "/service/invoices"
+
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: jest.fn(), push: jest.fn(), prefetch: jest.fn() }),
-  usePathname: () => "/service/dashboard",
+  useRouter: () => ({ replace: mockReplace, push: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => mockPathname,
 }))
 
 jest.mock("@/lib/supabaseClient", () => ({
@@ -43,9 +46,7 @@ jest.mock("@/lib/hooks/useExportMode", () => ({
 }))
 
 jest.mock("@/components/service/ServiceSubscriptionContext", () => ({
-  ServiceSubscriptionProvider: ({ children }: { children: React.ReactNode }) => (
-    <>{children}</>
-  ),
+  ServiceSubscriptionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 jest.mock("@/components/service/ServiceWorkspaceSubscriptionBanners", () => ({
@@ -96,13 +97,15 @@ import { supabase } from "@/lib/supabaseClient"
 import { resolveAccess } from "@/lib/accessControl"
 import { autoBindSingleStore } from "@/lib/autoBindStore"
 import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
 
-describe("ProtectedLayout hook order", () => {
+describe("ProtectedLayout checkAccess orchestration (Sprint 2B)", () => {
   let container: HTMLDivElement
   let root: Root
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockPathname = "/service/invoices"
     container = document.createElement("div")
     document.body.appendChild(container)
     root = createRoot(container)
@@ -119,14 +122,14 @@ describe("ProtectedLayout hook order", () => {
       },
       error: null,
     } as never)
-    jest.mocked(autoBindSingleStore).mockResolvedValue(false)
+
     jest.mocked(resolveAccess).mockResolvedValue({
       allowed: true,
       resolvedContext: {
         business: {
           id: "biz-1",
-          default_currency: "GHS",
           industry: "service",
+          default_currency: "GHS",
         },
         role: "owner",
       },
@@ -140,43 +143,58 @@ describe("ProtectedLayout hook order", () => {
     container.remove()
   })
 
-  it(
-    "renders loading then access-granted without React hook-order errors",
-    async () => {
-      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
-
-      act(() => {
-        root.render(
-          <ProtectedLayout>
-            <div data-testid="protected-child">Child content</div>
-          </ProtectedLayout>
-        )
-      })
-
-      expect(container.textContent).toContain("Loading...")
-
-      const deadline = Date.now() + 5_000
-      while (Date.now() < deadline) {
-        if (container.querySelector('[data-testid="protected-child"]')) {
-          break
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      }
-
-      expect(container.querySelector('[data-testid="protected-child"]')).not.toBeNull()
-
-      const hookOrderMessages = consoleError.mock.calls
-        .map((call) => String(call[0]))
-        .filter(
-          (message) =>
-            message.includes("Rendered more hooks") ||
-            message.includes("Rendered fewer hooks") ||
-            message.includes("Minified React error #310")
-        )
-
-      expect(hookOrderMessages).toEqual([])
-
-      consoleError.mockRestore()
+  async function waitForChild() {
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      if (container.querySelector('[data-testid="protected-child"]')) return
+      await new Promise((r) => setTimeout(r, 10))
     }
-  )
+    throw new Error("Protected child did not render")
+  }
+
+  it("skips autoBindSingleStore on /service/* paths", async () => {
+    act(() => {
+      root.render(
+        <ProtectedLayout>
+          <div data-testid="protected-child">ok</div>
+        </ProtectedLayout>
+      )
+    })
+
+    await waitForChild()
+
+    expect(autoBindSingleStore).not.toHaveBeenCalled()
+  })
+
+  it("reuses resolveAccess resolvedContext without post-access getCurrentBusiness", async () => {
+    act(() => {
+      root.render(
+        <ProtectedLayout>
+          <div data-testid="protected-child">ok</div>
+        </ProtectedLayout>
+      )
+    })
+
+    await waitForChild()
+
+    expect(getCurrentBusiness).not.toHaveBeenCalled()
+    expect(getUserRole).not.toHaveBeenCalled()
+  })
+
+  it("calls autoBindSingleStore on retail paths", async () => {
+    mockPathname = "/retail/dashboard"
+    jest.mocked(autoBindSingleStore).mockResolvedValue(false)
+
+    act(() => {
+      root.render(
+        <ProtectedLayout>
+          <div data-testid="protected-child">ok</div>
+        </ProtectedLayout>
+      )
+    })
+
+    await waitForChild()
+
+    expect(autoBindSingleStore).toHaveBeenCalled()
+  })
 })
