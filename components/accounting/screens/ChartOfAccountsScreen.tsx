@@ -16,6 +16,12 @@ import { useServiceFinancialWrite } from "@/components/service/useServiceFinanci
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import type { ScreenProps } from "./types"
 
+import {
+  allowedSubTypesForAccountType,
+  subTypeLabel,
+  type AccountType,
+} from "@/lib/accounting/accountSubTypeTaxonomy"
+
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "income", "expense"] as const
 
 type Account = {
@@ -25,6 +31,7 @@ type Account = {
   type: "asset" | "liability" | "equity" | "income" | "expense"
   description: string | null
   is_system: boolean
+  sub_type?: string | null
 }
 
 export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps) {
@@ -42,10 +49,14 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
   const [createName, setCreateName] = useState("")
   const [createCode, setCreateCode] = useState("")
   const [createType, setCreateType] = useState<Account["type"]>("asset")
-  const [createSubType, setCreateSubType] = useState<"" | "bank" | "cash">("")
+  const [createSubType, setCreateSubType] = useState("")
   const [createDescription, setCreateDescription] = useState("")
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState("")
+  const [editAccount, setEditAccount] = useState<Account | null>(null)
+  const [editSubType, setEditSubType] = useState("")
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState("")
 
   useEffect(() => {
     if (!businessId) setLoading(false)
@@ -91,6 +102,43 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
   const closeCreateModal = () => {
     if (!createSubmitting) setShowCreateModal(false)
   }
+
+  const openEditPurposeModal = (account: Account) => {
+    if (account.is_system || readOnly) return
+    setEditAccount(account)
+    setEditSubType(account.sub_type ?? "")
+    setEditError("")
+  }
+
+  const closeEditModal = () => {
+    if (!editSubmitting) setEditAccount(null)
+  }
+
+  const handleEditPurpose = async () => {
+    if (!editAccount) return
+    setEditError("")
+    setEditSubmitting(true)
+    try {
+      const response = await fetch(`/api/accounts/${editAccount.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sub_type: editSubType || null }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to update account purpose")
+      }
+      setEditAccount(null)
+      await loadAccounts()
+    } catch (err: any) {
+      setEditError(err.message || "Failed to update account purpose")
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  const purposeOptionsForType = (type: Account["type"]) =>
+    allowedSubTypesForAccountType(type as AccountType)
 
   const handleCreateAccount = async () => {
     setCreateError("")
@@ -315,20 +363,23 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                       Type
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                      Purpose
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
                       Description
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
                       System
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                      Eligibility
+                      Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {filteredAccounts.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                      <td colSpan={8} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                         {searchTerm || filterType ? "No accounts found matching filters" : "No accounts found"}
                       </td>
                     </tr>
@@ -354,6 +405,9 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
                             {getTypeBadge(account.type)}
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
+                            {account.sub_type ? subTypeLabel(account.sub_type) : "—"}
+                          </td>
                           <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                             {account.description || "—"}
                           </td>
@@ -367,18 +421,29 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            {isEligible ? (
-                              <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 rounded">
-                                ✅ Eligible
-                              </span>
-                            ) : (
-                              <span
-                                className="px-2 py-1 text-xs font-medium bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-400 rounded border border-amber-200 dark:border-amber-800"
-                                title="Income, expense, and system accounts cannot receive opening balances."
-                              >
-                                Not eligible for opening balances
-                              </span>
-                            )}
+                            <div className="flex flex-col gap-1">
+                              {isEligible ? (
+                                <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 rounded">
+                                  ✅ Opening balance eligible
+                                </span>
+                              ) : (
+                                <span
+                                  className="px-2 py-1 text-xs font-medium bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-400 rounded border border-amber-200 dark:border-amber-800"
+                                  title="Income, expense, and system accounts cannot receive opening balances."
+                                >
+                                  Not eligible for opening balances
+                                </span>
+                              )}
+                              {!account.is_system && !readOnly && (
+                                <button
+                                  type="button"
+                                  onClick={() => openEditPurposeModal(account)}
+                                  className="text-left text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  Edit purpose
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -466,7 +531,7 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                   value={createType}
                   onChange={(e) => {
                     setCreateType(e.target.value as Account["type"])
-                    if (e.target.value !== "asset") setCreateSubType("")
+                    setCreateSubType("")
                   }}
                   disabled={createSubmitting}
                   className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white disabled:opacity-60"
@@ -478,25 +543,33 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                   ))}
                 </select>
               </div>
-              {createType === "asset" && (
+              {(createType === "asset" || createType === "liability") && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Sub-type
+                    Account purpose
                     <span className="ml-1 text-xs font-normal text-gray-400">(optional)</span>
                   </label>
                   <select
                     value={createSubType}
-                    onChange={(e) => setCreateSubType(e.target.value as "" | "bank" | "cash")}
+                    onChange={(e) => setCreateSubType(e.target.value)}
                     disabled={createSubmitting}
                     className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white disabled:opacity-60"
                   >
                     <option value="">None</option>
-                    <option value="bank">Bank</option>
-                    <option value="cash">Cash</option>
+                    {purposeOptionsForType(createType).map((st) => (
+                      <option key={st} value={st}>
+                        {subTypeLabel(st)}
+                      </option>
+                    ))}
                   </select>
-                  {createSubType === "" && (
+                  {createSubType === "" && createType === "asset" && (
                     <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                      Set sub-type to <strong>Bank</strong> or <strong>Cash</strong> if this account holds real money — required for owner withdrawals &amp; contributions.
+                      Set purpose to <strong>Bank</strong>, <strong>Cash</strong>, or <strong>Mobile money</strong> if this account holds real money — required for payments and financing workflows.
+                    </p>
+                  )}
+                  {createSubType === "" && createType === "liability" && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      Set purpose to <strong>Loan / Borrowing</strong> to use this account in the Loans register.
                     </p>
                   )}
                 </div>
@@ -513,6 +586,70 @@ export default function ChartOfAccountsScreen({ mode, businessId }: ScreenProps)
                 />
               </div>
             </div>
+          </Modal>
+
+          <Modal
+            isOpen={editAccount != null}
+            onClose={closeEditModal}
+            title="Edit account purpose"
+            size="md"
+            closeOnOverlayClick={!editSubmitting}
+            footer={
+              <>
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  disabled={editSubmitting}
+                  className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditPurpose}
+                  disabled={editSubmitting}
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50"
+                >
+                  {editSubmitting ? "Saving…" : "Save purpose"}
+                </button>
+              </>
+            }
+          >
+            {editAccount && (
+              <div className="space-y-4">
+                {editError && (
+                  <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                    {editError}
+                  </div>
+                )}
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {editAccount.code} – {editAccount.name} ({editAccount.type})
+                </p>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Account purpose
+                  </label>
+                  <select
+                    value={editSubType}
+                    onChange={(e) => setEditSubType(e.target.value)}
+                    disabled={editSubmitting}
+                    className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white disabled:opacity-60"
+                  >
+                    <option value="">None</option>
+                    {purposeOptionsForType(editAccount.type).map((st) => (
+                      <option key={st} value={st}>
+                        {subTypeLabel(st)}
+                      </option>
+                    ))}
+                  </select>
+                  {editAccount.type === "liability" && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Choose <strong>Loan / Borrowing</strong> to make this liability available in the Loans workflow.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </Modal>
         </div>
       </div>

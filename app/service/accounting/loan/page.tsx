@@ -30,6 +30,7 @@ type LoanRecord = {
   interest_rate_pct: number | null
   start_date: string
   outstanding: number
+  loan_account_id: string | null
   loan_account: { code: string; name: string } | null
 }
 
@@ -151,6 +152,7 @@ function FinancingPageInner() {
   const [loanAmount, setLoanAmount]       = useState<number | "">("")
   const [bankId, setBankId]               = useState<string | null>(null)
   const [loanAccountId, setLoanAccountId] = useState<string | null>(null)
+  const [loanRegisterId, setLoanRegisterId] = useState<string | null>(null)
   const [expenseAccountId, setExpenseAccountId] = useState<string | null>(null)
   const [lenderName, setLenderName]       = useState("")
   const [interestRatePct, setInterestRatePct] = useState<number | "">("")
@@ -258,6 +260,22 @@ function FinancingPageInner() {
   const selectedExpense   = expenseAccounts.find((a)  => a.id === expenseAccountId)
   const selectedEquityBank = bankCashAccounts.find((a) => a.id === equityBankId)
   const selectedEquityAcc  = equityAccounts.find((a)  => a.id === equityAccountId)
+  const repayableLoans = loans.filter(
+    (l) =>
+      l.outstanding > 0 &&
+      (!loanAccountId || l.loan_account_id === loanAccountId)
+  )
+
+  useEffect(() => {
+    if (loanMode !== "repayment") return
+    if (repayableLoans.length === 0) {
+      setLoanRegisterId(null)
+      return
+    }
+    if (!loanRegisterId || !repayableLoans.some((l) => l.id === loanRegisterId)) {
+      setLoanRegisterId(repayableLoans[0].id)
+    }
+  }, [loanMode, repayableLoans, loanRegisterId])
 
   // Loan preview accounts
   const loanDR =
@@ -277,12 +295,19 @@ function FinancingPageInner() {
   const noLoanAccs = coaLoaded && loanAccounts.length === 0
   const noEquity   = coaLoaded && equityAccounts.length === 0
 
-  const loanFormDisabled  = noBankCash || (loanMode !== "interest" && noLoanAccs)
+  const loanFormDisabled  =
+    noBankCash ||
+    (loanMode === "drawdown" && noLoanAccs) ||
+    (loanMode === "repayment" && (noLoanAccs || repayableLoans.length === 0))
   const equityFormDisabled = noBankCash || noEquity
 
   const loanValid =
     numLoanAmount > 0 && bankId != null &&
-    (loanMode === "interest" ? expenseAccountId != null : loanAccountId != null)
+    (loanMode === "interest"
+      ? expenseAccountId != null
+      : loanMode === "repayment"
+        ? loanAccountId != null && loanRegisterId != null
+        : loanAccountId != null)
 
   const equityValid = numEquityAmount > 0 && equityBankId != null && equityAccountId != null
 
@@ -338,8 +363,10 @@ function FinancingPageInner() {
             bank_or_cash_account_id: bankId,
             description:             loanDesc || defaultDesc,
           }
-          if (loanMode === "repayment") intent.loan_account_id = loanAccountId
-          else intent.expense_account_id = expenseAccountId
+          if (loanMode === "repayment") {
+            intent.loan_account_id = loanAccountId
+            intent.loan_id = loanRegisterId
+          } else intent.expense_account_id = expenseAccountId
 
           const res = await fetch("/api/service/accounting/post-intent", {
             method: "POST",
@@ -508,8 +535,11 @@ function FinancingPageInner() {
 
           {/* Warnings */}
           {noBankCash && <Warn>No bank or cash account found. Please create one in Chart of Accounts.</Warn>}
-          {noLoanAccs && loanMode !== "interest" && (
-            <Warn>No loan accounts found. Accounts 2300 (Short-term) and 2310 (Long-term) should be created automatically — if missing, add them in Chart of Accounts with type <strong>Liability</strong>.</Warn>
+          {noLoanAccs && loanMode === "drawdown" && (
+            <Warn>No loan liability accounts found. Add a liability account with purpose <strong>Loan / Borrowing</strong> in Chart of Accounts, or ensure system accounts 2300/2310 are provisioned.</Warn>
+          )}
+          {loanMode === "repayment" && repayableLoans.length === 0 && !loansLoading && (
+            <Warn>No outstanding loans available for repayment on the selected liability account.</Warn>
           )}
 
           {/* Loan form */}
@@ -527,7 +557,7 @@ function FinancingPageInner() {
                 className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60" />
             </Field>
 
-            <Field label="Bank / Cash Account">
+            <Field label="Bank / Cash / Mobile Money">
               <NativeSelect value={bankId ?? ""} onChange={(e) => setBankId(e.target.value || null)}
                 disabled={isSubmitting || loanFormDisabled}>
                 <option value="">Select account…</option>
@@ -535,8 +565,26 @@ function FinancingPageInner() {
               </NativeSelect>
             </Field>
 
+            {loanMode === "repayment" && (
+              <Field label="Loan facility" hint="Select the loan register entry to repay">
+                <NativeSelect
+                  value={loanRegisterId ?? ""}
+                  onChange={(e) => setLoanRegisterId(e.target.value || null)}
+                  disabled={isSubmitting || loanFormDisabled}
+                >
+                  <option value="">Select loan…</option>
+                  {repayableLoans.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {(l.lender_name || "Loan")} — outstanding {formatMoney(l.outstanding, currencyCode)}
+                      {l.loan_account ? ` (${l.loan_account.code})` : ""}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
+
             {loanMode !== "interest" && (
-              <Field label="Loan Account" hint="2300 = Short-term · 2310 = Long-term">
+              <Field label="Loan liability account" hint="GL account mapped to this borrowing">
                 <NativeSelect value={loanAccountId ?? ""} onChange={(e) => setLoanAccountId(e.target.value || null)}
                   disabled={isSubmitting || loanFormDisabled}>
                   <option value="">Select loan account…</option>
@@ -623,7 +671,7 @@ function FinancingPageInner() {
                 className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100 disabled:opacity-60" />
             </Field>
 
-            <Field label="Bank / Cash Account">
+            <Field label="Bank / Cash / Mobile Money">
               <NativeSelect value={equityBankId ?? ""} onChange={(e) => setEquityBankId(e.target.value || null)}
                 disabled={isSubmitting || equityFormDisabled}>
                 <option value="">Select account…</option>

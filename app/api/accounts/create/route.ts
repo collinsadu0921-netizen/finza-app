@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  ACCOUNT_TYPES,
+  isAllowedSubTypeForAccountType,
+  normalizeSubType,
+  type AccountType,
+} from "@/lib/accounting/accountSubTypeTaxonomy"
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,18 +43,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate type
-    if (!["asset", "liability", "equity", "income", "expense"].includes(type)) {
+    if (!(ACCOUNT_TYPES as readonly string[]).includes(type)) {
       return NextResponse.json(
         { error: "Invalid account type" },
         { status: 400 }
       )
     }
 
-    // Validate sub_type (only allowed on assets)
-    const validSubTypes = ["bank", "cash"]
-    if (sub_type && (!validSubTypes.includes(sub_type) || type !== "asset")) {
+    const normalizedSubType = normalizeSubType(sub_type)
+    if (
+      normalizedSubType &&
+      !isAllowedSubTypeForAccountType(type as AccountType, normalizedSubType)
+    ) {
       return NextResponse.json(
-        { error: "sub_type must be 'bank' or 'cash' and only applies to asset accounts" },
+        { error: "Invalid account purpose for the selected account type" },
         { status: 400 }
       )
     }
@@ -76,7 +84,7 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         code: code.trim(),
         type,
-        sub_type: sub_type || null,
+        sub_type: normalizedSubType,
         description: description?.trim() || null,
         is_system: false,
       })

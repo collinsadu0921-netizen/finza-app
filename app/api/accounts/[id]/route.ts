@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  ACCOUNT_TYPES,
+  isAllowedSubTypeForAccountType,
+  normalizeSubType,
+  type AccountType,
+} from "@/lib/accounting/accountSubTypeTaxonomy"
 
 export async function GET(
   request: NextRequest,
@@ -77,12 +83,12 @@ export async function PUT(
     if (tierBlockPut) return tierBlockPut
 
     const body = await request.json()
-    const { name, code, type, description } = body
+    const { name, code, type, description, sub_type } = body
 
     // Verify account exists and is not system
     const { data: existing } = await supabase
       .from("accounts")
-      .select("is_system")
+      .select("is_system, type")
       .eq("id", id)
       .eq("business_id", business.id)
       .single()
@@ -107,8 +113,9 @@ export async function PUT(
 
     if (name !== undefined) updateData.name = name.trim()
     if (code !== undefined) updateData.code = code.trim()
+    const effectiveType = (type ?? existing.type) as AccountType
     if (type !== undefined) {
-      if (!["asset", "liability", "equity", "income", "expense"].includes(type)) {
+      if (!(ACCOUNT_TYPES as readonly string[]).includes(type)) {
         return NextResponse.json(
           { error: "Invalid account type" },
           { status: 400 }
@@ -117,6 +124,20 @@ export async function PUT(
       updateData.type = type
     }
     if (description !== undefined) updateData.description = description?.trim() || null
+
+    if (sub_type !== undefined) {
+      const normalizedSubType = normalizeSubType(sub_type)
+      if (
+        normalizedSubType &&
+        !isAllowedSubTypeForAccountType(effectiveType, normalizedSubType)
+      ) {
+        return NextResponse.json(
+          { error: "Invalid account purpose for the selected account type" },
+          { status: 400 }
+        )
+      }
+      updateData.sub_type = normalizedSubType
+    }
 
     const { data: account, error } = await supabase
       .from("accounts")

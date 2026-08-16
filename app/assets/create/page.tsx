@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useToast } from "@/components/ui/ToastProvider"
+import { isOperationalFundingSubType } from "@/lib/accounting/accountSubTypeTaxonomy"
 
 export default function CreateAssetPage() {
   const router = useRouter()
@@ -70,7 +71,8 @@ export default function CreateAssetPage() {
       const data = await response.json()
       if (response.ok) {
         const assetAccounts = (data.accounts || []).filter(
-          (acc: any) => acc.type === "asset" && ["1010", "1020", "1000"].includes(acc.code)
+          (acc: any) =>
+            acc.type === "asset" && isOperationalFundingSubType(acc.sub_type)
         )
         setAccounts(assetAccounts)
         if (assetAccounts.length > 0) {

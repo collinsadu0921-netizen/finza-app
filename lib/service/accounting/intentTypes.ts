@@ -3,6 +3,11 @@
  * Users cannot choose debit/credit; the engine derives lines from intent_type.
  */
 
+import {
+  isOperationalFundingSubType,
+  isLoanSubType,
+} from "@/lib/accounting/accountSubTypeTaxonomy"
+
 export const SERVICE_INTENT_TYPES = [
   "OWNER_CONTRIBUTION",
   "OWNER_WITHDRAWAL",
@@ -15,10 +20,9 @@ export type ServiceIntentType = (typeof SERVICE_INTENT_TYPES)[number]
 
 /** Account eligibility: type and optional sub_type */
 export type AccountEligibility =
-  | { type: "asset"; subType?: "bank" | "cash" }
+  | { type: "asset"; subType: "operational_funding" }
   | { type: "equity" }
   | { type: "expense" }
-  | { type: "liability" }
   | { type: "liability"; subType: "loan" }
   | { type: "income" }
 
@@ -52,12 +56,13 @@ export interface LoanDrawdownIntent extends ServiceIntentBase {
   loan_account_id: string
 }
 
-/** LOAN_REPAYMENT: Dr loan liability, Cr bank/cash. Amount > 0. */
+/** LOAN_REPAYMENT: Dr loan liability, Cr bank/cash. Amount > 0. Requires loan register row. */
 export interface LoanRepaymentIntent extends ServiceIntentBase {
   intent_type: "LOAN_REPAYMENT"
   amount: number
   bank_or_cash_account_id: string
   loan_account_id: string
+  loan_id: string
 }
 
 /** LOAN_INTEREST_PAYMENT: Dr interest expense, Cr bank/cash. Amount > 0. */
@@ -81,37 +86,32 @@ export const INTENT_ACCOUNT_RULES: Record<
   { [K: string]: AccountEligibility }
 > = {
   OWNER_CONTRIBUTION: {
-    bank_or_cash_account_id: { type: "asset", subType: "bank" },
+    bank_or_cash_account_id: { type: "asset", subType: "operational_funding" },
     equity_account_id:       { type: "equity" },
   },
   OWNER_WITHDRAWAL: {
-    bank_or_cash_account_id: { type: "asset", subType: "bank" },
+    bank_or_cash_account_id: { type: "asset", subType: "operational_funding" },
     equity_account_id:       { type: "equity" },
   },
   LOAN_DRAWDOWN: {
-    bank_or_cash_account_id: { type: "asset", subType: "bank" },
+    bank_or_cash_account_id: { type: "asset", subType: "operational_funding" },
     loan_account_id:         { type: "liability", subType: "loan" },
   },
   LOAN_REPAYMENT: {
-    bank_or_cash_account_id: { type: "asset", subType: "bank" },
+    bank_or_cash_account_id: { type: "asset", subType: "operational_funding" },
     loan_account_id:         { type: "liability", subType: "loan" },
   },
   LOAN_INTEREST_PAYMENT: {
-    bank_or_cash_account_id: { type: "asset", subType: "bank" },
+    bank_or_cash_account_id: { type: "asset", subType: "operational_funding" },
     expense_account_id:      { type: "expense" },
   },
 }
 
-/** Allow both bank and cash sub_types */
-export function isBankOrCashSubType(subType: string | null | undefined): boolean {
-  if (!subType) return false
-  const s = subType.toLowerCase()
-  return s === "bank" || s === "cash"
-}
-
-export function isLoanSubType(subType: string | null | undefined): boolean {
-  return subType?.toLowerCase() === "loan"
-}
+export {
+  isOperationalFundingSubType,
+  isOperationalFundingSubType as isBankOrCashSubType,
+  isLoanSubType,
+} from "@/lib/accounting/accountSubTypeTaxonomy"
 
 export interface AccountForValidation {
   id: string
@@ -126,8 +126,8 @@ export function accountFitsEligibility(
 ): boolean {
   if (account.type !== eligibility.type) return false
   if ("subType" in eligibility && eligibility.subType) {
-    if (eligibility.subType === "bank" || eligibility.subType === "cash") {
-      return isBankOrCashSubType(account.sub_type)
+    if (eligibility.subType === "operational_funding") {
+      return isOperationalFundingSubType(account.sub_type)
     }
     if (eligibility.subType === "loan") {
       return isLoanSubType(account.sub_type)
@@ -163,14 +163,19 @@ export function validateServiceIntent(
     }
   }
 
-  if (
-    intent.intent_type === "LOAN_DRAWDOWN" ||
-    intent.intent_type === "LOAN_REPAYMENT"
-  ) {
+  if (intent.intent_type === "LOAN_DRAWDOWN") {
     const i = intent as LoanDrawdownIntent
     if (typeof i.amount !== "number" || i.amount <= 0) return "amount must be a positive number"
     if (!i.bank_or_cash_account_id || !i.loan_account_id) {
       return "bank_or_cash_account_id and loan_account_id are required"
+    }
+  }
+
+  if (intent.intent_type === "LOAN_REPAYMENT") {
+    const i = intent as LoanRepaymentIntent
+    if (typeof i.amount !== "number" || i.amount <= 0) return "amount must be a positive number"
+    if (!i.bank_or_cash_account_id || !i.loan_account_id || !i.loan_id) {
+      return "bank_or_cash_account_id, loan_account_id, and loan_id are required"
     }
   }
 
@@ -190,7 +195,11 @@ export function validateServiceIntent(
     if (!account) return `Account ${field} not found or not in this business`
     if (!accountFitsEligibility(account, eligibility)) {
       const subTypeHint =
-        "subType" in eligibility && eligibility.subType ? ` (${eligibility.subType})` : ""
+        "subType" in eligibility && eligibility.subType
+          ? eligibility.subType === "operational_funding"
+            ? " (bank, cash, or mobile money)"
+            : ` (${eligibility.subType})`
+          : ""
       return `Account ${field} must be type '${eligibility.type}'${subTypeHint}`
     }
   }
