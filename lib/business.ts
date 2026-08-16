@@ -1,5 +1,19 @@
 import { SupabaseClient } from "@supabase/supabase-js"
-import { getUserRole } from "./userRoles"
+import {
+  requireBusinessScopeForUser,
+  resolveBusinessScopeForUser,
+  type BusinessScopeDiagnostics,
+  type ResolveBusinessScopeOptions,
+  type ResolveBusinessScopeResult,
+} from "./business/resolveBusinessScope"
+
+export type {
+  BusinessScopeDiagnostics,
+  ResolveBusinessScopeOptions,
+  ResolveBusinessScopeResult,
+}
+
+export { requireBusinessScopeForUser, resolveBusinessScopeForUser }
 
 // ─── localStorage helpers (client-side only) ──────────────────────────────────
 
@@ -214,59 +228,6 @@ export async function getCurrentBusiness(
   return null
 }
 
-/** Result of {@link resolveBusinessScopeForUser}. */
-export type ResolveBusinessScopeResult =
-  | { ok: true; businessId: string }
-  | { ok: false; status: number; error: string }
-
-/**
- * Resolves which business an API route should use. When the client sends
- * `business_id` (aligned with localStorage workspace selection), validates
- * membership and uses it; otherwise falls back to {@link getCurrentBusiness}
- * (server cannot read localStorage, so multi-business users need the param).
- */
-export type ResolveBusinessScopeOptions = {
-  /** Request-local role from an earlier getUserRole call (skips duplicate lookup). */
-  knownRole?: string | null
-}
-
-export async function resolveBusinessScopeForUser(
-  supabase: SupabaseClient,
-  userId: string,
-  requestedBusinessId: string | null | undefined,
-  options?: ResolveBusinessScopeOptions
-): Promise<ResolveBusinessScopeResult> {
-  const trimmed =
-    typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
-  const explicit = trimmed.length > 0 ? trimmed : null
-
-  if (explicit) {
-    const role =
-      options?.knownRole !== undefined
-        ? options.knownRole
-        : await getUserRole(supabase, userId, explicit)
-    if (!role) {
-      return { ok: false, status: 403, error: "Forbidden" }
-    }
-    const { data: b } = await supabase
-      .from("businesses")
-      .select("id")
-      .eq("id", explicit)
-      .is("archived_at", null)
-      .maybeSingle()
-    if (!b) {
-      return { ok: false, status: 404, error: "Business not found" }
-    }
-    return { ok: true, businessId: b.id }
-  }
-
-  const business = await getCurrentBusiness(supabase, userId)
-  if (!business) {
-    return { ok: false, status: 404, error: "Business not found" }
-  }
-  return { ok: true, businessId: business.id }
-}
-
 /**
  * Client-side business resolution for list pages: URL param → localStorage workspace → server fallback.
  */
@@ -280,35 +241,4 @@ export async function resolvePreferredBusinessForUser(
   const fromStorage = getSelectedBusinessId()
   const explicit = fromRequest || fromStorage || null
   return resolveBusinessScopeForUser(supabase, userId, explicit)
-}
-
-/**
- * Like {@link resolveBusinessScopeForUser} but **requires** an explicit `business_id`
- * from the client (no server-side fallback). Use for APIs that must align with
- * workspace selection — missing id → 400, no access → 403.
- */
-export async function requireBusinessScopeForUser(
-  supabase: SupabaseClient,
-  userId: string,
-  requestedBusinessId: string | null | undefined
-): Promise<ResolveBusinessScopeResult> {
-  const trimmed =
-    typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
-  if (!trimmed) {
-    return { ok: false, status: 400, error: "Missing business_id" }
-  }
-  const role = await getUserRole(supabase, userId, trimmed)
-  if (!role) {
-    return { ok: false, status: 403, error: "Forbidden" }
-  }
-  const { data: b } = await supabase
-    .from("businesses")
-    .select("id")
-    .eq("id", trimmed)
-    .is("archived_at", null)
-    .maybeSingle()
-  if (!b) {
-    return { ok: false, status: 404, error: "Business not found" }
-  }
-  return { ok: true, businessId: b.id }
 }

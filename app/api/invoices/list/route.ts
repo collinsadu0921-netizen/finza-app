@@ -224,7 +224,15 @@ export async function GET(request: NextRequest) {
     const scope = await resolveBusinessScopeForUser(
       supabase,
       user.id,
-      searchParams.get("business_id") ?? searchParams.get("businessId")
+      searchParams.get("business_id") ?? searchParams.get("businessId"),
+      {
+        diag: {
+          recordTiming: (name, durMs, desc) =>
+            diag.recordTiming(`scope_${name}`, durMs, desc),
+          step: (name, fields) =>
+            diag.step(`scope_${name}`, fields as Record<string, string | number | boolean | null | undefined>),
+        },
+      }
     )
     diag.recordTiming("scope", timedStepMs(tScope), "tenant")
     diag.step("auth", { ms_auth: timedStepMs(tAuth), auth_source: auth.authSource })
