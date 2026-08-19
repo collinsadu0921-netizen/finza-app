@@ -54,7 +54,7 @@ export default function ClientContextWarning() {
           </div>
           <div className="mt-4">
             <button
-              onClick={() => router.push("/accounting/control-tower")}
+              onClick={() => router.push("/accounting/work")}
               className="text-sm font-medium text-yellow-800 dark:text-yellow-300 hover:text-yellow-900 dark:hover:text-yellow-200 underline"
             >
               Go to Control Tower →

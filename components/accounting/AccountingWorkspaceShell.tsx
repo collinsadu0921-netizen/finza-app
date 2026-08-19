@@ -41,6 +41,7 @@ function isClientDependentRoute(pathname: string): boolean {
 }
 
 function getPageTitle(pathname: string, hasClientSelected: boolean): string {
+  if (pathname.startsWith("/accounting/work")) return "Work"
   if (hasClientSelected) return "Client Workspace"
   if (pathname.startsWith("/accounting/clients")) return "Clients"
   return "Firm Dashboard"
@@ -88,22 +89,26 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
 
         const [clientsRes, tasksRes, requestsRes] = await Promise.all([
           fetch("/api/accounting/firm/clients", { cache: "no-store" }),
-          fetch("/api/accounting/control-tower/work-items?limit=200", { cache: "no-store" }),
+          fetch("/api/accounting/work", { cache: "no-store" }),
           fetch("/api/accounting/requests", { cache: "no-store" }),
         ])
 
         if (!mounted) return
 
         const clientsJson = clientsRes.ok ? await clientsRes.json() : { clients: [] }
-        const tasksJson = tasksRes.ok ? await tasksRes.json() : { work_items: [] }
+        const tasksJson = tasksRes.ok ? await tasksRes.json() : { items: [] }
         const requestsJson = requestsRes.ok ? await requestsRes.json() : { requests: [] }
 
         const clients: ClientRow[] = clientsJson.clients ?? []
-        const workItems: WorkItemRow[] = tasksJson.work_items ?? []
+        const workItems: WorkItemRow[] = tasksJson.items ?? []
         const requests: RequestRow[] = requestsJson.requests ?? []
         setClientCount(clients.length)
         setOpenTasks(workItems.length)
-        setOpenRequests(requests.filter((r) => r.status === "open" || r.status === "in_progress").length)
+        setOpenRequests(
+          requests.filter(
+            (r) => r.status === "open" || r.status === "in_progress" || r.status === "waiting_on_client"
+          ).length
+        )
       } finally {
         if (mounted) setLoading(false)
       }

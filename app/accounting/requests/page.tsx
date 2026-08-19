@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-type RequestStatus = "open" | "in_progress" | "completed" | "cancelled"
+type RequestStatus = "open" | "in_progress" | "waiting_on_client" | "completed" | "cancelled"
 
 type FirmRequestRow = {
   id: string
@@ -16,11 +16,12 @@ type FirmRequestRow = {
   created_at: string
 }
 
-const STATUS_OPTIONS: RequestStatus[] = ["open", "in_progress", "completed", "cancelled"]
+const STATUS_OPTIONS: RequestStatus[] = ["open", "in_progress", "waiting_on_client", "completed", "cancelled"]
 
 const STATUS_STYLES: Record<RequestStatus, string> = {
   open: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
   in_progress: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  waiting_on_client: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
   completed: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   cancelled: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 }

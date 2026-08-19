@@ -4,7 +4,7 @@
  * Accountant workspace dashboard.
  *
  * Data sources — 4 parallel calls, no per-client N+1:
- *   /api/accounting/control-tower/work-items  → work item counts + clients needing attention
+ *   /api/accounting/work                      → Practice Work index
  *   /api/accounting/firm/clients              → client roster (total count, name map)
  *   /api/accounting/requests                  → all firm requests in one call (firm-wide listing)
  *   /api/accounting/firm/activity?limit=10    → recent firm activity
@@ -12,8 +12,8 @@
 
 import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
-import type { ControlTowerWorkItem, WorkItemSeverity } from "@/lib/accounting/controlTower/types"
-import { scoreClient, getRiskLabel } from "@/lib/accounting/controlTower/riskScore"
+import type { PracticeWorkItem, PracticeWorkStatusGroup } from "@/lib/practice/work/types"
+import { statusGroupLabel } from "@/lib/practice/work/normalize"
 
 // ---------- types -----------------------------------------------------------
 
@@ -28,7 +28,7 @@ type ClientRequest = {
   id: string
   client_business_id: string
   title: string
-  status: "open" | "in_progress" | "completed" | "cancelled"
+  status: "open" | "in_progress" | "waiting_on_client" | "completed" | "cancelled"
   due_at: string | null
   created_at: string
 }
@@ -44,30 +44,27 @@ type ActivityLog = {
 type ClientRow = {
   business_id: string
   client_name: string
-  risk_score: number
   item_count: number
-  top_severity: WorkItemSeverity | null
+  top_group: PracticeWorkStatusGroup | null
 }
 
 // ---------- helpers ---------------------------------------------------------
 
-const SEVERITY_ORDER: Record<string, number> = {
-  blocker: 0,
-  critical: 1,
-  high: 2,
-  medium: 3,
-  low: 4,
+const GROUP_ORDER: Record<PracticeWorkStatusGroup, number> = {
+  needs_action: 0,
+  waiting: 1,
+  done: 2,
 }
 
-function topSeverity(items: ControlTowerWorkItem[]): WorkItemSeverity | null {
+function topGroup(items: PracticeWorkItem[]): PracticeWorkStatusGroup | null {
   if (!items.length) return null
   return items.reduce((best, w) =>
-    (SEVERITY_ORDER[w.severity] ?? 99) < (SEVERITY_ORDER[best.severity] ?? 99) ? w : best
-  ).severity
+    GROUP_ORDER[w.status_group] < GROUP_ORDER[best.status_group] ? w : best
+  ).status_group
 }
 
-function buildClientRows(workItems: ControlTowerWorkItem[]): ClientRow[] {
-  const map = new Map<string, ControlTowerWorkItem[]>()
+function buildClientRows(workItems: PracticeWorkItem[]): ClientRow[] {
+  const map = new Map<string, PracticeWorkItem[]>()
   for (const w of workItems) {
     const arr = map.get(w.business_id) ?? []
     arr.push(w)
@@ -76,12 +73,11 @@ function buildClientRows(workItems: ControlTowerWorkItem[]): ClientRow[] {
   return Array.from(map.entries())
     .map(([business_id, items]) => ({
       business_id,
-      client_name: items[0].client_name,
-      risk_score: scoreClient(items),
+      client_name: items[0].business_name,
       item_count: items.length,
-      top_severity: topSeverity(items),
+      top_group: topGroup(items),
     }))
-    .sort((a, b) => b.risk_score - a.risk_score)
+    .sort((a, b) => b.item_count - a.item_count)
     .slice(0, 8)
 }
 
@@ -108,18 +104,16 @@ function fmtRelative(iso: string): string {
 
 // ---------- ui atoms --------------------------------------------------------
 
-const SEVERITY_CHIP: Record<string, string> = {
-  blocker: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
-  critical: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
-  high: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
-  medium: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
-  low: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
+const GROUP_CHIP: Record<PracticeWorkStatusGroup, string> = {
+  needs_action: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
+  waiting: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
+  done: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
 }
 
-function SeverityChip({ severity }: { severity: WorkItemSeverity }) {
+function StatusChip({ group }: { group: PracticeWorkStatusGroup }) {
   return (
-    <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${SEVERITY_CHIP[severity] ?? SEVERITY_CHIP.low}`}>
-      {severity}
+    <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${GROUP_CHIP[group]}`}>
+      {statusGroupLabel(group)}
     </span>
   )
 }
@@ -189,7 +183,7 @@ function EmptyRow({ text }: { text: string }) {
 // ---------- main page -------------------------------------------------------
 
 export default function AccountantDashboardPage() {
-  const [workItems, setWorkItems] = useState<ControlTowerWorkItem[]>([])
+  const [workItems, setWorkItems] = useState<PracticeWorkItem[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [requests, setRequests] = useState<ClientRequest[]>([])
   const [activity, setActivity] = useState<ActivityLog[]>([])
@@ -205,7 +199,7 @@ export default function AccountantDashboardPage() {
         // Single parallel load — 4 calls total regardless of client count.
         // /api/accounting/requests with no business_id returns all firm requests (see route.ts).
         const [wiRes, clRes, actRes, reqRes] = await Promise.all([
-          fetch("/api/accounting/control-tower/work-items?limit=200"),
+          fetch("/api/accounting/work"),
           fetch("/api/accounting/firm/clients"),
           fetch("/api/accounting/firm/activity?limit=10"),
           fetch("/api/accounting/requests"),
@@ -213,14 +207,14 @@ export default function AccountantDashboardPage() {
 
         if (cancelled) return
 
-        const wiData = wiRes.ok ? await wiRes.json() : { work_items: [] }
+        const wiData = wiRes.ok ? await wiRes.json() : { items: [] }
         const clData = clRes.ok ? await clRes.json() : { clients: [] }
         const actData = actRes.ok ? await actRes.json() : { logs: [] }
         const reqData = reqRes.ok ? await reqRes.json() : { requests: [] }
 
         if (cancelled) return
 
-        setWorkItems(wiData.work_items ?? [])
+        setWorkItems(wiData.items ?? [])
         setClients(clData.clients ?? [])
         setActivity(actData.logs ?? [])
         setRequests(reqData.requests ?? [])
@@ -237,7 +231,10 @@ export default function AccountantDashboardPage() {
   const clientRows = useMemo(() => buildClientRows(workItems), [workItems])
 
   const openRequests = useMemo(
-    () => requests.filter((r) => r.status === "open" || r.status === "in_progress"),
+    () =>
+      requests.filter(
+        (r) => r.status === "open" || r.status === "in_progress" || r.status === "waiting_on_client"
+      ),
     [requests]
   )
   const overdueRequests = useMemo(
@@ -245,11 +242,13 @@ export default function AccountantDashboardPage() {
     [openRequests]
   )
 
-  const workItemsBySeverity = useMemo(() => {
-    const counts: Record<WorkItemSeverity, number> = {
-      blocker: 0, critical: 0, high: 0, medium: 0, low: 0,
+  const workItemsByGroup = useMemo(() => {
+    const counts: Record<PracticeWorkStatusGroup, number> = {
+      needs_action: 0,
+      waiting: 0,
+      done: 0,
     }
-    for (const w of workItems) counts[w.severity] = (counts[w.severity] ?? 0) + 1
+    for (const w of workItems) counts[w.status_group] = (counts[w.status_group] ?? 0) + 1
     return counts
   }, [workItems])
 
@@ -260,7 +259,7 @@ export default function AccountantDashboardPage() {
     const m = new Map<string, string>()
     for (const c of clients) m.set(c.business_id, c.business_name)
     // Also fill from work items in case a client has no requests
-    for (const w of workItems) if (!m.has(w.business_id)) m.set(w.business_id, w.client_name)
+    for (const w of workItems) if (!m.has(w.business_id)) m.set(w.business_id, w.business_name)
     return m
   }, [clients, workItems])
 
@@ -284,10 +283,10 @@ export default function AccountantDashboardPage() {
         </div>
         <div className="flex gap-2">
           <Link
-            href="/accounting/control-tower"
+            href="/accounting/work"
             className="inline-flex px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
           >
-            Control Tower →
+            Work →
           </Link>
           <Link
             href="/accounting/clients"
@@ -316,13 +315,13 @@ export default function AccountantDashboardPage() {
           label="Clients needing action"
           value={clientsWithItems}
           accent={clientsWithItems > 0 ? "amber" : "neutral"}
-          href="/accounting/control-tower"
+          href="/accounting/work"
         />
         <StatCard
           label="Total work items"
           value={workItems.length}
           accent={workItems.length > 0 ? "amber" : "neutral"}
-          href="/accounting/control-tower"
+          href="/accounting/work"
         />
         <StatCard
           label="Open requests"
@@ -335,12 +334,10 @@ export default function AccountantDashboardPage() {
           accent={overdueRequests.length > 0 ? "red" : "neutral"}
         />
         <StatCard
-          label="Blockers / critical"
-          value={(workItemsBySeverity.blocker ?? 0) + (workItemsBySeverity.critical ?? 0)}
-          accent={
-            (workItemsBySeverity.blocker ?? 0) + (workItemsBySeverity.critical ?? 0) > 0 ? "red" : "neutral"
-          }
-          href="/accounting/control-tower"
+          label="Needs action"
+          value={workItemsByGroup.needs_action}
+          accent={workItemsByGroup.needs_action > 0 ? "red" : "neutral"}
+          href="/accounting/work"
         />
       </div>
 
@@ -349,7 +346,7 @@ export default function AccountantDashboardPage() {
         <Panel
           title="Clients needing attention"
           action={
-            <Link href="/accounting/control-tower" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+            <Link href="/accounting/work" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
               Full view →
             </Link>
           }
@@ -368,11 +365,9 @@ export default function AccountantDashboardPage() {
                       <p className="text-sm font-medium text-gray-900 dark:text-white">{r.client_name}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                         {r.item_count} item{r.item_count !== 1 ? "s" : ""}
-                        {" · "}
-                        {getRiskLabel(r.risk_score)} risk
                       </p>
                     </div>
-                    {r.top_severity && <SeverityChip severity={r.top_severity} />}
+                    {r.top_group && <StatusChip group={r.top_group} />}
                   </Link>
                 </li>
               ))}
@@ -380,37 +375,30 @@ export default function AccountantDashboardPage() {
           )}
         </Panel>
 
-        {/* Work items by severity */}
         <Panel
-          title="Work items by severity"
+          title="Work by status"
           action={
-            <Link href="/accounting/control-tower" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
-              Open work queue →
+            <Link href="/accounting/work" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+              Open work →
             </Link>
           }
         >
           {workItems.length === 0 ? (
-            <EmptyRow text="No open work items." />
+            <EmptyRow text="No work needs your attention." />
           ) : (
             <div className="p-4 space-y-3">
-              {(["blocker", "critical", "high", "medium", "low"] as WorkItemSeverity[]).map((s) => {
-                const count = workItemsBySeverity[s] ?? 0
-                const max = Math.max(...Object.values(workItemsBySeverity), 1)
+              {(["needs_action", "waiting"] as PracticeWorkStatusGroup[]).map((s) => {
+                const count = workItemsByGroup[s] ?? 0
+                const max = Math.max(workItemsByGroup.needs_action, workItemsByGroup.waiting, 1)
                 const pct = Math.round((count / max) * 100)
                 return (
                   <div key={s} className="flex items-center gap-3">
-                    <span className="w-16 text-xs font-medium text-gray-600 dark:text-gray-400 capitalize">{s}</span>
+                    <span className="w-24 text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {statusGroupLabel(s)}
+                    </span>
                     <div className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-gray-700">
                       <div
-                        className={`h-2 rounded-full ${
-                          s === "blocker" || s === "critical"
-                            ? "bg-red-500"
-                            : s === "high"
-                              ? "bg-orange-400"
-                              : s === "medium"
-                                ? "bg-amber-400"
-                                : "bg-gray-300 dark:bg-gray-600"
-                        }`}
+                        className={`h-2 rounded-full ${s === "waiting" ? "bg-amber-400" : "bg-blue-500"}`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>

@@ -8,10 +8,10 @@ import { supabase } from "@/lib/supabaseClient"
 const MAIN_ITEMS = [
   { label: "Dashboard", href: "/accounting/dashboard" },
   { label: "Clients", href: "/accounting/clients" },
+  { label: "Work", href: "/accounting/work" },
 ]
 
 const WORK_ITEMS = [
-  { label: "Tasks", href: "/accounting/tasks" },
   { label: "Requests", href: "/accounting/requests" },
   { label: "Filings", href: "/accounting/filings" },
   { label: "Documents", href: "/accounting/documents" },

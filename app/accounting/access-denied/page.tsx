@@ -24,7 +24,7 @@ export default function AccountingAccessDeniedPage() {
           <button
             onClick={() =>
               router.push(
-                returnTo === "firm" ? "/accounting/firm" : "/accounting/control-tower"
+                returnTo === "firm" ? "/accounting/firm" : "/accounting/work"
               )
             }
             className="inline-block px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-medium"

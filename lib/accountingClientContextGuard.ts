@@ -28,6 +28,7 @@ const NO_CLIENT_PATHS = [
   "/accounting/firm",
   "/accounting/onboarding",
   "/accounting/control-tower",
+  "/accounting/work",
 ]
 
 export function isBusinessScopedPath(pathname: string): boolean {

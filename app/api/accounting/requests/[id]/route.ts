@@ -4,8 +4,9 @@ import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/account
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { CLIENT_REQUEST_STATUS_SET } from "@/lib/practice/work/requestStatus"
 
-const ALLOWED_STATUS = new Set(["open", "in_progress", "completed", "cancelled"])
+const ALLOWED_STATUS = CLIENT_REQUEST_STATUS_SET
 
 /**
  * PATCH /api/accounting/requests/[id]
@@ -84,7 +85,7 @@ export async function PATCH(
       const s = typeof body.status === "string" ? body.status.trim() : ""
       if (!ALLOWED_STATUS.has(s)) {
         return NextResponse.json(
-          { error: "status must be one of: open, in_progress, completed, cancelled" },
+          { error: "status must be one of: open, in_progress, waiting_on_client, completed, cancelled" },
           { status: 400 }
         )
       }

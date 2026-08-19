@@ -13,7 +13,7 @@ type ClientRequest = {
   engagement_id: string
   title: string
   description: string
-  status: "open" | "in_progress" | "completed" | "cancelled"
+  status: "open" | "in_progress" | "waiting_on_client" | "completed" | "cancelled"
   created_by: string
   due_at: string | null
   completed_at: string | null
@@ -47,6 +47,7 @@ type Attachment = {
 const STATUS_OPTIONS: ClientRequest["status"][] = [
   "open",
   "in_progress",
+  "waiting_on_client",
   "completed",
   "cancelled",
 ]
@@ -93,6 +94,7 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20 MB
 const STATUS_CHIP: Record<ClientRequest["status"], string> = {
   open: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
   in_progress: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200",
+  waiting_on_client: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200",
   completed: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200",
   cancelled: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
 }

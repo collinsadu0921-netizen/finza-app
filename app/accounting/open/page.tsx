@@ -76,7 +76,7 @@ export default async function AccountingOpenPage({
             <p className="text-sm text-red-700 dark:text-red-300 mb-4">{message}</p>
             <p className="text-xs text-red-600 dark:text-red-400 mb-4">Reason: {auth.reason}</p>
             <Link
-              href="/accounting/control-tower"
+              href="/accounting/work"
               className="inline-block px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-medium"
             >
               Go to Control Tower
@@ -100,7 +100,7 @@ export default async function AccountingOpenPage({
               The client must have accounting initialized before you can open the workspace.
             </p>
             <Link
-              href="/accounting/control-tower"
+              href="/accounting/work"
               className="inline-block px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium"
             >
               Go to Control Tower

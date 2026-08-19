@@ -23,6 +23,7 @@ const CLIENT_SCOPED_PREFIXES = [
 const EXEMPT_PREFIXES = [
   "/accounting/firm",
   "/accounting/control-tower",
+  "/accounting/work",
   "/accounting/onboarding",
 ]
 

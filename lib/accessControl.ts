@@ -146,6 +146,7 @@ function isFirmOnlyRoute(pathname: string): boolean {
   const normalized = path.endsWith("/") && path !== "/" ? path.slice(0, -1) : path
   return (
     normalized.startsWith("/accounting/control-tower") ||
+    normalized.startsWith("/accounting/work") ||
     normalized.startsWith("/accounting/firm") ||
     normalized.startsWith("/admin/accounting")
   )

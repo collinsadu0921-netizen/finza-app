@@ -482,7 +482,7 @@ export default function Sidebar() {
             items: [
               { label: "Dashboard", route: "/accounting/dashboard" },
               { label: "Clients", route: "/accounting/clients" },
-              { label: "Control Tower", route: "/accounting/control-tower" },
+              { label: "Work", route: "/accounting/work" },
             ],
           },
           ...(booksItems.length
@@ -1010,7 +1010,8 @@ export default function Sidebar() {
                               )
                             const isAccountingClientRoute =
                               item.route.startsWith("/accounting") &&
-                              !item.route.includes("control-tower")
+                              !item.route.includes("control-tower") &&
+                              !item.route.includes("/accounting/work")
                             const isServiceClientRoute =
                               item.route.startsWith("/service/ledger") ||
                               item.route.startsWith("/service/accounting") ||
