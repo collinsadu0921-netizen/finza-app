@@ -30,28 +30,28 @@ export default function HomePage() {
       const { data: authData } = await supabase.auth.getUser()
       const signupIntent = authData.user?.user_metadata?.signup_intent
 
-      if (isPracticeSignupIntent(signupIntent)) {
-        const { data: firmUser } = await supabase
-          .from("accounting_firm_users")
-          .select("firm_id, accounting_firms(onboarding_status)")
-          .eq("user_id", userId)
-          .limit(1)
-          .maybeSingle()
+      const { data: firmUser } = await supabase
+        .from("accounting_firm_users")
+        .select("firm_id, accounting_firms(onboarding_status)")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle()
 
-        if (!firmUser?.firm_id) {
+      const hasFirmMembership = !!firmUser?.firm_id
+      const firm = Array.isArray(firmUser?.accounting_firms)
+        ? firmUser?.accounting_firms[0]
+        : firmUser?.accounting_firms
+      const firmOnboardingComplete = firm?.onboarding_status === "completed"
+
+      if (isPracticeSignupIntent(signupIntent)) {
+        if (!hasFirmMembership) {
           router.replace(PRACTICE_FIRM_SETUP_PATH)
           return
         }
-
-        const firm = Array.isArray(firmUser.accounting_firms)
-          ? firmUser.accounting_firms[0]
-          : firmUser.accounting_firms
-
-        if (firm?.onboarding_status !== "completed") {
+        if (!firmOnboardingComplete) {
           router.replace(PRACTICE_FIRM_ONBOARDING_PATH)
           return
         }
-
         router.replace(PRACTICE_HOME_PATH)
         return
       }
@@ -69,7 +69,8 @@ export default function HomePage() {
 
       const destination = resolvePostAuthDestination({
         signupIntent: typeof signupIntent === "string" ? signupIntent : undefined,
-        hasFirmMembership: false,
+        hasFirmMembership,
+        firmOnboardingComplete,
         ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
         membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
         trialIntent: authData.user?.user_metadata?.trial_intent === true,

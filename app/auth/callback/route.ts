@@ -264,42 +264,48 @@ export async function GET(request: NextRequest) {
     let hasFirmMembership = false
     let firmOnboardingComplete: boolean | undefined
 
-    if (signupIntent === SIGNUP_INTENT_PRACTICE) {
-      const { data: firmUser, error: firmErr } = await supabase
-        .from("accounting_firm_users")
-        .select("firm_id, accounting_firms(onboarding_status)")
-        .eq("user_id", user.id)
-        .limit(1)
-        .maybeSingle()
+    const { data: firmUser, error: firmErr } = await supabase
+      .from("accounting_firm_users")
+      .select("firm_id, accounting_firms(onboarding_status)")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle()
 
-      if (firmErr) {
-        console.error("[auth/callback] accounting_firm_users:", firmErr.message)
-      }
-
-      if (firmUser?.firm_id) {
-        hasFirmMembership = true
-        const firm = Array.isArray(firmUser.accounting_firms)
-          ? firmUser.accounting_firms[0]
-          : firmUser.accounting_firms
-        firmOnboardingComplete = firm?.onboarding_status === "completed"
-      }
+    if (firmErr) {
+      console.error("[auth/callback] accounting_firm_users:", firmErr.message)
     }
 
-    const destination = resolvePostAuthDestination({
-      signupIntent,
-      hasFirmMembership,
-      firmOnboardingComplete,
-      ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
-      membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
-      trialIntent,
-      trialWorkspace: typeof trialWorkspace === "string" ? trialWorkspace : null,
-      trialPlan: typeof trialPlan === "string" ? trialPlan : null,
-    })
+    if (firmUser?.firm_id) {
+      hasFirmMembership = true
+      const firm = Array.isArray(firmUser.accounting_firms)
+        ? firmUser.accounting_firms[0]
+        : firmUser.accounting_firms
+      firmOnboardingComplete = firm?.onboarding_status === "completed"
+    }
 
-    redirectUrl = new URL(destination, origin)
+    const invitationToken = requestUrl.searchParams.get("invitation_token")?.trim()
+    if (invitationToken) {
+      redirectUrl = new URL(
+        `/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`,
+        origin
+      )
+    } else {
+      const destination = resolvePostAuthDestination({
+        signupIntent,
+        hasFirmMembership,
+        firmOnboardingComplete,
+        ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
+        membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
+        trialIntent,
+        trialWorkspace: typeof trialWorkspace === "string" ? trialWorkspace : null,
+        trialPlan: typeof trialPlan === "string" ? trialPlan : null,
+      })
+
+      redirectUrl = new URL(destination, origin)
+    }
   }
 
-  const res = NextResponse.redirect(redirectUrl)
+  const res = NextResponse.redirect(redirectUrl!)
   pendingCookies.forEach(({ name, value, options }) => {
     if (options && typeof options === "object") {
       res.cookies.set(name, value, options as Parameters<typeof res.cookies.set>[2])

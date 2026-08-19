@@ -28,9 +28,12 @@ export type PostAuthDestinationInput = {
  *
  * Precedence:
  * 1. Practice signup intent → Practice setup / onboarding / dashboard (even if Service businesses exist)
- * 2. Service trial intent with no businesses → business-setup
- * 3. Existing accessible businesses → Service/Retail dashboards or workspace selector
- * 4. Default → business-setup
+ * 2. Existing accessible businesses → Service/Retail dashboards or workspace selector
+ * 3. Firm membership without Service businesses → Practice (invited staff path)
+ * 4. Service trial intent with no businesses → business-setup
+ * 5. Default → business-setup
+ *
+ * Authorization for Practice access is firm membership; signup_intent is onboarding preference only.
  */
 export function resolvePostAuthDestination(input: PostAuthDestinationInput): string {
   const signupIntent = input.signupIntent ?? SIGNUP_INTENT_SERVICE
@@ -46,6 +49,13 @@ export function resolvePostAuthDestination(input: PostAuthDestinationInput): str
 
   if (businesses.length > 0) {
     return resolveBusinessDashboardRedirect(businesses, false)
+  }
+
+  if (input.hasFirmMembership) {
+    return resolvePracticePostAuthPath({
+      hasFirmMembership: true,
+      onboardingComplete: input.firmOnboardingComplete,
+    })
   }
 
   if (input.trialIntent && input.trialWorkspace === "service" && input.trialPlan) {

@@ -59,6 +59,21 @@ describe("resolvePostAuthDestination", () => {
     ).toBe("/business-setup")
   })
 
+  it("Service intent with firm membership and no businesses → Practice dashboard", () => {
+    expect(
+      resolvePostAuthDestination({
+        signupIntent: SIGNUP_INTENT_SERVICE,
+        hasFirmMembership: true,
+        firmOnboardingComplete: true,
+        ownedBusinesses: [],
+        membershipRows: [],
+        trialIntent: false,
+        trialWorkspace: null,
+        trialPlan: null,
+      })
+    ).toBe(PRACTICE_HOME_PATH)
+  })
+
   it("Service intent with no businesses → business-setup", () => {
     expect(
       resolvePostAuthDestination({

@@ -6,6 +6,7 @@ import Link from "next/link"
 import { getActiveFirmId } from "@/lib/accounting/firm/session"
 import type { FirmRole } from "@/lib/accounting/firm/authority"
 import { DisabledActionButton } from "@/components/AuthorityGuard"
+import { FirmTeamPanel } from "@/components/practice/FirmTeamPanel"
 import { EngagementStatusBadge } from "@/components/EngagementStatusBadge"
 
 type ClientStatus = {
@@ -342,24 +343,11 @@ export default function FirmDashboardPage() {
             </button>
           </div>
 
-          {staff.length > 0 && (
-            <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-              <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Team</h2>
-              <ul className="divide-y divide-gray-100 dark:divide-gray-700">
-                {staff.map((member) => (
-                  <li key={member.user_id} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-gray-900 dark:text-white">
-                      {member.name}
-                      <span className="ml-2 capitalize text-gray-500">{member.role}</span>
-                    </span>
-                    <span className="text-gray-500">
-                      {member.assigned_client_count} client{member.assigned_client_count === 1 ? "" : "s"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <FirmTeamPanel
+            firmRole={firmRole}
+            staff={staff}
+            onStaffChange={loadStaff}
+          />
 
           {/* Metrics Cards */}
           {metrics && (

@@ -17,6 +17,7 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   workspace?: string | null
   billing_cycle?: string | null
   cycle?: string | null
+  invitation_token?: string | null
   attribution?: SignupAttribution | null
 }): string {
   const base = getPublicAppUrl().replace(/\/$/, "")
@@ -38,6 +39,10 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   const parsed = tryParseBillingCycle(opts.billing_cycle ?? opts.cycle ?? null)
   if (parsed) {
     u.searchParams.set("billing_cycle", parsed)
+  }
+  const invitationToken = opts.invitation_token?.trim()
+  if (invitationToken) {
+    u.searchParams.set("invitation_token", invitationToken)
   }
   const attr = opts.attribution
   if (attr?.signup_utm_source) u.searchParams.set("utm_source", attr.signup_utm_source)

@@ -15,14 +15,21 @@ function LoginPageContent() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
+  const invitationToken = searchParams.get("invitation_token")?.trim() ?? ""
+
   const handleGoogle = async () => {
     setError("")
     setLoading(true)
     try {
       const plan = searchParams.get("plan")
       const trial = searchParams.get("trial")
-      const workspace = searchParams.get("workspace")
-      const redirectTo = buildOAuthRedirectToWithMarketingContext({ plan, trial, workspace })
+      const workspace = invitationToken ? "practice" : searchParams.get("workspace")
+      const redirectTo = buildOAuthRedirectToWithMarketingContext({
+        plan,
+        trial,
+        workspace,
+        invitation_token: invitationToken || undefined,
+      })
       const { error: oauthError } = await signInWithGoogle(redirectTo)
       if (oauthError) {
         setError(oauthError.message || "Could not start Google sign-in")
@@ -64,7 +71,11 @@ function LoginPageContent() {
         fetch("/api/audit-logs/login", { method: "POST" }).catch(() => {})
 
         setLoading(false)
-        router.replace("/")
+        if (invitationToken) {
+          router.replace(`/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`)
+        } else {
+          router.replace("/")
+        }
       }
     } catch (err: any) {
       setError(err.message || "An error occurred")

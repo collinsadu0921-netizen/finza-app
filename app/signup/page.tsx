@@ -24,6 +24,7 @@ import {
   resolveImmediatePostSignupPath,
   type SignupWorkspaceChoice,
 } from "@/lib/auth/signupWorkspace"
+import { INVITATION_SESSION_KEY } from "@/lib/accounting/firm/staffInvitations"
 
 const TRIAL_SUPPORTED_WORKSPACES = ["service"] as const
 
@@ -92,11 +93,41 @@ function SignupPageInner() {
   const searchParams = useSearchParams()
 
   const urlWorkspace = parseSignupWorkspaceParam(searchParams.get("workspace"))
-  const [selectedWorkspace, setSelectedWorkspace] = useState<SignupWorkspaceChoice | null>(urlWorkspace)
+  const invitationToken = searchParams.get("invitation_token")?.trim() ?? ""
+  const [invitationPreview, setInvitationPreview] = useState<{
+    firm_name: string
+    role_label: string
+    email: string
+  } | null>(null)
+  const [selectedWorkspace, setSelectedWorkspace] = useState<SignupWorkspaceChoice | null>(
+    invitationToken ? "practice" : urlWorkspace
+  )
 
   useEffect(() => {
+    if (invitationToken) {
+      setSelectedWorkspace("practice")
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(INVITATION_SESSION_KEY, invitationToken)
+      }
+      void fetch(
+        `/api/accounting/firm/staff/invitations/preview?token=${encodeURIComponent(invitationToken)}`
+      )
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.firm_name) {
+            setInvitationPreview({
+              firm_name: data.firm_name,
+              role_label: data.role_label,
+              email: data.email,
+            })
+            setEmail(data.email)
+          }
+        })
+        .catch(() => {})
+      return
+    }
     if (urlWorkspace) setSelectedWorkspace(urlWorkspace)
-  }, [urlWorkspace])
+  }, [urlWorkspace, invitationToken])
 
   const activeWorkspace = selectedWorkspace
   const isPractice = activeWorkspace === "practice"
@@ -162,6 +193,7 @@ function SignupPageInner() {
         workspace: oauthWorkspace,
         billing_cycle: isPractice ? undefined : searchParams.get("billing_cycle") ?? undefined,
         cycle: isPractice ? undefined : searchParams.get("cycle") ?? undefined,
+        invitation_token: invitationToken || undefined,
         attribution: mergeSignupAttribution(
           readSignupAttributionFromSession() ?? parseSignupAttributionFromSearchParams(searchParams),
           parseSignupAttributionFromSearchParams(searchParams)
@@ -233,6 +265,9 @@ function SignupPageInner() {
 
       const callbackUrl = new URL("/auth/callback", appUrl)
       callbackUrl.searchParams.set("workspace", activeWorkspace)
+      if (invitationToken) {
+        callbackUrl.searchParams.set("invitation_token", invitationToken)
+      }
 
       const { data, error: authError } = await supabase.auth.signUp({
         email,
@@ -252,12 +287,19 @@ function SignupPageInner() {
       if (data.user) {
         setLoading(false)
         if (data.session) {
-          router.push(resolveImmediatePostSignupPath(signupIntent))
+          if (invitationToken) {
+            router.push(
+              `/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`
+            )
+          } else {
+            router.push(resolveImmediatePostSignupPath(signupIntent))
+          }
         } else {
           const qs = new URLSearchParams({
             email: email.trim(),
             workspace: activeWorkspace,
           })
+          if (invitationToken) qs.set("invitation_token", invitationToken)
           router.push(`/signup/check-email?${qs.toString()}`)
         }
       }
@@ -275,7 +317,7 @@ function SignupPageInner() {
     )
   }
 
-  const showChoice = !activeWorkspace
+  const showChoice = !activeWorkspace && !invitationToken
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
@@ -299,6 +341,14 @@ function SignupPageInner() {
                       ? "Professional"
                       : "Business"}
                 </span>
+              </p>
+            </>
+          ) : invitationPreview ? (
+            <>
+              <h1 className="mb-2 text-2xl font-bold text-gray-900">Create your Finza account</h1>
+              <p className="text-sm text-gray-600">
+                You&apos;re joining <strong>{invitationPreview.firm_name}</strong> on Finza Practice
+                as <strong>{invitationPreview.role_label}</strong>.
               </p>
             </>
           ) : (
