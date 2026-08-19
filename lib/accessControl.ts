@@ -272,6 +272,14 @@ export async function resolveAccess(
       })
     }
 
+    // Staff invitation acceptance: any authenticated invitee (incl. Service owners) before membership.
+    if (
+      normalizedPath === "/accounting/invitations/accept" ||
+      normalizedPath.startsWith("/accounting/invitations/accept/")
+    ) {
+      return debugDecision({ allowed: true })
+    }
+
     // Check if user belongs to an accounting firm
     const { data: firmUsers } = await supabase
       .from("accounting_firm_users")

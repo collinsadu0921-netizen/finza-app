@@ -71,8 +71,14 @@ function LoginPageContent() {
         fetch("/api/audit-logs/login", { method: "POST" }).catch(() => {})
 
         setLoading(false)
+        const next = searchParams.get("next")?.trim() || ""
         if (invitationToken) {
           router.replace(`/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`)
+        } else if (
+          next.startsWith("/accounting/invitations/accept") &&
+          !next.startsWith("//")
+        ) {
+          router.replace(next)
         } else {
           router.replace("/")
         }

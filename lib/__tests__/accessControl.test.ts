@@ -210,6 +210,21 @@ describe("accessControl", () => {
       const journals = await resolveAccess(supabase, "user-1", "/accounting/journals")
       expect(journals.allowed).toBe(true)
     })
+
+    it("allows invitation accept for Service user without firm membership", async () => {
+      const supabase = createMockSupabase({
+        firmUsersData: [],
+        authUser: { user_metadata: { signup_intent: "business_owner" } },
+      })
+      mockGetCurrentBusiness.mockResolvedValue({
+        id: "biz-1",
+        industry: "service",
+        owner_id: "user-1",
+      } as any)
+
+      const res = await resolveAccess(supabase, "user-1", "/accounting/invitations/accept")
+      expect(res.allowed).toBe(true)
+    })
   })
 
   describe("resolveAccess – Practice client books boundary", () => {

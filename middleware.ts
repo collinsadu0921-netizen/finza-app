@@ -79,6 +79,14 @@ function isAccountingPath(pathname: string): boolean {
   return pathname.startsWith("/accounting") || pathname.startsWith("/api/accounting")
 }
 
+/** Logged-out invitees must open accept UI + token preview without a session. */
+function isPublicPracticeInvitationPath(pathname: string): boolean {
+  if (pathname === "/accounting/invitations/accept") return true
+  if (pathname.startsWith("/accounting/invitations/accept/")) return true
+  if (pathname === "/api/accounting/firm/staff/invitations/preview") return true
+  return false
+}
+
 function isServiceOrRetailPath(pathname: string): boolean {
   return (
     pathname.startsWith("/service") ||
@@ -93,8 +101,13 @@ export async function middleware(request: NextRequest) {
 
   // ── Accounting path handling ────────────────────────────────────────────────
   if (isAccountingPath(pathname)) {
+    // Practice staff invitation accept/preview must work logged-out (token in URL).
+    if (isPublicPracticeInvitationPath(pathname)) {
+      return NextResponse.next()
+    }
+
     // Pre-inject workspace headers onto the request that will be forwarded.
-    // These are validated by assertAccountingAccess() inside each route handler.
+    // These are validated by assertAccountingAccess() in route handlers.
     const requestHeaders = new Headers(request.headers)
     requestHeaders.set("x-workspace", "accounting")
     requestHeaders.set("x-permissions", "accounting:read")
@@ -126,7 +139,7 @@ export async function middleware(request: NextRequest) {
 
       if (!user) {
         const loginUrl = new URL("/login", request.url)
-        loginUrl.searchParams.set("next", pathname)
+        loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`)
         return NextResponse.redirect(loginUrl)
       }
     }
