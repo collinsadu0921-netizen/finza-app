@@ -36,6 +36,10 @@ describe("shouldApplyServiceMarketingMetadataFromUrl", () => {
     expect(shouldApplyServiceMarketingMetadataFromUrl("starter", "accounting_firm")).toBe(false)
   })
 
+  it("never applies when URL workspace is practice", () => {
+    expect(shouldApplyServiceMarketingMetadataFromUrl("starter", undefined, "practice")).toBe(false)
+  })
+
   it("does not apply when plan is null", () => {
     expect(shouldApplyServiceMarketingMetadataFromUrl(null, "business_owner")).toBe(false)
   })

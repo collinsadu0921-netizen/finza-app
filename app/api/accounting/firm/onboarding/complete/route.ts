@@ -82,12 +82,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate required fields
-    if (!legal_name || !jurisdiction || !reporting_standard) {
+    // Validate required minimum fields (reporting framework is optional — Firm settings)
+    if (!legal_name || !jurisdiction) {
       return NextResponse.json(
         {
-          error:
-            "legal_name, jurisdiction, and reporting_standard are required",
+          error: "legal_name and jurisdiction are required",
         },
         { status: 400 }
       )
@@ -102,7 +101,7 @@ export async function POST(request: NextRequest) {
         onboarding_completed_by: user.id,
         legal_name,
         jurisdiction,
-        reporting_standard,
+        reporting_standard: reporting_standard || null,
         default_accounting_standard: default_accounting_standard || null,
         updated_at: new Date().toISOString(),
       })

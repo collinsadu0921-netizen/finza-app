@@ -202,10 +202,14 @@ export default function AddClientPage() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="mb-8">
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
-              Add Client
+              Add client
             </h1>
             <p className="text-gray-600 dark:text-gray-400 text-lg">
-              Create a new engagement with a client business
+              Connect a Finza Service business as your client.
+            </p>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 max-w-xl">
+              The client&apos;s business must already use Finza Service. The business owner will approve your
+              firm&apos;s access request.
             </p>
           </div>
 

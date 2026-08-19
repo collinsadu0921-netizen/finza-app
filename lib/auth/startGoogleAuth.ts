@@ -24,8 +24,16 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   const plan = opts.plan?.trim()
   if (plan) u.searchParams.set("plan", plan)
   if (opts.trial === "1") u.searchParams.set("trial", "1")
-  if (opts.workspace?.trim().toLowerCase() === "service") {
+  const workspace = opts.workspace?.trim().toLowerCase()
+  if (workspace === "service") {
     u.searchParams.set("workspace", "service")
+  } else if (
+    workspace === "practice" ||
+    workspace === "accounting" ||
+    workspace === "accountant" ||
+    workspace === "firm"
+  ) {
+    u.searchParams.set("workspace", "practice")
   }
   const parsed = tryParseBillingCycle(opts.billing_cycle ?? opts.cycle ?? null)
   if (parsed) {

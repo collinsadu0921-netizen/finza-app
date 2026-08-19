@@ -9,12 +9,15 @@ import { tryParseBillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing
 import {
   AUTH_CALLBACK_MEMBERSHIP_QUERY_LIMIT,
   isMembershipResultPotentiallyTruncated,
-  mergeAccessibleBusinesses,
   resolveMembershipQueryFailureRedirect,
-  resolveBusinessDashboardRedirect,
   shouldApplyServiceMarketingMetadataFromUrl,
-  urlIndicatesServiceMarketingContext,
 } from "@/lib/auth/callbackPostAuthRouting"
+import { resolvePostAuthDestination } from "@/lib/auth/resolvePostAuthDestination"
+import {
+  isPracticeWorkspaceParam,
+  SIGNUP_INTENT_PRACTICE,
+  SIGNUP_INTENT_SERVICE,
+} from "@/lib/auth/signupWorkspace"
 import {
   parseSignupAttributionFromSearchParams,
   signupAttributionToUserMetadata,
@@ -121,14 +124,30 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const isAccountingFirm = existingSignupIntent === "accounting_firm"
-  /** Service marketing trial CTA: `trial=1` + `workspace=service` — plan may be omitted (defaults to Essentials). */
-  const isServiceTrialFromUrl = trialParam === "1" && workspaceParam === "service" && !isAccountingFirm
+  const isPracticeFromUrl = isPracticeWorkspaceParam(workspaceParam)
+  const isAccountingFirm =
+    existingSignupIntent === SIGNUP_INTENT_PRACTICE || isPracticeFromUrl
 
-  const canApplyPlanOnlyFromUrl =
-    !isAccountingFirm && shouldApplyServiceMarketingMetadataFromUrl(parsedPlan, existingSignupIntent)
+  /** Service marketing trial CTA: `trial=1` + `workspace=service` — plan may be omitted (defaults to Essentials). */
+  const isServiceTrialFromUrl =
+    trialParam === "1" && workspaceParam === "service" && !isAccountingFirm
+
+  const canApplyPlanOnlyFromUrl = shouldApplyServiceMarketingMetadataFromUrl(
+    parsedPlan,
+    existingSignupIntent,
+    workspaceParam
+  )
 
   let shouldPersistMetadata = Object.keys(attributionMeta).length > 0
+
+  if (isPracticeFromUrl && existingSignupIntent !== SIGNUP_INTENT_PRACTICE) {
+    effectiveMeta = {
+      ...effectiveMeta,
+      signup_intent: SIGNUP_INTENT_PRACTICE,
+      trial_intent: false,
+    }
+    shouldPersistMetadata = true
+  }
 
   if (isServiceTrialFromUrl || (canApplyPlanOnlyFromUrl && parsedPlan !== null)) {
     if (isServiceTrialFromUrl) {
@@ -178,12 +197,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const signupIntent = (effectiveMeta.signup_intent as string) || "business_owner"
+  const signupIntent = (effectiveMeta.signup_intent as string) || SIGNUP_INTENT_SERVICE
   const trialWorkspace = effectiveMeta.trial_workspace ?? null
   const trialPlan = effectiveMeta.trial_plan ?? null
   const trialIntent = effectiveMeta.trial_intent === true
-
-  const urlPrefersService = urlIndicatesServiceMarketingContext(workspaceParam, trialParam, parsedPlan)
 
   const { data: ownedRows, error: ownedErr } = await supabase
     .from("businesses")
@@ -244,19 +261,13 @@ export async function GET(request: NextRequest) {
       return res
     }
 
-    const businesses = mergeAccessibleBusinesses(
-      Array.isArray(ownedRows) ? ownedRows : [],
-      Array.isArray(membershipRows) ? membershipRows : []
-    )
+    let hasFirmMembership = false
+    let firmOnboardingComplete: boolean | undefined
 
-    if (businesses.length > 0) {
-      redirectUrl = new URL(resolveBusinessDashboardRedirect(businesses, urlPrefersService), origin)
-    } else if (trialIntent && trialWorkspace === "service" && trialPlan) {
-      redirectUrl = new URL("/business-setup", origin)
-    } else if (signupIntent === "accounting_firm") {
+    if (signupIntent === SIGNUP_INTENT_PRACTICE) {
       const { data: firmUser, error: firmErr } = await supabase
         .from("accounting_firm_users")
-        .select("firm_id")
+        .select("firm_id, accounting_firms(onboarding_status)")
         .eq("user_id", user.id)
         .limit(1)
         .maybeSingle()
@@ -265,12 +276,27 @@ export async function GET(request: NextRequest) {
         console.error("[auth/callback] accounting_firm_users:", firmErr.message)
       }
 
-      redirectUrl = firmUser
-        ? new URL("/accounting/firm", origin)
-        : new URL("/accounting/firm/setup", origin)
-    } else {
-      redirectUrl = new URL("/business-setup", origin)
+      if (firmUser?.firm_id) {
+        hasFirmMembership = true
+        const firm = Array.isArray(firmUser.accounting_firms)
+          ? firmUser.accounting_firms[0]
+          : firmUser.accounting_firms
+        firmOnboardingComplete = firm?.onboarding_status === "completed"
+      }
     }
+
+    const destination = resolvePostAuthDestination({
+      signupIntent,
+      hasFirmMembership,
+      firmOnboardingComplete,
+      ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
+      membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
+      trialIntent,
+      trialWorkspace: typeof trialWorkspace === "string" ? trialWorkspace : null,
+      trialPlan: typeof trialPlan === "string" ? trialPlan : null,
+    })
+
+    redirectUrl = new URL(destination, origin)
   }
 
   const res = NextResponse.redirect(redirectUrl)

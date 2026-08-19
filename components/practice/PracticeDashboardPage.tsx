@@ -208,6 +208,24 @@ export default function PracticeDashboardPage() {
         </Link>
       </div>
 
+      {partner && summary.clients === 0 && (
+        <section className="mb-6 rounded-xl border border-gray-200 bg-white p-5">
+          <h2 className="text-sm font-semibold text-gray-900">Welcome to Finza Practice</h2>
+          <p className="mt-1 text-sm text-gray-600">Get started with your firm.</p>
+          <ol className="mt-4 space-y-2 text-sm text-gray-700 list-decimal list-inside">
+            <li>Add your first client</li>
+            <li>Add your team — coming in the next onboarding slice</li>
+            <li>Assign work after clients are connected</li>
+          </ol>
+          <Link
+            href="/accounting/firm/clients/add"
+            className="mt-4 inline-flex rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            Add first client
+          </Link>
+        </section>
+      )}
+
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
           label={partner ? "Clients" : "My clients"}

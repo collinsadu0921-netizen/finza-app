@@ -81,7 +81,7 @@ function LoginPageContent() {
             <FinzaLogo height={72} />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h1>
-          <p className="text-gray-600 text-sm">Sign in to Finza Service to manage quotes, invoices, and payments.</p>
+          <p className="text-gray-600 text-sm">Sign in to continue to Finza.</p>
         </div>
 
         {resetSuccess && (

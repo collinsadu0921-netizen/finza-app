@@ -218,8 +218,10 @@ export async function checkFirmOnboardingForAction(
     return { isComplete: true, firmId }
   } catch (error) {
     console.error("Error in checkFirmOnboardingForAction:", error)
-    // On error, allow action (fail open for safety, but log error)
-    return { isComplete: true }
+    return {
+      isComplete: false,
+      error: "Could not verify firm onboarding status. Please try again.",
+    }
   }
 }
 

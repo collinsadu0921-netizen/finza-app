@@ -6,10 +6,15 @@ import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptio
  */
 export function shouldApplyServiceMarketingMetadataFromUrl(
   parsedPlan: ServiceSubscriptionTier | null,
-  existingSignupIntent: string | undefined
+  existingSignupIntent: string | undefined,
+  urlWorkspaceParam?: string
 ): boolean {
   if (parsedPlan === null) return false
   if (existingSignupIntent === "accounting_firm") return false
+  const ws = (urlWorkspaceParam ?? "").trim().toLowerCase()
+  if (ws === "practice" || ws === "accounting" || ws === "accountant" || ws === "firm") {
+    return false
+  }
   return true
 }
 

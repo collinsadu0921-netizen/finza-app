@@ -35,4 +35,19 @@ describe("buildOAuthRedirectToWithMarketingContext", () => {
     expect(u.searchParams.get("billing_cycle")).toBe("annual")
     expect(u.searchParams.get("cycle")).toBeNull()
   })
+
+  it("forwards workspace=practice to /auth/callback", () => {
+    const url = buildOAuthRedirectToWithMarketingContext({
+      workspace: "practice",
+    })
+    const u = new URL(url)
+    expect(u.searchParams.get("workspace")).toBe("practice")
+  })
+
+  it("maps accounting alias to practice on callback URL", () => {
+    const url = buildOAuthRedirectToWithMarketingContext({
+      workspace: "accounting",
+    })
+    expect(new URL(url).searchParams.get("workspace")).toBe("practice")
+  })
 })

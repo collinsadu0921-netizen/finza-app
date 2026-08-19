@@ -5,6 +5,14 @@ import { useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { getAllUserBusinesses, setSelectedBusinessId, getSelectedBusinessId } from "@/lib/business"
 import { setTabIndustryMode } from "@/lib/industryMode"
+import {
+  isPracticeSignupIntent,
+  PRACTICE_FIRM_SETUP_PATH,
+  PRACTICE_HOME_PATH,
+  PRACTICE_FIRM_ONBOARDING_PATH,
+  SERVICE_BUSINESS_SETUP_PATH,
+} from "@/lib/auth/signupWorkspace"
+import { resolvePostAuthDestination } from "@/lib/auth/resolvePostAuthDestination"
 
 export default function HomePage() {
   const router = useRouter()
@@ -19,57 +27,86 @@ export default function HomePage() {
         return
       }
 
-      // Account intent takes priority over workspace defaults.
-      // New accountant users should not be forced into service-first routing.
       const { data: authData } = await supabase.auth.getUser()
       const signupIntent = authData.user?.user_metadata?.signup_intent
 
-      if (signupIntent === "accounting_firm") {
-        const { data: firmUsers } = await supabase
+      if (isPracticeSignupIntent(signupIntent)) {
+        const { data: firmUser } = await supabase
           .from("accounting_firm_users")
-          .select("firm_id")
+          .select("firm_id, accounting_firms(onboarding_status)")
           .eq("user_id", userId)
           .limit(1)
+          .maybeSingle()
 
-        if (firmUsers && firmUsers.length > 0) {
-          router.replace("/accounting/firm")
+        if (!firmUser?.firm_id) {
+          router.replace(PRACTICE_FIRM_SETUP_PATH)
           return
         }
 
-        router.replace("/accounting/firm/setup")
+        const firm = Array.isArray(firmUser.accounting_firms)
+          ? firmUser.accounting_firms[0]
+          : firmUser.accounting_firms
+
+        if (firm?.onboarding_status !== "completed") {
+          router.replace(PRACTICE_FIRM_ONBOARDING_PATH)
+          return
+        }
+
+        router.replace(PRACTICE_HOME_PATH)
         return
       }
 
-      const all = await getAllUserBusinesses(supabase, userId)
+      const { data: ownedRows } = await supabase
+        .from("businesses")
+        .select("id, industry")
+        .eq("owner_id", userId)
+        .is("archived_at", null)
 
-      if (all.length === 0) {
+      const { data: membershipRows } = await supabase
+        .from("business_users")
+        .select("business_id, businesses(id, industry, archived_at)")
+        .eq("user_id", userId)
+
+      const destination = resolvePostAuthDestination({
+        signupIntent: typeof signupIntent === "string" ? signupIntent : undefined,
+        hasFirmMembership: false,
+        ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
+        membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
+        trialIntent: authData.user?.user_metadata?.trial_intent === true,
+        trialWorkspace:
+          typeof authData.user?.user_metadata?.trial_workspace === "string"
+            ? authData.user.user_metadata.trial_workspace
+            : null,
+        trialPlan:
+          typeof authData.user?.user_metadata?.trial_plan === "string"
+            ? authData.user.user_metadata.trial_plan
+            : null,
+      })
+
+      if (destination === SERVICE_BUSINESS_SETUP_PATH) {
         setTabIndustryMode("service")
-        router.replace("/business-setup")
+        router.replace(destination)
         return
       }
 
-      if (all.length === 1) {
-        // Single workspace — select it and go straight to dashboard
-        const biz = all[0]
-        setSelectedBusinessId(biz.id)
-        setTabIndustryMode(biz.industry ?? "service")
-        router.replace(biz.industry === "retail" ? "/retail/dashboard" : "/service/dashboard")
-        return
-      }
-
-      // Multiple workspaces — check if one was previously selected
-      const preferredId = getSelectedBusinessId()
-      if (preferredId) {
-        const preferred = all.find(b => b.id === preferredId)
-        if (preferred) {
-          setTabIndustryMode(preferred.industry ?? "service")
-          router.replace(preferred.industry === "retail" ? "/retail/dashboard" : "/service/dashboard")
-          return
+      if (destination.startsWith("/service/") || destination.startsWith("/retail/")) {
+        const all = await getAllUserBusinesses(supabase, userId)
+        if (all.length === 1) {
+          const biz = all[0]
+          setSelectedBusinessId(biz.id)
+          setTabIndustryMode(biz.industry ?? "service")
+        } else if (all.length > 1) {
+          const preferredId = getSelectedBusinessId()
+          const preferred = preferredId ? all.find((b) => b.id === preferredId) : null
+          if (preferred) {
+            setTabIndustryMode(preferred.industry ?? "service")
+          }
         }
+        router.replace(destination)
+        return
       }
 
-      // No preference stored — show workspace selector
-      router.replace("/select-workspace")
+      router.replace(destination)
     }
 
     resolveLanding()

@@ -6,10 +6,23 @@ import { useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { getPublicAppUrl } from "@/lib/auth/publicAppUrl"
+import { parseSignupWorkspaceParam } from "@/lib/auth/signupWorkspace"
+
+function checkEmailProductLine(workspace: ReturnType<typeof parseSignupWorkspaceParam>): string {
+  if (workspace === "practice") {
+    return "Finish creating your Finza Practice account."
+  }
+  if (workspace === "service") {
+    return "Finish creating your Finza Service account."
+  }
+  return "Finish creating your Finza account."
+}
 
 function CheckEmailInner() {
   const searchParams = useSearchParams()
   const email = searchParams.get("email") ?? ""
+  const workspace = parseSignupWorkspaceParam(searchParams.get("workspace"))
+  const productLine = checkEmailProductLine(workspace)
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle")
   const [message, setMessage] = useState("")
 
@@ -23,11 +36,17 @@ function CheckEmailInner() {
     setMessage("")
     try {
       const origin = getPublicAppUrl()
+      const callbackUrl = new URL("/auth/callback", origin)
+      if (workspace === "practice") {
+        callbackUrl.searchParams.set("workspace", "practice")
+      } else if (workspace === "service") {
+        callbackUrl.searchParams.set("workspace", "service")
+      }
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: email.trim(),
         options: {
-          emailRedirectTo: `${origin}/auth/callback`,
+          emailRedirectTo: callbackUrl.toString(),
         },
       })
       if (error) {
@@ -51,7 +70,7 @@ function CheckEmailInner() {
         <h1 className="text-2xl font-bold text-gray-900 text-center mb-2">Check your email</h1>
         <p className="text-sm text-gray-600 text-center mb-6">
           We sent a confirmation link to <span className="font-semibold text-gray-800">{email || "your address"}</span>.
-          Open the email and tap <strong>Confirm</strong> to finish creating your Finza Service account.
+          Open the email and tap <strong>Confirm</strong> to {productLine.toLowerCase()}
         </p>
 
         {status === "sent" && (
@@ -78,7 +97,10 @@ function CheckEmailInner() {
           >
             Back to sign in
           </Link>
-          <Link href="/signup" className="text-center text-sm text-blue-600 font-semibold hover:text-blue-700 py-2">
+          <Link
+            href={workspace ? `/signup?workspace=${workspace}` : "/signup"}
+            className="text-center text-sm text-blue-600 font-semibold hover:text-blue-700 py-2"
+          >
             Use a different email
           </Link>
         </div>

@@ -150,13 +150,7 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
               onClick={() => router.push("/accounting/firm/setup")}
               className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium"
             >
-              Create Firm
-            </button>
-            <button
-              onClick={() => router.push("/accounting/firm/setup")}
-              className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium"
-            >
-              Join Firm
+              Create firm
             </button>
           </div>
           <div className="border-t border-gray-200 pt-4 text-sm text-gray-700 space-y-1">
