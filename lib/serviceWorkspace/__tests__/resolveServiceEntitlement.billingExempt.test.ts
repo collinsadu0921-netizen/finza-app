@@ -126,7 +126,7 @@ describe("resolveServiceEntitlement — normal customers unchanged", () => {
     expect(e.trialGraceExpired).toBe(true)
   })
 
-  it("paid renewal past_due with active grace can still write", () => {
+  it("paid past_due after deterministic grace is read-only even if DB grace is still in the future", () => {
     const graceUntil = new Date(NOW.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString()
     const e = resolveServiceEntitlement(
       {
@@ -140,9 +140,9 @@ describe("resolveServiceEntitlement — normal customers unchanged", () => {
     )
 
     expect(e.trialExpiredWithoutPayment).toBe(false)
-    expect(e.isReadOnlyLocked).toBe(false)
-    expect(e.canWriteFinancialRecords).toBe(true)
-    expect(e.inGracePeriod).toBe(true)
+    expect(e.isReadOnlyLocked).toBe(true)
+    expect(e.canWriteFinancialRecords).toBe(false)
+    expect(e.inGracePeriod).toBe(false)
   })
 
   it("periodExpired for active subscription past current_period_ends_at", () => {

@@ -14,6 +14,7 @@ jest.mock("@/lib/serviceWorkspace/activateServiceSubscription", () => ({
 
 jest.mock("@/lib/serviceWorkspace/loadBusinessBillingRow", () => ({
   isBusinessBillingExempt: jest.fn().mockResolvedValue(false),
+  loadBusinessSubscriptionRow: jest.fn().mockResolvedValue({}),
 }))
 
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"

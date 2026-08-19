@@ -139,4 +139,67 @@ describe("activateServiceSubscription notification", () => {
     anchorEnd.setMonth(anchorEnd.getMonth() + 1)
     expect(nextEnd.toISOString()).toBe(anchorEnd.toISOString())
   })
+
+  it.each([
+    ["past_due", "2026-04-01T12:00:00.000Z"],
+    ["locked", "2026-04-01T12:00:00.000Z"],
+    ["active", "2026-04-01T12:00:00.000Z"],
+  ] as const)(
+    "renewal from %s with an expired period becomes active with a future period",
+    async (status, expiredPeriod) => {
+      const existingStart = "2026-01-01T12:00:00.000Z"
+      const paidAt = "2026-05-01T12:00:00.000Z"
+      let updatePayload: Record<string, unknown> | null = null
+      let bizFromCalls = 0
+      const supabase = {
+        from: jest.fn((table: string) => {
+          if (table === "businesses") {
+            bizFromCalls += 1
+            if (bizFromCalls === 1) {
+              return {
+                select: jest.fn().mockReturnThis(),
+                eq: jest.fn().mockReturnThis(),
+                is: jest.fn().mockReturnThis(),
+                maybeSingle: jest.fn().mockResolvedValue({
+                  data: {
+                    id: BIZ,
+                    subscription_started_at: existingStart,
+                    current_period_ends_at: expiredPeriod,
+                    service_subscription_status: status,
+                  },
+                  error: null,
+                }),
+              }
+            }
+            return {
+              update: jest.fn().mockImplementation((payload: Record<string, unknown>) => {
+                updatePayload = payload
+                return {
+                  eq: jest.fn().mockReturnValue({
+                    is: jest.fn().mockResolvedValue({ error: null }),
+                  }),
+                }
+              }),
+            }
+          }
+          return {}
+        }),
+      } as never
+
+      const out = await activateServiceSubscription(supabase, {
+        businessId: BIZ,
+        tier: "professional",
+        cycle: "monthly",
+        paidAt,
+      })
+
+      expect(out.ok).toBe(true)
+      expect(updatePayload?.service_subscription_status).toBe("active")
+      expect(updatePayload?.subscription_grace_until).toBeNull()
+      expect(updatePayload?.subscription_started_at).toBe(existingStart)
+      expect(new Date(String(updatePayload?.current_period_ends_at)).getTime()).toBeGreaterThan(
+        new Date(paidAt).getTime()
+      )
+    }
+  )
 })
