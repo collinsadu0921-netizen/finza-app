@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation"
 import BalanceSheetScreen from "@/components/accounting/screens/BalanceSheetScreen"
 
 type Props = {
@@ -7,5 +8,8 @@ type Props = {
 export default async function BalanceSheetReportPage({ searchParams }: Props) {
   const p = await searchParams
   const businessId = p.business_id?.trim() ?? null
-  return <BalanceSheetScreen mode="accounting" businessId={businessId} />
+  if (businessId) {
+    redirect(`/service/reports/balance-sheet?business_id=${encodeURIComponent(businessId)}`)
+  }
+  return <BalanceSheetScreen mode="accounting" businessId={null} />
 }

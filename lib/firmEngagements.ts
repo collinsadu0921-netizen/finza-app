@@ -4,6 +4,7 @@
  */
 
 import { SupabaseClient } from "@supabase/supabase-js"
+import { evaluateEngagementState } from "@/lib/accounting/evaluateEngagementState"
 
 export type EngagementStatus = "pending" | "accepted" | "active" | "suspended" | "terminated"
 export type EngagementAccessLevel = "read" | "write" | "approve"
@@ -129,22 +130,14 @@ export function isEngagementEffective(
     return false
   }
 
-  // Effective = accepted or active (client approved) and within date range
-  if (engagement.status !== "accepted" && engagement.status !== "active") {
-    return false
-  }
-
-  // Check effective_from
-  if (engagement.effective_from > checkDate) {
-    return false
-  }
-
-  // Check effective_to (if set)
-  if (engagement.effective_to && engagement.effective_to < checkDate) {
-    return false
-  }
-
-  return true
+  return evaluateEngagementState({
+    engagement: {
+      status: engagement.status,
+      effective_from: engagement.effective_from,
+      effective_to: engagement.effective_to ?? null,
+    },
+    now: new Date(`${checkDate}T12:00:00.000Z`),
+  }).effective
 }
 
 /**

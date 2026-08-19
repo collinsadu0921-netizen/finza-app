@@ -23,6 +23,10 @@ import { logAccessDeniedAttempt } from "./firmActivityLog"
 import { hasPermission, type CustomPermissions } from "./permissions"
 import { ROUTE_PERMISSION_RULES } from "./nav/routePermissionRules"
 import { isRetailPosPinUrlIsolationActive } from "./retail/posPinUrlIsolation"
+import {
+  isPracticeBlockedServicePath,
+  isPracticeClientBooksPath,
+} from "./practice/practiceClientBooks"
 
 export type Workspace = "retail" | "service" | "accounting"
 
@@ -159,7 +163,8 @@ function isFirmOnlyRoute(pathname: string): boolean {
 export async function resolveAccess(
   supabase: SupabaseClient,
   userId: string | null,
-  pathname: string
+  pathname: string,
+  options?: { businessId?: string | null }
 ): Promise<AccessDecision> {
   const workspace = getWorkspaceFromPath(pathname || "")
   let business: { id: string; industry: string | null } | null = null
@@ -355,8 +360,15 @@ export async function resolveAccess(
           .limit(1)
 
         if (firmUsers && firmUsers.length > 0) {
-          // User belongs to firm but no business - allow access to accounting workspace
-          return debugDecision({ allowed: true })
+          // Firm practitioners without a Service business may only open the P0 client-books surfaces.
+          if (isPracticeClientBooksPath(pathname)) {
+            return debugDecision({ allowed: true, reason: "Practice client books (firm member, no owned business)" })
+          }
+          return debugDecision({
+            allowed: false,
+            redirectTo: "/accounting/dashboard",
+            reason: "Firm practitioners cannot use arbitrary Service routes",
+          })
         } else {
           // No firm, no business - redirect to firm setup
           return debugDecision({ allowed: false, redirectTo: "/accounting/firm/setup", reason: "No business or firm found - redirect to firm setup" })
@@ -410,6 +422,38 @@ export async function resolveAccess(
         redirectTo: "/retail/dashboard",
         reason: "Service workspace routes are not available for retail businesses",
       })
+    }
+  }
+
+  // STEP 5.6: Practice client-books boundary for firm practitioners on /service/*
+  if (workspace === "service" && userId) {
+    const { data: practiceFirmRows } = await supabase
+      .from("accounting_firm_users")
+      .select("firm_id")
+      .eq("user_id", userId)
+      .limit(1)
+    if (practiceFirmRows && practiceFirmRows.length > 0) {
+      const urlBid = options?.businessId?.trim() || null
+      if (isPracticeClientBooksPath(pathname)) {
+        return debugDecision({
+          allowed: true,
+          reason: "Practice client books path (firm authority checked on page/API)",
+        })
+      }
+      if (urlBid && business && urlBid !== business.id) {
+        return debugDecision({
+          allowed: false,
+          redirectTo: "/accounting/dashboard",
+          reason: "Firm practitioners cannot open another client's operational Service pages",
+        })
+      }
+      if (isPracticeBlockedServicePath(pathname) && urlBid && business && urlBid !== business.id) {
+        return debugDecision({
+          allowed: false,
+          redirectTo: "/accounting/dashboard",
+          reason: "Sensitive Service surfaces are not available for Practice client context",
+        })
+      }
     }
   }
 

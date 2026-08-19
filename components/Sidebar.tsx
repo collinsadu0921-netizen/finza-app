@@ -6,7 +6,6 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
-import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute, buildServiceSubscriptionSettingsRoute } from "@/lib/service/routes"
 import {
   computeWinningSidebarNavPathBases,
@@ -467,6 +466,31 @@ export default function Sidebar() {
     }
 
     if (effectiveIndustry === "service") {
+      if (isAccountantFirmUser) {
+        const clientBooksId = urlBusinessId ?? sidebarBusinessId
+        const booksItems = clientBooksId
+          ? [
+              { label: "Profit & Loss", route: `/service/reports/profit-and-loss?business_id=${encodeURIComponent(clientBooksId)}` },
+              { label: "Balance Sheet", route: `/service/reports/balance-sheet?business_id=${encodeURIComponent(clientBooksId)}` },
+              { label: "Trial Balance", route: `/service/reports/trial-balance?business_id=${encodeURIComponent(clientBooksId)}` },
+              { label: "Ledger", route: `/service/ledger?business_id=${encodeURIComponent(clientBooksId)}` },
+            ]
+          : []
+        return [
+          {
+            title: "Practice",
+            items: [
+              { label: "Dashboard", route: "/accounting/dashboard" },
+              { label: "Clients", route: "/accounting/clients" },
+              { label: "Control Tower", route: "/accounting/control-tower" },
+            ],
+          },
+          ...(booksItems.length
+            ? [{ title: "Client books", items: booksItems }]
+            : []),
+        ]
+      }
+
       const sections: MenuSection[] = [
         {
           title: "Operations",
@@ -519,8 +543,7 @@ export default function Sidebar() {
           ],
         },
       ]
-      if (!isAccountantFirmUser) {
-        sections.push({
+      sections.push({
           title: "Reports",
           items: [
             { label: "Profit & Loss", route: buildServiceRoute("/service/reports/profit-and-loss", effectiveServiceBusinessId ?? undefined), minTier: "starter" },
@@ -547,78 +570,44 @@ export default function Sidebar() {
             },
           ],
         })
-      }
-      // Service users: use URL business_id first so direct /service/* deep links render without waiting for getCurrentBusiness().
-      const accountingBusinessId = isAccountantFirmUser ? sidebarBusinessId : effectiveServiceBusinessId
-      const showAccountingSection = isAccountantFirmUser || accountingBusinessId != null
-      if (showAccountingSection) {
-        const useServiceRoutes = effectiveIndustry === "service" && !isAccountantFirmUser
-        const generalLedgerReportRoute = useServiceRoutes
-          ? buildServiceRoute("/service/reports/general-ledger", accountingBusinessId ?? undefined)
-          : buildAccountingRoute("/accounting/reports/general-ledger", accountingBusinessId ?? undefined)
-        const journalEntriesRoute = useServiceRoutes
-          ? buildServiceRoute("/service/ledger", accountingBusinessId ?? undefined)
-          : buildAccountingRoute("/accounting/ledger", accountingBusinessId ?? undefined)
-        const coaRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/chart-of-accounts", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/chart-of-accounts", accountingBusinessId ?? undefined)
-        const trialBalanceRoute = useServiceRoutes ? buildServiceRoute("/service/reports/trial-balance", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reports/trial-balance", accountingBusinessId ?? undefined)
-        const reconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reconciliation", accountingBusinessId ?? undefined)
-        const bankReconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/bank-reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/bank-reconciliation", accountingBusinessId ?? undefined)
-        const periodsRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/periods", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/periods", accountingBusinessId ?? undefined)
-
-        const accountingItems: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }> = [
-          { label: "General Ledger", route: generalLedgerReportRoute, minTier: "business" },
-          { label: "Journal Entries", route: journalEntriesRoute, minTier: "business" },
-          { label: "Chart of Accounts", route: coaRoute, minTier: "business" },
-          { label: "Trial Balance", route: trialBalanceRoute, minTier: "business" },
-          { label: "Reconciliation", route: reconciliationRoute, minTier: "business" },
-          { label: "Bank Reconciliation", route: bankReconciliationRoute, minTier: "business" },
-          { label: "Accounting Periods", route: periodsRoute, minTier: "business" },
-          ...(isAccountantFirmUser === true
-            ? ([
-                { label: "Health", route: buildAccountingRoute("/accounting/health", accountingBusinessId ?? undefined) },
-                { label: "Control Tower", route: buildAccountingRoute("/accounting/control-tower") },
-                { label: "Forensic Runs", route: "/admin/accounting/forensic-runs" },
-                { label: "Tenants", route: "/admin/accounting/tenants" },
-              ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)
-            : ([
-                {
-                  label: "Loans & Equity",
-                  route: buildServiceRoute("/service/accounting/loan", accountingBusinessId ?? undefined),
-                  minTier: "business" as const,
-                },
-                { label: "Accounting Audit Log", route: buildServiceRoute("/service/accounting/audit", accountingBusinessId ?? undefined), minTier: "professional" as const },
-              ] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)),
-        ]
+      const accountingBusinessId = effectiveServiceBusinessId
+      if (accountingBusinessId != null) {
         sections.push({
           title: "Advanced accounting",
-          items: accountingItems,
-        })
-      }
-      if (!isAccountantFirmUser) {
-        sections.push({
-          title: "Organization",
           items: [
-            { label: "Team members", route: buildServiceRoute("/service/settings/team", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
-            { label: "Accountant requests", route: buildServiceRoute("/service/invitations", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+            { label: "General Ledger", route: buildServiceRoute("/service/reports/general-ledger", accountingBusinessId), minTier: "business" },
+            { label: "Journal Entries", route: buildServiceRoute("/service/ledger", accountingBusinessId), minTier: "business" },
+            { label: "Chart of Accounts", route: buildServiceRoute("/service/accounting/chart-of-accounts", accountingBusinessId), minTier: "business" },
+            { label: "Trial Balance", route: buildServiceRoute("/service/reports/trial-balance", accountingBusinessId), minTier: "business" },
+            { label: "Reconciliation", route: buildServiceRoute("/service/accounting/reconciliation", accountingBusinessId), minTier: "business" },
+            { label: "Bank Reconciliation", route: buildServiceRoute("/service/accounting/bank-reconciliation", accountingBusinessId), minTier: "business" },
+            { label: "Accounting Periods", route: buildServiceRoute("/service/accounting/periods", accountingBusinessId), minTier: "business" },
+            { label: "Loans & Equity", route: buildServiceRoute("/service/accounting/loan", accountingBusinessId), minTier: "business" },
+            { label: "Accounting Audit Log", route: buildServiceRoute("/service/accounting/audit", accountingBusinessId), minTier: "professional" },
           ],
         })
       }
       sections.push({
-          title: "Settings",
-          items: [
-            { label: "All settings",        route: "/service/settings",              minTier: "starter" },
-            { label: "Subscription & plan", route: "/service/settings/subscription", minTier: "starter" },
-            { label: "Help & Support",      route: "/help",                            minTier: "starter" },
-          ],
-        })
-      if (!isAccountantFirmUser) {
-        sections.push({
-          title: "Admin",
-          items: [
-            { label: "Full Audit Log", route: buildServiceRoute("/audit-log", effectiveServiceBusinessId ?? undefined), minTier: "business" },
-          ],
-        })
-      }
+        title: "Organization",
+        items: [
+          { label: "Team members", route: buildServiceRoute("/service/settings/team", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+          { label: "Accountant requests", route: buildServiceRoute("/service/invitations", effectiveServiceBusinessId ?? undefined), minTier: "professional" },
+        ],
+      })
+      sections.push({
+        title: "Settings",
+        items: [
+          { label: "All settings",        route: "/service/settings",              minTier: "starter" },
+          { label: "Subscription & plan", route: "/service/settings/subscription", minTier: "starter" },
+          { label: "Help & Support",      route: "/help",                            minTier: "starter" },
+        ],
+      })
+      sections.push({
+        title: "Admin",
+        items: [
+          { label: "Full Audit Log", route: buildServiceRoute("/audit-log", effectiveServiceBusinessId ?? undefined), minTier: "business" },
+        ],
+      })
       return sections
     }
 

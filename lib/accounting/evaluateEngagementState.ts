@@ -33,6 +33,27 @@ export type EngagementLike = {
 } | null
 
 /**
+ * Canonical effective-engagement check.
+ * Effective means: status is accepted or active AND within effective_from/effective_to.
+ * pending / suspended / terminated / missing dates are never effective.
+ */
+export function isEngagementEffective(
+  engagement: EngagementLike,
+  now?: Date
+): boolean {
+  return evaluateEngagementState({ engagement, now }).effective
+}
+
+/** Status-only check when dates are not available. `null` means "skip status gate". */
+export function isEngagementStatusEffective(
+  status: string | null | undefined
+): boolean {
+  if (status == null) return true
+  const normalized = String(status).toLowerCase()
+  return normalized === "accepted" || normalized === "active"
+}
+
+/**
  * Evaluate engagement state for a single engagement row (or no row).
  * Date comparison uses YYYY-MM-DD; now is converted to date-only.
  */

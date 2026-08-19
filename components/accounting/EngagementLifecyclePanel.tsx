@@ -165,16 +165,9 @@ export default function EngagementLifecyclePanel({
           )}
 
           {canAct && state === "PENDING" && (
-            <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex gap-2">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => patchStatus("accepted")}
-                className="px-3 py-1.5 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-              >
-                {loading ? "…" : "Accept engagement"}
-              </button>
-            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
+              Waiting for the client owner to accept this engagement in Finza Service.
+            </p>
           )}
 
           {canAct && state === "ACTIVE" && (
@@ -211,7 +204,7 @@ export default function EngagementLifecyclePanel({
               <button
                 type="button"
                 disabled={loading}
-                onClick={() => patchStatus("active")}
+                onClick={() => patchStatus("accepted")}
                 className="px-3 py-1.5 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
               >
                 {loading ? "…" : "Reactivate engagement"}

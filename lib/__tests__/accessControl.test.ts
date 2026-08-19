@@ -212,6 +212,65 @@ describe("accessControl", () => {
     })
   })
 
+  describe("resolveAccess – Practice client books boundary", () => {
+    it("allows a firm practitioner on P0 Service books paths", async () => {
+      const supabase = createMockSupabase({
+        firmUsersData: [{ firm_id: "firm-1" }],
+        authUser: { user_metadata: { signup_intent: "accounting_firm" } },
+      })
+      mockGetCurrentBusiness.mockResolvedValue(null)
+
+      for (const path of [
+        "/service/reports/profit-and-loss",
+        "/service/reports/balance-sheet",
+        "/service/reports/trial-balance",
+        "/service/ledger",
+      ]) {
+        const res = await resolveAccess(supabase, "user-1", path, { businessId: "biz-abc" })
+        expect(res.allowed).toBe(true)
+      }
+    })
+
+    it("denies a firm practitioner on payroll and team/subscription", async () => {
+      const supabase = createMockSupabase({
+        firmUsersData: [{ firm_id: "firm-1" }],
+        authUser: { user_metadata: { signup_intent: "accounting_firm" } },
+      })
+      mockGetCurrentBusiness.mockResolvedValue(null)
+
+      for (const path of [
+        "/service/payroll",
+        "/service/settings/team",
+        "/service/settings/subscription",
+      ]) {
+        const res = await resolveAccess(supabase, "user-1", path, { businessId: "biz-abc" })
+        expect(res.allowed).toBe(false)
+        expect(res.redirectTo).toBe("/accounting/dashboard")
+      }
+    })
+
+    it("denies a firm practitioner opening another client's operational Service page", async () => {
+      const supabase = createMockSupabase({ firmUsersData: [{ firm_id: "firm-1" }] })
+      mockGetCurrentBusiness.mockResolvedValue({ id: "owned-biz", industry: "service" } as never)
+      mockGetUserRole.mockResolvedValue("owner" as never)
+
+      const res = await resolveAccess(supabase, "user-1", "/service/payroll", {
+        businessId: "client-biz",
+      })
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/accounting/dashboard")
+    })
+
+    it("leaves a normal Service owner on their own payroll", async () => {
+      const supabase = createMockSupabase({ firmUsersData: [] })
+      mockGetCurrentBusiness.mockResolvedValue({ id: "owned-biz", industry: "service" } as never)
+      mockGetUserRole.mockResolvedValue("owner" as never)
+
+      const res = await resolveAccess(supabase, "user-1", "/service/payroll")
+      expect(res.allowed).toBe(true)
+    })
+  })
+
   describe("resolveAccess – POS surface (PIN + cashier role)", () => {
     beforeEach(() => {
       mockIsCashierAuthenticated.mockReturnValue(false)

@@ -222,7 +222,7 @@ export default function ClientCommandCenter({ businessId }: Props) {
                 : " – ongoing"}
             </p>
           </div>
-          <OpenAccountingButton businessId={businessId}>Open Accounting →</OpenAccountingButton>
+          <OpenAccountingButton businessId={businessId}>Open client books</OpenAccountingButton>
         </div>
 
         <div className="space-y-6 mb-8">

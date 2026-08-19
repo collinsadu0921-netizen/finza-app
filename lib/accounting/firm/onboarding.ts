@@ -4,6 +4,7 @@
  */
 
 import { SupabaseClient } from "@supabase/supabase-js"
+import { isEngagementEffective } from "@/lib/accounting/evaluateEngagementState"
 
 export type FirmOnboardingStatus = "pending" | "in_progress" | "completed"
 
@@ -134,16 +135,25 @@ export async function getFirmIdForBusiness(
       return null
     }
 
-    // Check if this firm has active engagement with the business
-    const { data: engagement, error: engagementError } = await supabase
+    const { data: engagements, error: engagementError } = await supabase
       .from("firm_client_engagements")
-      .select("accounting_firm_id")
+      .select("accounting_firm_id, status, effective_from, effective_to")
       .eq("accounting_firm_id", data.firm_id)
       .eq("client_business_id", businessId)
-      .eq("status", "active")
-      .maybeSingle()
+      .in("status", ["accepted", "active"])
 
-    if (engagementError || !engagement) {
+    if (engagementError || !engagements?.length) {
+      return null
+    }
+
+    const effective = engagements.find((row) =>
+      isEngagementEffective({
+        status: row.status,
+        effective_from: row.effective_from,
+        effective_to: row.effective_to ?? null,
+      })
+    )
+    if (!effective) {
       return null
     }
 

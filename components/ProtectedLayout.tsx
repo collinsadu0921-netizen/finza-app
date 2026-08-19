@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { ServiceSubscriptionProvider } from "@/components/service/ServiceSubscriptionContext"
 import ServiceWorkspaceSubscriptionBanners from "@/components/service/ServiceWorkspaceSubscriptionBanners"
 import StoreSwitcher from "./StoreSwitcher"
@@ -70,6 +70,8 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const isNestedProtectedLayout = useContext(ProtectedLayoutContext)
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const urlBusinessId = searchParams.get("business_id")?.trim() || null
   const [loading, setLoading] = useState(isNestedProtectedLayout ? false : true)
   /** True only while handling session error or denied access before navigation (never show protected shell). */
   const [redirectBanner, setRedirectBanner] = useState(false)
@@ -177,7 +179,9 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
       if (stale()) return
       
       // CENTRALIZED ACCESS RESOLUTION: Single function makes ALL access decisions
-      const decision = await resolveAccess(supabase, userId, pathname || "")
+      const decision = await resolveAccess(supabase, userId, pathname || "", {
+        businessId: urlBusinessId,
+      })
       
       if (stale()) return
       
@@ -261,7 +265,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
     }
     // Note: do not depend on `loading` — setting loading false here would re-fire this effect and re-run
     // resolveAccess + getUserRole, which caused visible retail UI flicker.
-  }, [router, pathname, isNestedProtectedLayout, cashierSessionBump])
+  }, [router, pathname, urlBusinessId, isNestedProtectedLayout, cashierSessionBump])
 
   useEffect(() => {
     if (typeof window === "undefined") return

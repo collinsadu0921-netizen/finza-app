@@ -2,9 +2,9 @@
  * PATCH /api/accounting/firm/engagements/[id]/status
  *
  * Partner-only. Transition engagement status with enforced rules.
- * Allowed: pending→accepted, accepted→active, accepted|active→suspended,
- * suspended→active, any→terminated.
- * Sets accepted_at/accepted_by when transitioning to accepted.
+ * Owner acceptance is canonical: firm users cannot pending→accepted.
+ * Allowed: accepted→active (legacy normalize), accepted|active→suspended,
+ * suspended→accepted|active, accepted|active|suspended→terminated.
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -14,10 +14,10 @@ import { getEngagementById } from "@/lib/accounting/firm/engagements"
 import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
 
 const ALLOWED: Record<string, string[]> = {
-  pending: ["accepted"],
+  pending: [],
   accepted: ["active", "suspended", "terminated"],
   active: ["suspended", "terminated"],
-  suspended: ["active", "terminated"],
+  suspended: ["accepted", "active", "terminated"],
   terminated: [],
 }
 
@@ -83,6 +83,16 @@ export async function PATCH(
     if (!firmUser || firmUser.role !== "partner") {
       return NextResponse.json(
         { error: "Only Partners can change engagement status via this endpoint" },
+        { status: 403 }
+      )
+    }
+
+    if (engagement.status === "pending" && newStatus === "accepted") {
+      return NextResponse.json(
+        {
+          error: "Only the client business owner can accept an engagement",
+          error_code: "OWNER_ACCEPTANCE_REQUIRED",
+        },
         { status: 403 }
       )
     }

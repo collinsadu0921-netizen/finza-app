@@ -111,5 +111,5 @@ export default async function AccountingOpenPage({
     )
   }
 
-  redirect(buildAccountingRoute("/accounting", businessId))
+  redirect(`/service/reports/profit-and-loss?business_id=${encodeURIComponent(businessId)}`)
 }

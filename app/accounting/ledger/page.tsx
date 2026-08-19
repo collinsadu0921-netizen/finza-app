@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation"
 import LedgerScreen from "@/components/accounting/screens/LedgerScreen"
 
 type Props = {
@@ -7,5 +8,8 @@ type Props = {
 export default async function AccountingLedgerPage({ searchParams }: Props) {
   const p = await searchParams
   const businessId = p.business_id?.trim() ?? null
-  return <LedgerScreen mode="accounting" businessId={businessId} />
+  if (businessId) {
+    redirect(`/service/ledger?business_id=${encodeURIComponent(businessId)}`)
+  }
+  return <LedgerScreen mode="accounting" businessId={null} />
 }

@@ -5,12 +5,14 @@
  * - Firm role (partner, senior, junior, readonly)
  * - Engagement access level (read, write, approve)
  * - Action type being performed
- * - Engagement status (pending, active, suspended, terminated)
+ * - Engagement status (pending, accepted, active, suspended, terminated)
  */
+
+import { isEngagementStatusEffective } from "@/lib/accounting/evaluateEngagementState"
 
 export type FirmRole = "partner" | "senior" | "junior" | "readonly"
 export type EngagementAccessLevel = "read" | "write" | "approve"
-export type EngagementStatus = "pending" | "active" | "suspended" | "terminated" | null
+export type EngagementStatus = "pending" | "accepted" | "active" | "suspended" | "terminated" | null
 
 export type ActionType =
   | "create_engagement"
@@ -215,11 +217,12 @@ export function resolveAuthority(params: ResolveAuthorityParams): AuthorityResol
     }
   }
 
-  // Check engagement status if engagement access is required
-  if (engagementAccess && engagementStatus !== "active" && engagementStatus !== null) {
+  // Check engagement status if engagement access is required.
+  // Canonical effective statuses are accepted | active (see isEngagementStatusEffective).
+  if (engagementAccess && engagementStatus != null && !isEngagementStatusEffective(engagementStatus)) {
     return {
       allowed: false,
-      reason: `Engagement is ${engagementStatus}. Active engagement required.`,
+      reason: `Engagement is ${engagementStatus}. An accepted (effective) engagement is required.`,
       reasonCode: "ENGAGEMENT_NOT_ACTIVE",
     }
   }
