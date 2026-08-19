@@ -62,13 +62,15 @@ export default function RedirectToCanonicalAccounting({ canonicalPath, search }:
       <ProtectedLayout>
         <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
           <div className="text-center">
-            <p className="text-gray-600 dark:text-gray-400 mb-4">No business context. Open Accounting workspace to select a client.</p>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              No business context. Open Practice and select a client.
+            </p>
             <button
               type="button"
-              onClick={() => router.push("/accounting")}
+              onClick={() => router.push("/accounting/clients")}
               className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
             >
-              Open Accounting
+              Go to Clients
             </button>
           </div>
         </div>

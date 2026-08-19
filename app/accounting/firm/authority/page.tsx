@@ -65,7 +65,7 @@ export default function AuthorityMatrixPage() {
               Authority Matrix
             </h1>
             <p className="text-gray-600 dark:text-gray-400 text-lg">
-              Understand what each role can do in the Accounting Workspace
+              Understand what each role can do in Practice
             </p>
           </div>
 

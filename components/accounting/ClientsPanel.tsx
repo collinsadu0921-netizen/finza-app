@@ -153,10 +153,10 @@ export function ClientsPanel({
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">{title}</h2>
       )}
       <Link
-        href="/accounting/control-tower"
+        href="/accounting/work"
         className="inline-block mb-3 px-3 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700"
       >
-        Open Control Tower
+        Go to Work
       </Link>
 
       {error && (
@@ -200,7 +200,7 @@ export function ClientsPanel({
       {filteredAndSorted.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {clients.length === 0
-            ? "No clients. Add clients from Control Tower or firm setup."
+            ? "No clients. Add clients from Clients or firm setup."
             : "No clients match your search."}
         </p>
       ) : (
@@ -235,7 +235,7 @@ export function ClientsPanel({
                   )}
                   <div className="flex flex-wrap gap-2">
                     <Link
-                      href={`/accounting/control-tower/${client.business_id}`}
+                      href={`/accounting/clients/${client.business_id}/overview`}
                       className="inline-block px-2 py-1 text-xs font-medium rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
                       Open
@@ -244,7 +244,7 @@ export function ClientsPanel({
                       href={`/accounting/open?business_id=${encodeURIComponent(client.business_id)}`}
                       className="inline-block px-2 py-1 text-xs font-medium rounded border border-blue-600 dark:border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                     >
-                      Open Accounting
+                      Open client books
                     </Link>
                   </div>
                 </div>

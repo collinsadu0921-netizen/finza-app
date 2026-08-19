@@ -114,7 +114,7 @@ export function WorkQueue({
 
   const emptyMessage = businessId
     ? "No work items for this client."
-    : "No work items. Check Control Tower for client overview."
+    : "No work items. Open a client overview or Work for next steps."
 
   if (effectiveGroupBy && byClient?.length) {
     return (
@@ -136,7 +136,7 @@ export function WorkQueue({
                   {total} item{total !== 1 ? "s" : ""}
                 </span>
                 <Link
-                  href={`/accounting/control-tower/${business_id}`}
+                  href={`/accounting/clients/${business_id}/overview`}
                   className="shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
                 >
                   Open Client Command Center

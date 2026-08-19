@@ -81,6 +81,7 @@ export function derivePracticeDashboard(input: PracticeDashboardDeriveInput): Pr
 
   return {
     firm_id: input.firmId,
+    firm_name: null,
     role: input.role,
     enforcement_active: input.enforcementActive,
     current_user_id: input.currentUserId,

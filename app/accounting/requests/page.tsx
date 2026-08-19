@@ -118,6 +118,8 @@ export default function FirmRequestsPage() {
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Client requests</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Requests across all firm clients. Open a client request page to manage and update items.
+          When a request is waiting on the client, update it to In progress after the information
+          arrives outside Finza.
         </p>
       </div>
 

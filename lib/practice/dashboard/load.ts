@@ -27,7 +27,7 @@ export async function loadPracticeDashboard(opts: {
   const index = await loadPracticeWorkIndex(opts)
   if (!index.ok) return index
 
-  const [staffRes, assignRes] = await Promise.all([
+  const [staffRes, assignRes, firmRes] = await Promise.all([
     opts.supabase
       .from("accounting_firm_users")
       .select("user_id, role")
@@ -37,6 +37,7 @@ export async function loadPracticeDashboard(opts: {
       .select("user_id, client_business_id")
       .eq("firm_id", index.firmId)
       .is("unassigned_at", null),
+    opts.supabase.from("accounting_firms").select("name").eq("id", index.firmId).maybeSingle(),
   ])
 
   if (staffRes.error) {
@@ -44,6 +45,9 @@ export async function loadPracticeDashboard(opts: {
   }
   if (assignRes.error) {
     return { ok: false, status: 500, error: assignRes.error.message }
+  }
+  if (firmRes.error) {
+    return { ok: false, status: 500, error: firmRes.error.message }
   }
 
   const firmStaffIds = (staffRes.data ?? []).map((row) => row.user_id as string)
@@ -78,17 +82,20 @@ export async function loadPracticeDashboard(opts: {
 
   return {
     ok: true,
-    dashboard: derivePracticeDashboard({
-      firmId: index.firmId,
-      role: index.scope.role,
-      currentUserId: opts.userId,
-      enforcementActive: index.scope.enforcementActive,
-      authorizedBusinessIds: index.scope.authorizedBusinessIds,
-      effectiveBusinessIds: index.scope.effectiveBusinessIds,
-      clients: index.clients.filter((c) => index.scope.authorizedBusinessIds.includes(c.id)),
-      staff,
-      assignments,
-      items: index.items,
-    }),
+    dashboard: {
+      ...derivePracticeDashboard({
+        firmId: index.firmId,
+        role: index.scope.role,
+        currentUserId: opts.userId,
+        enforcementActive: index.scope.enforcementActive,
+        authorizedBusinessIds: index.scope.authorizedBusinessIds,
+        effectiveBusinessIds: index.scope.effectiveBusinessIds,
+        clients: index.clients.filter((c) => index.scope.authorizedBusinessIds.includes(c.id)),
+        staff,
+        assignments,
+        items: index.items,
+      }),
+      firm_name: (firmRes.data?.name as string | undefined)?.trim() || null,
+    },
   }
 }

@@ -145,10 +145,30 @@ try {
       where firm_id = $1 and unassigned_at is null`,
     [ids.firmA]
   )
+  // Cleanup prior UAT assignment mutation if present (senior should only have Client 1 in P1B1).
+  const seniorHasClient2 = assignments.rows.some(
+    (r) => r.user_id === ids.seniorA && r.client_business_id === ids.client2
+  )
+  if (seniorHasClient2) {
+    await client.query(
+      `update public.accounting_firm_client_assignments
+          set unassigned_at = now()
+        where firm_id = $1 and user_id = $2 and client_business_id = $3 and unassigned_at is null`,
+      [ids.firmA, ids.seniorA, ids.client2]
+    )
+  }
+  const assignmentsAfterCleanup = seniorHasClient2
+    ? await client.query(
+        `select user_id, client_business_id
+           from public.accounting_firm_client_assignments
+          where firm_id = $1 and unassigned_at is null`,
+        [ids.firmA]
+      )
+    : assignments
   const assigned = {
-    seniorA: new Set(assignments.rows.filter((r) => r.user_id === ids.seniorA).map((r) => r.client_business_id)),
-    juniorA: new Set(assignments.rows.filter((r) => r.user_id === ids.juniorA).map((r) => r.client_business_id)),
-    readonlyA: new Set(assignments.rows.filter((r) => r.user_id === ids.readonlyA).map((r) => r.client_business_id)),
+    seniorA: new Set(assignmentsAfterCleanup.rows.filter((r) => r.user_id === ids.seniorA).map((r) => r.client_business_id)),
+    juniorA: new Set(assignmentsAfterCleanup.rows.filter((r) => r.user_id === ids.juniorA).map((r) => r.client_business_id)),
+    readonlyA: new Set(assignmentsAfterCleanup.rows.filter((r) => r.user_id === ids.readonlyA).map((r) => r.client_business_id)),
   }
 
   async function upsertTask(title, businessId, assignedTo, dueAt, status = "pending") {
@@ -381,7 +401,7 @@ try {
     severity: "PILOT FRICTION — no client portal",
   }
 
-  // ── Assignment change simulation ──
+  // ── Assignment change simulation (reverted after check) ──
   const beforeSenior = assigned.seniorA.size
   await client.query(
     `insert into public.accounting_firm_client_assignments
@@ -401,6 +421,12 @@ try {
     dual_assign_client2: afterAssign.rows.some((r) => r.client_business_id === ids.client2),
     terminology_risk: "engagement vs client assignment vs task assignment — three concepts",
   }
+  await client.query(
+    `update public.accounting_firm_client_assignments
+        set unassigned_at = now()
+      where firm_id = $1 and user_id = $2 and client_business_id = $3 and unassigned_at is null`,
+    [ids.firmA, ids.seniorA, ids.client2]
+  )
 
   // ── Multi-firm ──
   const firmATasks = await client.query(
@@ -468,13 +494,11 @@ try {
     note("pilot_blocker", "waiting_on_client state does not persist")
   }
   note("friction", "No client response portal — accountant must manually check/update request status")
-  note("friction", "Client layout Notes tab has no route — dead link")
-  note("friction", "Control Tower wording still appears in ClientCommandCenter / ClientsPanel")
   note("friction", "My Work often empty for juniors when work is requests/filings without assignee")
   note("future", "Client portal for document upload and status updates")
   note("future", "Waiting duration timestamp (waiting_on_client_at)")
   note("future", "Work-item assignment for requests/filings")
-  note("polish", "Review deep link filters to journal_approval only — OB review needs separate link")
+  note("polish", "Review deep link uses needs_action — includes tasks alongside journal/OB review items")
 
   report.findings = findings
   report.verdict_hint = findings.p0.length

@@ -277,4 +277,169 @@ describe("GET /api/accounting/work", () => {
     expect(body.items).toHaveLength(1)
     expect(body.items[0].title).toBe("My task")
   })
+
+  it("defaults partner to all work when view is omitted", async () => {
+    mockSupabase({
+      userId: "partner-1",
+      memberships: [{ firm_id: "firm-a", role: "partner", user_id: "partner-1" }],
+      tables: {
+        firm_client_engagements: [
+          {
+            id: "eng-a",
+            accounting_firm_id: "firm-a",
+            client_business_id: "biz-a",
+            status: "accepted",
+            effective_from: "2026-01-01",
+            effective_to: null,
+          },
+        ],
+        businesses: [{ id: "biz-a", name: "Alpha Ltd" }],
+        client_tasks: [
+          {
+            id: "task-a",
+            client_business_id: "biz-a",
+            title: "Mine",
+            status: "pending",
+            priority: "normal",
+            assigned_to_user_id: "partner-1",
+            due_at: null,
+            created_at: "2026-08-01T00:00:00.000Z",
+          },
+          {
+            id: "task-b",
+            client_business_id: "biz-a",
+            title: "Other",
+            status: "pending",
+            priority: "normal",
+            assigned_to_user_id: null,
+            due_at: null,
+            created_at: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+      },
+    })
+
+    const res = await GET(request("http://localhost/api/accounting/work?firm_id=firm-a"))
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.view).toBe("all")
+    expect(body.items).toHaveLength(2)
+  })
+
+  it("defaults senior to my work when view is omitted", async () => {
+    mockSupabase({
+      userId: "senior-1",
+      memberships: [{ firm_id: "firm-a", role: "senior", user_id: "senior-1" }],
+      tables: {
+        firm_client_engagements: [
+          {
+            id: "eng-a",
+            accounting_firm_id: "firm-a",
+            client_business_id: "biz-a",
+            status: "accepted",
+            effective_from: "2026-01-01",
+            effective_to: null,
+          },
+        ],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
+        accounting_firm_client_assignments: [
+          {
+            id: "asg-1",
+            firm_id: "firm-a",
+            user_id: "senior-1",
+            client_business_id: "biz-a",
+            unassigned_at: null,
+          },
+        ],
+        businesses: [{ id: "biz-a", name: "ABC Ltd" }],
+        client_tasks: [
+          {
+            id: "task-mine",
+            client_business_id: "biz-a",
+            title: "My task",
+            status: "pending",
+            priority: "normal",
+            assigned_to_user_id: "senior-1",
+            due_at: null,
+            created_at: "2026-08-01T00:00:00.000Z",
+          },
+          {
+            id: "task-other",
+            client_business_id: "biz-a",
+            title: "Unassigned on my client",
+            status: "pending",
+            priority: "normal",
+            assigned_to_user_id: null,
+            due_at: null,
+            created_at: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+      },
+    })
+
+    const res = await GET(request("http://localhost/api/accounting/work?firm_id=firm-a"))
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.view).toBe("my")
+    expect(body.items).toHaveLength(1)
+    expect(body.items[0].title).toBe("My task")
+  })
+
+  it("honors explicit view=all for a restricted role", async () => {
+    mockSupabase({
+      userId: "junior-1",
+      memberships: [{ firm_id: "firm-a", role: "junior", user_id: "junior-1" }],
+      tables: {
+        firm_client_engagements: [
+          {
+            id: "eng-a",
+            accounting_firm_id: "firm-a",
+            client_business_id: "biz-a",
+            status: "accepted",
+            effective_from: "2026-01-01",
+            effective_to: null,
+          },
+        ],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
+        accounting_firm_client_assignments: [
+          {
+            id: "asg-1",
+            firm_id: "firm-a",
+            user_id: "junior-1",
+            client_business_id: "biz-a",
+            unassigned_at: null,
+          },
+        ],
+        businesses: [{ id: "biz-a", name: "ABC Ltd" }],
+        client_tasks: [
+          {
+            id: "task-mine",
+            client_business_id: "biz-a",
+            title: "My task",
+            status: "pending",
+            priority: "normal",
+            assigned_to_user_id: "junior-1",
+            due_at: null,
+            created_at: "2026-08-01T00:00:00.000Z",
+          },
+          {
+            id: "task-other",
+            client_business_id: "biz-a",
+            title: "Team task",
+            status: "pending",
+            priority: "normal",
+            assigned_to_user_id: "senior-1",
+            due_at: null,
+            created_at: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+      },
+    })
+
+    const res = await GET(request("http://localhost/api/accounting/work?firm_id=firm-a&view=all"))
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.view).toBe("all")
+    expect(body.items).toHaveLength(2)
+  })
 })

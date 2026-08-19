@@ -56,7 +56,7 @@ type AccountingPeriod = {
 }
 
 const CLIENT_NOT_SELECTED_MESSAGE =
-  "Client not selected. Please choose a client or use a Control Tower drill link."
+  "Client not selected. Please choose a client or open Work / Clients."
 
 export default function DraftsPage() {
   const router = useRouter()

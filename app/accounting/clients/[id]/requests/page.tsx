@@ -745,6 +745,13 @@ function RequestCard({
           </div>
         </div>
 
+        {r.status === "waiting_on_client" ? (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+            Waiting for the client. When the requested information arrives outside Finza, change the
+            status to In progress to resume work.
+          </p>
+        ) : null}
+
         {/* Comments toggle */}
         <button
           type="button"

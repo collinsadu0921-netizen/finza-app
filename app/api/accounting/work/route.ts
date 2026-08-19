@@ -9,8 +9,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
 import { filterPracticeWorkItems, sortPracticeWorkItems } from "@/lib/practice/work/filter"
+import { resolvePracticeWorkView } from "@/lib/practice/work/defaultView"
 import { loadPracticeWorkIndex } from "@/lib/practice/work/loadIndex"
-import type { PracticeWorkStatusGroup, PracticeWorkView } from "@/lib/practice/work/types"
+import type { PracticeWorkStatusGroup } from "@/lib/practice/work/types"
 
 export async function GET(request: NextRequest) {
   try {
@@ -35,9 +36,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: index.error }, { status: index.status })
     }
 
-    const viewParam = params.get("view")
-    const view: PracticeWorkView =
-      viewParam === "my" || viewParam === "unassigned" || viewParam === "all" ? viewParam : "all"
+    const view = resolvePracticeWorkView({
+      role: index.scope.role,
+      viewParam: params.get("view"),
+    })
     const statusGroupParam = params.get("status_group")
     const statusGroup: PracticeWorkStatusGroup | null =
       statusGroupParam === "needs_action" ||
@@ -83,6 +85,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       firm_id: index.firmId,
+      role: index.scope.role,
+      view,
       items: filtered,
       staff: index.staff,
       clients: index.clients,

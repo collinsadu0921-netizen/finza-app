@@ -88,8 +88,9 @@ export default function PracticeWorkPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [role, setRole] = useState<string | null>(null)
 
-  const view = (searchParams.get("view") as PracticeWorkView) || "all"
+  const viewParam = searchParams.get("view")
   const clientId = searchParams.get("client") ?? ""
   const type = searchParams.get("type") ?? ""
   const statusGroup = searchParams.get("status") ?? ""
@@ -102,7 +103,8 @@ export default function PracticeWorkPage() {
       const next = new URLSearchParams(searchParams.toString())
       if (value) next.set(key, value)
       else next.delete(key)
-      router.replace(`/accounting/work?${next.toString()}`, { scroll: false })
+      const qs = next.toString()
+      router.replace(qs ? `/accounting/work?${qs}` : "/accounting/work", { scroll: false })
     },
     [router, searchParams]
   )
@@ -114,7 +116,9 @@ export default function PracticeWorkPage() {
       const firmId = getActiveFirmId()
       const params = new URLSearchParams()
       if (firmId) params.set("firm_id", firmId)
-      if (view === "my" || view === "unassigned" || view === "all") params.set("view", view)
+      if (viewParam === "my" || viewParam === "unassigned" || viewParam === "all") {
+        params.set("view", viewParam)
+      }
       if (clientId) params.set("client", clientId)
       if (type) params.set("type", type)
       if (statusGroup === "needs_action" || statusGroup === "waiting" || statusGroup === "done") {
@@ -136,22 +140,43 @@ export default function PracticeWorkPage() {
       setStaff(data.staff ?? [])
       setClients(data.clients ?? [])
       setCounts(data.counts ?? { all: 0, my: 0, unassigned: 0, waiting: 0, needs_action: 0 })
+      if (typeof data.role === "string") setRole(data.role)
+
+      // Sync role-aware default into the URL when view was omitted.
+      if (
+        viewParam == null &&
+        (data.view === "my" || data.view === "unassigned" || data.view === "all")
+      ) {
+        const next = new URLSearchParams(searchParams.toString())
+        next.set("view", data.view)
+        router.replace(`/accounting/work?${next.toString()}`, { scroll: false })
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load work")
       setItems([])
     } finally {
       setLoading(false)
     }
-  }, [view, clientId, type, statusGroup, assignee, due, q])
+  }, [viewParam, clientId, type, statusGroup, assignee, due, q, router, searchParams])
 
   useEffect(() => {
     load()
   }, [load])
 
+  const view: PracticeWorkView =
+    viewParam === "my" || viewParam === "unassigned" || viewParam === "all"
+      ? viewParam
+      : role && role !== "partner"
+        ? "my"
+        : "all"
+
   const hasActiveFilters = Boolean(clientId || type || statusGroup || assignee || due || q)
-  const emptyMessage = hasActiveFilters
-    ? "No work matches these filters."
-    : "No work needs your attention."
+  const emptyMessage =
+    view === "my" && !hasActiveFilters
+      ? "No items are assigned directly to you. Requests, filings, and some reviews may not have an individual assignee — check All work for those."
+      : hasActiveFilters
+        ? "No work matches these filters."
+        : "No work needs your attention."
 
   return (
     <div className="space-y-4">
@@ -172,12 +197,12 @@ export default function PracticeWorkPage() {
         {VIEWS.map((option) => {
           const count =
             option.id === "my" ? counts.my : option.id === "unassigned" ? counts.unassigned : counts.all
-          const active = view === option.id || (option.id === "all" && view !== "my" && view !== "unassigned")
+          const active = view === option.id
           return (
             <button
               key={option.id}
               type="button"
-              onClick={() => setParam("view", option.id === "all" ? "" : option.id)}
+              onClick={() => setParam("view", option.id)}
               className={`rounded-md px-3 py-1.5 text-sm ${
                 active ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50"
               }`}
@@ -190,6 +215,13 @@ export default function PracticeWorkPage() {
           )
         })}
       </div>
+
+      {view === "my" && !hasActiveFilters ? (
+        <p className="text-xs text-gray-500">
+          My work shows items assigned directly to you. Other work for your clients is available under
+          All work.
+        </p>
+      ) : null}
 
       <div className="rounded-xl border border-gray-200 bg-white">
         <div className="flex flex-col gap-3 border-b border-gray-100 p-3 sm:flex-row sm:items-center">

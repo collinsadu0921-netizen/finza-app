@@ -77,6 +77,7 @@ export type PracticeDashboardShow = {
 
 export type PracticeDashboard = {
   firm_id: string
+  firm_name: string | null
   role: PracticeFirmRole
   enforcement_active: boolean
   current_user_id: string

@@ -131,7 +131,7 @@ export default function AdjustmentsReviewPage() {
                 onClick={() => router.push("/accounting")}
                 className="text-blue-600 dark:text-blue-400 hover:underline mb-2 text-sm"
               >
-                ← Back to Accounting Workspace
+                ← Back to Practice
               </button>
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
                 Adjusting Journal Review

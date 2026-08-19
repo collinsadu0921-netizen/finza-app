@@ -191,6 +191,9 @@ export default function PracticeDashboardPage() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Practice</h1>
+          {data.firm_name ? (
+            <p className="mt-0.5 text-sm font-medium text-gray-700">{data.firm_name}</p>
+          ) : null}
           <p className="mt-1 text-sm text-gray-500">
             {partner
               ? "How the firm is doing today, and where attention needs to go."
@@ -198,7 +201,7 @@ export default function PracticeDashboardPage() {
           </p>
         </div>
         <Link
-          href="/accounting/work"
+          href={workHref({ view: "all" })}
           className="inline-flex rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           View all work
@@ -318,7 +321,7 @@ export default function PracticeDashboardPage() {
         <Panel
           title="Needs attention"
           action={
-            <Link href="/accounting/work" className="text-xs text-blue-600 hover:underline">
+            <Link href={workHref({ view: "all" })} className="text-xs text-blue-600 hover:underline">
               View all work
             </Link>
           }
@@ -434,7 +437,8 @@ export default function PracticeDashboardPage() {
             </ul>
           )}
           <p className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
-            Waiting duration is not tracked yet — showing created and due dates only.
+            Waiting duration is not tracked yet — showing created and due dates only. When the client
+            responds outside Finza, open the request and set status to In progress.
           </p>
         </Panel>
 
@@ -442,7 +446,7 @@ export default function PracticeDashboardPage() {
           <Panel
             title="Needs review"
             action={
-              <Link href={workHref({ status: "needs_action", type: "journal_approval" })} className="text-xs text-blue-600 hover:underline">
+              <Link href={workHref({ status: "needs_action" })} className="text-xs text-blue-600 hover:underline">
                 Open review work
               </Link>
             }

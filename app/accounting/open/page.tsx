@@ -79,7 +79,7 @@ export default async function AccountingOpenPage({
               href="/accounting/work"
               className="inline-block px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-medium"
             >
-              Go to Control Tower
+              Go to Work
             </Link>
           </div>
         </div>
@@ -103,7 +103,7 @@ export default async function AccountingOpenPage({
               href="/accounting/work"
               className="inline-block px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium"
             >
-              Go to Control Tower
+              Go to Work
             </Link>
           </div>
         </div>

@@ -2,18 +2,7 @@
 
 import { useParams, usePathname } from "next/navigation"
 import Link from "next/link"
-
-const CLIENT_TABS = [
-  { label: "Overview", segment: "overview" },
-  { label: "Tasks", segment: "tasks" },
-  { label: "Requests", segment: "requests" },
-  { label: "Filings", segment: "filings" },
-  { label: "VAT", segment: "vat" },
-  { label: "Periods", segment: "periods" },
-  { label: "Adjustments", segment: "adjustments" },
-  { label: "Documents", segment: "documents" },
-  { label: "Notes", segment: "notes" },
-]
+import { PRACTICE_CLIENT_NAV_TABS } from "@/lib/practice/clientNav"
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const params = useParams()
@@ -35,8 +24,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
               ← Clients
             </Link>
           </div>
-          <nav className="flex items-center gap-0 mt-3" aria-label="Client sections">
-            {CLIENT_TABS.map((tab) => {
+          <nav className="flex items-center gap-0 mt-3 overflow-x-auto" aria-label="Client sections">
+            {PRACTICE_CLIENT_NAV_TABS.map((tab) => {
               const href = `/accounting/clients/${businessId}/${tab.segment}`
               const isActive = activeSegment === tab.segment
               return (
