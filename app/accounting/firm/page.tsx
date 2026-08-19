@@ -80,6 +80,7 @@ export default function FirmDashboardPage() {
   const [activityTotal, setActivityTotal] = useState(0)
   const [activityPage, setActivityPage] = useState(1)
   const [firmRole, setFirmRole] = useState<FirmRole | null>(null)
+  const [staff, setStaff] = useState<{ user_id: string; name: string; role: string; assigned_client_count: number }[]>([])
 
   useEffect(() => {
     if (tabParam === "activity") setActiveTab("activity")
@@ -89,6 +90,7 @@ export default function FirmDashboardPage() {
     loadMetrics()
     loadFirmRole()
     loadClients()
+    loadStaff()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
 
@@ -108,6 +110,20 @@ export default function FirmDashboardPage() {
       }
     } catch (err) {
       console.error("Error loading metrics:", err)
+    }
+  }
+
+  const loadStaff = async () => {
+    try {
+      const firmId = getActiveFirmId()
+      const qs = firmId ? `?firm_id=${encodeURIComponent(firmId)}` : ""
+      const response = await fetch(`/api/accounting/firm/staff${qs}`)
+      if (response.ok) {
+        const data = await response.json()
+        setStaff(data.staff ?? [])
+      }
+    } catch (err) {
+      console.error("Error loading staff:", err)
     }
   }
 
@@ -325,6 +341,25 @@ export default function FirmDashboardPage() {
               View Authority Matrix
             </button>
           </div>
+
+          {staff.length > 0 && (
+            <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-white">Team</h2>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+                {staff.map((member) => (
+                  <li key={member.user_id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="text-gray-900 dark:text-white">
+                      {member.name}
+                      <span className="ml-2 capitalize text-gray-500">{member.role}</span>
+                    </span>
+                    <span className="text-gray-500">
+                      {member.assigned_client_count} client{member.assigned_client_count === 1 ? "" : "s"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Metrics Cards */}
           {metrics && (

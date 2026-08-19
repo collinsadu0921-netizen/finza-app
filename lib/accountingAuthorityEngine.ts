@@ -6,6 +6,11 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { evaluateEngagementState } from "@/lib/accounting/evaluateEngagementState"
+import { isPracticeFirmRole } from "@/lib/practice/assignment/policy"
+import {
+  assertAssignedClientAccess,
+  getAuthorizedClientBusinessIdsForUser,
+} from "@/lib/practice/assignment/scope"
 
 export type AccessLevel = "read" | "write" | "approve"
 
@@ -107,7 +112,7 @@ export async function getAccountingAuthority(
 
   const { data: firmUsers, error: fuError } = await supabase
     .from("accounting_firm_users")
-    .select("firm_id")
+    .select("firm_id, role")
     .eq("user_id", firmUserId)
 
   debug.firmUserError = fuError?.message ?? null
@@ -164,6 +169,29 @@ export async function getAccountingAuthority(
     )
   }
 
+  const membership = (firmUsers ?? []).find((r: { firm_id: string }) => r.firm_id === row.accounting_firm_id)
+  const role = isPracticeFirmRole(membership?.role) ? membership.role : null
+  if (role) {
+    const assignment = await assertAssignedClientAccess({
+      supabase,
+      userId: firmUserId,
+      firmId: row.accounting_firm_id,
+      businessId,
+      role,
+    })
+    debug.assignment = assignment
+    if (!assignment.allowed) {
+      return empty(
+        assignment.reason,
+        row.accounting_firm_id,
+        row.id,
+        row.status,
+        row.effective_from,
+        row.effective_to
+      )
+    }
+  }
+
   const level = row.access_level as AccessLevel
   if (!ACCESS_ORDER.includes(level)) {
     return empty(
@@ -216,26 +244,9 @@ export async function getEffectiveBusinessIdsForFirmUser(
   checkDate?: string
 ): Promise<string[]> {
   const date = checkDate ?? new Date().toISOString().split("T")[0]
-  const { data: firmUsers, error: fuError } = await supabase
-    .from("accounting_firm_users")
-    .select("firm_id")
-    .eq("user_id", firmUserId)
-  if (fuError || !firmUsers?.length) return []
-  const firmIds = firmUsers.map((r: { firm_id: string }) => r.firm_id)
-  const { data: engagements } = await supabase
-    .from("firm_client_engagements")
-    .select("client_business_id")
-    .in("accounting_firm_id", firmIds)
-  const candidateIds = [...new Set((engagements ?? []).map((e: { client_business_id: string }) => e.client_business_id))]
-  const effective: string[] = []
-  for (const bid of candidateIds) {
-    const result = await getAccountingAuthority({
-      supabase,
-      firmUserId,
-      businessId: bid,
-      checkDate: date,
-    })
-    if (result.allowed) effective.push(bid)
-  }
-  return effective
+  return getAuthorizedClientBusinessIdsForUser(
+    supabase,
+    firmUserId,
+    new Date(date + "T12:00:00.000Z")
+  )
 }

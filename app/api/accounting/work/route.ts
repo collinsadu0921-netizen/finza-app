@@ -10,6 +10,8 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
 import { aggregatePracticeWork } from "@/lib/practice/work/aggregate"
 import { filterPracticeWorkItems, sortPracticeWorkItems } from "@/lib/practice/work/filter"
+import { hasPortfolioWideVisibility } from "@/lib/practice/assignment/policy"
+import { loadFirmUserClientScope } from "@/lib/practice/assignment/scope"
 import { partitionFirmEngagements, resolveWorkFirmId } from "@/lib/practice/work/scope"
 import type {
   FilingSourceRow,
@@ -87,7 +89,20 @@ export async function GET(request: NextRequest) {
     }
 
     const now = new Date()
-    const { effectiveBusinessIds, issues } = partitionFirmEngagements(engagementRows ?? [], now)
+    const scope = await loadFirmUserClientScope(supabase, {
+      userId: user.id,
+      firmId,
+      now,
+    })
+    if (!scope) {
+      return NextResponse.json({ error: "Forbidden. Accounting firm membership required." }, { status: 403 })
+    }
+
+    const { issues: allIssues } = partitionFirmEngagements(engagementRows ?? [], now)
+    const effectiveBusinessIds = scope.authorizedBusinessIds
+    const issues = hasPortfolioWideVisibility(scope.role)
+      ? allIssues
+      : allIssues.filter((row) => scope.assignedBusinessIds.includes(row.client_business_id))
     const allClientIds = [
       ...new Set([
         ...effectiveBusinessIds,

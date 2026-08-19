@@ -13,6 +13,7 @@ type Client = {
   engagement_status?: "pending" | "active" | "suspended" | "terminated"
   granted_at: string
   accepted_at?: string | null
+  assigned_staff?: { user_id: string; name: string }[]
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -112,6 +113,9 @@ export default function ClientsPage() {
                   Client
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Assigned
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -131,6 +135,11 @@ export default function ClientsPage() {
                     <span className="text-sm font-medium text-gray-900 dark:text-white">
                       {client.business_name}
                     </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
+                    {client.assigned_staff?.length
+                      ? client.assigned_staff.map((s) => s.name).join(", ")
+                      : "—"}
                   </td>
                   <td className="px-6 py-4">
                     {client.engagement_status ? (

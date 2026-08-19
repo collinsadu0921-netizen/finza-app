@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { getAuthorizedClientBusinessIdsForUser } from "@/lib/practice/assignment/scope"
 
 const VALID_STATUSES = ["pending", "in_progress", "filed", "accepted", "rejected", "cancelled"]
 
@@ -39,6 +40,10 @@ export async function GET(request: NextRequest) {
     }
 
     const firmIds = firmUsers.map((f) => f.firm_id as string).filter(Boolean)
+    const authorizedIds = await getAuthorizedClientBusinessIdsForUser(supabase, user.id)
+    if (!authorizedIds.length) {
+      return NextResponse.json({ filings: [] })
+    }
 
     const { searchParams } = new URL(request.url)
     const statusFilter = searchParams.get("status")?.trim() ?? ""
@@ -64,6 +69,7 @@ export async function GET(request: NextRequest) {
         )
       `)
       .in("firm_id", firmIds)
+      .in("client_business_id", authorizedIds)
       .order("filed_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(limit)

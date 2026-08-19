@@ -136,6 +136,27 @@ describe("resolvePracticeClientBooksContext", () => {
     if (ctx.kind === "service") expect(ctx.businessId).toBe("owned-biz")
   })
 
+  it("denies an unassigned firm user even when the firm has an engagement", async () => {
+    mockAuthority.mockResolvedValue({
+      allowed: false,
+      level: null,
+      reason: "CLIENT_NOT_ASSIGNED",
+      firmId: "firm-1",
+      engagementId: "eng-1",
+      engagementStatus: "accepted",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: null,
+      debug: {},
+    })
+
+    const ctx = await resolvePracticeClientBooksContext({
+      supabase: supabaseWithFirm(true),
+      userId: "senior-unassigned",
+      urlBusinessId: "biz-xyz",
+    })
+    expect(ctx.kind).toBe("denied")
+  })
+
   it("denies a Service owner impersonating another business via URL", async () => {
     mockServiceCtx.mockResolvedValue({ businessId: "owned-biz" })
     mockGetRole.mockResolvedValue(null)

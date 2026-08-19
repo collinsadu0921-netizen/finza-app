@@ -5,6 +5,7 @@ import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingCont
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
 import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { getAuthorizedClientBusinessIdsForUser } from "@/lib/practice/assignment/scope"
 
 /**
  * GET /api/accounting/requests?business_id=   → requests for a single client (firm-scoped)
@@ -51,6 +52,10 @@ export async function GET(request: NextRequest) {
       }
 
       const firmIds = firmUsers.map((f) => f.firm_id as string).filter(Boolean)
+      const authorizedIds = await getAuthorizedClientBusinessIdsForUser(supabase, user.id)
+      if (!authorizedIds.length) {
+        return NextResponse.json({ requests: [] })
+      }
 
       const limit = Math.min(parseInt(searchParams.get("limit") ?? "200", 10), 500)
 
@@ -71,6 +76,7 @@ export async function GET(request: NextRequest) {
           )
         `)
         .in("firm_id", firmIds)
+        .in("client_business_id", authorizedIds)
         .order("due_at", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(limit)

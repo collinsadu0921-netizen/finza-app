@@ -4,6 +4,7 @@ import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/account
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { assertTaskAssigneeAllowed } from "@/lib/practice/assignment/scope"
 
 /**
  * PATCH /api/accounting/clients/[id]/tasks/[taskId]
@@ -123,10 +124,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if ("assigned_to_user_id" in body) {
-      patch.assigned_to_user_id =
+      const assignedTo =
         typeof body.assigned_to_user_id === "string"
           ? body.assigned_to_user_id.trim() || null
           : null
+      if (assignedTo) {
+        const assignee = await assertTaskAssigneeAllowed({
+          supabase,
+          firmId: auth.firmId!,
+          businessId,
+          assigneeUserId: assignedTo,
+        })
+        if (!assignee.allowed) {
+          return NextResponse.json(
+            { error: "Task assignee must have access to this client", reason: assignee.reason },
+            { status: 403 }
+          )
+        }
+      }
+      patch.assigned_to_user_id = assignedTo
     }
 
     if ("due_at" in body) {

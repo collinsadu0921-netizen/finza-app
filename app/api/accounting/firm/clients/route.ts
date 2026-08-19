@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
+import { hasPortfolioWideVisibility, isPracticeFirmRole } from "@/lib/practice/assignment/policy"
+import { loadFirmUserClientScope } from "@/lib/practice/assignment/scope"
 
 /**
  * GET /api/accounting/firm/clients
@@ -38,7 +40,7 @@ export async function GET(request: NextRequest) {
     // Get user's firms
     const { data: firmUsers, error: firmUsersError } = await supabase
       .from("accounting_firm_users")
-      .select("firm_id")
+      .select("firm_id, role")
       .eq("user_id", user.id)
 
     if (firmUsersError) {
@@ -54,6 +56,19 @@ export async function GET(request: NextRequest) {
     }
 
     const firmIds = firmUsers.map((fu) => fu.firm_id)
+    const visibleByFirm = new Map<string, Set<string> | "all">()
+    for (const membership of firmUsers) {
+      const role = isPracticeFirmRole(membership.role) ? membership.role : "readonly"
+      if (hasPortfolioWideVisibility(role)) {
+        visibleByFirm.set(membership.firm_id, "all")
+        continue
+      }
+      const scope = await loadFirmUserClientScope(supabase, {
+        userId: user.id,
+        firmId: membership.firm_id,
+      })
+      visibleByFirm.set(membership.firm_id, new Set(scope?.authorizedBusinessIds ?? []))
+    }
 
     const today = new Date().toISOString().split("T")[0]
     // Get all engagements for these firms (effective = accepted or active + date range per migration 279)
@@ -75,8 +90,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ clients: [] })
     }
 
+    const scopedEngagements = engagements.filter((engagement) => {
+      const visible = visibleByFirm.get(engagement.accounting_firm_id)
+      if (visible === "all") return true
+      return visible?.has(engagement.client_business_id) ?? false
+    })
+
+    if (!scopedEngagements.length) {
+      return NextResponse.json({ clients: [] })
+    }
+
     // Get business IDs
-    const businessIds = [...new Set(engagements.map((e) => e.client_business_id))]
+    const businessIds = [...new Set(scopedEngagements.map((e) => e.client_business_id))]
 
     // Fetch businesses
     const { data: businesses, error: businessesError } = await supabase
@@ -91,8 +116,36 @@ export async function GET(request: NextRequest) {
     const businessMap = new Map((businesses || []).map((b) => [b.id, b]))
 
     // For each engagement, get status information
+    const { data: assignmentRows } = await supabase
+      .from("accounting_firm_client_assignments")
+      .select("firm_id, client_business_id, user_id")
+      .in("firm_id", firmIds)
+      .in("client_business_id", businessIds)
+      .is("unassigned_at", null)
+
+    const assigneeIds = [...new Set((assignmentRows ?? []).map((row) => row.user_id as string))]
+    const { data: assigneeUsers } = assigneeIds.length
+      ? await supabase.from("users").select("id, email, full_name").in("id", assigneeIds)
+      : { data: [] as { id: string; email?: string | null; full_name?: string | null }[] }
+    const assigneeName = new Map(
+      (assigneeUsers ?? []).map((row) => [
+        row.id,
+        (row.full_name?.trim() || row.email?.trim() || "Firm user") as string,
+      ])
+    )
+    const assignedByClient = new Map<string, { user_id: string; name: string }[]>()
+    for (const row of assignmentRows ?? []) {
+      const key = `${row.firm_id}:${row.client_business_id}`
+      const list = assignedByClient.get(key) ?? []
+      list.push({
+        user_id: row.user_id,
+        name: assigneeName.get(row.user_id) ?? "Firm user",
+      })
+      assignedByClient.set(key, list)
+    }
+
     const clientsWithStatus = await Promise.all(
-      engagements.map(async (engagement: any) => {
+      scopedEngagements.map(async (engagement: any) => {
         const businessId = engagement.client_business_id
         const business = businessMap.get(businessId)
         
@@ -168,6 +221,8 @@ export async function GET(request: NextRequest) {
           effective_to: engagement.effective_to,
           granted_at: engagement.created_at,
           accepted_at: engagement.accepted_at,
+          assigned_staff:
+            assignedByClient.get(`${engagement.accounting_firm_id}:${businessId}`) ?? [],
           businessId,
           businessName,
           engagementId: engagement.id,

@@ -15,6 +15,7 @@ import { evaluateEngagementState } from "@/lib/accounting/evaluateEngagementStat
 import OpenAccountingButton from "@/components/accounting/OpenAccountingButton"
 import { WorkQueue } from "@/components/accounting/WorkQueue"
 import EngagementLifecyclePanel from "@/components/accounting/EngagementLifecyclePanel"
+import ClientAssignmentPanel from "@/components/practice/ClientAssignmentPanel"
 
 interface Props {
   businessId: string
@@ -56,7 +57,13 @@ export default function ClientCommandCenter({ businessId }: Props) {
         if (!summaryRes.ok || !summaryData) {
           const errData = await summaryRes.json().catch(() => ({}))
           if (!cancelled) {
-            if (summaryRes.status === 403) setError(errData.reason || "Access denied")
+            if (summaryRes.status === 403) {
+              setError(
+                errData.reason === "CLIENT_NOT_ASSIGNED"
+                  ? "You are not assigned to this client."
+                  : errData.reason || "Access denied"
+              )
+            }
             else if (summaryRes.status === 400) setError("Missing business context")
             else setError(errData.error || "Failed to load")
             setSummary(null)
@@ -250,6 +257,8 @@ export default function ClientCommandCenter({ businessId }: Props) {
               }
             }}
           />
+
+          <ClientAssignmentPanel businessId={businessId} />
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <CountCard label="Approvals pending" value={counts.approvals_pending} />

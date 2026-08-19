@@ -4,6 +4,7 @@ import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/account
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { assertTaskAssigneeAllowed } from "@/lib/practice/assignment/scope"
 
 /**
  * GET /api/accounting/clients/[id]/tasks?status=&priority=&limit=
@@ -150,6 +151,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       )
     }
     const { supabase, user, auth } = result
+
+    if (assignedTo) {
+      const assignee = await assertTaskAssigneeAllowed({
+        supabase,
+        firmId: auth.firmId!,
+        businessId,
+        assigneeUserId: assignedTo,
+      })
+      if (!assignee.allowed) {
+        return NextResponse.json(
+          { error: "Task assignee must have access to this client", reason: assignee.reason },
+          { status: 403 }
+        )
+      }
+    }
 
     const { data: inserted, error: insertErr } = await supabase
       .from("client_tasks")
