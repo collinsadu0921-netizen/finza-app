@@ -5,7 +5,7 @@ import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingCont
 import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
 import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
-import { getAuthorizedClientBusinessIdsForUser } from "@/lib/practice/assignment/scope"
+import { resolveActivePracticeFirmScope } from "@/lib/practice/assignment/activeFirm"
 
 /**
  * GET /api/accounting/requests?business_id=   → requests for a single client (firm-scoped)
@@ -41,20 +41,17 @@ export async function GET(request: NextRequest) {
       const memberForbidden = await requireFirmMemberForApi(supabase, user.id)
       if (memberForbidden) return memberForbidden
 
-      // Resolve all firm IDs for this user (column is firm_id per authorityEngine).
-      const { data: firmUsers, error: firmErr } = await supabase
-        .from("accounting_firm_users")
-        .select("firm_id")
-        .eq("user_id", user.id)
-
-      if (firmErr || !firmUsers?.length) {
-        return NextResponse.json({ error: "Not a firm member" }, { status: 403 })
+      const resolved = await resolveActivePracticeFirmScope({
+        supabase,
+        userId: user.id,
+        requestedFirmId: searchParams.get("firm_id"),
+      })
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: resolved.status })
       }
-
-      const firmIds = firmUsers.map((f) => f.firm_id as string).filter(Boolean)
-      const authorizedIds = await getAuthorizedClientBusinessIdsForUser(supabase, user.id)
+      const authorizedIds = resolved.scope.authorizedBusinessIds
       if (!authorizedIds.length) {
-        return NextResponse.json({ requests: [] })
+        return NextResponse.json({ requests: [], firm_id: resolved.firmId })
       }
 
       const limit = Math.min(parseInt(searchParams.get("limit") ?? "200", 10), 500)
@@ -75,7 +72,7 @@ export async function GET(request: NextRequest) {
             name
           )
         `)
-        .in("firm_id", firmIds)
+        .eq("firm_id", resolved.firmId)
         .in("client_business_id", authorizedIds)
         .order("due_at", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false })
@@ -102,7 +99,7 @@ export async function GET(request: NextRequest) {
         }
       })
 
-      return NextResponse.json({ requests })
+      return NextResponse.json({ requests, firm_id: resolved.firmId })
     }
 
     // ── Per-client listing (business_id provided) ────────────────────────────

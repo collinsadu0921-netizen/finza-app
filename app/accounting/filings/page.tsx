@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { getActiveFirmId } from "@/lib/accounting/firm/session"
 
 type FilingStatus = "pending" | "in_progress" | "filed" | "accepted" | "rejected" | "cancelled"
 
@@ -63,7 +64,10 @@ export default function FirmFilingsPage() {
     setLoading(true)
     setError("")
     try {
-      const res = await fetch("/api/accounting/filings?limit=500")
+      const firmId = getActiveFirmId()
+      const qs = new URLSearchParams({ limit: "500" })
+      if (firmId) qs.set("firm_id", firmId)
+      const res = await fetch(`/api/accounting/filings?${qs.toString()}`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setError(data.error || `Failed to load (${res.status})`)

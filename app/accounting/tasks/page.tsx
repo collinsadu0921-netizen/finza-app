@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link"
+import { getActiveFirmId } from "@/lib/accounting/firm/session"
 
 // ---------- types ------------------------------------------------------------
 
@@ -349,7 +350,10 @@ export default function FirmTasksPage() {
     setLoading(true)
     setError("")
     try {
-      const res = await fetch("/api/accounting/tasks?limit=500")
+      const firmId = getActiveFirmId()
+      const qs = new URLSearchParams({ limit: "500" })
+      if (firmId) qs.set("firm_id", firmId)
+      const res = await fetch(`/api/accounting/tasks?${qs.toString()}`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { setError(data.error || `Failed (${res.status})`); return }
       setAllTasks(data.tasks ?? [])

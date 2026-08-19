@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
-import { getAuthorizedClientBusinessIdsForUser } from "@/lib/practice/assignment/scope"
+import { resolveActivePracticeFirmScope } from "@/lib/practice/assignment/activeFirm"
 
 const VALID_STATUSES = ["pending", "in_progress", "filed", "accepted", "rejected", "cancelled"]
 
@@ -30,22 +30,19 @@ export async function GET(request: NextRequest) {
     const memberForbidden = await requireFirmMemberForApi(supabase, user.id)
     if (memberForbidden) return memberForbidden
 
-    const { data: firmUsers, error: firmErr } = await supabase
-      .from("accounting_firm_users")
-      .select("firm_id")
-      .eq("user_id", user.id)
-
-    if (firmErr || !firmUsers?.length) {
-      return NextResponse.json({ error: "Not a firm member" }, { status: 403 })
-    }
-
-    const firmIds = firmUsers.map((f) => f.firm_id as string).filter(Boolean)
-    const authorizedIds = await getAuthorizedClientBusinessIdsForUser(supabase, user.id)
-    if (!authorizedIds.length) {
-      return NextResponse.json({ filings: [] })
-    }
-
     const { searchParams } = new URL(request.url)
+    const resolved = await resolveActivePracticeFirmScope({
+      supabase,
+      userId: user.id,
+      requestedFirmId: searchParams.get("firm_id"),
+    })
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: resolved.status })
+    }
+    const authorizedIds = resolved.scope.authorizedBusinessIds
+    if (!authorizedIds.length) {
+      return NextResponse.json({ filings: [], firm_id: resolved.firmId })
+    }
     const statusFilter = searchParams.get("status")?.trim() ?? ""
     const filingTypeFilter = searchParams.get("filing_type")?.trim() ?? ""
     const clientFilter = searchParams.get("client")?.trim() ?? ""
@@ -68,7 +65,7 @@ export async function GET(request: NextRequest) {
           name
         )
       `)
-      .in("firm_id", firmIds)
+      .eq("firm_id", resolved.firmId)
       .in("client_business_id", authorizedIds)
       .order("filed_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
@@ -110,7 +107,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({ filings })
+    return NextResponse.json({ filings, firm_id: resolved.firmId })
   } catch (e) {
     console.error("GET /api/accounting/filings:", e)
     return NextResponse.json(

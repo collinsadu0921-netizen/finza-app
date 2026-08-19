@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/accounting/firm/requireMember"
-import { hasPortfolioWideVisibility, isPracticeFirmRole } from "@/lib/practice/assignment/policy"
-import { loadFirmUserClientScope } from "@/lib/practice/assignment/scope"
+import { hasPortfolioWideVisibility } from "@/lib/practice/assignment/policy"
+import { resolveActivePracticeFirmScope } from "@/lib/practice/assignment/activeFirm"
 
 /**
  * GET /api/accounting/firm/clients
@@ -37,37 +37,20 @@ export async function GET(request: NextRequest) {
     const jurisdiction = searchParams.get("jurisdiction") // Future: filter by business country
     const risk = searchParams.get("risk") // Future: filter by critical exceptions
 
-    // Get user's firms
-    const { data: firmUsers, error: firmUsersError } = await supabase
-      .from("accounting_firm_users")
-      .select("firm_id, role")
-      .eq("user_id", user.id)
-
-    if (firmUsersError) {
-      console.error("Error fetching user firms:", firmUsersError)
-      return NextResponse.json(
-        { error: "Failed to fetch firm membership" },
-        { status: 500 }
-      )
+    const resolved = await resolveActivePracticeFirmScope({
+      supabase,
+      userId: user.id,
+      requestedFirmId: searchParams.get("firm_id"),
+    })
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: resolved.status })
     }
-
-    if (!firmUsers || firmUsers.length === 0) {
-      return NextResponse.json({ clients: [] })
-    }
-
-    const firmIds = firmUsers.map((fu) => fu.firm_id)
+    const firmIds = [resolved.firmId]
     const visibleByFirm = new Map<string, Set<string> | "all">()
-    for (const membership of firmUsers) {
-      const role = isPracticeFirmRole(membership.role) ? membership.role : "readonly"
-      if (hasPortfolioWideVisibility(role)) {
-        visibleByFirm.set(membership.firm_id, "all")
-        continue
-      }
-      const scope = await loadFirmUserClientScope(supabase, {
-        userId: user.id,
-        firmId: membership.firm_id,
-      })
-      visibleByFirm.set(membership.firm_id, new Set(scope?.authorizedBusinessIds ?? []))
+    if (hasPortfolioWideVisibility(resolved.scope.role)) {
+      visibleByFirm.set(resolved.firmId, "all")
+    } else {
+      visibleByFirm.set(resolved.firmId, new Set(resolved.scope.authorizedBusinessIds))
     }
 
     const today = new Date().toISOString().split("T")[0]
@@ -267,6 +250,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
+      firm_id: resolved.firmId,
+      assignment_enforcement_enabled: resolved.scope.enforcementActive,
       clients: filteredClients,
       total: filteredClients.length,
     })

@@ -47,6 +47,7 @@ describe("getAccountingAuthority assignment scope", () => {
     const result = await getAccountingAuthority({
       supabase: supabase({
         accounting_firm_users: [{ firm_id: "firm-a", role: "partner", user_id: "partner-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [engagement],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "senior-1", client_business_id: "biz-a", unassigned_at: null },
@@ -64,6 +65,7 @@ describe("getAccountingAuthority assignment scope", () => {
     const assigned = await getAccountingAuthority({
       supabase: supabase({
         accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "senior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [engagement],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "senior-1", client_business_id: "biz-a", unassigned_at: null },
@@ -77,6 +79,7 @@ describe("getAccountingAuthority assignment scope", () => {
     const unassigned = await getAccountingAuthority({
       supabase: supabase({
         accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "senior-2" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [engagement],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "senior-1", client_business_id: "biz-a", unassigned_at: null },
@@ -122,6 +125,7 @@ describe("getAccountingAuthority assignment scope", () => {
     const result = await getAccountingAuthority({
       supabase: supabase({
         accounting_firm_users: [{ firm_id: "firm-a", role: "junior", user_id: "junior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [{ ...engagement, access_level: "read" }],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "junior-1", client_business_id: "biz-a", unassigned_at: null },

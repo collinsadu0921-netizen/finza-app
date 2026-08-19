@@ -39,6 +39,7 @@ function filterable(rows: unknown[]) {
     return api
   }
   api.limit = self
+  api.maybeSingle = async () => ({ data: filtered[0] ?? null, error: null })
   api.then = (resolve: (value: unknown) => unknown) =>
     Promise.resolve({ data: filtered, error: null }).then(resolve)
   return api
@@ -170,6 +171,7 @@ describe("GET /api/accounting/work", () => {
             effective_to: null,
           },
         ],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         accounting_firm_client_assignments: [
           {
             id: "asg-1",
@@ -233,6 +235,7 @@ describe("GET /api/accounting/work", () => {
             effective_to: null,
           },
         ],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         accounting_firm_client_assignments: [
           {
             id: "asg-1",

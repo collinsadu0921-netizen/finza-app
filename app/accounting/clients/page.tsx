@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { EngagementStatusBadge } from "@/components/EngagementStatusBadge"
+import AssignmentEnforcementBanner from "@/components/practice/AssignmentEnforcementBanner"
+import { getActiveFirmId } from "@/lib/accounting/firm/session"
 
 type Client = {
   id: string
@@ -38,7 +40,9 @@ export default function ClientsPage() {
       try {
         setLoading(true)
         setError("")
-        const res = await fetch("/api/accounting/firm/clients")
+        const firmId = getActiveFirmId()
+        const qs = firmId ? `?firm_id=${encodeURIComponent(firmId)}` : ""
+        const res = await fetch(`/api/accounting/firm/clients${qs}`)
         if (cancelled) return
         if (!res.ok) {
           const data = await res.json().catch(() => ({}))
@@ -89,6 +93,8 @@ export default function ClientsPage() {
           className="w-full sm:w-72 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
         />
       </div>
+
+      <AssignmentEnforcementBanner />
 
       {error && (
         <div className="mb-4 p-4 rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-800 dark:text-red-200">

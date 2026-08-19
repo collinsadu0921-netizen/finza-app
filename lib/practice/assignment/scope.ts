@@ -67,7 +67,7 @@ export async function loadFirmUserClientScope(
     ),
   ]
 
-  const [assignedRes, enforcementRes] = await Promise.all([
+  const [assignedRes, firmRes] = await Promise.all([
     supabase
       .from("accounting_firm_client_assignments")
       .select("client_business_id")
@@ -75,16 +75,16 @@ export async function loadFirmUserClientScope(
       .eq("user_id", opts.userId)
       .is("unassigned_at", null),
     supabase
-      .from("accounting_firm_client_assignments")
-      .select("id")
-      .eq("firm_id", opts.firmId)
-      .limit(1),
+      .from("accounting_firms")
+      .select("assignment_scope_enabled_at")
+      .eq("id", opts.firmId)
+      .maybeSingle(),
   ])
 
   const assignedBusinessIds = [
     ...new Set((assignedRes.data ?? []).map((row) => row.client_business_id as string)),
   ]
-  const enforcementActive = (enforcementRes.data ?? []).length > 0
+  const enforcementActive = Boolean(firmRes.data?.assignment_scope_enabled_at)
 
   return {
     firmId: opts.firmId,
@@ -95,7 +95,7 @@ export async function loadFirmUserClientScope(
       role: membership.role,
       effectiveClientIds: effectiveBusinessIds,
       assignedClientIds: assignedBusinessIds,
-      firmHasAssignmentRows: enforcementActive,
+      assignmentEnforcementEnabled: enforcementActive,
     }),
     enforcementActive,
   }
@@ -129,7 +129,7 @@ export async function assertAssignedClientAccess(opts: {
   businessId: string
   role: PracticeFirmRole
 }): Promise<{ allowed: boolean; reason: string }> {
-  const [assignedRes, enforcementRes] = await Promise.all([
+  const [assignedRes, firmRes] = await Promise.all([
     opts.supabase
       .from("accounting_firm_client_assignments")
       .select("id")
@@ -139,17 +139,17 @@ export async function assertAssignedClientAccess(opts: {
       .is("unassigned_at", null)
       .limit(1),
     opts.supabase
-      .from("accounting_firm_client_assignments")
-      .select("id")
-      .eq("firm_id", opts.firmId)
-      .limit(1),
+      .from("accounting_firms")
+      .select("assignment_scope_enabled_at")
+      .eq("id", opts.firmId)
+      .maybeSingle(),
   ])
 
   const allowed = isClientInScope({
     role: opts.role,
     businessId: opts.businessId,
     assigned: (assignedRes.data ?? []).length > 0,
-    firmHasAssignmentRows: (enforcementRes.data ?? []).length > 0,
+    assignmentEnforcementEnabled: Boolean(firmRes.data?.assignment_scope_enabled_at),
   })
   return { allowed, reason: allowed ? "ACTIVE" : CLIENT_NOT_ASSIGNED }
 }
@@ -170,7 +170,7 @@ export async function assertTaskAssigneeAllowed(opts: {
     return { allowed: false, reason: "ASSIGNEE_NOT_FIRM_MEMBER" }
   }
 
-  const [assignedRes, enforcementRes] = await Promise.all([
+  const [assignedRes, firmRes] = await Promise.all([
     opts.supabase
       .from("accounting_firm_client_assignments")
       .select("id")
@@ -180,16 +180,16 @@ export async function assertTaskAssigneeAllowed(opts: {
       .is("unassigned_at", null)
       .limit(1),
     opts.supabase
-      .from("accounting_firm_client_assignments")
-      .select("id")
-      .eq("firm_id", opts.firmId)
-      .limit(1),
+      .from("accounting_firms")
+      .select("assignment_scope_enabled_at")
+      .eq("id", opts.firmId)
+      .maybeSingle(),
   ])
 
   const allowed = canAssignTaskToUser({
     assigneeRole: membership.role,
     assigneeAssignedToClient: (assignedRes.data ?? []).length > 0,
-    firmHasAssignmentRows: (enforcementRes.data ?? []).length > 0,
+    assignmentEnforcementEnabled: Boolean(firmRes.data?.assignment_scope_enabled_at),
   })
   return { allowed, reason: allowed ? "ok" : CLIENT_NOT_ASSIGNED }
 }

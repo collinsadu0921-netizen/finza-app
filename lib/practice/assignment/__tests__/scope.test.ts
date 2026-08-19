@@ -54,10 +54,11 @@ describe("assignment scope", () => {
     expect(result.allowed).toBe(true)
   })
 
-  it("denies an unassigned senior once the firm has assignment rows", async () => {
+  it("denies an unassigned senior after assignment enforcement is enabled", async () => {
     const supabase = {
       from: filterableFrom({
         accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "senior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "other", client_business_id: "biz-a", unassigned_at: null },
         ],
@@ -78,6 +79,7 @@ describe("assignment scope", () => {
     const supabase = {
       from: filterableFrom({
         accounting_firm_users: [{ firm_id: "firm-a", role: "junior", user_id: "junior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [
           {
             accounting_firm_id: "firm-a",
@@ -126,6 +128,7 @@ describe("assignment scope", () => {
     const supabase = {
       from: filterableFrom({
         accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "senior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [
           {
             accounting_firm_id: "firm-a",
@@ -152,6 +155,7 @@ describe("assignment scope", () => {
     const supabase = {
       from: filterableFrom({
         accounting_firm_users: [{ firm_id: "firm-a", role: "junior", user_id: "junior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "other", client_business_id: "biz-a", unassigned_at: null },
         ],
@@ -168,6 +172,7 @@ describe("assignment scope", () => {
     const assignedSupabase = {
       from: filterableFrom({
         accounting_firm_users: [{ firm_id: "firm-a", role: "junior", user_id: "junior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         accounting_firm_client_assignments: [
           { id: "asg-1", firm_id: "firm-a", user_id: "junior-1", client_business_id: "biz-a", unassigned_at: null },
         ],
@@ -204,6 +209,7 @@ describe("assignment scope", () => {
     const supabase = {
       from: filterableFrom({
         accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "multi-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
         firm_client_engagements: [
           {
             accounting_firm_id: "firm-a",
@@ -226,5 +232,64 @@ describe("assignment scope", () => {
     })
     expect(scope?.authorizedBusinessIds).toEqual([])
     expect(scope?.assignedBusinessIds).toEqual([])
+  })
+
+  it("keeps enforcement on after all assignment rows are removed", async () => {
+    const supabase = {
+      from: filterableFrom({
+        accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "senior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: "2026-08-19T00:00:00.000Z" }],
+        firm_client_engagements: [
+          {
+            accounting_firm_id: "firm-a",
+            client_business_id: "biz-a",
+            status: "accepted",
+            effective_from: "2026-01-01",
+            effective_to: null,
+          },
+        ],
+        accounting_firm_client_assignments: [],
+      }),
+    }
+    const scope = await loadFirmUserClientScope(supabase as never, {
+      userId: "senior-1",
+      firmId: "firm-a",
+      now,
+    })
+    expect(scope?.enforcementActive).toBe(true)
+    expect(scope?.authorizedBusinessIds).toEqual([])
+  })
+
+  it("lets a senior see effective clients while enforcement is off", async () => {
+    const supabase = {
+      from: filterableFrom({
+        accounting_firm_users: [{ firm_id: "firm-a", role: "senior", user_id: "senior-1" }],
+        accounting_firms: [{ id: "firm-a", assignment_scope_enabled_at: null }],
+        firm_client_engagements: [
+          {
+            accounting_firm_id: "firm-a",
+            client_business_id: "biz-a",
+            status: "accepted",
+            effective_from: "2026-01-01",
+            effective_to: null,
+          },
+          {
+            accounting_firm_id: "firm-a",
+            client_business_id: "biz-b",
+            status: "accepted",
+            effective_from: "2026-01-01",
+            effective_to: null,
+          },
+        ],
+        accounting_firm_client_assignments: [],
+      }),
+    }
+    const scope = await loadFirmUserClientScope(supabase as never, {
+      userId: "senior-1",
+      firmId: "firm-a",
+      now,
+    })
+    expect(scope?.enforcementActive).toBe(false)
+    expect(scope?.authorizedBusinessIds).toEqual(["biz-a", "biz-b"])
   })
 })
