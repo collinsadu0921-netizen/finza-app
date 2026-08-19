@@ -442,7 +442,7 @@ export default function PracticeDashboardPage() {
           <Panel
             title="Needs review"
             action={
-              <Link href="/accounting/work" className="text-xs text-blue-600 hover:underline">
+              <Link href={workHref({ status: "needs_action", type: "journal_approval" })} className="text-xs text-blue-600 hover:underline">
                 Open review work
               </Link>
             }
