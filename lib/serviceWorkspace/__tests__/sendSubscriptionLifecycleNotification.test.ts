@@ -175,4 +175,109 @@ describe("sendSubscriptionLifecycleNotification", () => {
     )
     expect(insertMock).toHaveBeenCalled()
   })
+
+  it("sends period-expired grace copy rather than a payment-failed message", async () => {
+    const insertMock = jest.fn().mockResolvedValue({ data: { id: "log2" }, error: null })
+    let subNotifCalls = 0
+    const admin = {
+      from: jest.fn((table: string) => {
+        if (table === "businesses") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            is: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: { name: "Co", email: "biz@test.co", owner_id: "owner-1" },
+              error: null,
+            }),
+          }
+        }
+        if (table === "subscription_notification_events") {
+          subNotifCalls += 1
+          if (subNotifCalls === 1) {
+            return {
+              select: jest.fn().mockReturnThis(),
+              eq: jest.fn().mockReturnThis(),
+              maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+            }
+          }
+          return { insert: insertMock }
+        }
+        return {}
+      }),
+      auth: {
+        admin: {
+          getUserById: jest.fn(),
+        },
+      },
+    }
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
+
+    const r = await sendSubscriptionLifecycleNotification({
+      businessId: BIZ,
+      eventType: "subscription_period_expired_grace_started",
+      lifecycleKey: "2026-08-06T18:00:00.000Z|aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    })
+    expect(r.ok).toBe(true)
+    expect(sendTransactionalEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Your Finza subscription period has ended — 3-day grace started",
+        text: expect.stringContaining("3-day grace period is now active"),
+      })
+    )
+    expect(sendTransactionalEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.not.stringContaining("could not charge"),
+      })
+    )
+  })
+
+  it("dedupes by event_type + lifecycle_key so grace-start does not block lock", async () => {
+    const eq = jest.fn().mockReturnThis()
+    const insert = jest.fn().mockResolvedValue({ data: { id: "log3" }, error: null })
+    let notificationCalls = 0
+    const admin = {
+      from: jest.fn((table: string) => {
+        if (table === "businesses") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            is: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: { name: "Co", email: "biz@test.co", owner_id: "owner-1" },
+              error: null,
+            }),
+          }
+        }
+        if (table === "subscription_notification_events") {
+          notificationCalls += 1
+          if (notificationCalls === 1) {
+            const chain: Record<string, unknown> = {}
+            chain.select = jest.fn(() => chain)
+            chain.eq = eq
+            eq.mockReturnValue(chain)
+            chain.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null })
+            return chain
+          }
+          return { insert }
+        }
+        return {}
+      }),
+      auth: { admin: { getUserById: jest.fn() } },
+    }
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
+
+    await sendSubscriptionLifecycleNotification({
+      businessId: BIZ,
+      eventType: "subscription_locked",
+      lifecycleKey: "2026-08-06T18:00:00.000Z|" + BIZ,
+    })
+
+    expect(eq.mock.calls).toEqual(
+      expect.arrayContaining([
+        ["event_type", "subscription_locked"],
+        ["lifecycle_key", "2026-08-06T18:00:00.000Z|" + BIZ],
+      ])
+    )
+  })
 })

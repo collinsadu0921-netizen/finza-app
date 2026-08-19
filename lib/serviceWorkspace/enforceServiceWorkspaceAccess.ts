@@ -58,6 +58,12 @@ export type EnforceServiceAccessOptions = {
 export const TRIAL_EXPIRED_READ_ONLY_MESSAGE =
   "Your trial has ended. Upgrade to continue creating or editing financial records."
 
+export const SUBSCRIPTION_READ_ONLY_MESSAGE =
+  "Your subscription has ended. Renew to continue creating or editing financial records."
+
+export const SUBSCRIPTION_READ_ONLY_CODE = "SUBSCRIPTION_READ_ONLY"
+export const TRIAL_EXPIRED_READ_ONLY_CODE = "TRIAL_EXPIRED_READ_ONLY"
+
 /**
  * Returns null when access is allowed; a NextResponse (401 or 403) otherwise.
  *
@@ -85,10 +91,16 @@ export async function enforceServiceWorkspaceAccess(
   const entitlement = resolveServiceEntitlement(row)
 
   if (mode === "write" && !entitlement.canWriteFinancialRecords) {
+    const isUnpaidTrialLock =
+      entitlement.trialExpiredWithoutPayment || entitlement.trialGraceExpired
     return NextResponse.json(
       {
-        error: TRIAL_EXPIRED_READ_ONLY_MESSAGE,
-        code: "TRIAL_EXPIRED_READ_ONLY",
+        error: isUnpaidTrialLock
+          ? TRIAL_EXPIRED_READ_ONLY_MESSAGE
+          : SUBSCRIPTION_READ_ONLY_MESSAGE,
+        code: isUnpaidTrialLock
+          ? TRIAL_EXPIRED_READ_ONLY_CODE
+          : SUBSCRIPTION_READ_ONLY_CODE,
         trialGraceExpired: entitlement.trialGraceExpired,
         trialGraceActive: entitlement.trialGraceActive,
         isReadOnlyLocked: entitlement.isReadOnlyLocked,

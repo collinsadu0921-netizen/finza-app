@@ -4,8 +4,15 @@
  *
  * - trial_ending_3d / trial_ending_1d: reminders before trial ends
  * - trial_grace_started: expired unpaid trial → past_due + 3-day grace (only if grace_until is null)
- * - grace_ending_24h: grace expires within 24h (paid renewal or unpaid trial)
- * - subscription_locked: past_due + grace_until <= now → locked (paid and unpaid)
+ * - paid period expired (active + known current_period_ends_at):
+ *     within period_end + 3 days → past_due + deterministic grace
+ *     after period_end + 3 days → locked (no fresh grace from cron time)
+ * - paid past_due normalization:
+ *     grace = current_period_ends_at + 3 days (never stored/sliding grace)
+ *     now < deadline → remain past_due and normalize stored grace
+ *     now >= deadline → locked with that same deadline
+ * - grace_ending_24h: stored-grace reminder for trial/never-paid (and legacy unpaid)
+ * - subscription_locked: unpaid/trial past_due + stored grace_until <= now → locked
  */
 import "server-only"
 
@@ -15,6 +22,11 @@ import {
   type SendSubscriptionLifecycleNotificationResult,
 } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
+import {
+  deterministicPaidGraceEnd,
+  lifecycleKeyPaidPeriod,
+  sameTimestamp,
+} from "@/lib/serviceWorkspace/paidSubscriptionPeriod"
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -28,6 +40,13 @@ export type ServiceSubscriptionLifecycleCronSummary = {
   trialGraceStartedChecked: number
   trialGraceStartedUpdated: number
   trialGraceStartedNotified: number
+  paidPeriodExpiredChecked: number
+  paidGraceStartedUpdated: number
+  paidGraceStartedNotified: number
+  paidPeriodExpiredLocked: number
+  paidPastDueChecked: number
+  paidPastDueNormalized: number
+  paidPastDueLocked: number
   graceEndingChecked: number
   graceEndingSent: number
   lockedChecked: number
@@ -39,6 +58,23 @@ export type ServiceSubscriptionLifecycleCronSummary = {
 export type TrialCandidateRow = { id: string; trial_ends_at: string }
 export type GraceCandidateRow = { id: string; subscription_grace_until: string }
 export type ExpiredUnpaidTrialRow = { id: string; trial_ends_at: string }
+export type ExpiredPaidActiveRow = {
+  id: string
+  service_subscription_status: string
+  current_period_ends_at: string
+}
+
+export type PaidPastDueRow = {
+  id: string
+  service_subscription_status: string
+  current_period_ends_at: string
+  subscription_grace_until: string | null
+}
+
+export type PaidPeriodMutationResult = {
+  updated: boolean
+  error: { message: string } | null
+}
 
 export type SubscriptionLifecycleCronQueries = {
   listTrialEnding3d: (now: Date) => Promise<TrialCandidateRow[]>
@@ -49,6 +85,36 @@ export type SubscriptionLifecycleCronQueries = {
     graceUntilIso: string,
     now: Date
   ) => Promise<{ error: { message: string } | null }>
+  listExpiredPaidActiveSubscriptions: (now: Date) => Promise<ExpiredPaidActiveRow[]>
+  transitionExpiredPaidToPastDue: (opts: {
+    businessId: string
+    expectedStatus: string
+    expectedPeriodEndsAt: string
+    graceUntilIso: string
+    now: Date
+  }) => Promise<PaidPeriodMutationResult>
+  lockExpiredPaidBeyondGrace: (opts: {
+    businessId: string
+    expectedStatus: string
+    expectedPeriodEndsAt: string
+    graceUntilIso: string
+    now: Date
+  }) => Promise<PaidPeriodMutationResult>
+  listPaidPastDueSubscriptions: (now: Date) => Promise<PaidPastDueRow[]>
+  normalizePaidPastDueGrace: (opts: {
+    businessId: string
+    expectedStatus: string
+    expectedPeriodEndsAt: string
+    graceUntilIso: string
+    now: Date
+  }) => Promise<PaidPeriodMutationResult>
+  lockPaidPastDueBeyondGrace: (opts: {
+    businessId: string
+    expectedStatus: string
+    expectedPeriodEndsAt: string
+    graceUntilIso: string
+    now: Date
+  }) => Promise<PaidPeriodMutationResult>
   listGraceEnding24h: (now: Date) => Promise<GraceCandidateRow[]>
   listLockExpiredGrace: (now: Date) => Promise<GraceCandidateRow[]>
   lockPastDueGraceExpired: (
@@ -79,6 +145,39 @@ function countsAsEmailSent(r: SendSubscriptionLifecycleNotificationResult): bool
 
 export function trialPostExpiryGraceUntilIso(now: Date): string {
   return new Date(now.getTime() + TRIAL_POST_EXPIRY_GRACE_DAYS * DAY_MS).toISOString()
+}
+
+async function mutateExpiredPaidSubscription(
+  supabase: SupabaseClient,
+  opts: {
+    businessId: string
+    expectedStatus: string
+    expectedPeriodEndsAt: string
+    graceUntilIso: string
+    now: Date
+    nextStatus: "past_due" | "locked"
+  }
+): Promise<PaidPeriodMutationResult> {
+  const { data, error } = await supabase
+    .from("businesses")
+    .update({
+      service_subscription_status: opts.nextStatus,
+      subscription_grace_until: opts.graceUntilIso,
+      updated_at: opts.now.toISOString(),
+    })
+    .eq("id", opts.businessId)
+    .eq("service_subscription_status", opts.expectedStatus)
+    .eq("current_period_ends_at", opts.expectedPeriodEndsAt)
+    .eq("billing_exempt", false)
+    .is("archived_at", null)
+    .select("id")
+
+  if (error) {
+    return { updated: false, error: { message: error.message } }
+  }
+
+  const matched = Array.isArray(data) && data.length > 0
+  return { updated: matched, error: null }
 }
 
 export function createSubscriptionLifecycleCronQueries(
@@ -164,6 +263,72 @@ export function createSubscriptionLifecycleCronQueries(
       return { error: error ? { message: error.message } : null }
     },
 
+    async listExpiredPaidActiveSubscriptions(
+      now: Date
+    ): Promise<ExpiredPaidActiveRow[]> {
+      const nowIso = now.toISOString()
+      const { data, error } = await supabase
+        .from("businesses")
+        .select("id, service_subscription_status, current_period_ends_at")
+        .eq("service_subscription_status", "active")
+        .not("subscription_started_at", "is", null)
+        .not("current_period_ends_at", "is", null)
+        .lte("current_period_ends_at", nowIso)
+        .eq("billing_exempt", false)
+        .is("archived_at", null)
+
+      if (error) {
+        throw new Error(`listExpiredPaidActiveSubscriptions: ${error.message}`)
+      }
+      return (data ?? []) as ExpiredPaidActiveRow[]
+    },
+
+    async transitionExpiredPaidToPastDue(opts) {
+      return mutateExpiredPaidSubscription(supabase, {
+        ...opts,
+        nextStatus: "past_due",
+      })
+    },
+
+    async lockExpiredPaidBeyondGrace(opts) {
+      return mutateExpiredPaidSubscription(supabase, {
+        ...opts,
+        nextStatus: "locked",
+      })
+    },
+
+    async listPaidPastDueSubscriptions(_now: Date): Promise<PaidPastDueRow[]> {
+      const { data, error } = await supabase
+        .from("businesses")
+        .select(
+          "id, service_subscription_status, current_period_ends_at, subscription_grace_until"
+        )
+        .eq("service_subscription_status", "past_due")
+        .not("subscription_started_at", "is", null)
+        .not("current_period_ends_at", "is", null)
+        .eq("billing_exempt", false)
+        .is("archived_at", null)
+
+      if (error) {
+        throw new Error(`listPaidPastDueSubscriptions: ${error.message}`)
+      }
+      return (data ?? []) as PaidPastDueRow[]
+    },
+
+    async normalizePaidPastDueGrace(opts) {
+      return mutateExpiredPaidSubscription(supabase, {
+        ...opts,
+        nextStatus: "past_due",
+      })
+    },
+
+    async lockPaidPastDueBeyondGrace(opts) {
+      return mutateExpiredPaidSubscription(supabase, {
+        ...opts,
+        nextStatus: "locked",
+      })
+    },
+
     async listGraceEnding24h(now: Date): Promise<GraceCandidateRow[]> {
       const ms = now.getTime()
       const nowIso = new Date(ms).toISOString()
@@ -175,6 +340,7 @@ export function createSubscriptionLifecycleCronQueries(
         .not("subscription_grace_until", "is", null)
         .gt("subscription_grace_until", nowIso)
         .lte("subscription_grace_until", beforeIso)
+        .or("subscription_started_at.is.null,current_period_ends_at.is.null")
         .eq("billing_exempt", false)
         .is("archived_at", null)
 
@@ -190,6 +356,7 @@ export function createSubscriptionLifecycleCronQueries(
         .eq("service_subscription_status", "past_due")
         .not("subscription_grace_until", "is", null)
         .lte("subscription_grace_until", nowIso)
+        .or("subscription_started_at.is.null,current_period_ends_at.is.null")
         .eq("billing_exempt", false)
         .is("archived_at", null)
 
@@ -233,6 +400,13 @@ export async function executeServiceSubscriptionLifecycleCron(
     trialGraceStartedChecked: 0,
     trialGraceStartedUpdated: 0,
     trialGraceStartedNotified: 0,
+    paidPeriodExpiredChecked: 0,
+    paidGraceStartedUpdated: 0,
+    paidGraceStartedNotified: 0,
+    paidPeriodExpiredLocked: 0,
+    paidPastDueChecked: 0,
+    paidPastDueNormalized: 0,
+    paidPastDueLocked: 0,
     graceEndingChecked: 0,
     graceEndingSent: 0,
     lockedChecked: 0,
@@ -325,6 +499,137 @@ export async function executeServiceSubscriptionLifecycleCron(
       )
       if (countsAsEmailSent(r)) summary.trialGraceStartedNotified++
       else if (!r.ok) summary.errors.push(`trial_grace_started ${row.id}: ${r.reason}`)
+    }
+
+    const paidExpired = await queries.listExpiredPaidActiveSubscriptions(now)
+    summary.paidPeriodExpiredChecked = paidExpired.length
+    for (const row of paidExpired) {
+      const periodIso = String(row.current_period_ends_at)
+      const periodEnd = new Date(periodIso)
+      if (Number.isNaN(periodEnd.getTime())) {
+        summary.errors.push(`paid_period ${row.id}: invalid current_period_ends_at`)
+        continue
+      }
+      const graceEnd = deterministicPaidGraceEnd(periodEnd)
+      const graceUntilIso = graceEnd.toISOString()
+      const mutationOpts = {
+        businessId: row.id,
+        expectedStatus: row.service_subscription_status,
+        expectedPeriodEndsAt: periodIso,
+        graceUntilIso,
+        now,
+      }
+
+      try {
+        if (now.getTime() < graceEnd.getTime()) {
+          const result = await queries.transitionExpiredPaidToPastDue(mutationOpts)
+          if (result.error) {
+            summary.errors.push(`paid_grace_start ${row.id}: ${result.error.message}`)
+            continue
+          }
+          if (!result.updated) {
+            continue
+          }
+          summary.paidGraceStartedUpdated++
+          const r = await safeSend(
+            {
+              businessId: row.id,
+              eventType: "subscription_period_expired_grace_started",
+              lifecycleKey: lifecycleKeyPaidPeriod(periodIso, row.id),
+            },
+            "subscription_period_expired_grace_started"
+          )
+          if (countsAsEmailSent(r)) summary.paidGraceStartedNotified++
+          else if (!r.ok) {
+            summary.errors.push(
+              `subscription_period_expired_grace_started ${row.id}: ${r.reason}`
+            )
+          }
+        } else {
+          const result = await queries.lockExpiredPaidBeyondGrace(mutationOpts)
+          if (result.error) {
+            summary.errors.push(`paid_period_lock ${row.id}: ${result.error.message}`)
+            continue
+          }
+          if (!result.updated) {
+            continue
+          }
+          summary.paidPeriodExpiredLocked++
+          const r = await safeSend(
+            {
+              businessId: row.id,
+              eventType: "subscription_locked",
+              lifecycleKey: lifecycleKeyPaidPeriod(periodIso, row.id),
+            },
+            "subscription_locked"
+          )
+          if (countsAsEmailSent(r)) summary.lockedNotified++
+          else if (!r.ok) summary.errors.push(`subscription_locked ${row.id}: ${r.reason}`)
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        summary.errors.push(`paid_period ${row.id}: threw ${msg}`)
+      }
+    }
+
+    const paidPastDue = await queries.listPaidPastDueSubscriptions(now)
+    summary.paidPastDueChecked = paidPastDue.length
+    for (const row of paidPastDue) {
+      const periodIso = String(row.current_period_ends_at)
+      const periodEnd = new Date(periodIso)
+      if (Number.isNaN(periodEnd.getTime())) {
+        summary.errors.push(`paid_past_due ${row.id}: invalid current_period_ends_at`)
+        continue
+      }
+      const graceEnd = deterministicPaidGraceEnd(periodEnd)
+      const graceUntilIso = graceEnd.toISOString()
+      const mutationOpts = {
+        businessId: row.id,
+        expectedStatus: "past_due",
+        expectedPeriodEndsAt: periodIso,
+        graceUntilIso,
+        now,
+      }
+
+      try {
+        if (now.getTime() < graceEnd.getTime()) {
+          if (sameTimestamp(row.subscription_grace_until, graceUntilIso)) {
+            continue
+          }
+          const result = await queries.normalizePaidPastDueGrace(mutationOpts)
+          if (result.error) {
+            summary.errors.push(`paid_past_due_normalize ${row.id}: ${result.error.message}`)
+            continue
+          }
+          if (!result.updated) {
+            continue
+          }
+          summary.paidPastDueNormalized++
+        } else {
+          const result = await queries.lockPaidPastDueBeyondGrace(mutationOpts)
+          if (result.error) {
+            summary.errors.push(`paid_past_due_lock ${row.id}: ${result.error.message}`)
+            continue
+          }
+          if (!result.updated) {
+            continue
+          }
+          summary.paidPastDueLocked++
+          const r = await safeSend(
+            {
+              businessId: row.id,
+              eventType: "subscription_locked",
+              lifecycleKey: lifecycleKeyPaidPeriod(periodIso, row.id),
+            },
+            "subscription_locked"
+          )
+          if (countsAsEmailSent(r)) summary.lockedNotified++
+          else if (!r.ok) summary.errors.push(`subscription_locked ${row.id}: ${r.reason}`)
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        summary.errors.push(`paid_past_due ${row.id}: threw ${msg}`)
+      }
     }
 
     const graceRows = await queries.listGraceEnding24h(now)

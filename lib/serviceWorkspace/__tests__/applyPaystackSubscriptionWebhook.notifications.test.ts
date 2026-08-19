@@ -12,6 +12,11 @@ jest.mock("@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification", () => 
   sendSubscriptionLifecycleNotification: jest.fn().mockResolvedValue({ ok: true }),
 }))
 
+jest.mock("@/lib/serviceWorkspace/loadBusinessBillingRow", () => ({
+  isBusinessBillingExempt: jest.fn().mockResolvedValue(false),
+  loadBusinessSubscriptionRow: jest.fn().mockResolvedValue({}),
+}))
+
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
 import { applyPaystackSubscriptionWebhook } from "@/lib/serviceWorkspace/applyPaystackSubscriptionWebhook"

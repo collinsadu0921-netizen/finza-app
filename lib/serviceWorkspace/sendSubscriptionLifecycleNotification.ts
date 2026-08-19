@@ -9,6 +9,7 @@ import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 
 export type SubscriptionLifecycleEventType =
   | "payment_failed_grace_started"
+  | "subscription_period_expired_grace_started"
   | "grace_ending_24h"
   | "subscription_locked"
   | "subscription_reactivated"
@@ -49,6 +50,8 @@ function subjectForEvent(eventType: SubscriptionLifecycleEventType): string {
   switch (eventType) {
     case "payment_failed_grace_started":
       return "Your Finza subscription payment failed"
+    case "subscription_period_expired_grace_started":
+      return "Your Finza subscription period has ended — 3-day grace started"
     case "grace_ending_24h":
       return "Reminder: your Finza subscription grace period ends soon"
     case "subscription_locked":
@@ -92,6 +95,10 @@ function buildEmailBody(opts: {
     case "payment_failed_grace_started":
       headline = "Payment failed — grace period started"
       bodyText = `We could not charge your subscription for ${name}. You have a 3-day grace period to update your payment method. After that, workspace access may be restricted until payment succeeds.`
+      break
+    case "subscription_period_expired_grace_started":
+      headline = "Subscription period ended — grace period started"
+      bodyText = `Your Finza subscription period for ${name} has ended. Your 3-day grace period is now active. Renew to avoid your workspace becoming read-only.`
       break
     case "grace_ending_24h":
       headline = "Grace period ending soon"

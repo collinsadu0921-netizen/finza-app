@@ -13,8 +13,17 @@
  *   3. Expired trial, grace ended OR status=locked → read-only (no financial writes).
  *   4. Stale trialing (trial ended, no grace row yet): read-only until lifecycle cron sets grace.
  *
- * Paid subscriptions use status=active / past_due (renewal) / locked as before.
- * MoMo renewal grace is separate but shares subscription_grace_until with unpaid trial grace.
+ * Paid subscriptions (subscription_started_at AND current_period_ends_at set):
+ *   1. Before current_period_ends_at → writable (already paid), not in paid grace.
+ *   2. After period end, before period_end + 3 days → paid grace, still writable.
+ *   3. After period_end + 3 days → read-only even if status is still `active`
+ *      or subscription_grace_until is erroneously later. DB grace cannot extend
+ *      the deterministic paid deadline.
+ *   4. status=locked → locked regardless of clock.
+ *   5. billing_exempt → unrestricted.
+ *
+ * Legacy paid rows with NULL current_period_ends_at keep prior access semantics.
+ * Cron status is normalization, not the sole security boundary.
  * =============================================================================
  */
 
@@ -29,6 +38,7 @@ import {
   isBillingExemptFromRow,
   resolveBillingExemptReason,
 } from "@/lib/serviceWorkspace/billingExempt"
+import { resolvePaidPeriodClock } from "@/lib/serviceWorkspace/paidSubscriptionPeriod"
 
 /** Raw columns fetched from public.businesses */
 export type RawBusinessSubscriptionRow = {
@@ -185,22 +195,33 @@ export function resolveServiceEntitlement(
       ? Math.max(0, Math.ceil((trialEndsAt.getTime() - now.getTime()) / DAY_MS) - 1)
       : null
 
-  const periodExpired =
-    status === "active" && periodEndsAt !== null && now >= periodEndsAt
+  const paid = resolvePaidPeriodClock({
+    now,
+    subscriptionStartedAt,
+    periodEndsAt,
+    status,
+  })
+
+  const periodExpired = paid.isPaidWithKnownPeriod
+    ? paid.paidPeriodExpired
+    : status === "active" && periodEndsAt !== null && now >= periodEndsAt
 
   const daysUntilRenewal =
     status === "active" && periodEndsAt !== null && now < periodEndsAt
       ? Math.max(0, Math.ceil((periodEndsAt.getTime() - now.getTime()) / DAY_MS))
       : null
 
+  // Unpaid / legacy rows only. Paid grace is capped at period_end + 3 days
+  // and must not be extended by a stale subscription_grace_until value.
   const paymentGraceExpired =
-    graceUntil !== null && now >= graceUntil
+    !paid.isPaidWithKnownPeriod && graceUntil !== null && now >= graceUntil
 
   const staleUnpaidTrialingAwaitingCron =
     status === "trialing" && trialExpiredWithoutPayment && graceUntil === null
 
   const isReadOnlyLocked =
     status === "locked" ||
+    paid.paidGraceExpired ||
     paymentGraceExpired ||
     (trialGraceExpired && !trialGraceActive) ||
     staleUnpaidTrialingAwaitingCron
@@ -210,11 +231,19 @@ export function resolveServiceEntitlement(
   const inGracePeriod =
     !isReadOnlyLocked &&
     (trialGraceActive ||
-      periodExpired ||
-      (graceUntil !== null &&
+      paid.paidGraceActive ||
+      (!paid.isPaidWithKnownPeriod && periodExpired) ||
+      (!paid.isPaidWithKnownPeriod &&
+        graceUntil !== null &&
         now < graceUntil &&
         subscriptionStartedAt !== null &&
         status === "past_due"))
+
+  const graceEndsAt = paid.isPaidWithKnownPeriod
+    ? paid.paidPeriodExpired
+      ? paid.deterministicPaidGraceEnd
+      : null
+    : graceUntil
 
   return {
     effectiveTier,
@@ -234,7 +263,7 @@ export function resolveServiceEntitlement(
     periodExpired,
     daysUntilRenewal,
     inGracePeriod,
-    graceEndsAt: graceUntil,
+    graceEndsAt,
     isReadOnlyLocked,
     isSubscriptionLocked: isReadOnlyLocked,
     canWriteFinancialRecords,

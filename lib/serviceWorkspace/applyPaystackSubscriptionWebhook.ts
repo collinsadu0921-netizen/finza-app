@@ -6,10 +6,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { TIER_PRICING, type BillingCycle } from "@/lib/serviceWorkspace/subscriptionPricing"
-import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
+import {
+  parseServiceSubscriptionStatus,
+  type ServiceSubscriptionTier,
+} from "@/lib/serviceWorkspace/subscriptionTiers"
 import { activateServiceSubscription } from "@/lib/serviceWorkspace/activateServiceSubscription"
-import { isBusinessBillingExempt } from "@/lib/serviceWorkspace/loadBusinessBillingRow"
+import {
+  isBusinessBillingExempt,
+  loadBusinessSubscriptionRow,
+} from "@/lib/serviceWorkspace/loadBusinessBillingRow"
 import { sendSubscriptionLifecycleNotification } from "@/lib/serviceWorkspace/sendSubscriptionLifecycleNotification"
+import {
+  deterministicPaidGraceEnd,
+  lifecycleKeyPaidPeriod,
+  resolvePaidPeriodClock,
+} from "@/lib/serviceWorkspace/paidSubscriptionPeriod"
 
 export const FINZA_PAYSTACK_METADATA_PURPOSE_KEY = "finza_purpose"
 export const FINZA_PAYSTACK_SUBSCRIPTION_PURPOSE = "service_subscription"
@@ -169,13 +180,111 @@ export async function applyPaystackSubscriptionWebhook(
     return { handled: true, applied: true, message: "subscription activated" }
   }
 
-  const graceEnd = new Date(Date.now() + GRACE_MS).toISOString()
+  const row = await loadBusinessSubscriptionRow(supabase, businessId)
+  const now = new Date()
+  const subscriptionStartedAt = row.subscription_started_at
+    ? new Date(row.subscription_started_at)
+    : null
+  const periodEndsAtRaw = row.current_period_ends_at
+    ? String(row.current_period_ends_at)
+    : null
+  const periodEndsAt = periodEndsAtRaw ? new Date(periodEndsAtRaw) : null
+  const rowStatus = parseServiceSubscriptionStatus(row.service_subscription_status)
+  const paid = resolvePaidPeriodClock({
+    now,
+    subscriptionStartedAt,
+    periodEndsAt,
+    status: rowStatus,
+  })
+
+  const recordFailureEvent = async () => {
+    await supabase.from("paystack_subscription_webhook_events").upsert(
+      {
+        reference,
+        business_id: businessId,
+        outcome: "failed",
+        paystack_transaction_id: transactionId ?? null,
+        target_tier: tier,
+        billing_cycle: cycle,
+        processed_at: new Date().toISOString(),
+      },
+      { onConflict: "reference" }
+    )
+  }
+
+  if (paid.isPaidWithKnownPeriod && periodEndsAt && periodEndsAtRaw) {
+    const graceEnd = paid.deterministicPaidGraceEnd ?? deterministicPaidGraceEnd(periodEndsAt)
+    const graceEndIso = graceEnd.toISOString()
+
+    if (now.getTime() < periodEndsAt.getTime()) {
+      await recordFailureEvent()
+      return {
+        handled: true,
+        applied: true,
+        message: "renewal failed — paid period still valid",
+      }
+    }
+
+    const nextStatus = now.getTime() < graceEnd.getTime() ? "past_due" : "locked"
+    const { data: failRows, error: failErr } = await supabase
+      .from("businesses")
+      .update({
+        service_subscription_status: nextStatus,
+        subscription_grace_until: graceEndIso,
+        updated_at: now.toISOString(),
+      })
+      .eq("id", businessId)
+      .eq("current_period_ends_at", periodEndsAtRaw)
+      .eq("billing_exempt", false)
+      .is("archived_at", null)
+      .select("id")
+
+    if (failErr) {
+      console.error("[paystack subscription] paid failure update error:", failErr)
+      return { handled: true, message: failErr.message }
+    }
+
+    await recordFailureEvent()
+
+    if (Array.isArray(failRows) && failRows.length > 0) {
+      if (nextStatus === "past_due") {
+        void sendSubscriptionLifecycleNotification({
+          businessId,
+          eventType: "payment_failed_grace_started",
+          lifecycleKey: lifecycleKeyPaidPeriod(periodEndsAtRaw, businessId),
+          metadata: { reference },
+        }).catch((err) => {
+          console.error("[paystack subscription] payment_failed_grace_started email:", err)
+        })
+      } else {
+        void sendSubscriptionLifecycleNotification({
+          businessId,
+          eventType: "subscription_locked",
+          lifecycleKey: lifecycleKeyPaidPeriod(periodEndsAtRaw, businessId),
+          metadata: { reference },
+        }).catch((err) => {
+          console.error("[paystack subscription] subscription_locked email:", err)
+        })
+      }
+    }
+
+    return {
+      handled: true,
+      applied: true,
+      message:
+        nextStatus === "past_due"
+          ? "subscription payment failed — deterministic paid grace set"
+          : "subscription payment failed — paid grace expired",
+    }
+  }
+
+  const graceEnd = new Date(now.getTime() + GRACE_MS).toISOString()
   const { error: failErr } = await supabase
     .from("businesses")
     .update({
-      service_subscription_status: "past_due",  // payment failed; grace window open
-      subscription_grace_until:    graceEnd,
-      updated_at:                  new Date().toISOString(),
+      service_subscription_status: "past_due",
+      subscription_grace_until: graceEnd,
+      updated_at: now.toISOString(),
     })
     .eq("id", businessId)
     .is("archived_at", null)
@@ -185,18 +294,7 @@ export async function applyPaystackSubscriptionWebhook(
     return { handled: true, message: failErr.message }
   }
 
-  await supabase.from("paystack_subscription_webhook_events").upsert(
-    {
-      reference,
-      business_id: businessId,
-      outcome: "failed",
-      paystack_transaction_id: transactionId ?? null,
-      target_tier: tier,
-      billing_cycle: cycle,
-      processed_at: new Date().toISOString(),
-    },
-    { onConflict: "reference" }
-  )
+  await recordFailureEvent()
 
   void sendSubscriptionLifecycleNotification({
     businessId,
