@@ -166,20 +166,43 @@ export async function GET(request: NextRequest) {
           error: error.message,
           step: "ledger_list_query",
           business_id: businessId,
+          error_code: "ACCOUNTING_DATA_UNAVAILABLE",
           supabase_error: { message: error.message, code: error.code, details: error.details },
         },
         { status: 500 }
       )
     }
 
-    return NextResponse.json({ 
+    // Currency is required for Money UI; Practice users cannot read /api/business/profile
+    // (owner/business_users only). Load via the same scoped data client.
+    const { data: businessRow, error: currencyError } = await dataClient
+      .from("businesses")
+      .select("default_currency")
+      .eq("id", businessId)
+      .maybeSingle()
+
+    if (currencyError) {
+      console.error("Error fetching ledger currency:", { businessId, currencyError })
+      return NextResponse.json(
+        {
+          error: currencyError.message,
+          step: "ledger_currency_query",
+          business_id: businessId,
+          error_code: "ACCOUNTING_DATA_UNAVAILABLE",
+        },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
       entries: entries || [],
+      default_currency: businessRow?.default_currency ?? null,
       pagination: {
         page,
         pageSize,
         total: count || 0,
-        totalPages: Math.ceil((count || 0) / pageSize)
-      }
+        totalPages: Math.ceil((count || 0) / pageSize),
+      },
     })
   } catch (error: any) {
     console.error("Error in ledger list:", error)

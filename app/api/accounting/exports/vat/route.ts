@@ -1,23 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getTaxControlAccountCodes } from "@/lib/accounting/taxControlAccounts"
-import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * GET /api/accounting/exports/vat
- * Export VAT return summary as CSV
- * 
+ * Export VAT return summary as CSV (Service owner + Practice READ+).
+ *
  * Query params:
  * - business_id: UUID (required)
  * - period: YYYY-MM format (required)
- * 
- * Returns CSV with columns:
- * - period
- * - opening_balance
- * - output_vat
- * - input_vat
- * - closing_balance
  */
 export async function GET(request: NextRequest) {
   try {
@@ -31,102 +26,71 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
-    const periodParam = searchParams.get("period") // Format: YYYY-MM
-
-    try {
-      assertAccountingAccess(accountingUserFromRequest(request))
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Forbidden"
-      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
-    }
+    const businessId = (searchParams.get("business_id") ?? searchParams.get("businessId"))?.trim() ?? null
+    const periodParam = searchParams.get("period")
 
     if (!businessId) {
       return NextResponse.json(
-        { error: "business_id parameter is required" },
+        { error: "business_id parameter is required", error_code: "MISSING_BUSINESS_ID" },
         { status: 400 }
       )
     }
 
-    const resolved = await resolveAccountingContext({
+    const authResult = await resolveAccountingRequestAuthority({
       supabase,
       userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
+      businessId,
+      requiredLevel: "read",
     })
-    if ("error" in resolved) {
+    if (!authResult.ok) {
       return NextResponse.json(
-        { error: "business_id parameter is required" },
-        { status: 400 }
-      )
-    }
-    const resolvedBusinessId = resolved.businessId
-
-    // Check accountant firm access
-    const { data: accessLevel, error: accessError } = await supabase.rpc(
-      "can_accountant_access_business",
-      {
-        p_user_id: user.id,
-        p_business_id: resolvedBusinessId,
-      }
-    )
-
-    if (accessError) {
-      console.error("Error checking accountant access:", accessError)
-      return NextResponse.json(
-        { error: "Failed to verify access" },
-        { status: 500 }
+        { error: authResult.error, reason_code: authResult.reasonCode },
+        { status: authResult.status }
       )
     }
 
-    if (!accessLevel) {
-      return NextResponse.json(
-        { error: "Unauthorized. No access to this business." },
-        { status: 403 }
-      )
-    }
+    const resolvedBusinessId = authResult.businessId
+    const dataClient = getAccountingDataClient(authResult, supabase)
 
     if (!periodParam) {
       return NextResponse.json(
-        { error: "Period parameter is required (format: YYYY-MM)" },
+        { error: "Period parameter is required (format: YYYY-MM)", error_code: "MISSING_PERIOD" },
         { status: 400 }
       )
     }
 
-    // Parse period (YYYY-MM) to period_start and period_end
     const [year, month] = periodParam.split("-").map(Number)
     if (!year || !month || month < 1 || month > 12) {
       return NextResponse.json(
-        { error: "Invalid period format. Use YYYY-MM" },
+        { error: "Invalid period format. Use YYYY-MM", error_code: "INVALID_PERIOD" },
         { status: 400 }
       )
     }
 
     const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
-    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0] // Last day of month
+    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0]
 
-    // Check accounting period exists and get status
-    const { data: accountingPeriod } = await supabase
+    await dataClient
       .from("accounting_periods")
       .select("status")
       .eq("business_id", resolvedBusinessId)
       .eq("period_start", periodStart)
       .maybeSingle()
 
-    // Resolve VAT control account code from control map
-    const taxControlCodes = await getTaxControlAccountCodes(supabase, resolvedBusinessId)
+    const taxControlCodes = await getTaxControlAccountCodes(dataClient, resolvedBusinessId)
     const vatAccountCode = taxControlCodes.vat
 
     if (!vatAccountCode) {
       return NextResponse.json(
-        { error: "VAT control account not found. Please configure VAT_PAYABLE control mapping." },
+        {
+          error: "VAT control account not found. Please configure VAT_PAYABLE control mapping.",
+          error_code: "VAT_CONTROL_MISSING",
+        },
         { status: 404 }
       )
     }
 
-    // Get VAT account ID
-    const { data: vatAccount } = await supabase
+    const { data: vatAccount, error: vatAccountError } = await dataClient
       .from("accounts")
       .select("id")
       .eq("business_id", resolvedBusinessId)
@@ -134,19 +98,26 @@ export async function GET(request: NextRequest) {
       .is("deleted_at", null)
       .maybeSingle()
 
+    if (vatAccountError) {
+      console.error("VAT export account query error:", vatAccountError)
+      return NextResponse.json(
+        { error: "ACCOUNTING_DATA_UNAVAILABLE", error_code: "ACCOUNTING_DATA_UNAVAILABLE" },
+        { status: 500 }
+      )
+    }
+
     if (!vatAccount) {
       return NextResponse.json(
-        { error: `VAT account with code ${vatAccountCode} not found` },
+        { error: `VAT account with code ${vatAccountCode} not found`, error_code: "VAT_ACCOUNT_MISSING" },
         { status: 404 }
       )
     }
 
-    // Calculate opening balance (balance as of period_start - 1 day)
     const openingDate = new Date(periodStart)
     openingDate.setDate(openingDate.getDate() - 1)
     const openingDateStr = openingDate.toISOString().split("T")[0]
 
-    const { data: openingBalance } = await supabase.rpc(
+    const { data: openingBalance, error: openingError } = await dataClient.rpc(
       "calculate_account_balance_as_of",
       {
         p_business_id: resolvedBusinessId,
@@ -155,49 +126,49 @@ export async function GET(request: NextRequest) {
       }
     )
 
-    // Calculate period debits and credits
-    const { data: periodLines } = await supabase
+    if (openingError) {
+      console.error("VAT export opening balance error:", openingError)
+      return NextResponse.json(
+        { error: "ACCOUNTING_DATA_UNAVAILABLE", error_code: "ACCOUNTING_DATA_UNAVAILABLE" },
+        { status: 500 }
+      )
+    }
+
+    const { data: periodLines, error: linesError } = await dataClient
       .from("journal_entry_lines")
       .select(
         `
         debit,
         credit,
         journal_entries!inner (
-          date
+          date,
+          business_id
         )
       `
       )
       .eq("account_id", vatAccount.id)
+      .eq("journal_entries.business_id", resolvedBusinessId)
       .gte("journal_entries.date", periodStart)
       .lte("journal_entries.date", periodEnd)
 
+    if (linesError) {
+      console.error("VAT export period lines error:", linesError)
+      return NextResponse.json(
+        { error: "ACCOUNTING_DATA_UNAVAILABLE", error_code: "ACCOUNTING_DATA_UNAVAILABLE" },
+        { status: 500 }
+      )
+    }
+
     const periodDebit = periodLines?.reduce((sum, line) => sum + Number(line.debit || 0), 0) || 0
     const periodCredit = periodLines?.reduce((sum, line) => sum + Number(line.credit || 0), 0) || 0
-
-    // Calculate closing balance
-    // For liability accounts: closing = opening + credits - debits
     const closingBalance = (openingBalance || 0) + periodCredit - periodDebit
 
-    // Build CSV
-    // Output VAT = credits (liability increases)
-    // Input VAT = debits (liability decreases)
     const csvRows = [
-      // Header
       "period,opening_balance,output_vat,input_vat,closing_balance",
-      // Data row
-      [
-        periodParam,
-        openingBalance || 0,
-        periodCredit, // Output VAT = credits
-        periodDebit, // Input VAT = debits
-        closingBalance,
-      ].join(","),
+      [periodParam, openingBalance || 0, periodCredit, periodDebit, closingBalance].join(","),
     ]
 
-    const csv = csvRows.join("\n")
-
-    // Return CSV with proper headers
-    return new NextResponse(csv, {
+    return new NextResponse(csvRows.join("\n"), {
       status: 200,
       headers: {
         "Content-Type": "text/csv",
@@ -212,4 +183,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-

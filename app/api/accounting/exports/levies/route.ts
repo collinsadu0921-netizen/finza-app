@@ -1,25 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getTaxControlAccountCodes } from "@/lib/accounting/taxControlAccounts"
-import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * GET /api/accounting/exports/levies
- * Export NHIL/GETFund/COVID levy summary as CSV
- * 
- * Query params:
- * - business_id: UUID (required)
- * - period: YYYY-MM format (required)
- * 
- * Returns CSV with columns:
- * - levy_code (NHIL / GETFUND / COVID)
- * - period
- * - debit_total
- * - credit_total
- * - closing_balance
- * 
- * Note: COVID is automatically excluded for periods >= 2026-01-01
+ * Export NHIL/GETFund/COVID levy summary as CSV (Service owner + Practice READ+).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -33,93 +22,59 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
-    const periodParam = searchParams.get("period") // Format: YYYY-MM
-
-    try {
-      assertAccountingAccess(accountingUserFromRequest(request))
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Forbidden"
-      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
-    }
+    const businessId = (searchParams.get("business_id") ?? searchParams.get("businessId"))?.trim() ?? null
+    const periodParam = searchParams.get("period")
 
     if (!businessId) {
       return NextResponse.json(
-        { error: "business_id parameter is required" },
+        { error: "business_id parameter is required", error_code: "MISSING_BUSINESS_ID" },
         { status: 400 }
       )
     }
 
-    const resolved = await resolveAccountingContext({
+    const authResult = await resolveAccountingRequestAuthority({
       supabase,
       userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
+      businessId,
+      requiredLevel: "read",
     })
-    if ("error" in resolved) {
+    if (!authResult.ok) {
       return NextResponse.json(
-        { error: "business_id parameter is required" },
-        { status: 400 }
-      )
-    }
-    const resolvedBusinessId = resolved.businessId
-
-    // Check accountant firm access
-    const { data: accessLevel, error: accessError } = await supabase.rpc(
-      "can_accountant_access_business",
-      {
-        p_user_id: user.id,
-        p_business_id: resolvedBusinessId,
-      }
-    )
-
-    if (accessError) {
-      console.error("Error checking accountant access:", accessError)
-      return NextResponse.json(
-        { error: "Failed to verify access" },
-        { status: 500 }
+        { error: authResult.error, reason_code: authResult.reasonCode },
+        { status: authResult.status }
       )
     }
 
-    if (!accessLevel) {
-      return NextResponse.json(
-        { error: "Unauthorized. No access to this business." },
-        { status: 403 }
-      )
-    }
+    const resolvedBusinessId = authResult.businessId
+    const dataClient = getAccountingDataClient(authResult, supabase)
 
     if (!periodParam) {
       return NextResponse.json(
-        { error: "Period parameter is required (format: YYYY-MM)" },
+        { error: "Period parameter is required (format: YYYY-MM)", error_code: "MISSING_PERIOD" },
         { status: 400 }
       )
     }
 
-    // Parse period (YYYY-MM) to period_start and period_end
     const [year, month] = periodParam.split("-").map(Number)
     if (!year || !month || month < 1 || month > 12) {
       return NextResponse.json(
-        { error: "Invalid period format. Use YYYY-MM" },
+        { error: "Invalid period format. Use YYYY-MM", error_code: "INVALID_PERIOD" },
         { status: 400 }
       )
     }
 
     const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
-    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0] // Last day of month
+    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0]
 
-    // Check accounting period exists and get status
-    const { data: accountingPeriod } = await supabase
+    await dataClient
       .from("accounting_periods")
       .select("status")
       .eq("business_id", resolvedBusinessId)
       .eq("period_start", periodStart)
       .maybeSingle()
 
-    // Resolve levy control account codes from control map
-    const taxControlCodes = await getTaxControlAccountCodes(supabase, resolvedBusinessId)
-    
-    // Build levy mappings (exclude COVID for periods >= 2026-01-01)
+    const taxControlCodes = await getTaxControlAccountCodes(dataClient, resolvedBusinessId)
+
     const excludeCovid = periodStart >= "2026-01-01"
     const levyMappings: Array<{ code: string; name: string; accountCode: string | null }> = [
       { code: "NHIL", name: "NHIL", accountCode: taxControlCodes.nhil },
@@ -130,7 +85,6 @@ export async function GET(request: NextRequest) {
       levyMappings.push({ code: "COVID", name: "COVID", accountCode: taxControlCodes.covid })
     }
 
-    // Calculate balances for each levy
     const levies = await Promise.all(
       levyMappings.map(async (levy) => {
         if (!levy.accountCode) {
@@ -143,14 +97,17 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Get account ID
-        const { data: account } = await supabase
+        const { data: account, error: accountError } = await dataClient
           .from("accounts")
           .select("id")
           .eq("business_id", resolvedBusinessId)
           .eq("code", levy.accountCode)
           .is("deleted_at", null)
           .maybeSingle()
+
+        if (accountError) {
+          throw new Error(accountError.message)
+        }
 
         if (!account) {
           return {
@@ -162,12 +119,11 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Calculate opening balance
         const openingDate = new Date(periodStart)
         openingDate.setDate(openingDate.getDate() - 1)
         const openingDateStr = openingDate.toISOString().split("T")[0]
 
-        const { data: openingBalance } = await supabase.rpc(
+        const { data: openingBalance, error: openingError } = await dataClient.rpc(
           "calculate_account_balance_as_of",
           {
             p_business_id: resolvedBusinessId,
@@ -176,26 +132,33 @@ export async function GET(request: NextRequest) {
           }
         )
 
-        // Calculate period debits and credits
-        const { data: periodLines } = await supabase
+        if (openingError) {
+          throw new Error(openingError.message)
+        }
+
+        const { data: periodLines, error: linesError } = await dataClient
           .from("journal_entry_lines")
           .select(
             `
             debit,
             credit,
             journal_entries!inner (
-              date
+              date,
+              business_id
             )
           `
           )
           .eq("account_id", account.id)
+          .eq("journal_entries.business_id", resolvedBusinessId)
           .gte("journal_entries.date", periodStart)
           .lte("journal_entries.date", periodEnd)
 
+        if (linesError) {
+          throw new Error(linesError.message)
+        }
+
         const periodDebit = periodLines?.reduce((sum, line) => sum + Number(line.debit || 0), 0) || 0
         const periodCredit = periodLines?.reduce((sum, line) => sum + Number(line.credit || 0), 0) || 0
-
-        // Calculate closing balance (liability: opening + credits - debits)
         const closingBalance = (openingBalance || 0) + periodCredit - periodDebit
 
         return {
@@ -208,26 +171,16 @@ export async function GET(request: NextRequest) {
       })
     )
 
-    // Build CSV
     const csvRows = [
-      // Header
       "levy_code,period,debit_total,credit_total,closing_balance",
-      // Data rows
       ...levies.map((levy) =>
-        [
-          levy.levy_code,
-          levy.period,
-          levy.debit_total,
-          levy.credit_total,
-          levy.closing_balance,
-        ].join(",")
+        [levy.levy_code, levy.period, levy.debit_total, levy.credit_total, levy.closing_balance].join(
+          ","
+        )
       ),
     ]
 
-    const csv = csvRows.join("\n")
-
-    // Return CSV with proper headers
-    return new NextResponse(csv, {
+    return new NextResponse(csvRows.join("\n"), {
       status: 200,
       headers: {
         "Content-Type": "text/csv",
@@ -237,9 +190,11 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error("Error in levies export:", error)
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      {
+        error: error.message || "Internal server error",
+        error_code: "ACCOUNTING_DATA_UNAVAILABLE",
+      },
       { status: 500 }
     )
   }
 }
-

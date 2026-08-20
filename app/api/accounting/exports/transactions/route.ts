@@ -1,27 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getTaxControlAccountCodes } from "@/lib/accounting/taxControlAccounts"
-import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * GET /api/accounting/exports/transactions
- * Export transaction-level tax detail as CSV
- * 
- * Query params:
- * - business_id: UUID (required)
- * - period: YYYY-MM format (required)
- * 
- * Returns CSV with columns:
- * - transaction_date
- * - source_type (invoice, bill, expense, pos, credit_note)
- * - reference_id
- * - tax_code (VAT / NHIL / GETFUND / COVID)
- * - debit_amount
- * - credit_amount
- * - account_code
- * 
- * Note: COVID is automatically excluded for periods >= 2026-01-01
+ * Export transaction-level tax detail as CSV (Service owner + Practice READ+).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -35,85 +22,52 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const businessId = searchParams.get("business_id")
-    const periodParam = searchParams.get("period") // Format: YYYY-MM
-
-    try {
-      assertAccountingAccess(accountingUserFromRequest(request))
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Forbidden"
-      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
-    }
+    const businessId = (searchParams.get("business_id") ?? searchParams.get("businessId"))?.trim() ?? null
+    const periodParam = searchParams.get("period")
 
     if (!businessId) {
       return NextResponse.json(
-        { error: "business_id parameter is required" },
+        { error: "business_id parameter is required", error_code: "MISSING_BUSINESS_ID" },
         { status: 400 }
       )
     }
 
-    const resolved = await resolveAccountingContext({
+    const authResult = await resolveAccountingRequestAuthority({
       supabase,
       userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
+      businessId,
+      requiredLevel: "read",
     })
-    if ("error" in resolved) {
+    if (!authResult.ok) {
       return NextResponse.json(
-        { error: "business_id parameter is required" },
-        { status: 400 }
-      )
-    }
-    const resolvedBusinessId = resolved.businessId
-
-    // Check accountant firm access
-    const { data: accessLevel, error: accessError } = await supabase.rpc(
-      "can_accountant_access_business",
-      {
-        p_user_id: user.id,
-        p_business_id: resolvedBusinessId,
-      }
-    )
-
-    if (accessError) {
-      console.error("Error checking accountant access:", accessError)
-      return NextResponse.json(
-        { error: "Failed to verify access" },
-        { status: 500 }
+        { error: authResult.error, reason_code: authResult.reasonCode },
+        { status: authResult.status }
       )
     }
 
-    if (!accessLevel) {
-      return NextResponse.json(
-        { error: "Unauthorized. No access to this business." },
-        { status: 403 }
-      )
-    }
+    const resolvedBusinessId = authResult.businessId
+    const dataClient = getAccountingDataClient(authResult, supabase)
 
     if (!periodParam) {
       return NextResponse.json(
-        { error: "Period parameter is required (format: YYYY-MM)" },
+        { error: "Period parameter is required (format: YYYY-MM)", error_code: "MISSING_PERIOD" },
         { status: 400 }
       )
     }
 
-    // Parse period (YYYY-MM) to period_start and period_end
     const [year, month] = periodParam.split("-").map(Number)
     if (!year || !month || month < 1 || month > 12) {
       return NextResponse.json(
-        { error: "Invalid period format. Use YYYY-MM" },
+        { error: "Invalid period format. Use YYYY-MM", error_code: "INVALID_PERIOD" },
         { status: 400 }
       )
     }
 
     const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
-    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0] // Last day of month
+    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0]
 
-    // Resolve tax control account codes from control map
-    const taxControlCodes = await getTaxControlAccountCodes(supabase, resolvedBusinessId)
-    
-    // Build tax account codes list (exclude COVID for periods >= 2026-01-01)
+    const taxControlCodes = await getTaxControlAccountCodes(dataClient, resolvedBusinessId)
+
     const excludeCovid = periodStart >= "2026-01-01"
     const taxAccountCodes: string[] = []
     const taxCodeMap: Record<string, string> = {}
@@ -137,22 +91,32 @@ export async function GET(request: NextRequest) {
 
     if (taxAccountCodes.length === 0) {
       return NextResponse.json(
-        { error: "No tax control accounts found. Please configure control mappings." },
+        {
+          error: "No tax control accounts found. Please configure control mappings.",
+          error_code: "TAX_CONTROL_MISSING",
+        },
         { status: 404 }
       )
     }
 
-    // Get tax control accounts
-    const { data: taxAccounts } = await supabase
+    const { data: taxAccounts, error: taxAccountsError } = await dataClient
       .from("accounts")
       .select("id, code")
       .eq("business_id", resolvedBusinessId)
       .in("code", taxAccountCodes)
       .is("deleted_at", null)
 
+    if (taxAccountsError) {
+      console.error("Tax transactions accounts error:", taxAccountsError)
+      return NextResponse.json(
+        { error: "ACCOUNTING_DATA_UNAVAILABLE", error_code: "ACCOUNTING_DATA_UNAVAILABLE" },
+        { status: 500 }
+      )
+    }
+
     if (!taxAccounts || taxAccounts.length === 0) {
       return NextResponse.json(
-        { error: "Tax control accounts not found" },
+        { error: "Tax control accounts not found", error_code: "TAX_ACCOUNT_MISSING" },
         { status: 404 }
       )
     }
@@ -163,9 +127,7 @@ export async function GET(request: NextRequest) {
       accountCodeMap[acc.id] = acc.code
     })
 
-    // Get journal entry lines for tax accounts
-    // We'll filter by date through the journal_entries relationship
-    const { data: taxLines, error: linesError } = await supabase
+    const { data: taxLines, error: linesError } = await dataClient
       .from("journal_entry_lines")
       .select(
         `
@@ -194,24 +156,18 @@ export async function GET(request: NextRequest) {
     if (linesError) {
       console.error("Error fetching tax transaction lines:", linesError)
       return NextResponse.json(
-        { error: "Failed to fetch tax transactions" },
+        { error: "ACCOUNTING_DATA_UNAVAILABLE", error_code: "ACCOUNTING_DATA_UNAVAILABLE" },
         { status: 500 }
       )
     }
 
-    // Build CSV rows
     const csvRows = [
-      // Header
       "transaction_date,source_type,reference_id,tax_code,debit_amount,credit_amount,account_code",
-      // Data rows
       ...(taxLines || []).map((line: any) => {
         const journalEntry = line.journal_entries
         const account = line.accounts
         const accountCode = accountCodeMap[account.id] || account.code
         const taxCode = taxCodeMap[accountCode] || "UNKNOWN"
-
-        // Map reference_type to source_type
-        // reference_type can be: invoice, bill, expense, pos, credit_note, etc.
         const sourceType = journalEntry.reference_type || "unknown"
 
         return [
@@ -226,10 +182,7 @@ export async function GET(request: NextRequest) {
       }),
     ]
 
-    const csv = csvRows.join("\n")
-
-    // Return CSV with proper headers
-    return new NextResponse(csv, {
+    return new NextResponse(csvRows.join("\n"), {
       status: 200,
       headers: {
         "Content-Type": "text/csv",
@@ -244,4 +197,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-

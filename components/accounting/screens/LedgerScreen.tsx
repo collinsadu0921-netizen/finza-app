@@ -276,22 +276,40 @@ function EntryCard({
               <div className="flex gap-8 shrink-0 ml-4">
                 <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
                   {hasDebit ? (
-                    <Money
-                      amount={Number(line.debit)}
-                      currencyCode={currencyCode}
-                      className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100"
-                    />
+                    currencyCode ? (
+                      <Money
+                        amount={Number(line.debit)}
+                        currencyCode={currencyCode}
+                        className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100"
+                      />
+                    ) : (
+                      <span className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100">
+                        {Number(line.debit).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    )
                   ) : (
                     <span className="text-gray-300 dark:text-gray-600">—</span>
                   )}
                 </span>
                 <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
                   {hasCredit ? (
-                    <Money
-                      amount={Number(line.credit)}
-                      currencyCode={currencyCode}
-                      className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100"
-                    />
+                    currencyCode ? (
+                      <Money
+                        amount={Number(line.credit)}
+                        currencyCode={currencyCode}
+                        className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100"
+                      />
+                    ) : (
+                      <span className="text-sm font-medium tabular-nums text-slate-900 dark:text-gray-100">
+                        {Number(line.credit).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    )
                   ) : (
                     <span className="text-gray-300 dark:text-gray-600">—</span>
                   )}
@@ -307,18 +325,36 @@ function EntryCard({
         <span className="text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">Total</span>
         <div className="flex gap-8">
           <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
-            <Money
-              amount={displayDebits}
-              currencyCode={currencyCode}
-              className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100"
-            />
+            {currencyCode ? (
+              <Money
+                amount={displayDebits}
+                currencyCode={currencyCode}
+                className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100"
+              />
+            ) : (
+              <span className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100">
+                {displayDebits.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            )}
           </span>
           <span className="w-28 text-right text-sm text-slate-900 dark:text-white">
-            <Money
-              amount={displayCredits}
-              currencyCode={currencyCode}
-              className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100"
-            />
+            {currencyCode ? (
+              <Money
+                amount={displayCredits}
+                currencyCode={currencyCode}
+                className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100"
+              />
+            ) : (
+              <span className="text-sm font-semibold tabular-nums text-slate-900 dark:text-gray-100">
+                {displayCredits.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            )}
           </span>
         </div>
       </div>
@@ -335,8 +371,12 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
   const { authority_source: authSource, access_level } = useAccountingAuthority(businessId)
   const authoritySource = authority_source ?? authSource
   const engagementAccessLevel = access_level ?? null
+  // Reverse is an APPROVE-class mutation for Practice engagements.
+  // Service owners/employees keep existing UI affordance; backend still enforces write+.
   const canReverseByEngagement =
-    authSource !== "accountant" || canApproveEngagement(engagementAccessLevel)
+    authSource !== "accountant"
+      ? true
+      : canApproveEngagement(engagementAccessLevel)
   const noContext = !businessId
   const [loading, setLoading] = useState(true)
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -446,9 +486,12 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
         throw new Error(detail ? `${msg} (${detail})` : msg)
       }
 
-      const { entries: data, pagination: paginationData } = body
+      const { entries: data, pagination: paginationData, default_currency: listCurrency } = body
       setEntries(data || [])
       if (paginationData) setPagination(paginationData)
+      if (typeof listCurrency === "string" && listCurrency.trim()) {
+        setCurrencyCode(listCurrency.trim().toUpperCase())
+      }
 
       const entryIds = (data || []).map((e: JournalEntry) => e.id).filter(Boolean)
       if (businessId && entryIds.length > 0) {
