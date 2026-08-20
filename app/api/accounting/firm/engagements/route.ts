@@ -112,16 +112,37 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if business exists
-    const { data: business, error: businessError } = await supabase
+    // Existence check via admin: businesses RLS only exposes owned/member/engaged rows,
+    // so Partners cannot resolve a not-yet-engaged Service client with the user client.
+    const { createSupabaseAdminClient } = await import("@/lib/supabaseAdmin")
+    const admin = createSupabaseAdminClient()
+    const { data: business, error: businessError } = await admin
       .from("businesses")
-      .select("id, name")
+      .select("id, name, industry, archived_at")
       .eq("id", business_id)
       .maybeSingle()
 
     if (businessError || !business) {
       return NextResponse.json(
         { error: "Business not found", error_code: "INVALID_BUSINESS_ID" },
+        { status: 400 }
+      )
+    }
+
+    if (business.archived_at) {
+      return NextResponse.json(
+        { error: "Cannot engage an archived business", error_code: "BUSINESS_ARCHIVED" },
+        { status: 400 }
+      )
+    }
+
+    const industry = (business.industry || "").toLowerCase()
+    if (industry !== "service" && industry !== "professional") {
+      return NextResponse.json(
+        {
+          error: "Only Finza Service businesses can be engaged as Practice clients",
+          error_code: "INVALID_BUSINESS_INDUSTRY",
+        },
         { status: 400 }
       )
     }

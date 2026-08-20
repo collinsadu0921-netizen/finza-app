@@ -4,6 +4,10 @@ import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useRouter } from "next/navigation"
 import { getActiveFirmId } from "@/lib/accounting/firm/session"
+import {
+  shouldClearPracticeClientSelection,
+  shouldRunPracticeClientSearch,
+} from "@/lib/accounting/firm/practiceClientSearch"
 
 type Business = {
   id: string
@@ -30,6 +34,8 @@ export default function AddClientPage() {
   const [userRole, setUserRole] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState("")
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
   const [formData, setFormData] = useState<EngagementFormData>({
@@ -44,12 +50,23 @@ export default function AddClientPage() {
   }, [])
 
   useEffect(() => {
-    if (searchQuery.length >= 2) {
-      searchBusinesses()
-    } else {
+    if (
+      !shouldRunPracticeClientSearch({
+        query: searchQuery,
+        selectedName: selectedBusiness?.name,
+      })
+    ) {
       setBusinesses([])
+      setSearching(false)
+      setSearchError("")
+      return
     }
-  }, [searchQuery])
+
+    const handle = window.setTimeout(() => {
+      void searchBusinesses(searchQuery)
+    }, 200)
+    return () => window.clearTimeout(handle)
+  }, [searchQuery, selectedBusiness, firmId])
 
   const loadFirmData = async () => {
     try {
@@ -63,7 +80,6 @@ export default function AddClientPage() {
 
       setFirmId(activeFirmId)
 
-      // Get user's role in firm
       const response = await fetch("/api/accounting/firm/firms")
       if (response.ok) {
         const data = await response.json()
@@ -84,23 +100,56 @@ export default function AddClientPage() {
     }
   }
 
-  const searchBusinesses = async () => {
+  const searchBusinesses = async (query: string) => {
+    const activeFirmId = getActiveFirmId() || firmId
+    if (!activeFirmId) {
+      setSearchError("No firm selected")
+      setBusinesses([])
+      return
+    }
+
     try {
-      const response = await fetch(`/api/businesses/search?q=${encodeURIComponent(searchQuery)}&books_only=true`)
-      if (response.ok) {
-        const data = await response.json()
-        setBusinesses(data.businesses || [])
+      setSearching(true)
+      setSearchError("")
+      const response = await fetch(
+        `/api/accounting/firm/clients/search?q=${encodeURIComponent(query)}&firm_id=${encodeURIComponent(activeFirmId)}`
+      )
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setBusinesses([])
+        setSearchError(data.error || "Search failed. Try again.")
+        return
       }
+      const data = await response.json()
+      setBusinesses(data.businesses || [])
     } catch (err) {
       console.error("Error searching businesses:", err)
+      setBusinesses([])
+      setSearchError("Search failed. Try again.")
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleSearchInputChange = (value: string) => {
+    setSearchQuery(value)
+    if (
+      shouldClearPracticeClientSelection({
+        selectedName: selectedBusiness?.name,
+        nextQuery: value,
+      })
+    ) {
+      setSelectedBusiness(null)
+      setFormData((prev) => ({ ...prev, business_id: "" }))
     }
   }
 
   const handleBusinessSelect = (business: Business) => {
     setSelectedBusiness(business)
-    setFormData({ ...formData, business_id: business.id })
+    setFormData((prev) => ({ ...prev, business_id: business.id }))
     setSearchQuery(business.name)
     setBusinesses([])
+    setSearchError("")
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -109,18 +158,16 @@ export default function AddClientPage() {
     setSubmitting(true)
 
     try {
-      // Get firm_id fresh from sessionStorage in case it changed
       const activeFirmId = getActiveFirmId() || firmId
-      
+
       if (!activeFirmId) {
         throw new Error("No firm selected. Please select a firm from the firm selector.")
       }
 
-      if (!formData.business_id) {
+      if (!formData.business_id || !selectedBusiness) {
         throw new Error("Please select a business")
       }
 
-      // Validate effective_from is not in the past
       const effectiveFromDate = new Date(formData.effective_from)
       const today = new Date()
       today.setHours(0, 0, 0, 0)
@@ -128,7 +175,6 @@ export default function AddClientPage() {
         throw new Error("Effective date cannot be in the past")
       }
 
-      // Validate effective_to if provided
       if (formData.effective_to) {
         const effectiveToDate = new Date(formData.effective_to)
         if (effectiveToDate < effectiveFromDate) {
@@ -153,7 +199,6 @@ export default function AddClientPage() {
         throw new Error(errorData.error || "Failed to create engagement")
       }
 
-      // Redirect to firm dashboard
       router.push("/accounting/firm")
     } catch (err: any) {
       setError(err.message || "Failed to create engagement")
@@ -196,6 +241,13 @@ export default function AddClientPage() {
     )
   }
 
+  const showNoMatch =
+    !searching &&
+    !searchError &&
+    !selectedBusiness &&
+    searchQuery.trim().length >= 2 &&
+    businesses.length === 0
+
   return (
     <ProtectedLayout>
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -208,7 +260,7 @@ export default function AddClientPage() {
               Connect a Finza Service business as your client.
             </p>
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 max-w-xl">
-              The client&apos;s business must already use Finza Service. The business owner will approve your
+              The client must already have a Finza Service business. The business owner will approve your
               firm&apos;s access request.
             </p>
           </div>
@@ -221,7 +273,6 @@ export default function AddClientPage() {
 
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-8">
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Business Selection */}
               <div>
                 <label
                   htmlFor="business_search"
@@ -234,9 +285,10 @@ export default function AddClientPage() {
                     type="text"
                     id="business_search"
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => handleSearchInputChange(e.target.value)}
                     placeholder="Search for business by name..."
                     className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    autoComplete="off"
                   />
                   {businesses.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto">
@@ -258,6 +310,22 @@ export default function AddClientPage() {
                     </div>
                   )}
                 </div>
+                {searching && (
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    Searching Finza businesses…
+                  </p>
+                )}
+                {searchError && (
+                  <p className="mt-2 text-sm text-red-600 dark:text-red-400">{searchError}</p>
+                )}
+                {showNoMatch && (
+                  <div className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                    <p>No eligible Finza Service businesses found.</p>
+                    <p className="mt-1 text-gray-500 dark:text-gray-500">
+                      The client must already have a Finza Service business.
+                    </p>
+                  </div>
+                )}
                 {selectedBusiness && (
                   <p className="mt-2 text-sm text-green-600 dark:text-green-400">
                     Selected: {selectedBusiness.name}
@@ -265,7 +333,6 @@ export default function AddClientPage() {
                 )}
               </div>
 
-              {/* Access Level */}
               <div>
                 <label
                   htmlFor="access_level"
@@ -294,7 +361,6 @@ export default function AddClientPage() {
                 </p>
               </div>
 
-              {/* Effective From */}
               <div>
                 <label
                   htmlFor="effective_from"
@@ -318,7 +384,6 @@ export default function AddClientPage() {
                 </p>
               </div>
 
-              {/* Effective To (Optional) */}
               <div>
                 <label
                   htmlFor="effective_to"
@@ -344,7 +409,6 @@ export default function AddClientPage() {
                 </p>
               </div>
 
-              {/* Confirmation Summary */}
               {selectedBusiness && (
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                   <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-200 mb-2">
@@ -362,7 +426,6 @@ export default function AddClientPage() {
                 </div>
               )}
 
-              {/* Submit Buttons */}
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex gap-4">
                   <button
@@ -389,7 +452,7 @@ export default function AddClientPage() {
               Important Notes
             </h3>
             <ul className="list-disc list-inside space-y-2 text-sm text-yellow-700 dark:text-yellow-300">
-              <li>Engagements start in "pending" status and require client acceptance</li>
+              <li>Engagements start in &quot;pending&quot; status and require client acceptance</li>
               <li>No client data will be visible until the engagement is accepted and active</li>
               <li>Only Partners and Seniors can create engagements</li>
               <li>Effective dates cannot be in the past</li>
