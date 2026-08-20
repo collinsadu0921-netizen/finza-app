@@ -80,3 +80,15 @@ describe("practiceClientSearch create roles", () => {
     expect(isPracticeClientCreateRoles("readonly")).toBe(false)
   })
 })
+
+describe("Practice Add Client Professional entitlement copy", () => {
+  it("documents the Professional approval requirement for Partners", () => {
+    const fs = require("fs")
+    const path = require("path")
+    const page = fs.readFileSync(
+      path.join(process.cwd(), "app/accounting/firm/clients/add/page.tsx"),
+      "utf8"
+    )
+    expect(page).toContain("Client approval requires Finza Professional or higher.")
+  })
+})

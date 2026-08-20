@@ -263,6 +263,9 @@ export default function AddClientPage() {
               The client must already have a Finza Service business. The business owner will approve your
               firm&apos;s access request.
             </p>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 max-w-xl">
+              Client approval requires Finza Professional or higher.
+            </p>
           </div>
 
           {error && (
@@ -422,6 +425,9 @@ export default function AddClientPage() {
                       ? ` until ${new Date(formData.effective_to).toLocaleDateString()}`
                       : " (ongoing)"}
                     . The client must accept this engagement before it becomes active.
+                  </p>
+                  <p className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+                    Client approval requires Finza Professional or higher.
                   </p>
                 </div>
               )}
