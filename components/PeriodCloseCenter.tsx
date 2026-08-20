@@ -61,6 +61,8 @@ type PeriodCloseCenterProps = {
   hasActiveEngagement?: boolean | null
   /** When true, hide period close/reopen actions (service trial read-only). */
   readOnly?: boolean
+  accessLevel?: "read" | "write" | "approve" | null
+  authoritySource?: "owner" | "employee" | "accountant" | null
 }
 
 export default function PeriodCloseCenter({
@@ -69,6 +71,8 @@ export default function PeriodCloseCenter({
   onPeriodUpdate,
   hasActiveEngagement = null,
   readOnly = false,
+  accessLevel = null,
+  authoritySource = null,
 }: PeriodCloseCenterProps) {
   const [readiness, setReadiness] = useState<ReadinessResult | null>(null)
   const [closeRequestInfo, setCloseRequestInfo] = useState<CloseRequestInfo | null>(null)
@@ -360,11 +364,14 @@ export default function PeriodCloseCenter({
   }
 
   const isOpen = period.status === "open"
-  const canSoftClose = isOpen && hasActiveEngagement === false && !processing
-  const canRequestClose = isOpen && (hasActiveEngagement === true || hasActiveEngagement === null) && !processing
-  const canApproveClose = period.status === "closing" && !processing
-  const canRejectClose = period.status === "closing" && !processing
-  const canLock = period.status === "soft_closed" && !processing
+  const isPractice = authoritySource === "accountant"
+  const practiceWrite = !isPractice || accessLevel === "write" || accessLevel === "approve"
+  const practiceApprove = !isPractice || accessLevel === "approve"
+  const canSoftClose = isOpen && hasActiveEngagement === false && !processing && practiceWrite
+  const canRequestClose = isOpen && (hasActiveEngagement === true || hasActiveEngagement === null) && !processing && practiceWrite
+  const canApproveClose = period.status === "closing" && !processing && practiceApprove
+  const canRejectClose = period.status === "closing" && !processing && practiceApprove
+  const canLock = period.status === "soft_closed" && !processing && practiceApprove
   const isLocked = period.status === "locked"
   const isClosing = period.status === "closing"
 
@@ -510,6 +517,10 @@ export default function PeriodCloseCenter({
         <p className="text-sm text-amber-700 dark:text-amber-400">
           Period close actions are unavailable while this workspace is read-only.
         </p>
+      ) : isPractice && !practiceWrite ? (
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Write access is required to request a period close.
+        </p>
       ) : (
       <div className="flex flex-wrap gap-3">
         {canSoftClose && (
@@ -570,10 +581,16 @@ export default function PeriodCloseCenter({
           <button
             onClick={handleLock}
             disabled={processing}
+            title="Partner role required"
             className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Lock Period
           </button>
+        )}
+        {isPractice && practiceApprove && (canApproveClose || canLock) && (
+          <p className="w-full text-xs text-gray-500 dark:text-gray-400">
+            Partner role required to approve, lock, or reopen a period.
+          </p>
         )}
 
         {processing && (

@@ -520,17 +520,10 @@ export default function NewDraftPage() {
             </button>
             <button
               onClick={handleSave}
-              disabled={!canSave() || saving || submitting}
-              className="px-6 py-3 bg-gray-600 hover:bg-gray-700 dark:bg-gray-600 dark:hover:bg-gray-700 text-white font-medium rounded-lg shadow-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? "Saving..." : "Save Draft"}
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit() || saving || submitting}
+              disabled={!canSave() || saving}
               className="px-6 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white font-medium rounded-lg shadow-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? "Submitting..." : "Submit for Review"}
+              {saving ? "Saving..." : "Save Draft"}
             </button>
           </div>
         </div>

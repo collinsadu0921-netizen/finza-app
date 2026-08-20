@@ -406,25 +406,6 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!businessId) {
-      setCurrencyCode(null)
-      return
-    }
-    let cancelled = false
-    fetch(`/api/business/profile?business_id=${encodeURIComponent(businessId)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setCurrencyCode(d.business?.default_currency ?? null)
-      })
-      .catch(() => {
-        if (!cancelled) setCurrencyCode(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [businessId])
-
-  useEffect(() => {
     if (businessId) loadAccounts()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId])

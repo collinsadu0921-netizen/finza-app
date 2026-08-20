@@ -11,9 +11,9 @@ const PERMISSION_LABELS: Record<string, string> = {
 }
 
 const PERMISSION_TOOLTIPS: Record<string, string> = {
-  read: "View records only",
-  write: "Can create drafts",
-  approve: "Can post & reverse entries",
+  read: "View books only. Create, edit, reverse, and approval actions are hidden.",
+  write: "Can create and edit permitted accounting work. Reverse and approval-only actions stay hidden.",
+  approve: "Can create, edit, and reverse. Some posts still require Partner role.",
 }
 
 export default function PermissionVisibilityBanner() {

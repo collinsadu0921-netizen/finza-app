@@ -87,71 +87,39 @@ export async function resolveAccountingRequestAuthority(opts: {
 
   const required =
     opts.requiredLevel === "approve" ? "write" : (opts.requiredLevel as AccountingAuthorityAccess)
-  // approve maps to write for checkAccountingAuthority (read|write only), then refine below.
+  const practiceRequired: AccessLevel =
+    opts.requiredLevel === "approve"
+      ? "approve"
+      : opts.requiredLevel === "write"
+        ? "write"
+        : "read"
 
   const serviceRole = await getUserRole(opts.supabase, opts.userId, businessId)
-  const base = await checkAccountingAuthority(
-    opts.supabase,
-    opts.userId,
-    businessId,
-    required,
-    serviceRole
-  )
 
-  if (!base.authorized || !base.authority_source) {
-    // Practice READ (or other firm-gated) users fail the Service write gate
-    // before the firm engine runs. Re-query so the caller gets the precise
-    // engagement reason (INSUFFICIENT_ACCESS_LEVEL, ENGAGEMENT_PENDING, …)
-    // instead of a generic Forbidden.
-    const practiceRequired: AccessLevel =
-      opts.requiredLevel === "approve"
-        ? "approve"
-        : opts.requiredLevel === "write"
-          ? "write"
-          : "read"
-    const firmAuth = await getAccountingAuthority({
-      supabase: opts.supabase,
-      firmUserId: opts.userId,
+  // Service owner/admin/accountant: one Service gate. Do not also run the firm engine.
+  if (serviceRole === "owner" || serviceRole === "admin" || serviceRole === "accountant") {
+    const base = await checkAccountingAuthority(
+      opts.supabase,
+      opts.userId,
       businessId,
-      requiredLevel: practiceRequired,
-    })
-    if (firmAuth.firmId) {
+      required,
+      serviceRole
+    )
+    if (!base.authorized || !base.authority_source) {
       return {
         ok: false,
         status: 403,
         error: "Forbidden",
-        reasonCode: firmAuth.reason || "INSUFFICIENT_AUTHORITY",
+        reasonCode: "INSUFFICIENT_AUTHORITY",
         businessId,
       }
-    }
-    return {
-      ok: false,
-      status: 403,
-      error: "Forbidden",
-      reasonCode: "INSUFFICIENT_AUTHORITY",
-      businessId,
-    }
-  }
-
-  const isPractice =
-    !serviceRole &&
-    (base.authority_source === "accountant" || base.authority_source === "employee")
-
-  if (!isPractice) {
-    if (opts.requiredLevel === "approve" && serviceRole !== "owner" && serviceRole !== "admin") {
-      // Service non-owners: no separate approve capability modeled; treat as write if authorized.
     }
     return {
       ok: true,
       userId: opts.userId,
       businessId,
       requiredLevel: opts.requiredLevel,
-      grantedLevel:
-        base.authority_source === "owner"
-          ? "owner"
-          : base.authority_source === "report_viewer"
-            ? "report_viewer"
-            : "employee",
+      grantedLevel: base.authority_source === "owner" ? "owner" : "employee",
       authoritySource: base.authority_source,
       isPractice: false,
       firmId: null,
@@ -163,44 +131,71 @@ export async function resolveAccountingRequestAuthority(opts: {
     }
   }
 
-  // Practice / firm engagement path — re-query engine for level + firm metadata.
-  const practiceRequired: AccessLevel =
-    opts.requiredLevel === "approve"
-      ? "approve"
-      : opts.requiredLevel === "write"
-        ? "write"
-        : "read"
-
+  // Practice: one firm-engine call at the actual required capability.
   const firmAuth = await getAccountingAuthority({
     supabase: opts.supabase,
     firmUserId: opts.userId,
     businessId,
     requiredLevel: practiceRequired,
   })
+  if (firmAuth.firmId) {
+    if (!firmAuth.allowed || !firmAuth.level) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Forbidden",
+        reasonCode: firmAuth.reason || "INSUFFICIENT_AUTHORITY",
+        businessId,
+      }
+    }
+    return {
+      ok: true,
+      userId: opts.userId,
+      businessId,
+      requiredLevel: opts.requiredLevel,
+      grantedLevel: firmAuth.level,
+      authoritySource: "practice",
+      isPractice: true,
+      firmId: firmAuth.firmId,
+      engagementId: firmAuth.engagementId,
+      practiceRole: null,
+      assignmentScoped: Boolean(firmAuth.debug?.assignment),
+      reason: firmAuth.reason,
+      serviceRole,
+    }
+  }
 
-  if (!firmAuth.allowed || !firmAuth.level) {
+  // Remaining Service-adjacent roles (e.g. report_viewer) or no access.
+  const base = await checkAccountingAuthority(
+    opts.supabase,
+    opts.userId,
+    businessId,
+    required,
+    serviceRole
+  )
+  if (!base.authorized || !base.authority_source) {
     return {
       ok: false,
       status: 403,
       error: "Forbidden",
-      reasonCode: firmAuth.reason || "INSUFFICIENT_AUTHORITY",
+      reasonCode: "INSUFFICIENT_AUTHORITY",
       businessId,
     }
   }
-
   return {
     ok: true,
     userId: opts.userId,
     businessId,
     requiredLevel: opts.requiredLevel,
-    grantedLevel: firmAuth.level,
-    authoritySource: "practice",
-    isPractice: true,
-    firmId: firmAuth.firmId,
-    engagementId: firmAuth.engagementId,
+    grantedLevel:
+      base.authority_source === "report_viewer" ? "report_viewer" : "employee",
+    authoritySource: base.authority_source,
+    isPractice: false,
+    firmId: null,
+    engagementId: null,
     practiceRole: null,
-    assignmentScoped: Boolean(firmAuth.debug?.assignment),
-    reason: firmAuth.reason,
+    assignmentScoped: false,
+    reason: null,
     serviceRole,
   }
 }

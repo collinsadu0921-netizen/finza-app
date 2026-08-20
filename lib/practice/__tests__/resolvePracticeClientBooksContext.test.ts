@@ -85,7 +85,7 @@ describe("resolvePracticeClientBooksContext", () => {
       allowed: false,
       level: null,
       reason: "NO_ENGAGEMENT",
-      firmId: null,
+      firmId: "firm-1",
       engagementId: null,
       engagementStatus: null,
       effectiveFrom: null,
@@ -124,6 +124,17 @@ describe("resolvePracticeClientBooksContext", () => {
   })
 
   it("keeps normal Service owners on their own business", async () => {
+    mockAuthority.mockResolvedValue({
+      allowed: false,
+      level: null,
+      reason: "NO_FIRM_MEMBERSHIP",
+      firmId: null,
+      engagementId: null,
+      engagementStatus: null,
+      effectiveFrom: null,
+      effectiveTo: null,
+      debug: {},
+    })
     mockServiceCtx.mockResolvedValue({ businessId: "owned-biz" })
     mockGetRole.mockResolvedValue("owner")
 
@@ -158,6 +169,17 @@ describe("resolvePracticeClientBooksContext", () => {
   })
 
   it("denies a Service owner impersonating another business via URL", async () => {
+    mockAuthority.mockResolvedValue({
+      allowed: false,
+      level: null,
+      reason: "NO_FIRM_MEMBERSHIP",
+      firmId: null,
+      engagementId: null,
+      engagementStatus: null,
+      effectiveFrom: null,
+      effectiveTo: null,
+      debug: {},
+    })
     mockServiceCtx.mockResolvedValue({ businessId: "owned-biz" })
     mockGetRole.mockResolvedValue(null)
 

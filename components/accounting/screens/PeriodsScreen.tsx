@@ -17,6 +17,8 @@ import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { useAccountingAuthority } from "@/lib/accounting/useAccountingAuthority"
+import { canApproveEngagement } from "@/lib/accounting/uiAuthority"
 import type { ScreenProps } from "./types"
 
 type ClosedByUser = {
@@ -76,6 +78,8 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
   }>({})
   const [checkingReadinessId, setCheckingReadinessId] = useState<string | null>(null)
   const [hasActiveEngagement, setHasActiveEngagement] = useState<boolean | null>(null)
+  const { authority_source: practiceAuthSource, access_level: practiceAccessLevel } =
+    useAccountingAuthority(businessId)
 
   useEffect(() => {
     if (!businessId) {
@@ -533,7 +537,9 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
                       const canReopen = 
                         period.status === "soft_closed" && 
                         !isProcessing &&
-                        (userRole === "admin" || userRole === "owner")
+                        (userRole === "admin" ||
+                          userRole === "owner" ||
+                          (practiceAuthSource === "accountant" && canApproveEngagement(practiceAccessLevel)))
                       const canCheckReadiness = period.status === "open" || period.status === "closing"
                       const isCheckingReadiness = checkingReadinessId === period.id
                       const readiness = readinessChecks[period.id]
@@ -701,6 +707,8 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
                                   onPeriodUpdate={loadPeriods}
                                   hasActiveEngagement={hasActiveEngagement}
                                   readOnly={readOnly}
+                                  accessLevel={practiceAccessLevel}
+                                  authoritySource={practiceAuthSource}
                                 />
                               </td>
                             </tr>

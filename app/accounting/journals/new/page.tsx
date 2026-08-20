@@ -604,20 +604,12 @@ export default function NewDraftPage() {
               Cancel
             </Button>
             <Button
-              variant="secondary"
+              variant="primary"
               onClick={() => handleSave(false)}
               disabled={!canSave() || saving}
               isLoading={saving}
             >
               Save as Draft
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => handleSave(true)}
-              disabled={!canSave() || saving}
-              isLoading={saving}
-            >
-              Save & Submit
             </Button>
           </div>
         </div>

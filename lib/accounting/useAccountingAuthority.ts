@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { isStaleClientAuthorityResponse } from "@/lib/accounting/practiceShellSession"
 
 export type AccountingAuthorityState = {
   authority_source: "owner" | "employee" | "accountant" | null
@@ -11,9 +12,24 @@ export type AccountingAuthorityState = {
   refetch: () => void
 }
 
+type CachedAuthority = {
+  authority_source: "owner" | "employee" | "accountant" | null
+  access_level: "read" | "write" | "approve" | null
+  engagement_status: string | null
+  at: number
+}
+
+const UI_AUTHORITY_TTL_MS = 20_000
+const uiAuthorityCache = new Map<string, CachedAuthority>()
+
+export function clearAccountingAuthorityUiCache(businessId?: string) {
+  if (businessId) uiAuthorityCache.delete(businessId)
+  else uiAuthorityCache.clear()
+}
+
 /**
  * Fetches accounting authority for the current user and business (readiness API).
- * For accountants, includes access_level and engagement_status for permission banner.
+ * UI-only short cache; server mutations remain authoritative.
  */
 export function useAccountingAuthority(businessId: string | null): AccountingAuthorityState {
   const [state, setState] = useState<{
@@ -29,40 +45,65 @@ export function useAccountingAuthority(businessId: string | null): AccountingAut
     loading: true,
     error: null,
   })
+  const requestGen = useRef(0)
+  const watchedBusinessId = useRef(businessId)
 
-  const doFetch = useCallback(() => {
+  const doFetch = useCallback((force = false) => {
+    const gen = ++requestGen.current
+    watchedBusinessId.current = businessId
     if (!businessId) {
       setState((s) => ({ ...s, authority_source: null, access_level: null, engagement_status: null, loading: false, error: null }))
       return
     }
-    setState((s) => ({ ...s, loading: true, error: null }))
+    const cached = uiAuthorityCache.get(businessId)
+    if (!force && cached && Date.now() - cached.at < UI_AUTHORITY_TTL_MS) {
+      setState({
+        authority_source: cached.authority_source,
+        access_level: cached.access_level,
+        engagement_status: cached.engagement_status,
+        loading: false,
+        error: null,
+      })
+      return
+    }
+    setState((s) => ({ ...s, loading: !cached, error: null }))
     fetch(`/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`)
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
-        setState((s) => ({
-          ...s,
-          authority_source: data?.authority_source ?? null,
-          access_level: data?.access_level ?? null,
-          engagement_status: data?.engagement_status ?? null,
+        if (requestGen.current !== gen || isStaleClientAuthorityResponse(businessId, watchedBusinessId.current)) return
+        const next = {
+          authority_source: (data?.authority_source ?? null) as CachedAuthority["authority_source"],
+          access_level: (data?.access_level ?? null) as CachedAuthority["access_level"],
+          engagement_status: (data?.engagement_status ?? null) as string | null,
+          at: Date.now(),
+        }
+        uiAuthorityCache.set(businessId, next)
+        setState({
+          authority_source: next.authority_source,
+          access_level: next.access_level,
+          engagement_status: next.engagement_status,
           loading: false,
           error: ok ? null : (data?.error ?? "Failed to load"),
-        }))
+        })
       })
       .catch((err) => {
-        setState((s) => ({
-          ...s,
+        if (requestGen.current !== gen || isStaleClientAuthorityResponse(businessId, watchedBusinessId.current)) return
+        setState({
           authority_source: null,
           access_level: null,
           engagement_status: null,
           loading: false,
           error: err?.message ?? "Failed to load",
-        }))
+        })
       })
   }, [businessId])
 
   useEffect(() => {
+    if (watchedBusinessId.current && businessId && watchedBusinessId.current !== businessId) {
+      clearAccountingAuthorityUiCache(watchedBusinessId.current)
+    }
     doFetch()
-  }, [doFetch])
+  }, [doFetch, businessId])
 
-  return { ...state, refetch: doFetch }
+  return { ...state, refetch: () => doFetch(true) }
 }

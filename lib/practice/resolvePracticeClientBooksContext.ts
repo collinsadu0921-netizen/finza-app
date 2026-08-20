@@ -63,26 +63,29 @@ export async function resolvePracticeClientBooksContext(opts: {
   urlBusinessId?: string | null
 }): Promise<PracticeClientBooksContext> {
   const urlBusinessId = opts.urlBusinessId?.trim() || null
-  const firmMember = await isFirmMember(opts.supabase, opts.userId)
 
-  if (firmMember && urlBusinessId) {
+  // When a client is explicit, the firm engine already answers membership.
+  // Skip a separate accounting_firm_users probe on every books-tab navigation.
+  if (urlBusinessId) {
     const auth = await getAccountingAuthority({
       supabase: opts.supabase,
       firmUserId: opts.userId,
       businessId: urlBusinessId,
       requiredLevel: "read",
     })
-    if (!auth.allowed || !auth.level || !auth.firmId || !auth.engagementId) {
-      return { kind: "denied", reason: auth.reason || "ENGAGEMENT_REQUIRED" }
+    if (auth?.allowed && auth.level && auth.firmId && auth.engagementId) {
+      const clientName = await loadBusinessName(opts.supabase, urlBusinessId)
+      return {
+        kind: "practice",
+        businessId: urlBusinessId,
+        clientName,
+        accessLevel: auth.level,
+        firmId: auth.firmId,
+        engagementId: auth.engagementId,
+      }
     }
-    const clientName = await loadBusinessName(opts.supabase, urlBusinessId)
-    return {
-      kind: "practice",
-      businessId: urlBusinessId,
-      clientName,
-      accessLevel: auth.level,
-      firmId: auth.firmId,
-      engagementId: auth.engagementId,
+    if (auth?.firmId && (!auth.allowed || !auth.level)) {
+      return { kind: "denied", reason: auth.reason || "ENGAGEMENT_REQUIRED" }
     }
   }
 
@@ -98,7 +101,7 @@ export async function resolvePracticeClientBooksContext(opts: {
     return { kind: "service", businessId: serviceCtx.businessId }
   }
 
-  if (firmMember && !urlBusinessId) {
+  if (!urlBusinessId && (await isFirmMember(opts.supabase, opts.userId))) {
     return { kind: "no_context" }
   }
 

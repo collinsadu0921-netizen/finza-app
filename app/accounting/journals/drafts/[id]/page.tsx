@@ -946,71 +946,16 @@ export default function DraftReviewPage({
             </div>
           </div>
 
-          {/* Action Bar */}
+          {/* Action Bar — submit/approve/reject routes do not exist; hide dead controls. */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex flex-wrap gap-3 justify-end">
-              {draft.status === "draft" && (
-                <div className="relative group">
-                  <Button
-                    variant="primary"
-                    onClick={handleSubmit}
-                    disabled={!authority.canSubmit || processing}
-                    isLoading={processing}
-                  >
-                    Submit for Review
-                  </Button>
-                  {!authority.canSubmit && authority.submitReason && (
-                    <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-10">
-                      <div className="bg-gray-900 text-white text-xs rounded py-2 px-3 whitespace-nowrap shadow-lg">
-                        {authority.submitReason}
-                        <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {draft.status === "approved" && !draft.journal_entry_id && !authority.canPost && authority.postReason && (
+                <p className="w-full text-sm text-gray-600 dark:text-gray-400 text-right">
+                  {authority.postReason === "Partner role required."
+                    ? "Partner role required to post this journal."
+                    : authority.postReason}
+                </p>
               )}
-
-              {draft.status === "submitted" && (
-                <>
-                  <div className="relative group">
-                    <Button
-                      variant="primary"
-                      onClick={handleApprove}
-                      disabled={!authority.canApprove || processing}
-                      isLoading={processing}
-                    >
-                      Approve
-                    </Button>
-                    {!authority.canApprove && authority.approveReason && (
-                      <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-900 text-white text-xs rounded py-2 px-3 whitespace-nowrap shadow-lg">
-                          {authority.approveReason}
-                          <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative group">
-                    <Button
-                      variant="danger"
-                      onClick={() => setShowRejectModal(true)}
-                      disabled={!authority.canReject || processing}
-                    >
-                      Reject
-                    </Button>
-                    {!authority.canReject && authority.rejectReason && (
-                      <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-900 text-white text-xs rounded py-2 px-3 whitespace-nowrap shadow-lg">
-                          {authority.rejectReason}
-                          <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-
               {draft.status === "approved" && !draft.journal_entry_id && (
                 <div className="relative group">
                   <Button

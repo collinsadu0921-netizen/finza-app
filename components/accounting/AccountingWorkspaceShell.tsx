@@ -9,6 +9,7 @@ import ServiceOwnerAccountingBanner from "@/components/accounting/ServiceOwnerAc
 import FirmSelector from "@/components/FirmSelector"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { hydrateActiveFirmFromMemberships } from "@/lib/accounting/firm/useActiveFirm"
+import { shouldReloadPracticeShellOnPathnameChange } from "@/lib/accounting/practiceShellSession"
 
 type AccountingWorkspaceShellProps = {
   children: React.ReactNode
@@ -67,8 +68,8 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
   useEffect(() => {
     let mounted = true
 
-    async function loadWorkspaceState() {
-      setLoading(true)
+    async function loadWorkspaceState(opts?: { spinner?: boolean }) {
+      if (opts?.spinner !== false) setLoading(true)
       setFirmLoadError(null)
       try {
         const { data: authData } = await supabase.auth.getUser()
@@ -113,29 +114,7 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
           return
         }
 
-        const firmQs = `firm_id=${encodeURIComponent(hydrated.firmId)}`
-        const [clientsRes, tasksRes, requestsRes] = await Promise.all([
-          fetch(`/api/accounting/firm/clients?${firmQs}`, { cache: "no-store" }),
-          fetch(`/api/accounting/work?${firmQs}`, { cache: "no-store" }),
-          fetch(`/api/accounting/requests?${firmQs}`, { cache: "no-store" }),
-        ])
-
-        if (!mounted) return
-
-        const clientsJson = clientsRes.ok ? await clientsRes.json() : { clients: [] }
-        const tasksJson = tasksRes.ok ? await tasksRes.json() : { items: [] }
-        const requestsJson = requestsRes.ok ? await requestsRes.json() : { requests: [] }
-
-        const clients: ClientRow[] = clientsJson.clients ?? []
-        const workItems: WorkItemRow[] = tasksJson.items ?? []
-        const requests: RequestRow[] = requestsJson.requests ?? []
-        setClientCount(clients.length)
-        setOpenTasks(workItems.length)
-        setOpenRequests(
-          requests.filter(
-            (r) => r.status === "open" || r.status === "in_progress" || r.status === "waiting_on_client"
-          ).length
-        )
+        // Counts are only for the no-client dashboard cards — not Client Books tabs.
       } finally {
         if (mounted) setLoading(false)
       }
@@ -145,7 +124,7 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
 
     const onFirmChanged = () => {
       if (skipFirmChangedReload.current) return
-      void loadWorkspaceState()
+      void loadWorkspaceState({ spinner: false })
     }
     window.addEventListener("firmChanged", onFirmChanged as EventListener)
 
@@ -153,13 +132,43 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
       mounted = false
       window.removeEventListener("firmChanged", onFirmChanged as EventListener)
     }
-  }, [pathname])
+    // Pathname changes must not remount the firm session (full-page "Resolving firm…").
+  }, shouldReloadPracticeShellOnPathnameChange() ? [pathname] : [])
 
   const hasFirm = firmCount > 0
   const pageTitle = useMemo(() => getPageTitle(pathname, hasClientSelected), [pathname, hasClientSelected])
   const shouldGateClientRoute = hasFirm && !hasClientSelected && isClientDependentRoute(pathname)
   const showNoClientDashboard = hasFirm && !hasClientSelected && (pathname === "/accounting/dashboard" || pathname === "/accounting")
   const showSidebar = hasFirm && !isFirmSetupRoute
+
+  useEffect(() => {
+    if (!showNoClientDashboard || !activeFirmId) return
+    let mounted = true
+    const firmQs = `firm_id=${encodeURIComponent(activeFirmId)}`
+    void Promise.all([
+      fetch(`/api/accounting/firm/clients?${firmQs}`, { cache: "no-store" }),
+      fetch(`/api/accounting/work?${firmQs}`, { cache: "no-store" }),
+      fetch(`/api/accounting/requests?${firmQs}`, { cache: "no-store" }),
+    ]).then(async ([clientsRes, tasksRes, requestsRes]) => {
+      if (!mounted) return
+      const clientsJson = clientsRes.ok ? await clientsRes.json() : { clients: [] }
+      const tasksJson = tasksRes.ok ? await tasksRes.json() : { items: [] }
+      const requestsJson = requestsRes.ok ? await requestsRes.json() : { requests: [] }
+      const clients: ClientRow[] = clientsJson.clients ?? []
+      const workItems: WorkItemRow[] = tasksJson.items ?? []
+      const requests: RequestRow[] = requestsJson.requests ?? []
+      setClientCount(clients.length)
+      setOpenTasks(workItems.length)
+      setOpenRequests(
+        requests.filter(
+          (r) => r.status === "open" || r.status === "in_progress" || r.status === "waiting_on_client"
+        ).length
+      )
+    })
+    return () => {
+      mounted = false
+    }
+  }, [showNoClientDashboard, activeFirmId])
 
   if (loading) {
     return (

@@ -108,7 +108,7 @@ export default function BulkActionBar({
   const [result, setResult] = useState<BulkActionResult | null>(null)
   const [summaryOpen, setSummaryOpen] = useState(false)
 
-  const applicableActions = (["journal_approve", "journal_post", "ob_approve", "ob_post"] as const).filter(
+  const applicableActions = (["journal_post", "ob_approve", "ob_post"] as const).filter(
     (action) => selectedItems.some((w) => appliesTo(w.work_item_type, action))
   )
 
