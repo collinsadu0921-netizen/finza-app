@@ -7,6 +7,11 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 /**
  * POST /api/accounting/adjustments/apply
@@ -28,14 +33,24 @@ import {
  * Allows adjustments in 'open' or 'soft_closed' periods (not 'locked')
  */
 export async function POST(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("adjustments_apply")
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return respond({ error: "Unauthorized" }, 401)
     }
 
     const body = await request.json()
@@ -62,9 +77,13 @@ export async function POST(request: NextRequest) {
       businessId: String(business_id),
       requiredLevel: "write",
     })
+    if (authResult.timings) {
+      diag.recordTiming("role", authResult.timings.role_ms)
+      diag.recordTiming("authority", authResult.timings.authority_ms)
+    }
     if (!authResult.ok) {
       const denied = deniedMutationResponse(authResult, "write", "create adjusting journals")
-      return NextResponse.json(denied.body, { status: denied.status })
+      return respond(denied.body, denied.status)
     }
 
     const resolvedBusinessId = authResult.businessId
@@ -179,6 +198,7 @@ export async function POST(request: NextRequest) {
     }))
 
     // PHASE 6: Call the canonical apply_adjusting_journal RPC function with adjustment metadata
+    const tRpc = performance.now()
     const { data: journalEntryId, error: rpcError } = await dataClient.rpc("apply_adjusting_journal", {
       p_business_id: resolvedBusinessId,
       p_period_start: period_start,
@@ -190,11 +210,12 @@ export async function POST(request: NextRequest) {
       p_adjustment_ref: adjustment_ref?.trim() || null,
     })
 
+    diag.recordTiming("rpc", timedStepMs(tRpc), "apply_adjusting_journal")
     if (rpcError) {
       console.error("Error applying adjusting journal:", rpcError)
-      return NextResponse.json(
+      return respond(
         { error: rpcError.message || "Failed to apply adjusting journal" },
-        { status: 400 } // Usually validation errors, not 500
+        400
       )
     }
 
@@ -213,6 +234,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle()
     const period_id = periodRow?.id ?? null
 
+    const tAudit = performance.now()
     await logAudit({
       businessId: resolvedBusinessId,
       userId: user.id,
@@ -224,16 +246,17 @@ export async function POST(request: NextRequest) {
       request,
     })
 
-    return NextResponse.json({
+    diag.recordTiming("audit", timedStepMs(tAudit))
+    return respond({
       success: true,
       journal_entry_id: journalEntryId,
       message: "Adjusting journal applied successfully",
-    })
-  } catch (error: any) {
+    }, 200)
+  } catch (error: unknown) {
     console.error("Error in adjusting journal apply:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
+    return respond(
+      { error: error instanceof Error ? error.message : "Internal server error" },
+      500
     )
   }
 }

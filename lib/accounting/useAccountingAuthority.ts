@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { isStaleClientAuthorityResponse } from "@/lib/accounting/practiceShellSession"
+import {
+  READINESS_TTL_MS,
+  invalidateClientBooksBusiness,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 export type AccountingAuthorityState = {
   authority_source: "owner" | "employee" | "accountant" | null
@@ -67,9 +72,15 @@ export function useAccountingAuthority(businessId: string | null): AccountingAut
       return
     }
     setState((s) => ({ ...s, loading: !cached, error: null }))
-    fetch(`/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`)
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
+    sharedClientBooksJson<{
+      authority_source?: CachedAuthority["authority_source"]
+      access_level?: CachedAuthority["access_level"]
+      engagement_status?: string | null
+      error?: string
+    }>(`/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`, {
+      ttlMs: READINESS_TTL_MS,
+    })
+      .then(({ ok, json: data }) => {
         if (requestGen.current !== gen || isStaleClientAuthorityResponse(businessId, watchedBusinessId.current)) return
         const next = {
           authority_source: (data?.authority_source ?? null) as CachedAuthority["authority_source"],
@@ -101,6 +112,7 @@ export function useAccountingAuthority(businessId: string | null): AccountingAut
   useEffect(() => {
     if (watchedBusinessId.current && businessId && watchedBusinessId.current !== businessId) {
       clearAccountingAuthorityUiCache(watchedBusinessId.current)
+      invalidateClientBooksBusiness(watchedBusinessId.current)
     }
     doFetch()
   }, [doFetch, businessId])

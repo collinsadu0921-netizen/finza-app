@@ -16,6 +16,11 @@ import AdjustmentDecisionHelper, { type AdjustmentPath } from "@/components/acco
 import ApprovalChainStatus from "@/components/accounting/ApprovalChainStatus"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
+import {
+  COA_TTL_MS,
+  PERIODS_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 type AccountingPeriod = {
   id: string
@@ -73,18 +78,24 @@ export default function AdjustmentsContent({ businessId }: Props) {
     let cancelled = false
     async function loadPeriods() {
       try {
-        const res = await fetch(`/api/accounting/periods?business_id=${businessId}`)
+        const res = await sharedClientBooksJson<{ periods?: AccountingPeriod[] }>(
+          `/api/accounting/periods?business_id=${businessId}`,
+          { ttlMs: PERIODS_TTL_MS }
+        )
         if (!res.ok || cancelled) return
-        const data = await res.json()
+        const data = res.json
         if (!cancelled)
           setPeriods((data.periods ?? []).filter((p: AccountingPeriod) => p.status === "open"))
       } catch { /* silent */ }
     }
     async function loadAccounts() {
       try {
-        const res = await fetch(`/api/accounting/coa?business_id=${businessId}`)
+        const res = await sharedClientBooksJson<{ accounts?: Account[] }>(
+          `/api/accounting/coa?business_id=${businessId}`,
+          { ttlMs: COA_TTL_MS }
+        )
         if (!res.ok || cancelled) return
-        const data = await res.json()
+        const data = res.json
         if (!cancelled) setAccounts(data.accounts ?? [])
       } catch { /* silent */ }
     }

@@ -4,6 +4,10 @@ import { useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { getActiveFirmId, setActiveFirmId, getActiveFirmName } from "@/lib/accounting/firm/session"
 import { resolveActiveFirmFromMemberships } from "@/lib/accounting/firm/resolveActiveFirm"
+import {
+  FIRMS_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 type Firm = {
   firm_id: string
@@ -40,13 +44,15 @@ export default function FirmSelector() {
 
   const loadFirms = async () => {
     try {
-      const response = await fetch("/api/accounting/firm/firms", { cache: "no-store" })
+      const response = await sharedClientBooksJson<{
+        firms?: Array<{ firm_id: string; firm_name: string; role: Firm["role"] }>
+      }>("/api/accounting/firm/firms", { ttlMs: FIRMS_TTL_MS })
       if (!response.ok) {
         setLoading(false)
         return
       }
 
-      const data = await response.json()
+      const data = response.json
       const firmList: Firm[] = (data.firms || []).map(
         (f: { firm_id: string; firm_name: string; role: Firm["role"] }) => ({
           firm_id: f.firm_id,

@@ -17,6 +17,13 @@ import {
 } from "@/lib/accounting/authorityEngine"
 import { getUserRole } from "@/lib/userRoles"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { timedStepMs } from "@/lib/server/routeDiagnostics"
+
+export type AuthorityTimings = {
+  role_ms: number
+  authority_ms: number
+  total_ms: number
+}
 
 export type AccountingAuthoritySource =
   | NonNullable<AccountingAuthorityResult["authority_source"]>
@@ -38,6 +45,7 @@ export type AccountingRequestAuthorityOk = {
   reason: string | null
   /** Service role from business_users/owner, if any. */
   serviceRole: string | null
+  timings: AuthorityTimings
 }
 
 export type AccountingRequestAuthorityDenied = {
@@ -46,6 +54,7 @@ export type AccountingRequestAuthorityDenied = {
   error: string
   reasonCode: string
   businessId: string | null
+  timings?: AuthorityTimings
 }
 
 export type AccountingRequestAuthority = AccountingRequestAuthorityOk | AccountingRequestAuthorityDenied
@@ -94,7 +103,17 @@ export async function resolveAccountingRequestAuthority(opts: {
         ? "write"
         : "read"
 
+  const tAll = performance.now()
+  const tRole = performance.now()
   const serviceRole = await getUserRole(opts.supabase, opts.userId, businessId)
+  const roleMs = timedStepMs(tRole)
+  const timings = (): AuthorityTimings => ({
+    role_ms: roleMs,
+    authority_ms: timedStepMs(tAuthz),
+    total_ms: timedStepMs(tAll),
+  })
+
+  const tAuthz = performance.now()
 
   // Service owner/admin/accountant: one Service gate. Do not also run the firm engine.
   if (serviceRole === "owner" || serviceRole === "admin" || serviceRole === "accountant") {
@@ -112,6 +131,7 @@ export async function resolveAccountingRequestAuthority(opts: {
         error: "Forbidden",
         reasonCode: "INSUFFICIENT_AUTHORITY",
         businessId,
+        timings: timings(),
       }
     }
     return {
@@ -128,6 +148,7 @@ export async function resolveAccountingRequestAuthority(opts: {
       assignmentScoped: false,
       reason: null,
       serviceRole,
+      timings: timings(),
     }
   }
 
@@ -146,6 +167,7 @@ export async function resolveAccountingRequestAuthority(opts: {
         error: "Forbidden",
         reasonCode: firmAuth.reason || "INSUFFICIENT_AUTHORITY",
         businessId,
+        timings: timings(),
       }
     }
     return {
@@ -162,6 +184,7 @@ export async function resolveAccountingRequestAuthority(opts: {
       assignmentScoped: Boolean(firmAuth.debug?.assignment),
       reason: firmAuth.reason,
       serviceRole,
+      timings: timings(),
     }
   }
 
@@ -180,6 +203,7 @@ export async function resolveAccountingRequestAuthority(opts: {
       error: "Forbidden",
       reasonCode: "INSUFFICIENT_AUTHORITY",
       businessId,
+      timings: timings(),
     }
   }
   return {
@@ -197,6 +221,7 @@ export async function resolveAccountingRequestAuthority(opts: {
     assignmentScoped: false,
     reason: null,
     serviceRole,
+    timings: timings(),
   }
 }
 

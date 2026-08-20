@@ -9,6 +9,11 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 /**
  * GET /api/accounting/reports/balance-sheet
@@ -17,14 +22,24 @@ import {
  * Query: business_id (required), period_id | period_start | as_of_date | start_date, end_date (optional).
  */
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("reports_balance_sheet")
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return respond({ error: "Unauthorized" }, 401)
     }
 
     const { searchParams } = new URL(request.url)
@@ -56,10 +71,14 @@ export async function GET(request: NextRequest) {
       businessId,
       requiredLevel: "read",
     })
+    if (auth.timings) {
+      diag.recordTiming("role", auth.timings.role_ms)
+      diag.recordTiming("authority", auth.timings.authority_ms)
+    }
     if (!auth.ok) {
-      return NextResponse.json(
+      return respond(
         { error: auth.error, reason_code: auth.reasonCode },
-        { status: auth.status }
+        auth.status
       )
     }
 
@@ -81,6 +100,7 @@ export async function GET(request: NextRequest) {
       await supabase.rpc("create_system_accounts", { p_business_id: businessId })
     }
 
+    const tReport = performance.now()
     const { data, error } = await getBalanceSheetReport(dataClient, {
       businessId,
       period_id: searchParams.get("period_id") ?? undefined,
@@ -100,7 +120,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(data)
+    diag.recordTiming("report", timedStepMs(tReport))
+    return respond(data, 200)
   } catch (err: unknown) {
     console.error("Error in balance sheet:", err)
     return NextResponse.json(

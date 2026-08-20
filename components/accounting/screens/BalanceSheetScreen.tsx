@@ -7,6 +7,11 @@ import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
 import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
+import {
+  PERIODS_TTL_MS,
+  REPORT_REMOUNT_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 type AccountingPeriod = {
   id: string
@@ -190,9 +195,12 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
   const loadPeriods = async () => {
     if (!businessId) return
     try {
-      const response = await fetch(`/api/accounting/periods?business_id=${businessId}`)
+      const response = await sharedClientBooksJson<{ periods?: AccountingPeriod[] }>(
+        `/api/accounting/periods?business_id=${businessId}`,
+        { ttlMs: PERIODS_TTL_MS }
+      )
       if (!response.ok) throw new Error("Failed to load periods")
-      const data = await response.json()
+      const data = response.json
       setPeriods(data.periods || [])
     } catch (err: any) {
       console.error("Error loading periods:", err)
@@ -239,12 +247,16 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
         }
       }
 
-      const response = await fetch(url)
+      const response = await sharedClientBooksJson<{
+        sections?: Array<{ key?: string }>
+        totals?: Record<string, number>
+        as_of_date?: string
+        error?: string
+      }>(url, { ttlMs: REPORT_REMOUNT_TTL_MS })
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to load balance sheet")
+        throw new Error(response.json.error || "Failed to load balance sheet")
       }
-      const data = await response.json()
+      const data = response.json
       const sections: any[] = data.sections ?? []
 
       setAssetSection(parseSection(sections.find((s) => s.key === "assets")))
@@ -263,7 +275,7 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
           adjustedEquity:           data.totals.liabilities_plus_equity - data.totals.liabilities,
           totalLiabilitiesAndEquity: data.totals.liabilities_plus_equity,
           balancingDifference:      data.totals.imbalance,
-          isBalanced:               data.totals.is_balanced,
+          isBalanced:               Boolean(data.totals.is_balanced),
           currentPeriodNetIncome:   0,
         })
       } else {

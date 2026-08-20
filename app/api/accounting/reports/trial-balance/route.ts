@@ -10,6 +10,11 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 /**
  * GET /api/accounting/reports/trial-balance
@@ -28,7 +33,16 @@ import {
  * Access: Admin/Owner/Accountant (read or write)
  */
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("reports_trial_balance")
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
@@ -67,16 +81,21 @@ export async function GET(request: NextRequest) {
     }
     const resolvedBusinessId = resolved.businessId
 
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
     const authResult = await resolveAccountingRequestAuthority({
       supabase,
       userId: user.id,
       businessId: resolvedBusinessId,
       requiredLevel: "read",
     })
+    if (authResult.timings) {
+      diag.recordTiming("role", authResult.timings.role_ms)
+      diag.recordTiming("authority", authResult.timings.authority_ms)
+    }
     if (!authResult.ok) {
-      return NextResponse.json(
+      return respond(
         { error: authResult.error, reason_code: authResult.reasonCode },
-        { status: authResult.status }
+        authResult.status
       )
     }
 
@@ -201,7 +220,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
+    diag.recordTiming("report", timedStepMs(routeT0), "compute")
+    return respond({
       period: {
         period_start: resolvedPeriod.period_start,
         period_end: resolvedPeriod.period_end,
@@ -223,7 +243,7 @@ export async function GET(request: NextRequest) {
       resolved_period_reason: resolvedPeriod.resolution_reason,
       resolved_period_start: resolvedPeriod.period_start,
       resolved_period_end: resolvedPeriod.period_end,
-    })
+    }, 200)
   } catch (error: any) {
     console.error("Error in trial balance:", error)
     return NextResponse.json(

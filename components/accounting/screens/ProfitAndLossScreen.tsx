@@ -7,6 +7,11 @@ import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
 import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
+import {
+  PERIODS_TTL_MS,
+  REPORT_REMOUNT_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 type AccountingPeriod = {
   id: string
@@ -112,9 +117,12 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
   const loadPeriods = async () => {
     if (!businessId) return
     try {
-      const response = await fetch(`/api/accounting/periods?business_id=${businessId}`)
+      const response = await sharedClientBooksJson<{ periods?: AccountingPeriod[] }>(
+        `/api/accounting/periods?business_id=${businessId}`,
+        { ttlMs: PERIODS_TTL_MS }
+      )
       if (!response.ok) throw new Error("Failed to load periods")
-      const data = await response.json()
+      const data = response.json
       setPeriods(data.periods || [])
     } catch (err: any) {
       console.error("Error loading periods:", err)
@@ -132,12 +140,16 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
       } else if (useDateRange && startDate && endDate) {
         url += `&start_date=${startDate}&end_date=${endDate}`
       }
-      const response = await fetch(url)
+      const response = await sharedClientBooksJson<{
+        sections?: ReportSection[]
+        totals?: { net_profit?: number; gross_profit?: number }
+        period?: { period_start: string; period_end: string }
+        error?: string
+      }>(url, { ttlMs: REPORT_REMOUNT_TTL_MS })
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to load profit & loss")
+        throw new Error(response.json.error || "Failed to load profit & loss")
       }
-      const data = await response.json()
+      const data = response.json
       const allSections: ReportSection[] = data.sections ?? []
       const income  = allSections.filter((s) => s.key === "income" || s.key === "other_income")
       const expense = allSections.filter((s) => s.key !== "income" && s.key !== "other_income")

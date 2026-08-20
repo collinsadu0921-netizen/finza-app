@@ -11,6 +11,11 @@ import {
 } from "@/lib/accounting/useAccountingReadiness"
 import { useAccountingAuthority } from "@/lib/accounting/useAccountingAuthority"
 import { canApproveEngagement } from "@/lib/accounting/uiAuthority"
+import {
+  COA_TTL_MS,
+  REPORT_REMOUNT_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 import ReversalModal from "@/components/accounting/ReversalModal"
 import ReadinessBanner from "@/components/accounting/ReadinessBanner"
 import BlockedActionModal from "@/components/accounting/BlockedActionModal"
@@ -435,9 +440,11 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
   const loadAccounts = async () => {
     if (!businessId) return
     try {
-      const response = await fetch(`/api/accounting/coa?business_id=${encodeURIComponent(businessId)}`)
+      const response = await sharedClientBooksJson<{
+        accounts?: Array<{ id: string; name: string; code: string }>
+      }>(`/api/accounting/coa?business_id=${encodeURIComponent(businessId)}`, { ttlMs: COA_TTL_MS })
       if (response.ok) {
-        const { accounts: data } = await response.json()
+        const { accounts: data } = response.json
         setAccounts(data || [])
       }
     } catch (err) {
@@ -459,8 +466,14 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       params.append("page",      page.toString())
       params.append("page_size", pagination.pageSize.toString())
 
-      const response = await fetch(`/api/ledger/list?${params.toString()}`)
-      const body = await response.json().catch(() => ({}))
+      const response = await sharedClientBooksJson<{
+        error?: string
+        supabase_error?: { message?: string }
+        entries?: JournalEntry[]
+        pagination?: Pagination
+        default_currency?: string
+      }>(`/api/ledger/list?${params.toString()}`, { ttlMs: REPORT_REMOUNT_TTL_MS })
+      const body = response.json
       if (!response.ok) {
         const msg    = (body.error as string) || "Unable to load ledger. Please try again."
         const detail = body.supabase_error?.message
@@ -530,7 +543,6 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
   const handleReversalSuccess = (reversalJeId: string) => {
     setSuccessBanner({ message: "Reversal created successfully.", reversalJeId })
     loadLedger(pagination.page)
-    router.refresh()
   }
 
   const handlePageChange = (newPage: number) => {

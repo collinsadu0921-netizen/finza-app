@@ -13,6 +13,10 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
+import {
+  PERIODS_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 type Period = {
   id: string
@@ -112,14 +116,17 @@ export default function ClientVatPage() {
     async function load() {
       try {
         setPeriodsLoading(true)
-        const res = await fetch(`/api/accounting/periods?business_id=${encodeURIComponent(businessId)}`)
+        const res = await sharedClientBooksJson<{ periods?: Period[]; error?: string }>(
+          `/api/accounting/periods?business_id=${encodeURIComponent(businessId)}`,
+          { ttlMs: PERIODS_TTL_MS }
+        )
         if (cancelled) return
         if (!res.ok) {
-          const d = await res.json().catch(() => ({}))
+          const d = res.json
           setPeriodsError(d.error || `Failed to load periods (${res.status})`)
           return
         }
-        const data = await res.json()
+        const data = res.json
         const list: Period[] = (data.periods ?? []).sort(
           (a: Period, b: Period) => b.period_start.localeCompare(a.period_start)
         )

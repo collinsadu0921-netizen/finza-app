@@ -14,6 +14,12 @@ import { buildServiceRoute } from "@/lib/service/routes"
 import EmptyState from "@/components/ui/EmptyState"
 import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
+import {
+  PERIODS_TTL_MS,
+  READINESS_TTL_MS,
+  REPORT_REMOUNT_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 type AccountingPeriod = {
   id: string
@@ -73,9 +79,11 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
       return
     }
     setReadinessLoading(true)
-    fetch(`/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`)
-      .then((res) => res.json())
-      .then((data) => {
+    sharedClientBooksJson<{ ready?: boolean; authority_source?: string | null }>(
+      `/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`,
+      { ttlMs: READINESS_TTL_MS }
+    )
+      .then(({ json: data }) => {
         setReadiness({
           ready: data.ready === true,
           authority_source: data.authority_source ?? null,
@@ -96,13 +104,16 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
   const loadPeriods = async () => {
     if (!businessId) return
     try {
-      const response = await fetch(`/api/accounting/periods?business_id=${businessId}`)
+      const response = await sharedClientBooksJson<{ periods?: AccountingPeriod[] }>(
+        `/api/accounting/periods?business_id=${businessId}`,
+        { ttlMs: PERIODS_TTL_MS }
+      )
 
       if (!response.ok) {
         throw new Error("Failed to load accounting periods")
       }
 
-      const data = await response.json()
+      const data = response.json
       // Reports can read open, soft_closed, and locked periods
       setPeriods(data.periods || [])
     } catch (err: any) {
@@ -126,14 +137,20 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
         url += `&start_date=${startDate}&end_date=${endDate}`
       }
 
-      const response = await fetch(url)
+      const response = await sharedClientBooksJson<{
+        accounts?: AccountBalance[]
+        byType?: Record<string, AccountBalance[]>
+        totals?: unknown
+        isBalanced?: boolean
+        imbalance?: number
+        error?: string
+      }>(url, { ttlMs: REPORT_REMOUNT_TTL_MS })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to load trial balance")
+        throw new Error(response.json.error || "Failed to load trial balance")
       }
 
-      const data = await response.json()
+      const data = response.json
       setAccounts(data.accounts || [])
       setByType(data.byType || {})
       setTotals(data.totals)

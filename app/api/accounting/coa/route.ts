@@ -7,6 +7,11 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 /**
  * GET /api/accounting/coa?business_id=...
@@ -25,14 +30,24 @@ import {
  * Sorted by code ASC
  */
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("accounting_coa")
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return respond({ error: "Unauthorized" }, 401)
     }
 
     const { searchParams } = new URL(request.url)
@@ -64,10 +79,14 @@ export async function GET(request: NextRequest) {
       businessId,
       requiredLevel: "read",
     })
+    if (authResult.timings) {
+      diag.recordTiming("role", authResult.timings.role_ms)
+      diag.recordTiming("authority", authResult.timings.authority_ms)
+    }
     if (!authResult.ok) {
-      return NextResponse.json(
+      return respond(
         { error: authResult.error, reason_code: authResult.reasonCode },
-        { status: authResult.status }
+        authResult.status
       )
     }
 
@@ -76,6 +95,7 @@ export async function GET(request: NextRequest) {
 
     const dataClient = getAccountingDataClient(authResult, supabase)
     // Get all accounts for business (read-only, no mutations)
+    const tDb = performance.now()
     const { data: accounts, error } = await dataClient
       .from("accounts")
       .select("id, code, name, type, description, is_system, sub_type")
@@ -91,20 +111,20 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ 
+    diag.recordTiming("db", timedStepMs(tDb), "accounts")
+    return respond({ 
       accounts: accounts || [],
-      // Include metadata for client-side filtering
       metadata: {
         total: accounts?.length || 0,
         allowedTypes: ["asset", "liability", "equity"],
         forbiddenTypes: ["income", "expense"],
       }
-    })
-  } catch (error: any) {
+    }, 200)
+  } catch (error: unknown) {
     console.error("Error in COA API:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
+    return respond(
+      { error: error instanceof Error ? error.message : "Internal server error" },
+      500
     )
   }
 }

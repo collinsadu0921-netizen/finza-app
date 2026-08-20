@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { invalidateClientBooksPeriods } from "@/lib/accounting/clientBooksRequestShare"
 
 type ReadinessBlocker = {
   code: string
@@ -165,6 +166,7 @@ export default function PeriodCloseCenter({
         throw new Error(msg)
       }
 
+      invalidateClientBooksPeriods(businessId)
       await onPeriodUpdate()
       await loadReadiness()
       await loadCloseRequestInfo()
@@ -204,6 +206,7 @@ export default function PeriodCloseCenter({
         const msg = errorData.error || "Failed to soft close"
         throw new Error(msg)
       }
+      invalidateClientBooksPeriods(businessId)
       await onPeriodUpdate()
       await loadReadiness()
       await loadCloseRequestInfo()
@@ -243,6 +246,7 @@ export default function PeriodCloseCenter({
         throw new Error(msg)
       }
 
+      invalidateClientBooksPeriods(businessId)
       await onPeriodUpdate()
       await loadReadiness()
       await loadCloseRequestInfo()
@@ -273,6 +277,7 @@ export default function PeriodCloseCenter({
         throw new Error(errorData.error || "Failed to reject close")
       }
 
+      invalidateClientBooksPeriods(businessId)
       await onPeriodUpdate()
       await loadReadiness()
       await loadCloseRequestInfo()
@@ -312,6 +317,7 @@ export default function PeriodCloseCenter({
         throw new Error(msg)
       }
 
+      invalidateClientBooksPeriods(businessId)
       await onPeriodUpdate()
       await loadReadiness()
     } catch (err: any) {

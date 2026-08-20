@@ -5,6 +5,11 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 /**
  * GET /api/accounting/exports/vat
@@ -15,14 +20,24 @@ import {
  * - period: YYYY-MM format (required)
  */
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("exports_vat")
+  const respondJson = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return respondJson({ error: "Unauthorized" }, 401)
     }
 
     const { searchParams } = new URL(request.url)
@@ -42,10 +57,14 @@ export async function GET(request: NextRequest) {
       businessId,
       requiredLevel: "read",
     })
+    if (authResult.timings) {
+      diag.recordTiming("role", authResult.timings.role_ms)
+      diag.recordTiming("authority", authResult.timings.authority_ms)
+    }
     if (!authResult.ok) {
-      return NextResponse.json(
+      return respondJson(
         { error: authResult.error, reason_code: authResult.reasonCode },
-        { status: authResult.status }
+        authResult.status
       )
     }
 
@@ -168,11 +187,13 @@ export async function GET(request: NextRequest) {
       [periodParam, openingBalance || 0, periodCredit, periodDebit, closingBalance].join(","),
     ]
 
+    const serverTiming = diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }])
     return new NextResponse(csvRows.join("\n"), {
       status: 200,
       headers: {
         "Content-Type": "text/csv",
         "Content-Disposition": `attachment; filename="vat-return-${periodParam}.csv"`,
+        ...(serverTiming ? { "Server-Timing": serverTiming } : {}),
       },
     })
   } catch (error: any) {

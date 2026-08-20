@@ -1,6 +1,10 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import {
+  READINESS_TTL_MS,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 export type AccountingReadinessState = {
   ready: boolean | null
@@ -21,9 +25,14 @@ function doFetch(
   setState: React.Dispatch<React.SetStateAction<ReadinessStateBase>>
 ) {
   setState((s) => ({ ...s, loading: true, error: null }))
-  fetch(`/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`)
-    .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-    .then(({ ok, data }) => {
+  sharedClientBooksJson<{
+    ready?: boolean
+    authority_source?: ReadinessStateBase["authority_source"]
+    error?: string
+  }>(`/api/accounting/readiness?business_id=${encodeURIComponent(businessId)}`, {
+    ttlMs: READINESS_TTL_MS,
+  })
+    .then(({ ok, json: data }) => {
       setState((s) => {
         if (!ok) {
           return {

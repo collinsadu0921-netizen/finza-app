@@ -6,16 +6,31 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("ledger_list")
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return respond({ error: "Unauthorized" }, 401)
     }
 
     const { searchParams } = new URL(request.url)
@@ -34,10 +49,14 @@ export async function GET(request: NextRequest) {
       businessId,
       requiredLevel: "read",
     })
+    if (authResult.timings) {
+      diag.recordTiming("role", authResult.timings.role_ms)
+      diag.recordTiming("authority", authResult.timings.authority_ms)
+    }
     if (!authResult.ok) {
-      return NextResponse.json(
+      return respond(
         { error: authResult.error, reason_code: authResult.reasonCode },
-        { status: authResult.status }
+        authResult.status
       )
     }
 
@@ -157,6 +176,7 @@ export async function GET(request: NextRequest) {
     const to = from + pageSize - 1
     query = query.range(from, to)
 
+    const tDb = performance.now()
     const { data: entries, error, count } = await query
 
     if (error) {
@@ -194,7 +214,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({
+    diag.recordTiming("db", timedStepMs(tDb), "ledger")
+    return respond({
       entries: entries || [],
       default_currency: businessRow?.default_currency ?? null,
       pagination: {
@@ -203,12 +224,12 @@ export async function GET(request: NextRequest) {
         total: count || 0,
         totalPages: Math.ceil((count || 0) / pageSize),
       },
-    })
-  } catch (error: any) {
+    }, 200)
+  } catch (error: unknown) {
     console.error("Error in ledger list:", error)
-    return NextResponse.json(
-      { error: error.message || "Internal server error" },
-      { status: 500 }
+    return respond(
+      { error: error instanceof Error ? error.message : "Internal server error" },
+      500
     )
   }
 }

@@ -40,11 +40,14 @@ function attachReportsDiagnostics(
 function jsonWithReportsDiagnostics(
   payload: PnLReportResponse,
   diagnostics: ReportsPnlDiagnostics,
-  status = 200
+  status = 200,
+  serverTiming?: string | null
 ) {
+  const headers = new Headers(reportsPnlResponseHeaders(diagnostics))
+  if (serverTiming) headers.set("Server-Timing", serverTiming)
   return NextResponse.json(attachReportsDiagnostics(payload, diagnostics), {
     status,
-    headers: reportsPnlResponseHeaders(diagnostics),
+    headers,
   })
 }
 
@@ -55,7 +58,8 @@ function jsonWithReportsDiagnostics(
  * Full final-response process cache + singleflight (default TTL 30s).
  */
 export async function GET(request: NextRequest) {
-  let diag = createRouteDiag("reports_pnl")
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("reports_pnl")
   const refreshOnRequest = isReportsPnlRefreshOnRequestEnabled()
 
   try {
@@ -66,6 +70,7 @@ export async function GET(request: NextRequest) {
     })
 
     if (!auth.ok) {
+      diag.recordTiming("auth", timedStepMs(tAuth), "session")
       diag.fail(auth.status, auth.error, { auth_failure_stage: auth.authFailureStage })
       return NextResponse.json(
         { error: auth.error, auth_failure_stage: auth.authFailureStage },
@@ -106,7 +111,8 @@ export async function GET(request: NextRequest) {
     }
 
     const { businessId, authority, isPractice } = gate.value
-    diag = createRouteDiag("reports_pnl", businessId)
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
+    diag.recordTiming("authority", timedStepMs(tAuth), "scope")
     // Practice users fail Service RLS on accounts/snapshots; use scoped privileged client after auth.
     const dataClient = isPractice ? createSupabaseAdminClient() : supabase
 
@@ -134,6 +140,7 @@ export async function GET(request: NextRequest) {
       resolvePnLMovementRangeForPnlRoute(dataClient, reportInput),
     ])
     const msReadyPeriod = timedStepMs(tReadyPeriod)
+    diag.recordTiming("period", msReadyPeriod, "readiness+period")
 
     const { ready, readinessCacheStatus } = readinessResult
     if (!ready) {
@@ -298,6 +305,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    diag.recordTiming("report", timedStepMs(tReport), reportsDiagnostics.reports_source)
+    diag.recordTiming("total", timedStepMs(routeT0), "handler")
     diag.step("report", {
       ms_report: Math.round((performance.now() - tReport) * 10) / 10,
       ms_remote_cache_read: cacheTiming.remoteCacheReadMs,
@@ -307,7 +316,12 @@ export async function GET(request: NextRequest) {
       ...reportsDiagnostics,
     })
     diag.finish(200, reportsDiagnostics)
-    return jsonWithReportsDiagnostics(cached.data, reportsDiagnostics)
+    return jsonWithReportsDiagnostics(
+      cached.data,
+      reportsDiagnostics,
+      200,
+      diag.serverTimingHeader()
+    )
   } catch (err: unknown) {
     console.error("Error in profit & loss:", err)
     diag.fail(500, err instanceof Error ? err.message : "Internal server error")

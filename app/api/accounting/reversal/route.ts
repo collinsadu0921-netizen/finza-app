@@ -8,6 +8,11 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 const MIN_REASON_LENGTH = 10
 
@@ -17,16 +22,26 @@ const MIN_REASON_LENGTH = 10
  * Practice: APPROVE required. Service owner/admin/write roles unchanged (approve maps to write).
  */
 export async function POST(request: NextRequest) {
+  const routeT0 = performance.now()
+  const diag = createRouteDiag("accounting_reversal")
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0) }]),
+    })
+
   try {
+    const tAuth = performance.now()
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
 
     if (!user) {
-      return NextResponse.json(
+      return respond(
         { error: "Unauthorized", reason_code: "UNAUTHENTICATED" },
-        { status: 401 }
+        401
       )
     }
 
@@ -83,14 +98,19 @@ export async function POST(request: NextRequest) {
       businessId,
       requiredLevel: "approve",
     })
+    if (authResult.timings) {
+      diag.recordTiming("role", authResult.timings.role_ms)
+      diag.recordTiming("authority", authResult.timings.authority_ms)
+    }
     if (!authResult.ok) {
       const denied = deniedMutationResponse(authResult, "approve", "reverse this journal")
-      return NextResponse.json(denied.body, { status: denied.status })
+      return respond(denied.body, denied.status)
     }
 
     const dataClient = getAccountingDataClient(authResult, supabase)
     const resolvedBusinessId = authResult.businessId
 
+    const tLookup = performance.now()
     const { data: originalJe, error: fetchError } = await dataClient
       .from("journal_entries")
       .select("id, business_id, date, description, period_id, reference_type, reference_id")
@@ -196,6 +216,8 @@ export async function POST(request: NextRequest) {
       description: l.description,
     }))
 
+    diag.recordTiming("lookup", timedStepMs(tLookup), "journal+period")
+    const tRpc = performance.now()
     const { data: journalEntryId, error: postError } = await dataClient.rpc("post_journal_entry", {
       p_business_id: resolvedBusinessId,
       p_date: reversal_date,
@@ -215,11 +237,12 @@ export async function POST(request: NextRequest) {
       p_is_revenue_correction: false,
     })
 
+    diag.recordTiming("rpc", timedStepMs(tRpc), "post_journal_entry")
     if (postError) {
       console.error("Reversal: post_journal_entry error", postError)
-      return NextResponse.json(
+      return respond(
         { error: postError.message || "Failed to post reversal journal entry" },
-        { status: 500 }
+        500
       )
     }
 
@@ -230,6 +253,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const tAudit = performance.now()
     await logAudit({
       businessId: resolvedBusinessId,
       userId: user.id,
@@ -272,15 +296,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    diag.recordTiming("audit", timedStepMs(tAudit))
+    return respond({
       reversal_journal_entry_id: journalEntryId,
       original_journal_entry_id: original_je_id,
-    })
+    }, 200)
   } catch (err: unknown) {
     console.error("Reversal API error:", err)
-    return NextResponse.json(
+    return respond(
       { error: err instanceof Error ? err.message : "Internal server error" },
-      { status: 500 }
+      500
     )
   }
 }

@@ -19,6 +19,11 @@ import { useServiceFinancialWrite } from "@/components/service/useServiceFinanci
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { useAccountingAuthority } from "@/lib/accounting/useAccountingAuthority"
 import { canApproveEngagement } from "@/lib/accounting/uiAuthority"
+import {
+  PERIODS_TTL_MS,
+  invalidateClientBooksPeriods,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 import type { ScreenProps } from "./types"
 
 type ClosedByUser = {
@@ -124,13 +129,16 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
     try {
       setLoading(true)
       setError("")
-      const response = await fetch(`/api/accounting/periods?business_id=${businessId}`)
+      const response = await sharedClientBooksJson<{
+        periods?: AccountingPeriod[]
+        error?: string
+      }>(`/api/accounting/periods?business_id=${businessId}`, { ttlMs: PERIODS_TTL_MS })
       
       if (!response.ok) {
         // Parse error response for better error messages
         let errorMessage = "Failed to load accounting periods"
         try {
-          const errorData = await response.json()
+          const errorData = response.json
           if (response.status === 400) {
             errorMessage = "Business context missing. Please refresh the page."
           } else if (response.status === 403) {
@@ -153,7 +161,7 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
         throw new Error(errorMessage)
       }
 
-      const data = await response.json()
+      const data = response.json
       setPeriods(data.periods || [])
       setLoading(false)
     } catch (err: any) {
@@ -234,7 +242,7 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
         throw new Error(errorData.error || "Failed to close period")
       }
 
-      // Reload periods to reflect new status
+      invalidateClientBooksPeriods(businessId)
       await loadPeriods()
     } catch (err: any) {
       setError(err.message || "Failed to close period")
@@ -265,7 +273,7 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
         throw new Error(errorData.error || "Failed to lock period")
       }
 
-      // Reload periods to reflect new status
+      invalidateClientBooksPeriods(businessId)
       await loadPeriods()
     } catch (err: any) {
       setError(err.message || "Failed to lock period")
@@ -309,6 +317,7 @@ export default function PeriodsScreen({ mode, businessId }: ScreenProps) {
 
       // Close modal and reload periods
       setReopenModal({ open: false, period: null, reason: "" })
+      invalidateClientBooksPeriods(businessId)
       await loadPeriods()
     } catch (err: any) {
       setError(err.message || "Failed to reopen period")

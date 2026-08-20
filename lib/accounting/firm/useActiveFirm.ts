@@ -10,6 +10,11 @@ import {
   type FirmMembershipOption,
   type ActiveFirmResolveReason,
 } from "@/lib/accounting/firm/resolveActiveFirm"
+import {
+  FIRMS_TTL_MS,
+  invalidateClientBooksFirms,
+  sharedClientBooksJson,
+} from "@/lib/accounting/clientBooksRequestShare"
 
 export type UseActiveFirmResult = {
   firmId: string | null
@@ -38,10 +43,13 @@ export function useActiveFirm(): UseActiveFirmResult {
   const [reason, setReason] = useState<ActiveFirmResolveReason | null>(null)
 
   const refresh = useCallback(async () => {
+    invalidateClientBooksFirms()
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/accounting/firm/firms", { cache: "no-store" })
+      const response = await sharedClientBooksJson<{
+        firms?: Array<{ firm_id: string; firm_name: string; role?: string | null }>
+      }>("/api/accounting/firm/firms", { ttlMs: FIRMS_TTL_MS })
       if (!response.ok) {
         setFirms([])
         setFirmId(null)
@@ -52,7 +60,7 @@ export function useActiveFirm(): UseActiveFirmResult {
         setError("Unable to load your firm. Try again.")
         return
       }
-      const data = await response.json()
+      const data = response.json
       const firmList: FirmMembershipOption[] = (data.firms || []).map(
         (f: { firm_id: string; firm_name: string; role?: string | null }) => ({
           firm_id: f.firm_id,
@@ -128,7 +136,9 @@ export async function hydrateActiveFirmFromMemberships(): Promise<{
   error: string | null
 }> {
   try {
-    const response = await fetch("/api/accounting/firm/firms", { cache: "no-store" })
+    const response = await sharedClientBooksJson<{
+      firms?: Array<{ firm_id: string; firm_name: string; role?: string | null }>
+    }>("/api/accounting/firm/firms", { ttlMs: FIRMS_TTL_MS })
     if (!response.ok) {
       return {
         firms: [],
@@ -138,7 +148,7 @@ export async function hydrateActiveFirmFromMemberships(): Promise<{
         error: "Unable to load your firm. Try again.",
       }
     }
-    const data = await response.json()
+    const data = response.json
     const firmList: FirmMembershipOption[] = (data.firms || []).map(
       (f: { firm_id: string; firm_name: string; role?: string | null }) => ({
         firm_id: f.firm_id,
