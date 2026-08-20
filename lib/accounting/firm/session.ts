@@ -14,21 +14,30 @@ export function getActiveFirmId(): string | null {
 export function setActiveFirmId(firmId: string | null, firmName?: string | null): void {
   if (typeof window === "undefined") return
 
-  if (firmId) {
-    sessionStorage.setItem(ACTIVE_FIRM_ID_KEY, firmId)
-    if (firmName) {
-      sessionStorage.setItem(ACTIVE_FIRM_NAME_KEY, firmName)
+  const prevId = sessionStorage.getItem(ACTIVE_FIRM_ID_KEY)
+  const nextId = firmId || null
+  const nextName = firmName ?? null
+
+  if (nextId) {
+    sessionStorage.setItem(ACTIVE_FIRM_ID_KEY, nextId)
+    if (nextName) {
+      sessionStorage.setItem(ACTIVE_FIRM_NAME_KEY, nextName)
     }
   } else {
     sessionStorage.removeItem(ACTIVE_FIRM_ID_KEY)
     sessionStorage.removeItem(ACTIVE_FIRM_NAME_KEY)
   }
 
+  // Skip redundant events when hydrate re-applies the same firm id.
+  if (prevId === nextId && nextId !== null) {
+    return
+  }
+
   // Clear client context on firm change.
   const { clearActiveClient } = require("./clientSession")
   clearActiveClient()
 
-  window.dispatchEvent(new CustomEvent("firmChanged", { detail: { firmId, firmName } }))
+  window.dispatchEvent(new CustomEvent("firmChanged", { detail: { firmId: nextId, firmName: nextName } }))
 }
 
 export function getActiveFirmName(): string | null {

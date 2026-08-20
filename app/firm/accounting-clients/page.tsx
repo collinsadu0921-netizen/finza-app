@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { getActiveFirmId } from "@/lib/firmSession"
+import { useActiveFirm } from "@/lib/accounting/firm/useActiveFirm"
 import { EngagementStatusBadge } from "@/components/EngagementStatusBadge"
 import BooksOnlyBadge from "@/components/BooksOnlyBadge"
 
@@ -33,30 +33,47 @@ export default function AccountingClientsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const returnTo = searchParams.get("return_to") ?? ""
+  const {
+    firmId: activeFirmId,
+    loading: firmLoading,
+    error: firmResolveError,
+    requiresSelection,
+  } = useActiveFirm()
   const [loading, setLoading] = useState(true)
   const [clients, setClients] = useState<Client[]>([])
   const [error, setError] = useState("")
   const [firmId, setFirmId] = useState<string | null>(null)
 
   useEffect(() => {
-    loadClients()
-  }, [])
+    if (firmLoading) return
+    void loadClients()
+  }, [firmLoading, activeFirmId, firmResolveError, requiresSelection])
 
   const loadClients = async () => {
     try {
       setLoading(true)
       setError("")
 
-      const activeFirmId = getActiveFirmId()
-      if (!activeFirmId) {
-        setError("No firm selected. Please select a firm first.")
+      if (firmResolveError) {
+        setError(firmResolveError)
+        setLoading(false)
+        return
+      }
+      if (requiresSelection || !activeFirmId) {
+        setError(
+          requiresSelection
+            ? "Select a firm to continue. You belong to more than one firm."
+            : "Select a firm to continue."
+        )
         setLoading(false)
         return
       }
 
       setFirmId(activeFirmId)
 
-      const response = await fetch(`/api/accounting/firm/clients`)
+      const response = await fetch(
+        `/api/accounting/firm/clients?firm_id=${encodeURIComponent(activeFirmId)}`
+      )
 
       if (!response.ok) {
         const errorData = await response.json()

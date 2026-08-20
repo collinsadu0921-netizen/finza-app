@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { getActiveFirmId } from "@/lib/accounting/firm/session"
+import { useActiveFirm } from "@/lib/accounting/firm/useActiveFirm"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { PRACTICE_HOME_PATH } from "@/lib/auth/signupWorkspace"
 
@@ -16,6 +16,12 @@ const COUNTRY_OPTIONS = [
  */
 export default function FirmOnboardingPage() {
   const router = useRouter()
+  const {
+    firmId: activeFirmId,
+    loading: firmLoading,
+    error: firmResolveError,
+    requiresSelection,
+  } = useActiveFirm()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [firmName, setFirmName] = useState("")
@@ -25,20 +31,31 @@ export default function FirmOnboardingPage() {
   const [jurisdiction, setJurisdiction] = useState("Ghana")
 
   useEffect(() => {
+    if (firmLoading) return
     void loadFirmData()
-  }, [])
+  }, [firmLoading, activeFirmId, firmResolveError, requiresSelection])
 
   const loadFirmData = async () => {
     try {
       setLoading(true)
       setError("")
 
-      const firmId = getActiveFirmId()
-      if (!firmId) {
-        setError("No firm selected")
+      if (firmResolveError) {
+        setError(firmResolveError)
         setLoading(false)
         return
       }
+      if (requiresSelection || !activeFirmId) {
+        setError(
+          requiresSelection
+            ? "Select a firm to continue. You belong to more than one firm."
+            : "Select a firm to continue."
+        )
+        setLoading(false)
+        return
+      }
+
+      const firmId = activeFirmId
 
       const response = await fetch(`/api/accounting/firm/onboarding/complete?firm_id=${firmId}`)
       if (!response.ok) {
@@ -68,8 +85,14 @@ export default function FirmOnboardingPage() {
     setSubmitting(true)
 
     try {
-      const firmId = getActiveFirmId()
-      if (!firmId) throw new Error("No firm selected")
+      const firmId = activeFirmId
+      if (!firmId) {
+        throw new Error(
+          requiresSelection
+            ? "Select a firm to continue. You belong to more than one firm."
+            : "Select a firm to continue."
+        )
+      }
 
       if (!legalName.trim() || !jurisdiction.trim()) {
         throw new Error("Legal name and country are required")

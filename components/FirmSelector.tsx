@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
-import { getActiveFirmId, setActiveFirmId, getActiveFirmName } from "@/lib/firmSession"
+import { getActiveFirmId, setActiveFirmId, getActiveFirmName } from "@/lib/accounting/firm/session"
+import { resolveActiveFirmFromMemberships } from "@/lib/accounting/firm/resolveActiveFirm"
 
 type Firm = {
   firm_id: string
@@ -12,9 +12,9 @@ type Firm = {
 }
 
 /**
- * Firm Selector Component
- * Allows accounting firm users to switch between multiple firms
- * Automatically clears client context on firm change
+ * Firm Selector — multi-firm switcher.
+ * Single-firm auto-hydration is handled centrally by resolveActiveFirmFromMemberships
+ * (shell / useActiveFirm); this component only renders when multiple firms exist.
  */
 export default function FirmSelector() {
   const router = useRouter()
@@ -22,63 +22,49 @@ export default function FirmSelector() {
   const [firms, setFirms] = useState<Firm[]>([])
   const [activeFirmId, setActiveFirmIdState] = useState<string | null>(null)
   const [activeFirmName, setActiveFirmNameState] = useState<string | null>(null)
-  const [activeFirmRole, setActiveFirmRole] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadFirms()
-    loadActiveFirm()
-    
-    // Listen for firm changes
+    void loadFirms()
+
     const handleFirmChange = (e: CustomEvent) => {
-      setActiveFirmIdState(e.detail.firmId)
-      setActiveFirmNameState(e.detail.firmName)
+      setActiveFirmIdState(e.detail?.firmId ?? null)
+      setActiveFirmNameState(e.detail?.firmName ?? null)
     }
-    
-    window.addEventListener('firmChanged', handleFirmChange as EventListener)
-    
+
+    window.addEventListener("firmChanged", handleFirmChange as EventListener)
     return () => {
-      window.removeEventListener('firmChanged', handleFirmChange as EventListener)
+      window.removeEventListener("firmChanged", handleFirmChange as EventListener)
     }
   }, [])
 
   const loadFirms = async () => {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        setLoading(false)
-        return
-      }
-
-      // Fetch firms from API
-      const response = await fetch('/api/accounting/firm/firms')
+      const response = await fetch("/api/accounting/firm/firms", { cache: "no-store" })
       if (!response.ok) {
         setLoading(false)
         return
       }
 
       const data = await response.json()
-      const firmList = (data.firms || []).map((f: any) => ({
-        firm_id: f.firm_id,
-        firm_name: f.firm_name,
-        role: f.role,
-      }))
+      const firmList: Firm[] = (data.firms || []).map(
+        (f: { firm_id: string; firm_name: string; role: Firm["role"] }) => ({
+          firm_id: f.firm_id,
+          firm_name: f.firm_name,
+          role: f.role,
+        })
+      )
       setFirms(firmList)
-      
-      // Auto-select first firm if only one and none selected
-      if (firmList.length === 1) {
-        const singleFirm = firmList[0]
-        const currentFirmId = getActiveFirmId()
-        if (!currentFirmId) {
-          setActiveFirmId(singleFirm.firm_id, singleFirm.firm_name)
-          setActiveFirmIdState(singleFirm.firm_id)
-          setActiveFirmNameState(singleFirm.firm_name)
-          setActiveFirmRole(singleFirm.role)
-        }
+
+      const resolution = resolveActiveFirmFromMemberships({
+        firms: firmList,
+        storedFirmId: getActiveFirmId(),
+      })
+      if (resolution.shouldPersist) {
+        setActiveFirmId(resolution.firmId, resolution.firmName)
       }
+      setActiveFirmIdState(resolution.firmId)
+      setActiveFirmNameState(resolution.firmName ?? getActiveFirmName())
     } catch (err) {
       console.error("Error loading firms:", err)
     } finally {
@@ -86,29 +72,13 @@ export default function FirmSelector() {
     }
   }
 
-  const loadActiveFirm = () => {
-    const firmId = getActiveFirmId()
-    const firmName = getActiveFirmName()
-    setActiveFirmIdState(firmId)
-    setActiveFirmNameState(firmName)
-    
-    // Find role for active firm
-    if (firmId) {
-      const firm = firms.find((f) => f.firm_id === firmId)
-      if (firm) {
-        setActiveFirmRole(firm.role)
-      }
-    }
-  }
-
   const handleFirmChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedFirmId = e.target.value
-    
+
     if (!selectedFirmId) {
       setActiveFirmId(null, null)
       setActiveFirmIdState(null)
       setActiveFirmNameState(null)
-      setActiveFirmRole(null)
       return
     }
 
@@ -117,11 +87,8 @@ export default function FirmSelector() {
       setActiveFirmId(selectedFirm.firm_id, selectedFirm.firm_name)
       setActiveFirmIdState(selectedFirm.firm_id)
       setActiveFirmNameState(selectedFirm.firm_name)
-      setActiveFirmRole(selectedFirm.role)
-      
-      // Reset cached state on firm switch
-      // Force page reload to clear any cached data
-      if (pathname?.startsWith('/accounting')) {
+
+      if (pathname?.startsWith("/accounting")) {
         router.refresh()
       }
     }
@@ -131,17 +98,14 @@ export default function FirmSelector() {
     return null
   }
 
-  // Don't show selector if no firms
   if (firms.length === 0) {
     return null
   }
 
-  // Only show in accounting workspace
-  if (!pathname?.startsWith('/accounting')) {
+  if (!pathname?.startsWith("/accounting")) {
     return null
   }
 
-  // Don't show if only one firm (auto-selected)
   if (firms.length === 1) {
     return null
   }

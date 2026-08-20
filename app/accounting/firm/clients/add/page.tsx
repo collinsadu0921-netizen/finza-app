@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useRouter } from "next/navigation"
-import { getActiveFirmId } from "@/lib/accounting/firm/session"
+import { useActiveFirm } from "@/lib/accounting/firm/useActiveFirm"
 import {
   shouldClearPracticeClientSelection,
   shouldRunPracticeClientSearch,
@@ -28,10 +28,14 @@ type EngagementFormData = {
  */
 export default function AddClientPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
+  const {
+    firmId,
+    role,
+    loading: firmLoading,
+    error: firmError,
+    requiresSelection,
+  } = useActiveFirm()
   const [submitting, setSubmitting] = useState(false)
-  const [firmId, setFirmId] = useState<string | null>(null)
-  const [userRole, setUserRole] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
@@ -45,9 +49,28 @@ export default function AddClientPage() {
     effective_to: null,
   })
 
+  const userRole = role
+  const loading = firmLoading
+
   useEffect(() => {
-    loadFirmData()
-  }, [])
+    if (firmLoading) return
+    if (firmError) {
+      setError(firmError)
+      return
+    }
+    if (requiresSelection) {
+      setError("Select a firm to continue. You belong to more than one firm.")
+      return
+    }
+    if (!firmId) {
+      setError("Select a firm to continue.")
+      return
+    }
+    setError("")
+    if (role && role !== "partner" && role !== "senior") {
+      setError("Only Partners and Seniors can add clients")
+    }
+  }, [firmLoading, firmError, requiresSelection, firmId, role])
 
   useEffect(() => {
     if (
@@ -68,42 +91,13 @@ export default function AddClientPage() {
     return () => window.clearTimeout(handle)
   }, [searchQuery, selectedBusiness, firmId])
 
-  const loadFirmData = async () => {
-    try {
-      setLoading(true)
-      const activeFirmId = getActiveFirmId()
-      if (!activeFirmId) {
-        setError("No firm selected")
-        setLoading(false)
-        return
-      }
-
-      setFirmId(activeFirmId)
-
-      const response = await fetch("/api/accounting/firm/firms")
-      if (response.ok) {
-        const data = await response.json()
-        const firm = data.firms?.find((f: any) => f.firm_id === activeFirmId)
-        if (firm) {
-          setUserRole(firm.role)
-          if (firm.role !== "partner" && firm.role !== "senior") {
-            setError("Only Partners and Seniors can add clients")
-            setLoading(false)
-            return
-          }
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to load firm data")
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const searchBusinesses = async (query: string) => {
-    const activeFirmId = getActiveFirmId() || firmId
-    if (!activeFirmId) {
-      setSearchError("No firm selected")
+    if (!firmId) {
+      setSearchError(
+        requiresSelection
+          ? "Select a firm to continue."
+          : "Unable to search until your firm is ready."
+      )
       setBusinesses([])
       return
     }
@@ -112,7 +106,7 @@ export default function AddClientPage() {
       setSearching(true)
       setSearchError("")
       const response = await fetch(
-        `/api/accounting/firm/clients/search?q=${encodeURIComponent(query)}&firm_id=${encodeURIComponent(activeFirmId)}`
+        `/api/accounting/firm/clients/search?q=${encodeURIComponent(query)}&firm_id=${encodeURIComponent(firmId)}`
       )
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
@@ -158,10 +152,12 @@ export default function AddClientPage() {
     setSubmitting(true)
 
     try {
-      const activeFirmId = getActiveFirmId() || firmId
-
-      if (!activeFirmId) {
-        throw new Error("No firm selected. Please select a firm from the firm selector.")
+      if (!firmId) {
+        throw new Error(
+          requiresSelection
+            ? "Select a firm to continue. You belong to more than one firm."
+            : "Select a firm to continue."
+        )
       }
 
       if (!formData.business_id || !selectedBusiness) {
@@ -186,7 +182,7 @@ export default function AddClientPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          firm_id: activeFirmId,
+          firm_id: firmId,
           business_id: formData.business_id,
           access_level: formData.access_level,
           effective_from: formData.effective_from,
@@ -214,7 +210,7 @@ export default function AddClientPage() {
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
+              <p className="mt-4 text-gray-600 dark:text-gray-400">Resolving your firm…</p>
             </div>
           </div>
         </div>
@@ -290,7 +286,8 @@ export default function AddClientPage() {
                     value={searchQuery}
                     onChange={(e) => handleSearchInputChange(e.target.value)}
                     placeholder="Search for business by name..."
-                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={!firmId}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                     autoComplete="off"
                   />
                   {businesses.length > 0 && (
@@ -436,7 +433,7 @@ export default function AddClientPage() {
                 <div className="flex gap-4">
                   <button
                     type="submit"
-                    disabled={submitting || !selectedBusiness}
+                    disabled={submitting || !selectedBusiness || !firmId}
                     className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                   >
                     {submitting ? "Creating..." : "Create Engagement"}

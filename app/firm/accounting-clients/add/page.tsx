@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useRouter } from "next/navigation"
-import { getActiveFirmId } from "@/lib/firmSession"
+import { useActiveFirm } from "@/lib/accounting/firm/useActiveFirm"
 
 /**
  * Add External Client (Books-Only) Page
@@ -22,10 +22,14 @@ import { getActiveFirmId } from "@/lib/firmSession"
  */
 export default function AddExternalClientPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
+  const {
+    firmId,
+    role: userRole,
+    loading,
+    error: firmError,
+    requiresSelection,
+  } = useActiveFirm()
   const [submitting, setSubmitting] = useState(false)
-  const [firmId, setFirmId] = useState<string | null>(null)
-  const [userRole, setUserRole] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [formData, setFormData] = useState({
     legal_name: "",
@@ -34,41 +38,25 @@ export default function AddExternalClientPage() {
   })
 
   useEffect(() => {
-    loadFirmData()
-  }, [])
-
-  const loadFirmData = async () => {
-    try {
-      setLoading(true)
-      const activeFirmId = getActiveFirmId()
-      if (!activeFirmId) {
-        setError("No firm selected")
-        setLoading(false)
-        return
-      }
-
-      setFirmId(activeFirmId)
-
-      // Get user's role in firm
-      const response = await fetch("/api/accounting/firm/firms")
-      if (response.ok) {
-        const data = await response.json()
-        const firm = data.firms?.find((f: any) => f.firm_id === activeFirmId)
-        if (firm) {
-          setUserRole(firm.role)
-          if (firm.role !== "partner" && firm.role !== "senior") {
-            setError("Only Partners and Seniors can add external clients")
-            setLoading(false)
-            return
-          }
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to load firm data")
-    } finally {
-      setLoading(false)
+    if (loading) return
+    if (firmError) {
+      setError(firmError)
+      return
     }
-  }
+    if (requiresSelection || !firmId) {
+      setError(
+        requiresSelection
+          ? "Select a firm to continue. You belong to more than one firm."
+          : "Select a firm to continue."
+      )
+      return
+    }
+    if (userRole && userRole !== "partner" && userRole !== "senior") {
+      setError("Only Partners and Seniors can add external clients")
+      return
+    }
+    setError("")
+  }, [loading, firmError, requiresSelection, firmId, userRole])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -77,7 +65,11 @@ export default function AddExternalClientPage() {
 
     try {
       if (!firmId) {
-        throw new Error("No firm selected")
+        throw new Error(
+          requiresSelection
+            ? "Select a firm to continue. You belong to more than one firm."
+            : "Select a firm to continue."
+        )
       }
 
       if (!formData.legal_name.trim()) {
