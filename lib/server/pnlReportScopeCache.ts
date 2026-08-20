@@ -20,6 +20,8 @@ export type PnlScopeCacheStatus = "hit" | "miss" | "disabled"
 export type PnlReportScopeAuthorityOk = {
   businessId: string
   role: string
+  /** True when access is via firm engagement (no Service membership). */
+  isPractice: boolean
   authority: AccountingAuthorityResult & {
     authorized: true
     authority_source: NonNullable<AccountingAuthorityResult["authority_source"]>
@@ -30,6 +32,7 @@ type CacheEntry = {
   expiresAt: number
   businessId: string
   role: string
+  isPractice: boolean
   authority_source: NonNullable<AccountingAuthorityResult["authority_source"]>
 }
 
@@ -78,6 +81,7 @@ function entryToResult(
     value: {
       businessId: entry.businessId,
       role: entry.role,
+      isPractice: entry.isPractice,
       authority: {
         authorized: true,
         businessId: entry.businessId,
@@ -99,6 +103,7 @@ function cachePositiveExplicitResult(
     expiresAt: Date.now() + ms,
     businessId: value.businessId,
     role: value.role,
+    isPractice: value.isPractice,
     authority_source: value.authority.authority_source,
   })
   if (store.size > 500) {
@@ -118,11 +123,57 @@ async function loadScopeAndAuthority(
     typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
   const explicitBusinessId = trimmed.length > 0 ? trimmed : null
 
-  let knownRole: string | null | undefined = undefined
+  // Explicit business_id (Practice Open Books always sends this):
+  // authorize via checkAccountingAuthority WITHOUT requiring business_users first.
   if (explicitBusinessId) {
-    knownRole = await getUserRole(supabase, userId, explicitBusinessId)
+    const knownRole = await getUserRole(supabase, userId, explicitBusinessId)
+    const authority = await checkAccountingAuthority(
+      supabase,
+      userId,
+      explicitBusinessId,
+      "read",
+      knownRole
+    )
+
+    if (!authority.authorized || !authority.authority_source) {
+      return {
+        ok: false,
+        scope: { ok: true, businessId: explicitBusinessId },
+        authority,
+        pnlScopeCacheStatus: "miss",
+      }
+    }
+
+    // Practice firm users have no Service role — use synthetic role for downstream P&L code.
+    const isPractice = !knownRole && authority.authority_source === "accountant"
+    const role = knownRole ?? (isPractice ? "accountant" : null)
+    if (!role) {
+      return {
+        ok: false,
+        scope: { ok: true, businessId: explicitBusinessId },
+        authority,
+        pnlScopeCacheStatus: "miss",
+      }
+    }
+
+    return {
+      ok: true,
+      value: {
+        businessId: explicitBusinessId,
+        role,
+        isPractice,
+        authority: {
+          authorized: true,
+          businessId: explicitBusinessId,
+          authority_source: authority.authority_source,
+        },
+      },
+      pnlScopeCacheStatus: "miss",
+    }
   }
 
+  // Implicit business (Service owner default workspace) — keep legacy scope helper.
+  let knownRole: string | null | undefined = undefined
   const scope = await resolveBusinessScopeForUser(supabase, userId, requestedBusinessId, {
     knownRole,
   })
@@ -130,6 +181,8 @@ async function loadScopeAndAuthority(
   if (!scope.ok) {
     return { ok: false, scope, pnlScopeCacheStatus: "miss" }
   }
+
+  knownRole = await getUserRole(supabase, userId, scope.businessId)
 
   const authority = await checkAccountingAuthority(
     supabase,
@@ -143,11 +196,7 @@ async function loadScopeAndAuthority(
     return { ok: false, scope, authority, pnlScopeCacheStatus: "miss" }
   }
 
-  const role =
-    knownRole !== undefined && knownRole !== null
-      ? knownRole
-      : await getUserRole(supabase, userId, scope.businessId)
-
+  const role = knownRole
   if (!role) {
     return { ok: false, scope, authority, pnlScopeCacheStatus: "miss" }
   }
@@ -157,6 +206,7 @@ async function loadScopeAndAuthority(
     value: {
       businessId: scope.businessId,
       role,
+      isPractice: false,
       authority: {
         authorized: true,
         businessId: scope.businessId,

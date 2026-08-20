@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * GET /api/accounting/coa?business_id=...
@@ -55,19 +58,25 @@ export async function GET(request: NextRequest) {
     }
     const businessId = resolved.businessId
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
-    if (!authResult.authorized) {
+    const authResult = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId,
+      requiredLevel: "read",
+    })
+    if (!authResult.ok) {
       return NextResponse.json(
-        { error: "Unauthorized. Only admins, owners, or accountants can access Chart of Accounts." },
-        { status: 403 }
+        { error: authResult.error, reason_code: authResult.reasonCode },
+        { status: authResult.status }
       )
     }
 
     const tierBlockCoa = await enforceServiceIndustryBusinessTierForAccountingApi(supabase, user.id, businessId)
     if (tierBlockCoa) return tierBlockCoa
 
+    const dataClient = getAccountingDataClient(authResult, supabase)
     // Get all accounts for business (read-only, no mutations)
-    const { data: accounts, error } = await supabase
+    const { data: accounts, error } = await dataClient
       .from("accounts")
       .select("id, code, name, type, description, is_system, sub_type")
       .eq("business_id", businessId)

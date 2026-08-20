@@ -166,7 +166,7 @@ describe("GET /api/accounting/reports/profit-and-loss", () => {
     await GET(req)
 
     expect(mockGetUserRole).toHaveBeenCalledTimes(1)
-    expect(mockResolveScope).toHaveBeenCalledTimes(1)
+    expect(mockResolveScope).toHaveBeenCalledTimes(0)
     expect(mockCheckAuthority).toHaveBeenCalledTimes(1)
   })
 

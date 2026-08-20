@@ -28,6 +28,7 @@ import {
   type ReportsPnlDiagnostics,
 } from "@/lib/server/reportsPnlRefreshPolicy"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 
 function attachReportsDiagnostics(
   payload: PnLReportResponse,
@@ -104,14 +105,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { businessId, authority } = gate.value
+    const { businessId, authority, isPractice } = gate.value
     diag = createRouteDiag("reports_pnl", businessId)
+    // Practice users fail Service RLS on accounts/snapshots; use scoped privileged client after auth.
+    const dataClient = isPractice ? createSupabaseAdminClient() : supabase
 
     diag.step("auth", {
       ms_auth: Math.round((performance.now() - tAuth) * 10) / 10,
       auth_source: auth.authSource,
       reports_refresh_on_request: refreshOnRequest ? "enabled" : "disabled",
       pnl_scope_cache: gate.pnlScopeCacheStatus,
+      is_practice: isPractice,
     })
 
     const reportInput = {
@@ -126,8 +130,8 @@ export async function GET(request: NextRequest) {
     // After authenticated scope: readiness and period resolution run concurrently.
     const tReadyPeriod = performance.now()
     const [readinessResult, periodResult] = await Promise.all([
-      checkAccountingReadinessForPnlRoute(supabase, businessId),
-      resolvePnLMovementRangeForPnlRoute(supabase, reportInput),
+      checkAccountingReadinessForPnlRoute(dataClient, businessId),
+      resolvePnLMovementRangeForPnlRoute(dataClient, reportInput),
     ])
     const msReadyPeriod = timedStepMs(tReadyPeriod)
 
@@ -207,7 +211,7 @@ export async function GET(request: NextRequest) {
             snapshotStale: false,
           }
           const { data, error } = await getProfitAndLossReport(
-            supabase,
+            dataClient,
             reportInput,
             {
               refreshOnRequest,

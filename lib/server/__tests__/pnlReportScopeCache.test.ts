@@ -64,18 +64,26 @@ describe("pnlReportScopeCache", () => {
     expect(second.ok).toBe(true)
     expect(second.ok && second.pnlScopeCacheStatus).toBe("hit")
     expect(mockGetUserRole).toHaveBeenCalledTimes(1)
-    expect(mockResolveScope).toHaveBeenCalledTimes(1)
+    // Explicit business_id must not require business_users scope.
+    expect(mockResolveScope).toHaveBeenCalledTimes(0)
     expect(mockCheckAuthority).toHaveBeenCalledTimes(1)
   })
 
-  it("does not cache scope failures", async () => {
-    mockResolveScope.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" })
+  it("allows Practice firm user with no Service role when authority grants", async () => {
+    mockGetUserRole.mockResolvedValue(null)
+    mockCheckAuthority.mockResolvedValue({
+      authorized: true,
+      businessId: "biz-a",
+      authority_source: "accountant",
+    })
 
-    await resolvePnlReportScopeAndAuthority(supabase, "user-1", "biz-a")
-    await resolvePnlReportScopeAndAuthority(supabase, "user-1", "biz-a")
-
-    expect(mockGetUserRole).toHaveBeenCalledTimes(2)
-    expect(mockResolveScope).toHaveBeenCalledTimes(2)
+    const result = await resolvePnlReportScopeAndAuthority(supabase, "firm-user", "biz-a")
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.role).toBe("accountant")
+      expect(result.value.authority.authority_source).toBe("accountant")
+    }
+    expect(mockResolveScope).not.toHaveBeenCalled()
   })
 
   it("does not cache authority denials", async () => {
@@ -88,5 +96,10 @@ describe("pnlReportScopeCache", () => {
     await resolvePnlReportScopeAndAuthority(supabase, "user-1", "biz-a")
 
     expect(mockCheckAuthority).toHaveBeenCalledTimes(2)
+  })
+
+  it("still uses resolveBusinessScopeForUser for implicit business", async () => {
+    await resolvePnlReportScopeAndAuthority(supabase, "user-1", null)
+    expect(mockResolveScope).toHaveBeenCalled()
   })
 })

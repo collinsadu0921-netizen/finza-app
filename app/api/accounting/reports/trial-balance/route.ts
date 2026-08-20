@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * GET /api/accounting/reports/trial-balance
@@ -64,16 +67,16 @@ export async function GET(request: NextRequest) {
     }
     const resolvedBusinessId = resolved.businessId
 
-    const auth = await checkAccountingAuthority(
+    const authResult = await resolveAccountingRequestAuthority({
       supabase,
-      user.id,
-      resolvedBusinessId,
-      "read"
-    )
-    if (!auth.authorized) {
+      userId: user.id,
+      businessId: resolvedBusinessId,
+      requiredLevel: "read",
+    })
+    if (!authResult.ok) {
       return NextResponse.json(
-        { error: "This action isn't available to your role." },
-        { status: 403 }
+        { error: authResult.error, reason_code: authResult.reasonCode },
+        { status: authResult.status }
       )
     }
 
@@ -84,11 +87,17 @@ export async function GET(request: NextRequest) {
     )
     if (tierBlockTb) return tierBlockTb
 
-    if (!canUserInitializeAccounting(auth.authority_source)) {
-      const { ready } = await checkAccountingReadiness(supabase, resolvedBusinessId)
+    const dataClient = getAccountingDataClient(authResult, supabase)
+
+    if (!canUserInitializeAccounting(authResult.authoritySource === "practice" ? "accountant" : authResult.authoritySource)) {
+      const { ready } = await checkAccountingReadiness(dataClient, resolvedBusinessId)
       if (!ready) {
         return NextResponse.json(
-          { error: "ACCOUNTING_NOT_READY", business_id: resolvedBusinessId, authority_source: auth.authority_source },
+          {
+            error: "ACCOUNTING_NOT_READY",
+            business_id: resolvedBusinessId,
+            authority_source: authResult.authoritySource,
+          },
           { status: 403 }
         )
       }
@@ -96,7 +105,11 @@ export async function GET(request: NextRequest) {
       const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, resolvedBusinessId)
       if (bootstrapErr) {
         return NextResponse.json(
-          { error: "ACCOUNTING_NOT_READY", business_id: resolvedBusinessId, authority_source: auth.authority_source },
+          {
+            error: "ACCOUNTING_NOT_READY",
+            business_id: resolvedBusinessId,
+            authority_source: authResult.authoritySource,
+          },
           { status: 500 }
         )
       }
@@ -104,8 +117,15 @@ export async function GET(request: NextRequest) {
     }
 
     const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
-      supabase,
-      { businessId: resolvedBusinessId, period_id: periodId, period_start: periodStart, as_of_date: asOfDate, start_date: startDate, end_date: endDate }
+      dataClient,
+      {
+        businessId: resolvedBusinessId,
+        period_id: periodId,
+        period_start: periodStart,
+        as_of_date: asOfDate,
+        start_date: startDate,
+        end_date: endDate,
+      }
     )
     if (resolveError || !resolvedPeriod) {
       return NextResponse.json(
@@ -114,9 +134,12 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: trialBalance, error: rpcError } = await supabase.rpc("get_trial_balance_from_snapshot", {
-      p_period_id: resolvedPeriod.period_id,
-    })
+    const { data: trialBalance, error: rpcError } = await dataClient.rpc(
+      "get_trial_balance_from_snapshot",
+      {
+        p_period_id: resolvedPeriod.period_id,
+      }
+    )
 
     if (rpcError) {
       console.error("Error fetching trial balance:", rpcError)

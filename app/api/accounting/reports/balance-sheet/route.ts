@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * GET /api/accounting/reports/balance-sheet
@@ -47,19 +50,30 @@ export async function GET(request: NextRequest) {
     }
     const businessId = resolved.businessId
 
-    const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
-    if (!auth.authorized) {
+    const auth = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId,
+      requiredLevel: "read",
+    })
+    if (!auth.ok) {
       return NextResponse.json(
-        { error: "Unauthorized. Only admins, owners, or accountants can view balance sheet." },
-        { status: 403 }
+        { error: auth.error, reason_code: auth.reasonCode },
+        { status: auth.status }
       )
     }
 
-    if (!canUserInitializeAccounting(auth.authority_source)) {
-      const { ready } = await checkAccountingReadiness(supabase, businessId)
+    const dataClient = getAccountingDataClient(auth, supabase)
+
+    if (!canUserInitializeAccounting(auth.isPractice ? "accountant" : auth.authoritySource)) {
+      const { ready } = await checkAccountingReadiness(dataClient, businessId)
       if (!ready) {
         return NextResponse.json(
-          { error: "ACCOUNTING_NOT_READY", business_id: businessId, authority_source: auth.authority_source },
+          {
+            error: "ACCOUNTING_NOT_READY",
+            business_id: businessId,
+            authority_source: auth.authoritySource,
+          },
           { status: 403 }
         )
       }
@@ -67,7 +81,7 @@ export async function GET(request: NextRequest) {
       await supabase.rpc("create_system_accounts", { p_business_id: businessId })
     }
 
-    const { data, error } = await getBalanceSheetReport(supabase, {
+    const { data, error } = await getBalanceSheetReport(dataClient, {
       businessId,
       period_id: searchParams.get("period_id") ?? undefined,
       period_start: searchParams.get("period_start") ?? undefined,
@@ -86,7 +100,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Render balance sheet even when trial balance is not balanced; UI shows warning + imbalance.
     return NextResponse.json(data)
   } catch (err: unknown) {
     console.error("Error in balance sheet:", err)

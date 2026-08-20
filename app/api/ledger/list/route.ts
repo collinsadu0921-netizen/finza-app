@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/accountingBootstrap"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,11 +28,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, businessId, "read")
-    if (!authResult.authorized) {
+    const authResult = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId,
+      requiredLevel: "read",
+    })
+    if (!authResult.ok) {
       return NextResponse.json(
-        { error: "This action isn't available to your role." },
-        { status: 403 }
+        { error: authResult.error, reason_code: authResult.reasonCode },
+        { status: authResult.status }
       )
     }
 
@@ -40,14 +48,16 @@ export async function GET(request: NextRequest) {
     )
     if (tierBlockLedgerList) return tierBlockLedgerList
 
-    if (canUserInitializeAccounting(authResult.authority_source)) {
+    const dataClient = getAccountingDataClient(authResult, supabase)
+
+    if (canUserInitializeAccounting(authResult.isPractice ? "accountant" : authResult.authoritySource)) {
       const bootstrap = await ensureAccountingInitialized(supabase, businessId)
       if (bootstrap.error) {
         const structured = bootstrap.structuredError
         const body = {
           error: "ACCOUNTING_NOT_READY",
           business_id: businessId,
-          authority_source: authResult.authority_source,
+          authority_source: authResult.authoritySource,
           ...(structured && {
             error_code: structured.error_code,
             message: structured.message,
@@ -69,7 +79,7 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1)
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("page_size") || "25", 10) || 25))
 
-    let query = supabase
+    let query = dataClient
       .from("journal_entries")
       .select(
         `
@@ -111,7 +121,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (accountId || accountCode) {
-      let idQuery = supabase
+      let idQuery = dataClient
         .from("journal_entries")
         .select("id, journal_entry_lines!inner(account_id, accounts!inner(code))")
         .eq("business_id", businessId)
