@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { logAudit } from "@/lib/auditLog"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import {
+  deniedMutationResponse,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
@@ -77,12 +80,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
-    if (!authResult.authorized) {
-      return NextResponse.json(
-        { error: "Unauthorized. Only accountants with write access can close or lock periods." },
-        { status: 403 }
+    const practiceRequired =
+      action === "approve_close" || action === "lock" || action === "reject_close"
+        ? "approve"
+        : "write"
+    const practiceAuth = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: resolvedBusinessId,
+      requiredLevel: practiceRequired,
+    })
+    if (!practiceAuth.ok) {
+      const denied = deniedMutationResponse(
+        practiceAuth,
+        practiceRequired,
+        action === "approve_close" || action === "lock" || action === "reject_close"
+          ? "approve or lock this period"
+          : "close this period"
       )
+      return NextResponse.json(denied.body, { status: denied.status })
     }
 
     const tierBlockClose = await enforceServiceIndustryBusinessTierForAccountingWrite(

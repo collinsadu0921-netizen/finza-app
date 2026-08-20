@@ -22,10 +22,46 @@ const mockSupabase = {
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(() => Promise.resolve(mockSupabase)),
 }))
+jest.mock("@/lib/accounting/permissions", () => ({
+  assertAccountingAccess: jest.fn(),
+  accountingUserFromRequest: jest.fn(() => ({
+    workspace: "accounting",
+    permissions: ["accounting:read", "accounting:write"],
+  })),
+}))
+jest.mock("@/lib/accounting/resolveAccountingContext", () => ({
+  resolveAccountingContext: jest.fn(() =>
+    Promise.resolve({ businessId: "b1000000-0000-0000-0000-000000000001" })
+  ),
+}))
+jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi", () => ({
+  enforceServiceIndustryBusinessTierForAccountingWrite: jest.fn(() => Promise.resolve(null)),
+}))
 jest.mock("@/lib/accounting/auth", () => ({
   checkAccountingAuthority: jest.fn(() =>
     Promise.resolve({ authorized: true, businessId })
   ),
+}))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => ({
+  resolveAccountingRequestAuthority: jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      userId: "u3000000-0000-0000-0000-000000000003",
+      businessId: "b1000000-0000-0000-0000-000000000001",
+      requiredLevel: "write",
+      grantedLevel: "owner",
+      authoritySource: "owner",
+      isPractice: false,
+      firmId: null,
+      engagementId: null,
+      practiceRole: null,
+      assignmentScoped: false,
+      reason: null,
+      serviceRole: "owner",
+    })
+  ),
+  deniedMutationResponse: jest.requireActual("@/lib/accounting/resolveAccountingRequestAuthority")
+    .deniedMutationResponse,
 }))
 jest.mock("@/lib/accounting/firm/onboarding", () => ({
   checkFirmOnboardingForAction: jest.fn(() =>

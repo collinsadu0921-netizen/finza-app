@@ -536,6 +536,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         original_je_id: reversalEntry.id,
+        business_id: businessId,
         reason: payload.reason,
         reversal_date: payload.reversal_date || undefined,
       }),

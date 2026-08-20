@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
-import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/firm/engagements"
-import { resolveAuthority } from "@/lib/accounting/firm/authority"
-import { logBlockedActionAttempt, logFirmActivity } from "@/lib/accounting/firm/activityLog"
+import { getActiveEngagement } from "@/lib/accounting/firm/engagements"
+import { logFirmActivity } from "@/lib/accounting/firm/activityLog"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import {
+  deniedMutationResponse,
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
@@ -329,8 +333,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Verify business exists
-    const { data: business } = await supabase
+    const capability = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: client_business_id,
+      requiredLevel: "write",
+    })
+    if (!capability.ok) {
+      const denied = deniedMutationResponse(capability, "write", "create journal drafts")
+      return NextResponse.json(
+        { reasonCode: denied.body.reason_code, message: denied.body.error, error: denied.body.error },
+        { status: denied.status }
+      )
+    }
+
+    const dataClient = getAccountingDataClient(capability, supabase)
+    const isOwnerMode = !capability.isPractice
+
+    const { data: business } = await dataClient
       .from("businesses")
       .select("id")
       .eq("id", client_business_id)
@@ -346,8 +366,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify period exists
-    const { data: period } = await supabase
+    const { data: period } = await dataClient
       .from("accounting_periods")
       .select("id, status, period_start, period_end")
       .eq("id", period_id)
@@ -364,7 +383,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check period is open (allows posting)
     if (period.status === "locked") {
       return NextResponse.json(
         {
@@ -375,7 +393,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check entry_date is within period
     const entryDate = new Date(entry_date)
     if (entryDate < new Date(period.period_start) || entryDate > new Date(period.period_end)) {
       return NextResponse.json(
@@ -387,7 +404,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check firm onboarding (firm path); owner-mode when firmId missing
     const onboardingCheck = await checkFirmOnboardingForAction(
       supabase,
       user.id,
@@ -403,21 +419,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const isOwnerMode = !onboardingCheck.firmId
-
     if (isOwnerMode) {
-      // ---------- Owner-mode: require accounting authority ----------
-      const auth = await checkAccountingAuthority(supabase, user.id, client_business_id, "write")
-      if (!auth.authorized) {
-        return NextResponse.json(
-          {
-            reasonCode: "FORBIDDEN",
-            message: "You do not have write access to this business",
-          },
-          { status: 403 }
-        )
-      }
-
       const tierBlockDraftPost = await enforceServiceIndustryBusinessTierForAccountingWrite(
         supabase,
         user.id,
@@ -425,80 +427,6 @@ export async function POST(request: NextRequest) {
         "business"
       )
       if (tierBlockDraftPost) return tierBlockDraftPost
-    } else {
-      // ---------- Firm-mode: engagement + resolveAuthority ----------
-      const { data: firmUser } = await supabase
-        .from("accounting_firm_users")
-        .select("role")
-        .eq("firm_id", onboardingCheck.firmId)
-        .eq("user_id", user.id)
-        .maybeSingle()
-
-      const engagement = await getActiveEngagement(
-        supabase,
-        onboardingCheck.firmId!,
-        client_business_id
-      )
-
-      if (!engagement) {
-        return NextResponse.json(
-          {
-            reasonCode: "NO_ENGAGEMENT",
-            message: "No active engagement found for this client",
-          },
-          { status: 403 }
-        )
-      }
-
-      if (!isEngagementEffective(engagement)) {
-        const today = new Date().toISOString().split("T")[0]
-        if (engagement.effective_from > today) {
-          return NextResponse.json(
-            {
-              reasonCode: "ENGAGEMENT_NOT_EFFECTIVE",
-              message: `Engagement is not yet effective. Effective date: ${engagement.effective_from}`,
-            },
-            { status: 403 }
-          )
-        }
-        if (engagement.effective_to && engagement.effective_to < today) {
-          return NextResponse.json(
-            {
-              reasonCode: "ENGAGEMENT_NOT_EFFECTIVE",
-              message: `Engagement has expired. Expired on: ${engagement.effective_to}`,
-            },
-            { status: 403 }
-          )
-        }
-      }
-
-      const authority = resolveAuthority({
-        firmRole: firmUser?.role as any || null,
-        engagementAccess: engagement.access_level as any || null,
-        action: "create_manual_journal_draft",
-        engagementStatus: engagement.status as any || null,
-      })
-
-      if (!authority.allowed) {
-        await logBlockedActionAttempt(
-          supabase,
-          onboardingCheck.firmId,
-          user.id,
-          "create_manual_journal_draft",
-          authority.reasonCode!,
-          authority.requiredEngagementAccess,
-          authority.requiredFirmRole,
-          client_business_id
-        )
-
-        return NextResponse.json(
-          {
-            reasonCode: authority.reasonCode || "INSUFFICIENT_AUTHORITY",
-            message: authority.reason || "Insufficient authority",
-          },
-          { status: 403 }
-        )
-      }
     }
 
     // Format lines for JSONB storage
@@ -526,7 +454,7 @@ export async function POST(request: NextRequest) {
           approved_at: nowIso,
         }
       : {
-          accounting_firm_id: onboardingCheck.firmId,
+          accounting_firm_id: capability.firmId || onboardingCheck.firmId,
           client_business_id,
           period_id,
           entry_date,
@@ -536,7 +464,7 @@ export async function POST(request: NextRequest) {
           created_by: user.id,
         }
 
-    const { data: draft, error: createError } = await supabase
+    const { data: draft, error: createError } = await dataClient
       .from("manual_journal_drafts")
       .insert(insertPayload)
       .select()
@@ -606,7 +534,7 @@ export async function POST(request: NextRequest) {
 
     await logFirmActivity({
       supabase,
-      firmId: onboardingCheck.firmId!,
+      firmId: (capability.firmId || onboardingCheck.firmId)!,
       actorUserId: user.id,
       actionType: "draft_created",
       entityType: "manual_journal_draft",

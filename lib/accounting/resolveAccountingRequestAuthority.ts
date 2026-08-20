@@ -50,6 +50,20 @@ export type AccountingRequestAuthorityDenied = {
 
 export type AccountingRequestAuthority = AccountingRequestAuthorityOk | AccountingRequestAuthorityDenied
 
+export function deniedMutationResponse(
+  auth: AccountingRequestAuthorityDenied,
+  requiredLevel: "write" | "approve",
+  action: string
+): { status: number; body: { error: string; reason_code: string } } {
+  const error =
+    auth.reasonCode === "INSUFFICIENT_ACCESS_LEVEL"
+      ? requiredLevel === "approve"
+        ? `Approve access is required to ${action}.`
+        : `Write access is required to ${action}.`
+      : auth.error
+  return { status: auth.status, body: { error, reason_code: auth.reasonCode } }
+}
+
 /**
  * Resolve whether the authenticated user may perform the required accounting
  * capability on an explicit client business.
@@ -85,6 +99,31 @@ export async function resolveAccountingRequestAuthority(opts: {
   )
 
   if (!base.authorized || !base.authority_source) {
+    // Practice READ (or other firm-gated) users fail the Service write gate
+    // before the firm engine runs. Re-query so the caller gets the precise
+    // engagement reason (INSUFFICIENT_ACCESS_LEVEL, ENGAGEMENT_PENDING, …)
+    // instead of a generic Forbidden.
+    const practiceRequired: AccessLevel =
+      opts.requiredLevel === "approve"
+        ? "approve"
+        : opts.requiredLevel === "write"
+          ? "write"
+          : "read"
+    const firmAuth = await getAccountingAuthority({
+      supabase: opts.supabase,
+      firmUserId: opts.userId,
+      businessId,
+      requiredLevel: practiceRequired,
+    })
+    if (firmAuth.firmId) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Forbidden",
+        reasonCode: firmAuth.reason || "INSUFFICIENT_AUTHORITY",
+        businessId,
+      }
+    }
     return {
       ok: false,
       status: 403,

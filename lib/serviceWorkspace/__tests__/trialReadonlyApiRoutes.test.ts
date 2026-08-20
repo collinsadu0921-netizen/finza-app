@@ -41,6 +41,29 @@ jest.mock("@/lib/accounting/auth", () => ({
   checkAccountingAuthority: jest.fn(() => Promise.resolve({ authorized: true })),
 }))
 
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => ({
+  resolveAccountingRequestAuthority: jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      userId: "user-1",
+      businessId: "biz-1",
+      requiredLevel: "write",
+      grantedLevel: "owner",
+      authoritySource: "owner",
+      isPractice: false,
+      firmId: null,
+      engagementId: null,
+      practiceRole: null,
+      assignmentScoped: false,
+      reason: null,
+      serviceRole: "owner",
+    })
+  ),
+  getAccountingDataClient: jest.fn((_auth: unknown, userScoped: unknown) => userScoped),
+  deniedMutationResponse: jest.requireActual("@/lib/accounting/resolveAccountingRequestAuthority")
+    .deniedMutationResponse,
+}))
+
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(() => Promise.resolve("owner")),
 }))

@@ -5,6 +5,10 @@ import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/fir
 import { buildCanonicalPostingPayload, validateCanonicalPayload } from "@/lib/accounting/manualJournalDraftPosting"
 import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import {
+  deniedMutationResponse,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
@@ -238,13 +242,17 @@ export async function POST(
         )
       }
 
-      if (engagement.access_level !== "approve") {
+      const capability = await resolveAccountingRequestAuthority({
+        supabase,
+        userId: user.id,
+        businessId: draft.client_business_id,
+        requiredLevel: "approve",
+      })
+      if (!capability.ok) {
+        const denied = deniedMutationResponse(capability, "approve", "post this journal")
         return NextResponse.json(
-          {
-            reasonCode: "INSUFFICIENT_ENGAGEMENT_ACCESS",
-            message: "Approve access level required to post to ledger",
-          },
-          { status: 403 }
+          { reasonCode: denied.body.reason_code, message: denied.body.error, error: denied.body.error },
+          { status: denied.status }
         )
       }
 

@@ -1,4 +1,5 @@
 import {
+  deniedMutationResponse,
   getAccountingDataClient,
   type AccountingRequestAuthorityOk,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
@@ -46,5 +47,37 @@ describe("resolveAccountingRequestAuthority missing business", () => {
       expect(r.reasonCode).toBe("MISSING_BUSINESS_ID")
       expect(r.status).toBe(400)
     }
+  })
+})
+
+describe("deniedMutationResponse", () => {
+  const denied = {
+    ok: false as const,
+    status: 403 as const,
+    error: "Forbidden",
+    reasonCode: "INSUFFICIENT_ACCESS_LEVEL",
+    businessId: "b1",
+  }
+
+  it("names approve when approve is required", () => {
+    const r = deniedMutationResponse(denied, "approve", "reverse this journal")
+    expect(r.status).toBe(403)
+    expect(r.body.reason_code).toBe("INSUFFICIENT_ACCESS_LEVEL")
+    expect(r.body.error).toBe("Approve access is required to reverse this journal.")
+  })
+
+  it("names write when write is required", () => {
+    const r = deniedMutationResponse(denied, "write", "create adjusting journals")
+    expect(r.body.error).toBe("Write access is required to create adjusting journals.")
+  })
+
+  it("keeps engagement-state codes unchanged", () => {
+    const r = deniedMutationResponse(
+      { ...denied, reasonCode: "ENGAGEMENT_PENDING" },
+      "approve",
+      "reverse this journal"
+    )
+    expect(r.body.reason_code).toBe("ENGAGEMENT_PENDING")
+    expect(r.body.error).toBe("Forbidden")
   })
 })

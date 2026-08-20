@@ -5,6 +5,10 @@ import { getActiveEngagement, isEngagementEffective } from "@/lib/accounting/fir
 import { assertBusinessNotArchived } from "@/lib/accounting/archivedBusiness"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import {
+  deniedMutationResponse,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * POST /api/accounting/opening-balances/{id}/post
@@ -99,6 +103,20 @@ export async function POST(
           message: "business_id is required"
         },
         { status: 400 }
+      )
+    }
+
+    const capability = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: existingImport.client_business_id,
+      requiredLevel: "approve",
+    })
+    if (!capability.ok) {
+      const denied = deniedMutationResponse(capability, "approve", "post opening balances")
+      return NextResponse.json(
+        { error: denied.body.error, reasonCode: denied.body.reason_code, message: denied.body.error },
+        { status: denied.status }
       )
     }
 

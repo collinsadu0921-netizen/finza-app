@@ -1,23 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { logAudit } from "@/lib/auditLog"
-import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
+import {
+  deniedMutationResponse,
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 const MIN_REASON_LENGTH = 10
 
 /**
  * POST /api/accounting/reversal
  *
- * Creates a reversal journal entry for a posted JE.
- * - New JE with reference_type='reversal', reference_id=original_je_id
- * - Lines: same accounts, debit/credit swapped
- * - Double-reversal guard: if already reversed, returns existing reversal JE id
- * - Period: reversal_date must fall in an open period
- * - No mutation of original journal entry
+ * Practice: APPROVE required. Service owner/admin/write roles unchanged (approve maps to write).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -27,23 +24,21 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    try {
-      assertAccountingAccess(accountingUserFromRequest(request))
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Forbidden"
-      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
+      return NextResponse.json(
+        { error: "Unauthorized", reason_code: "UNAUTHENTICATED" },
+        { status: 401 }
+      )
     }
 
     const body = await request.json().catch(() => ({}))
     const original_je_id = body.original_je_id as string | undefined
     const reason = typeof body.reason === "string" ? body.reason.trim() : ""
     const reversal_date_param = body.reversal_date as string | undefined
+    let businessId = typeof body.business_id === "string" ? body.business_id.trim() : ""
 
     if (!original_je_id) {
       return NextResponse.json(
-        { error: "original_je_id is required" },
+        { error: "original_je_id is required", reason_code: "JOURNAL_NOT_FOUND" },
         { status: 400 }
       )
     }
@@ -66,47 +61,55 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: originalJe, error: fetchError } = await supabase
+    if (!businessId) {
+      const { data: peek } = await supabase
+        .from("journal_entries")
+        .select("business_id")
+        .eq("id", original_je_id)
+        .maybeSingle()
+      businessId = (peek?.business_id as string | undefined) ?? ""
+    }
+
+    if (!businessId) {
+      return NextResponse.json(
+        { error: "business_id is required", reason_code: "MISSING_BUSINESS_ID" },
+        { status: 400 }
+      )
+    }
+
+    const authResult = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId,
+      requiredLevel: "approve",
+    })
+    if (!authResult.ok) {
+      const denied = deniedMutationResponse(authResult, "approve", "reverse this journal")
+      return NextResponse.json(denied.body, { status: denied.status })
+    }
+
+    const dataClient = getAccountingDataClient(authResult, supabase)
+    const resolvedBusinessId = authResult.businessId
+
+    const { data: originalJe, error: fetchError } = await dataClient
       .from("journal_entries")
       .select("id, business_id, date, description, period_id, reference_type, reference_id")
       .eq("id", original_je_id)
+      .eq("business_id", resolvedBusinessId)
       .maybeSingle()
 
     if (fetchError) {
       console.error("Reversal: fetch original JE error", fetchError)
       return NextResponse.json(
-        { error: "Failed to load journal entry" },
+        { error: "Failed to load journal entry", reason_code: "ACCOUNTING_DATA_UNAVAILABLE" },
         { status: 500 }
       )
     }
 
     if (!originalJe) {
       return NextResponse.json(
-        { error: "Journal entry not found" },
+        { error: "Journal entry not found", reason_code: "JOURNAL_NOT_FOUND" },
         { status: 404 }
-      )
-    }
-
-    const businessId = originalJe.business_id as string
-    const resolved = await resolveAccountingContext({
-      supabase,
-      userId: user.id,
-      searchParams: new URLSearchParams({ business_id: businessId }),
-      pathname: new URL(request.url).pathname,
-      source: "api",
-    })
-    if ("error" in resolved) {
-      return NextResponse.json(
-        { error: "Missing required parameter: business_id" },
-        { status: 400 }
-      )
-    }
-    const resolvedBusinessId = resolved.businessId
-    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
-    if (!authResult.authorized) {
-      return NextResponse.json(
-        { error: "You do not have permission to reverse journal entries for this business." },
-        { status: 403 }
       )
     }
 
@@ -122,12 +125,12 @@ export async function POST(request: NextRequest) {
     )
     if (inventoryBlock) {
       return NextResponse.json(
-        { error: inventoryBlock.error, code: inventoryBlock.code },
+        { error: inventoryBlock.error, code: inventoryBlock.code, reason_code: "JOURNAL_NOT_REVERSIBLE" },
         { status: 409 }
       )
     }
 
-    const { data: existingReversal } = await supabase
+    const { data: existingReversal } = await dataClient
       .from("journal_entries")
       .select("id")
       .eq("business_id", resolvedBusinessId)
@@ -144,7 +147,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const { data: period } = await supabase
+    const { data: period } = await dataClient
       .from("accounting_periods")
       .select("id, status, period_start, period_end")
       .eq("business_id", resolvedBusinessId)
@@ -157,12 +160,13 @@ export async function POST(request: NextRequest) {
         {
           error: "Reversal date must fall within an open accounting period.",
           code: "PERIOD_NOT_OPEN",
+          reason_code: "PERIOD_LOCKED",
         },
         { status: 400 }
       )
     }
 
-    const { data: lines } = await supabase
+    const { data: lines } = await dataClient
       .from("journal_entry_lines")
       .select("id, account_id, debit, credit, description")
       .eq("journal_entry_id", original_je_id)
@@ -192,7 +196,7 @@ export async function POST(request: NextRequest) {
       description: l.description,
     }))
 
-    const { data: journalEntryId, error: postError } = await supabase.rpc("post_journal_entry", {
+    const { data: journalEntryId, error: postError } = await dataClient.rpc("post_journal_entry", {
       p_business_id: resolvedBusinessId,
       p_date: reversal_date,
       p_description: description,
@@ -241,14 +245,10 @@ export async function POST(request: NextRequest) {
       request,
     })
 
-    // BUG 1 FIX: When reversing a payment JE, sync invoice status by soft-deleting
-    // the payment. Ledger already reflects reversal (reversal JE); payments table
-    // must be updated so recalculate_invoice_status (triggered on payment delete)
-    // reverts invoice status/amount_paid.
     const refType = originalJe.reference_type as string | null
     const refId = originalJe.reference_id as string | null
     if (refType === "payment" && refId) {
-      const { error: updatePaymentError } = await supabase
+      const { error: updatePaymentError } = await dataClient
         .from("payments")
         .update({
           deleted_at: new Date().toISOString(),

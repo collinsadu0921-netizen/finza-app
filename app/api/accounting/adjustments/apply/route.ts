@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { logAudit } from "@/lib/auditLog"
-import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import {
+  deniedMutationResponse,
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 /**
  * POST /api/accounting/adjustments/apply
@@ -47,14 +49,6 @@ export async function POST(request: NextRequest) {
       adjustment_ref,
     } = body
 
-    try {
-      assertAccountingAccess(accountingUserFromRequest(request))
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Forbidden"
-      return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
-    }
-
-    // Validate required fields
     if (!business_id || !period_start || !entry_date || !description || !lines) {
       return NextResponse.json(
         { error: "Missing required fields: business_id, period_start, entry_date, description, lines" },
@@ -62,20 +56,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const resolved = await resolveAccountingContext({
+    const authResult = await resolveAccountingRequestAuthority({
       supabase,
       userId: user.id,
-      searchParams: new URLSearchParams({ business_id: String(business_id) }),
-      pathname: new URL(request.url).pathname,
-      source: "api",
+      businessId: String(business_id),
+      requiredLevel: "write",
     })
-    if ("error" in resolved) {
-      return NextResponse.json(
-        { error: "Missing required fields: business_id, period_start, entry_date, description, lines" },
-        { status: 400 }
-      )
+    if (!authResult.ok) {
+      const denied = deniedMutationResponse(authResult, "write", "create adjusting journals")
+      return NextResponse.json(denied.body, { status: denied.status })
     }
-    const resolvedBusinessId = resolved.businessId
+
+    const resolvedBusinessId = authResult.businessId
+    const dataClient = getAccountingDataClient(authResult, supabase)
 
     const tierBlockAdj = await enforceServiceIndustryBusinessTierForAccountingWrite(
       supabase,
@@ -101,24 +94,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate period_start format (YYYY-MM-01)
+    if (!/^\d{4}-\d{2}-01$/.test(period_start)) {
+      return NextResponse.json(
+        { error: "period_start must be the first day of the month (YYYY-MM-01)" },
+        { status: 400 }
+      )
+    }
     const periodStartDate = new Date(period_start)
     if (isNaN(periodStartDate.getTime())) {
       return NextResponse.json(
         { error: "Invalid period_start format. Must be YYYY-MM-DD" },
-        { status: 400 }
-      )
-    }
-
-    // Verify period_start is first day of month
-    const expectedFirstDay = new Date(
-      periodStartDate.getFullYear(),
-      periodStartDate.getMonth(),
-      1
-    )
-    if (periodStartDate.getTime() !== expectedFirstDay.getTime()) {
-      return NextResponse.json(
-        { error: "period_start must be the first day of the month (YYYY-MM-01)" },
         { status: 400 }
       )
     }
@@ -171,7 +156,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify business exists (access will be checked by role check below)
-    const { data: business } = await supabase
+    const { data: business } = await dataClient
       .from("businesses")
       .select("id")
       .eq("id", resolvedBusinessId)
@@ -179,16 +164,8 @@ export async function POST(request: NextRequest) {
 
     if (!business) {
       return NextResponse.json(
-        { error: "Business not found" },
+        { error: "Business not found", reason_code: "BUSINESS_NOT_FOUND" },
         { status: 404 }
-      )
-    }
-
-    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
-    if (!authResult.authorized) {
-      return NextResponse.json(
-        { error: "Unauthorized. Only admins, owners, or accountants with write access can apply adjusting journals." },
-        { status: 403 }
       )
     }
 
@@ -202,7 +179,7 @@ export async function POST(request: NextRequest) {
     }))
 
     // PHASE 6: Call the canonical apply_adjusting_journal RPC function with adjustment metadata
-    const { data: journalEntryId, error: rpcError } = await supabase.rpc("apply_adjusting_journal", {
+    const { data: journalEntryId, error: rpcError } = await dataClient.rpc("apply_adjusting_journal", {
       p_business_id: resolvedBusinessId,
       p_period_start: period_start,
       p_entry_date: entry_date,
@@ -228,7 +205,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: periodRow } = await supabase
+    const { data: periodRow } = await dataClient
       .from("accounting_periods")
       .select("id")
       .eq("business_id", resolvedBusinessId)

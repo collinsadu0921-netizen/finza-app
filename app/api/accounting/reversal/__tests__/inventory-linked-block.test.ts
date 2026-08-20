@@ -7,16 +7,14 @@ import { NextRequest } from "next/server"
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(),
 }))
-jest.mock("@/lib/accounting/auth", () => ({
-  checkAccountingAuthority: jest.fn(),
-}))
-jest.mock("@/lib/accounting/permissions", () => ({
-  assertAccountingAccess: jest.fn(),
-  accountingUserFromRequest: jest.fn(() => ({ id: "u1" })),
-}))
-jest.mock("@/lib/accounting/resolveAccountingContext", () => ({
-  resolveAccountingContext: jest.fn(),
-}))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => {
+  const actual = jest.requireActual("@/lib/accounting/resolveAccountingRequestAuthority")
+  return {
+    ...actual,
+    resolveAccountingRequestAuthority: jest.fn(),
+    getAccountingDataClient: jest.fn((_auth: unknown, userScoped: unknown) => userScoped),
+  }
+})
 jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi", () => ({
   enforceServiceIndustryBusinessTierForAccountingApi: jest.fn(() => Promise.resolve(null)),
 }))
@@ -25,8 +23,7 @@ jest.mock("@/lib/auditLog", () => ({
 }))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { POST } from "../route"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -35,8 +32,21 @@ const JE_ID = "jjjjjjjj-jjjj-4jjj-8jjj-jjjjjjjjjjjj"
 describe("POST /api/accounting/reversal — inventory guard", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    jest.mocked(checkAccountingAuthority).mockResolvedValue({ authorized: true } as never)
-    jest.mocked(resolveAccountingContext).mockResolvedValue({ businessId: BUSINESS_ID } as never)
+    jest.mocked(resolveAccountingRequestAuthority).mockResolvedValue({
+      ok: true,
+      userId: "u1",
+      businessId: BUSINESS_ID,
+      requiredLevel: "approve",
+      grantedLevel: "owner",
+      authoritySource: "owner",
+      isPractice: false,
+      firmId: null,
+      engagementId: null,
+      practiceRole: null,
+      assignmentScoped: false,
+      reason: null,
+      serviceRole: "owner",
+    } as never)
   })
 
   it("rejects invoice_material_fulfilment with domain code", async () => {
@@ -78,6 +88,7 @@ describe("POST /api/accounting/reversal — inventory guard", () => {
       method: "POST",
       body: JSON.stringify({
         original_je_id: JE_ID,
+        business_id: BUSINESS_ID,
         reason: "Need to reverse this fulfilment entry",
       }),
     })
@@ -127,6 +138,7 @@ describe("POST /api/accounting/reversal — inventory guard", () => {
       method: "POST",
       body: JSON.stringify({
         original_je_id: JE_ID,
+        business_id: BUSINESS_ID,
         reason: "Need to reverse this return entry",
       }),
     })
@@ -175,6 +187,7 @@ describe("POST /api/accounting/reversal — inventory guard", () => {
       method: "POST",
       body: JSON.stringify({
         original_je_id: JE_ID,
+        business_id: BUSINESS_ID,
         reason: "Need to reverse this undo-return entry",
       }),
     })

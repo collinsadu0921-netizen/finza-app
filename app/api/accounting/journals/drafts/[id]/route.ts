@@ -6,6 +6,10 @@ import { resolveAuthority } from "@/lib/accounting/firm/authority"
 import { logBlockedActionAttempt, logFirmActivity } from "@/lib/accounting/firm/activityLog"
 import { getBusinessIdFromRequest, missingBusinessIdResponse } from "@/lib/accounting/requireBusinessId"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import {
+  deniedMutationResponse,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 /**
@@ -260,18 +264,21 @@ export async function PATCH(
 
     const isOwnerMode = draft.accounting_firm_id === null
 
-    if (isOwnerMode) {
-      const auth = await checkAccountingAuthority(supabase, user.id, draft.client_business_id, "write")
-      if (!auth.authorized) {
-        return NextResponse.json(
-          {
-            reasonCode: "FORBIDDEN",
-            message: "You do not have write access to this business",
-          },
-          { status: 403 }
-        )
-      }
+    const capability = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: draft.client_business_id,
+      requiredLevel: "write",
+    })
+    if (!capability.ok) {
+      const denied = deniedMutationResponse(capability, "write", "edit journal drafts")
+      return NextResponse.json(
+        { reasonCode: denied.body.reason_code, message: denied.body.error, error: denied.body.error },
+        { status: denied.status }
+      )
+    }
 
+    if (isOwnerMode) {
       const tierBlockDraftPatch = await enforceServiceIndustryBusinessTierForAccountingWrite(
         supabase,
         user.id,

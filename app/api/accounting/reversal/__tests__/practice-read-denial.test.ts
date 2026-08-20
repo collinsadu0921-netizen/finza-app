@@ -1,25 +1,10 @@
 /**
- * Reversal mutation must deny Practice READ (write+ required).
+ * Reversal mutation must deny Practice READ and WRITE (approve required).
  */
 import { NextRequest } from "next/server"
 
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(),
-}))
-jest.mock("@/lib/accounting/auth", () => ({
-  checkAccountingAuthority: jest.fn(),
-}))
-jest.mock("@/lib/accounting/permissions", () => ({
-  assertAccountingAccess: jest.fn(),
-  accountingUserFromRequest: jest.fn(() => ({
-    workspace: "accounting",
-    permissions: ["accounting:read", "accounting:write"],
-  })),
-}))
-jest.mock("@/lib/accounting/resolveAccountingContext", () => ({
-  resolveAccountingContext: jest.fn(async ({ searchParams }: { searchParams: URLSearchParams }) => ({
-    businessId: searchParams.get("business_id"),
-  })),
 }))
 jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi", () => ({
   enforceServiceIndustryBusinessTierForAccountingApi: jest.fn(async () => null),
@@ -27,50 +12,77 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountin
 jest.mock("@/lib/auditLog", () => ({
   logAudit: jest.fn(async () => undefined),
 }))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => {
+  const actual = jest.requireActual("@/lib/accounting/resolveAccountingRequestAuthority")
+  return {
+    ...actual,
+    resolveAccountingRequestAuthority: jest.fn(),
+    getAccountingDataClient: jest.fn((_auth: unknown, userScoped: unknown) => userScoped),
+  }
+})
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { POST as reversalPOST } from "@/app/api/accounting/reversal/route"
 
-const mockCheck = checkAccountingAuthority as jest.MockedFunction<typeof checkAccountingAuthority>
+const mockResolve = resolveAccountingRequestAuthority as jest.MockedFunction<
+  typeof resolveAccountingRequestAuthority
+>
 const mockCreateServer = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
 >
 
-describe("reversal Practice READ denial", () => {
-  it("READ cannot reverse via API", async () => {
-    const from = jest.fn(() => ({
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      maybeSingle: jest.fn(async () => ({
-        data: {
-          id: "je-1",
-          business_id: "biz-a",
-          date: "2026-03-01",
-          description: "Loan",
-          period_id: null,
-          reference_type: "manual",
-          reference_id: null,
-        },
-        error: null,
-      })),
-    }))
+describe("reversal Practice capability denial", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
     mockCreateServer.mockResolvedValue({
       auth: { getUser: jest.fn(async () => ({ data: { user: { id: "u1" } } })) },
-      from,
     } as never)
-    mockCheck.mockResolvedValue({ authorized: false, authority_source: null } as never)
+  })
 
+  it("READ cannot reverse via API", async () => {
+    mockResolve.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode: "INSUFFICIENT_ACCESS_LEVEL",
+      businessId: "biz-a",
+    })
     const req = new NextRequest("http://localhost/api/accounting/reversal", {
       method: "POST",
       body: JSON.stringify({
         original_je_id: "je-1",
+        business_id: "biz-a",
         reason: "UAT reverse denial reason",
       }),
       headers: { "Content-Type": "application/json" },
     })
     const res = await reversalPOST(req)
     expect(res.status).toBe(403)
-    expect((await res.json()).error).toMatch(/permission to reverse/i)
+    const body = await res.json()
+    expect(body.reason_code).toBe("INSUFFICIENT_ACCESS_LEVEL")
+    expect(body.error).toMatch(/Approve access is required/)
+  })
+
+  it("WRITE cannot reverse via API", async () => {
+    mockResolve.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode: "INSUFFICIENT_ACCESS_LEVEL",
+      businessId: "biz-a",
+    })
+    const res = await reversalPOST(
+      new NextRequest("http://localhost/api/accounting/reversal", {
+        method: "POST",
+        body: JSON.stringify({
+          original_je_id: "je-1",
+          business_id: "biz-a",
+          reason: "WRITE engagement reverse probe",
+        }),
+      })
+    )
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason_code).toBe("INSUFFICIENT_ACCESS_LEVEL")
   })
 })

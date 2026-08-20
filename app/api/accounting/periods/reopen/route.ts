@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { logAudit } from "@/lib/auditLog"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import {
+  deniedMutationResponse,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { checkFirmOnboardingForAction } from "@/lib/accounting/firm/onboarding"
@@ -92,12 +95,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const authResult = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "write")
-    if (!authResult.authorized) {
-      return NextResponse.json(
-        { error: "Unauthorized. Only accountants with write access can reopen periods." },
-        { status: 403 }
-      )
+    const practiceAuth = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: resolvedBusinessId,
+      requiredLevel: "approve",
+    })
+    if (!practiceAuth.ok) {
+      const denied = deniedMutationResponse(practiceAuth, "approve", "reopen this period")
+      return NextResponse.json(denied.body, { status: denied.status })
     }
 
     const tierBlockReopen = await enforceServiceIndustryBusinessTierForAccountingWrite(

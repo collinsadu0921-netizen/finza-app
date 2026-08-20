@@ -10,8 +10,8 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import ProtectedLayout from "@/components/ProtectedLayout"
-import { supabase } from "@/lib/supabaseClient"
-import { getUserRole, isUserAccountantReadonly } from "@/lib/userRoles"
+import { useAccountingAuthority } from "@/lib/accounting/useAccountingAuthority"
+import { canWriteEngagement } from "@/lib/accounting/uiAuthority"
 import AdjustmentDecisionHelper, { type AdjustmentPath } from "@/components/accounting/AdjustmentDecisionHelper"
 import ApprovalChainStatus from "@/components/accounting/ApprovalChainStatus"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
@@ -47,9 +47,8 @@ interface Props {
 
 export default function AdjustmentsContent({ businessId }: Props) {
   const router = useRouter()
+  const { authority_source, access_level, loading: authorityLoading } = useAccountingAuthority(businessId)
   const [loading, setLoading] = useState(true)
-  const [userRole, setUserRole] = useState<string | null>(null)
-  const [isReadonlyAccountant, setIsReadonlyAccountant] = useState(false)
   const [periods, setPeriods] = useState<AccountingPeriod[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [selectedPeriodStart, setSelectedPeriodStart] = useState<string | null>(null)
@@ -66,27 +65,8 @@ export default function AdjustmentsContent({ businessId }: Props) {
   const [selectedPath, setSelectedPath] = useState<AdjustmentPath | null>(null)
 
   useEffect(() => {
-    let cancelled = false
-    async function loadAuth() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user || cancelled) return
-        const [role, readonly] = await Promise.all([
-          getUserRole(supabase, user.id, businessId),
-          isUserAccountantReadonly(supabase, user.id, businessId),
-        ])
-        if (!cancelled) {
-          setUserRole(role)
-          setIsReadonlyAccountant(readonly)
-          setLoading(false)
-        }
-      } catch {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    loadAuth()
-    return () => { cancelled = true }
-  }, [businessId])
+    if (!authorityLoading) setLoading(false)
+  }, [authorityLoading])
 
   useEffect(() => {
     if (!businessId) return
@@ -205,7 +185,9 @@ export default function AdjustmentsContent({ businessId }: Props) {
   }
 
   const hasWriteAccess =
-    userRole === "admin" || userRole === "owner" || (userRole === "accountant" && !isReadonlyAccountant)
+    authority_source === "owner" ||
+    authority_source === "employee" ||
+    (authority_source === "accountant" && canWriteEngagement(access_level))
 
   if (loading) {
     return (
@@ -238,7 +220,7 @@ export default function AdjustmentsContent({ businessId }: Props) {
 
           {!hasWriteAccess ? (
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 text-yellow-700 dark:text-yellow-400 px-4 py-3 rounded">
-              <p>You do not have permission to create adjusting journals. Only admins, owners, or accountants with write access can create adjusting journals.</p>
+              <p>Write access is required to create adjusting journals. Ask a partner to raise this engagement from Read to Write.</p>
             </div>
           ) : (
             <>
