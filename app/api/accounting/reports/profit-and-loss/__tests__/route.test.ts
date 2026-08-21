@@ -20,6 +20,10 @@ jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
 jest.mock("@/lib/accounting/auth", () => ({
   checkAccountingAuthority: jest.fn(),
 }))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => ({
+  resolveAccountingRequestAuthority: jest.fn(),
+  getAccountingDataClient: jest.fn((_auth, client) => client),
+}))
 jest.mock("@/lib/server/pnlReportReadinessCache", () => ({
   checkAccountingReadinessForPnlRoute: jest.fn().mockResolvedValue({
     ready: true,
@@ -58,6 +62,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { checkAccountingReadinessForPnlRoute } from "@/lib/server/pnlReportReadinessCache"
 import { resolvePnLMovementRangeForPnlRoute } from "@/lib/server/pnlReportDefaultPeriodCache"
 import { getUserRole } from "@/lib/userRoles"
@@ -76,6 +81,9 @@ const mockResolveScope = resolveBusinessScopeForUser as jest.MockedFunction<
 >
 const mockCheckAuthority = checkAccountingAuthority as jest.MockedFunction<
   typeof checkAccountingAuthority
+>
+const mockResolveAuthority = resolveAccountingRequestAuthority as jest.MockedFunction<
+  typeof resolveAccountingRequestAuthority
 >
 const mockGetReport = getProfitAndLossReport as jest.MockedFunction<typeof getProfitAndLossReport>
 const mockGetUserRole = getUserRole as jest.MockedFunction<typeof getUserRole>
@@ -133,6 +141,31 @@ beforeEach(() => {
     authorized: true,
     authority_source: "owner",
   } as any)
+  mockResolveAuthority.mockResolvedValue({
+    ok: true,
+    userId: "user-1",
+    businessId: "biz-a",
+    requiredLevel: "read",
+    grantedLevel: "owner",
+    authoritySource: "owner",
+    isPractice: false,
+    firmId: null,
+    engagementId: null,
+    engagementStatus: null,
+    practiceRole: null,
+    assignmentScoped: false,
+    reason: null,
+    serviceRole: "owner",
+    timings: {
+      role_ms: 1,
+      authority_ms: 1,
+      membership_ms: 0,
+      engagement_ms: 0,
+      assignment_ms: 0,
+      total_ms: 2,
+      strategy: "parallel",
+    },
+  })
   mockGetReport.mockImplementation(async (_supabase, _input, _opts, loadMeta) => {
     if (loadMeta) {
       loadMeta.movementSource = "snapshot"
@@ -144,10 +177,13 @@ beforeEach(() => {
 
 describe("GET /api/accounting/reports/profit-and-loss", () => {
   it("returns 403 before cache when business access denied", async () => {
-    mockCheckAuthority.mockResolvedValue({
-      authorized: false,
-      authority_source: "employee",
-    } as any)
+    mockResolveAuthority.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode: "INSUFFICIENT_AUTHORITY",
+      businessId: "biz-a",
+    })
 
     const req = new NextRequest(
       "http://localhost/api/accounting/reports/profit-and-loss?business_id=biz-a"
@@ -165,9 +201,8 @@ describe("GET /api/accounting/reports/profit-and-loss", () => {
     await GET(req)
     await GET(req)
 
-    expect(mockGetUserRole).toHaveBeenCalledTimes(1)
+    expect(mockResolveAuthority).toHaveBeenCalledTimes(1)
     expect(mockResolveScope).toHaveBeenCalledTimes(0)
-    expect(mockCheckAuthority).toHaveBeenCalledTimes(1)
   })
 
   it("returns cached final response on repeated same-key request", async () => {

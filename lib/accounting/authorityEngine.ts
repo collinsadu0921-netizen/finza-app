@@ -6,13 +6,25 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { evaluateEngagementState } from "@/lib/accounting/evaluateEngagementState"
-import { isPracticeFirmRole } from "@/lib/practice/assignment/policy"
+import {
+  hasPortfolioWideVisibility,
+  isPracticeFirmRole,
+} from "@/lib/practice/assignment/policy"
 import {
   assertAssignedClientAccess,
   getAuthorizedClientBusinessIdsForUser,
 } from "@/lib/practice/assignment/scope"
+import { timedStepMs } from "@/lib/server/routeDiagnostics"
 
 export type AccessLevel = "read" | "write" | "approve"
+
+export type AuthorityQueryTimings = {
+  membership_ms: number
+  engagement_ms: number
+  assignment_ms: number
+}
+
+export type FirmMembershipRow = { firm_id: string; role: string }
 
 export type AuthorityResult = {
   allowed: boolean
@@ -23,7 +35,9 @@ export type AuthorityResult = {
   engagementStatus: string | null
   effectiveFrom: string | null
   effectiveTo: string | null
+  practiceRole: string | null
   debug: Record<string, unknown>
+  queryTimings: AuthorityQueryTimings
 }
 
 const ACCESS_ORDER: AccessLevel[] = ["read", "write", "approve"]
@@ -73,6 +87,24 @@ export type GetAccountingAuthorityOpts = {
   businessId: string
   requiredLevel?: AccessLevel
   checkDate?: string
+  /** Request-local reuse — skip a second accounting_firm_users round trip. */
+  preloadedMemberships?: FirmMembershipRow[] | null
+}
+
+export async function loadFirmMemberships(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<{ rows: FirmMembershipRow[]; error: string | null; ms: number }> {
+  const t = performance.now()
+  const { data, error } = await supabase
+    .from("accounting_firm_users")
+    .select("firm_id, role")
+    .eq("user_id", userId)
+  return {
+    rows: (data ?? []) as FirmMembershipRow[],
+    error: error?.message ?? null,
+    ms: timedStepMs(t),
+  }
 }
 
 /**
@@ -88,8 +120,14 @@ export async function getAccountingAuthority(
     businessId,
     requiredLevel,
     checkDate = new Date().toISOString().split("T")[0],
+    preloadedMemberships,
   } = opts
   const debug: Record<string, unknown> = {}
+  const queryTimings: AuthorityQueryTimings = {
+    membership_ms: 0,
+    engagement_ms: 0,
+    assignment_ms: 0,
+  }
 
   const empty = (
     reason: string,
@@ -97,7 +135,8 @@ export async function getAccountingAuthority(
     engagementId: string | null = null,
     engagementStatus: string | null = null,
     effectiveFrom: string | null = null,
-    effectiveTo: string | null = null
+    effectiveTo: string | null = null,
+    practiceRole: string | null = null
   ): AuthorityResult => ({
     allowed: false,
     level: null,
@@ -107,28 +146,39 @@ export async function getAccountingAuthority(
     engagementStatus,
     effectiveFrom,
     effectiveTo,
+    practiceRole,
     debug,
+    queryTimings,
   })
 
-  const { data: firmUsers, error: fuError } = await supabase
-    .from("accounting_firm_users")
-    .select("firm_id, role")
-    .eq("user_id", firmUserId)
+  let firmUsers: FirmMembershipRow[]
+  let fuError: string | null = null
+  if (preloadedMemberships) {
+    firmUsers = preloadedMemberships
+    debug.membershipReused = true
+  } else {
+    const loaded = await loadFirmMemberships(supabase, firmUserId)
+    firmUsers = loaded.rows
+    fuError = loaded.error
+    queryTimings.membership_ms = loaded.ms
+  }
 
-  debug.firmUserError = fuError?.message ?? null
-  debug.firmIds = (firmUsers ?? []).map((r: { firm_id: string }) => r.firm_id)
+  debug.firmUserError = fuError
+  debug.firmIds = firmUsers.map((r) => r.firm_id)
 
-  if (fuError || !firmUsers?.length) {
+  if (fuError || !firmUsers.length) {
     return empty("NO_FIRM_MEMBERSHIP")
   }
 
-  const firmIds = firmUsers.map((r: { firm_id: string }) => r.firm_id)
+  const firmIds = firmUsers.map((r) => r.firm_id)
 
+  const tEng = performance.now()
   const { data: engagements, error: engError } = await supabase
     .from("firm_client_engagements")
     .select("id, accounting_firm_id, client_business_id, status, access_level, effective_from, effective_to")
     .in("accounting_firm_id", firmIds)
     .eq("client_business_id", businessId)
+  queryTimings.engagement_ms = timedStepMs(tEng)
 
   debug.engagementError = engError?.message ?? null
   debug.engagementCount = (engagements ?? []).length
@@ -158,6 +208,9 @@ export async function getAccountingAuthority(
   debug.evaluatedState = evalResult.state
   debug.reason_code = evalResult.reason_code
 
+  const membership = firmUsers.find((r) => r.firm_id === row.accounting_firm_id)
+  const role = isPracticeFirmRole(membership?.role) ? membership.role : null
+
   if (evalResult.state !== "ACTIVE") {
     return empty(
       evalResult.reason_code,
@@ -165,30 +218,37 @@ export async function getAccountingAuthority(
       row.id,
       row.status,
       row.effective_from,
-      row.effective_to
+      row.effective_to,
+      role
     )
   }
 
-  const membership = (firmUsers ?? []).find((r: { firm_id: string }) => r.firm_id === row.accounting_firm_id)
-  const role = isPracticeFirmRole(membership?.role) ? membership.role : null
   if (role) {
-    const assignment = await assertAssignedClientAccess({
-      supabase,
-      userId: firmUserId,
-      firmId: row.accounting_firm_id,
-      businessId,
-      role,
-    })
-    debug.assignment = assignment
-    if (!assignment.allowed) {
-      return empty(
-        assignment.reason,
-        row.accounting_firm_id,
-        row.id,
-        row.status,
-        row.effective_from,
-        row.effective_to
-      )
+    // Partners are portfolio-wide; assignment/enforcement queries cannot change the decision.
+    if (hasPortfolioWideVisibility(role)) {
+      debug.assignment = { allowed: true, reason: "ACTIVE", skipped: "partner_portfolio" }
+    } else {
+      const tAsg = performance.now()
+      const assignment = await assertAssignedClientAccess({
+        supabase,
+        userId: firmUserId,
+        firmId: row.accounting_firm_id,
+        businessId,
+        role,
+      })
+      queryTimings.assignment_ms = timedStepMs(tAsg)
+      debug.assignment = assignment
+      if (!assignment.allowed) {
+        return empty(
+          assignment.reason,
+          row.accounting_firm_id,
+          row.id,
+          row.status,
+          row.effective_from,
+          row.effective_to,
+          role
+        )
+      }
     }
   }
 
@@ -200,7 +260,8 @@ export async function getAccountingAuthority(
       row.id,
       row.status,
       row.effective_from,
-      row.effective_to
+      row.effective_to,
+      role
     )
   }
 
@@ -215,7 +276,8 @@ export async function getAccountingAuthority(
         row.id,
         row.status,
         row.effective_from,
-        row.effective_to
+        row.effective_to,
+        role
       ),
       level,
     }
@@ -230,7 +292,9 @@ export async function getAccountingAuthority(
     engagementStatus: row.status,
     effectiveFrom: row.effective_from,
     effectiveTo: row.effective_to,
+    practiceRole: role,
     debug,
+    queryTimings,
   }
 }
 

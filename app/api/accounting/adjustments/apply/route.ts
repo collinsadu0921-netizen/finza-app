@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       businessId: String(business_id),
       requiredLevel: "write",
+      authorityContext: "practice-client-books",
     })
     if (authResult.timings) {
       diag.recordTiming("role", authResult.timings.role_ms)
@@ -172,20 +173,6 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-    }
-
-    // Verify business exists (access will be checked by role check below)
-    const { data: business } = await dataClient
-      .from("businesses")
-      .select("id")
-      .eq("id", resolvedBusinessId)
-      .single()
-
-    if (!business) {
-      return NextResponse.json(
-        { error: "Business not found", reason_code: "BUSINESS_NOT_FOUND" },
-        { status: 404 }
-      )
     }
 
     // Convert lines to JSONB format expected by function

@@ -4,7 +4,6 @@ import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
@@ -50,26 +49,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
     }
 
-    const resolved = await resolveAccountingContext({
-      supabase,
-      userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
-    })
-    if ("error" in resolved) {
+    const businessId = (
+      searchParams.get("business_id") ??
+      searchParams.get("businessId") ??
+      ""
+    ).trim()
+    if (!businessId) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
-    const businessId = resolved.businessId
 
     const auth = await resolveAccountingRequestAuthority({
       supabase,
       userId: user.id,
       businessId,
       requiredLevel: "read",
+      authorityContext: "practice-client-books",
     })
     if (auth.timings) {
       diag.recordTiming("role", auth.timings.role_ms)

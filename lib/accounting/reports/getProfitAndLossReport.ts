@@ -179,6 +179,14 @@ export type PnLReportLoadMeta = {
   movementSource: "snapshot" | "ledger" | "unavailable" | "zero_initialized"
   snapshotStale: boolean
   refreshJobId?: string | null
+  computeTimings?: {
+    snapshot_meta_ms: number
+    snapshot_lines_ms: number
+    period_check_ms: number
+    live_rpc_ms: number
+    currency_ms: number
+    total_ms: number
+  }
 }
 
 export async function getProfitAndLossReport(
@@ -203,19 +211,34 @@ export async function getProfitAndLossReport(
 
   const refreshOnRequest = options?.refreshOnRequest !== false
 
-  const { rows, error: fetchError, source: movementSource, snapshotStale, refreshJobId } =
-    await fetchProfitAndLossMovementRows(
+  const tCurrency = performance.now()
+  const [movement, bizRes] = await Promise.all([
+    fetchProfitAndLossMovementRows(
       supabase,
       businessId,
       range.movementStart,
       range.movementEnd,
       { refreshOnRequest, scheduleBackground: options?.scheduleBackground }
-    )
+    ),
+    supabase.from("businesses").select("default_currency").eq("id", businessId).single(),
+  ])
+  const currencyMs = Math.round((performance.now() - tCurrency) * 10) / 10
+
+  const { rows, error: fetchError, source: movementSource, snapshotStale, refreshJobId, computeTimings } =
+    movement
 
   if (loadMeta) {
     loadMeta.movementSource = movementSource
     loadMeta.snapshotStale = snapshotStale
     loadMeta.refreshJobId = refreshJobId ?? null
+    loadMeta.computeTimings = {
+      snapshot_meta_ms: computeTimings?.snapshot_meta_ms ?? 0,
+      snapshot_lines_ms: computeTimings?.snapshot_lines_ms ?? 0,
+      period_check_ms: computeTimings?.period_check_ms ?? 0,
+      live_rpc_ms: computeTimings?.live_rpc_ms ?? 0,
+      currency_ms: currencyMs,
+      total_ms: computeTimings?.total_ms ?? 0,
+    }
   }
 
   if (movementSource === "unavailable") {
@@ -226,12 +249,7 @@ export async function getProfitAndLossReport(
     return { data: null, error: fetchError }
   }
 
-  const { data: biz } = await supabase
-    .from("businesses")
-    .select("default_currency")
-    .eq("id", businessId)
-    .single()
-  const currencyCode = biz?.default_currency ?? "USD"
+  const currencyCode = bizRes.data?.default_currency ?? "USD"
   const currency = {
     code: currencyCode,
     symbol: getCurrencySymbol(currencyCode) || currencyCode,

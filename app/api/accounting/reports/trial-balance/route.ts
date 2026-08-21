@@ -4,7 +4,6 @@ import { ensureAccountingInitialized, canUserInitializeAccounting } from "@/lib/
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import {
   getAccountingDataClient,
@@ -66,20 +65,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: message === "Unauthorized" ? 401 : 403 })
     }
 
-    const resolved = await resolveAccountingContext({
-      supabase,
-      userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
-    })
-    if ("error" in resolved) {
+    const resolvedBusinessId = (
+      searchParams.get("business_id") ??
+      searchParams.get("businessId") ??
+      ""
+    ).trim()
+    if (!resolvedBusinessId) {
       return NextResponse.json(
         { error: "Missing required parameter: business_id" },
         { status: 400 }
       )
     }
-    const resolvedBusinessId = resolved.businessId
 
     diag.recordTiming("auth", timedStepMs(tAuth), "session")
     const authResult = await resolveAccountingRequestAuthority({
@@ -87,6 +83,7 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       businessId: resolvedBusinessId,
       requiredLevel: "read",
+      authorityContext: "practice-client-books",
     })
     if (authResult.timings) {
       diag.recordTiming("role", authResult.timings.role_ms)

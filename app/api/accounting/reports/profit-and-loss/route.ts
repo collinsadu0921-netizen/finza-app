@@ -77,10 +77,12 @@ export async function GET(request: NextRequest) {
         { status: auth.status }
       )
     }
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
 
     const { searchParams } = new URL(request.url)
     const requestedBusinessId = searchParams.get("business_id") ?? searchParams.get("businessId")
 
+    const tAuthority = performance.now()
     const gate = await resolvePnlReportScopeAndAuthority(
       supabase,
       auth.user.id,
@@ -111,8 +113,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { businessId, authority, isPractice } = gate.value
-    diag.recordTiming("auth", timedStepMs(tAuth), "session")
-    diag.recordTiming("authority", timedStepMs(tAuth), "scope")
+    diag.recordTiming("authority", timedStepMs(tAuthority), "scope")
     // Practice users fail Service RLS on accounts/snapshots; use scoped privileged client after auth.
     const dataClient = isPractice ? createSupabaseAdminClient() : supabase
 
@@ -305,12 +306,23 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const compute = loadMeta.computeTimings
+    if (compute) {
+      diag.recordTiming("snap_meta", compute.snapshot_meta_ms)
+      diag.recordTiming("snap_lines", compute.snapshot_lines_ms)
+      diag.recordTiming("pnl_live", compute.live_rpc_ms)
+    }
     diag.recordTiming("report", timedStepMs(tReport), reportsDiagnostics.reports_source)
     diag.recordTiming("total", timedStepMs(routeT0), "handler")
     diag.step("report", {
       ms_report: Math.round((performance.now() - tReport) * 10) / 10,
       ms_remote_cache_read: cacheTiming.remoteCacheReadMs,
       ms_stale_return: cacheTiming.staleReturnMs,
+      ms_snapshot_meta: compute?.snapshot_meta_ms ?? null,
+      ms_snapshot_lines: compute?.snapshot_lines_ms ?? null,
+      ms_period_check: compute?.period_check_ms ?? null,
+      ms_live_rpc: compute?.live_rpc_ms ?? null,
+      ms_currency: compute?.currency_ms ?? null,
       reports_refresh_scheduled: cacheTiming.refreshScheduled,
       reports_refresh_awaited: cacheTiming.refreshAwaited,
       ...reportsDiagnostics,

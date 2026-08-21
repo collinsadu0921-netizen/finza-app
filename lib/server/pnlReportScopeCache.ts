@@ -12,6 +12,7 @@ import {
   checkAccountingAuthority,
   type AccountingAuthorityResult,
 } from "@/lib/accounting/auth"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { resolveBusinessScopeForUser, type ResolveBusinessScopeResult } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
 
@@ -123,35 +124,33 @@ async function loadScopeAndAuthority(
     typeof requestedBusinessId === "string" ? requestedBusinessId.trim() : ""
   const explicitBusinessId = trimmed.length > 0 ? trimmed : null
 
-  // Explicit business_id (Practice Open Books always sends this):
-  // authorize via checkAccountingAuthority WITHOUT requiring business_users first.
+  // Explicit business_id (Practice Open Books always sends this).
+  // Lookup hint overlaps Service role + firm membership; it does not grant access.
   if (explicitBusinessId) {
-    const knownRole = await getUserRole(supabase, userId, explicitBusinessId)
-    const authority = await checkAccountingAuthority(
+    const resolved = await resolveAccountingRequestAuthority({
       supabase,
       userId,
-      explicitBusinessId,
-      "read",
-      knownRole
-    )
+      businessId: explicitBusinessId,
+      requiredLevel: "read",
+      authorityContext: "practice-client-books",
+    })
 
-    if (!authority.authorized || !authority.authority_source) {
+    if (!resolved.ok) {
       return {
         ok: false,
         scope: { ok: true, businessId: explicitBusinessId },
-        authority,
+        authority: { authorized: false, businessId: explicitBusinessId },
         pnlScopeCacheStatus: "miss",
       }
     }
 
-    // Practice firm users have no Service role — use synthetic role for downstream P&L code.
-    const isPractice = !knownRole && authority.authority_source === "accountant"
-    const role = knownRole ?? (isPractice ? "accountant" : null)
-    if (!role) {
+    const authoritySource = resolved.isPractice ? "accountant" : resolved.authoritySource
+    const role = resolved.serviceRole ?? (resolved.isPractice ? "accountant" : null)
+    if (!role || !authoritySource || authoritySource === "practice") {
       return {
         ok: false,
         scope: { ok: true, businessId: explicitBusinessId },
-        authority,
+        authority: { authorized: false, businessId: explicitBusinessId },
         pnlScopeCacheStatus: "miss",
       }
     }
@@ -161,11 +160,11 @@ async function loadScopeAndAuthority(
       value: {
         businessId: explicitBusinessId,
         role,
-        isPractice,
+        isPractice: resolved.isPractice,
         authority: {
           authorized: true,
           businessId: explicitBusinessId,
-          authority_source: authority.authority_source,
+          authority_source: authoritySource,
         },
       },
       pnlScopeCacheStatus: "miss",

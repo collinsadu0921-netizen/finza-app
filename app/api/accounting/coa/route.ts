@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       businessId,
       requiredLevel: "read",
+      authorityContext: "practice-client-books",
     })
     if (authResult.timings) {
       diag.recordTiming("role", authResult.timings.role_ms)

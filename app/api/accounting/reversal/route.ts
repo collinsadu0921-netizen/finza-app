@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       businessId,
       requiredLevel: "approve",
+      authorityContext: "practice-client-books",
     })
     if (authResult.timings) {
       diag.recordTiming("role", authResult.timings.role_ms)
@@ -132,6 +133,7 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       )
     }
+    diag.recordTiming("journal", timedStepMs(tLookup), "scoped")
 
     const tierBlockRev = await enforceServiceIndustryBusinessTierForAccountingApi(
       supabase,
@@ -150,15 +152,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: existingReversal } = await dataClient
-      .from("journal_entries")
-      .select("id")
-      .eq("business_id", resolvedBusinessId)
-      .eq("reference_type", "reversal")
-      .eq("reference_id", original_je_id)
-      .limit(1)
-      .maybeSingle()
+    // After journal + business scope is proven, these reads are independent.
+    const tFollow = performance.now()
+    const [existingRes, periodRes, linesRes] = await Promise.all([
+      dataClient
+        .from("journal_entries")
+        .select("id")
+        .eq("business_id", resolvedBusinessId)
+        .eq("reference_type", "reversal")
+        .eq("reference_id", original_je_id)
+        .limit(1)
+        .maybeSingle(),
+      dataClient
+        .from("accounting_periods")
+        .select("id, status, period_start, period_end")
+        .eq("business_id", resolvedBusinessId)
+        .lte("period_start", reversal_date)
+        .gte("period_end", reversal_date)
+        .maybeSingle(),
+      dataClient
+        .from("journal_entry_lines")
+        .select("id, account_id, debit, credit, description")
+        .eq("journal_entry_id", original_je_id)
+        .order("id"),
+    ])
+    diag.recordTiming("lookup", timedStepMs(tFollow), "reversal+period+lines")
 
+    const existingReversal = existingRes.data
     if (existingReversal) {
       return NextResponse.json({
         reversal_journal_entry_id: existingReversal.id,
@@ -167,14 +187,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const { data: period } = await dataClient
-      .from("accounting_periods")
-      .select("id, status, period_start, period_end")
-      .eq("business_id", resolvedBusinessId)
-      .lte("period_start", reversal_date)
-      .gte("period_end", reversal_date)
-      .maybeSingle()
-
+    const period = periodRes.data
     if (!period || period.status !== "open") {
       return NextResponse.json(
         {
@@ -186,12 +199,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: lines } = await dataClient
-      .from("journal_entry_lines")
-      .select("id, account_id, debit, credit, description")
-      .eq("journal_entry_id", original_je_id)
-      .order("id")
-
+    const lines = linesRes.data
     if (!lines || lines.length < 2) {
       return NextResponse.json(
         { error: "Original journal entry has no lines or insufficient lines to reverse." },
@@ -216,7 +224,6 @@ export async function POST(request: NextRequest) {
       description: l.description,
     }))
 
-    diag.recordTiming("lookup", timedStepMs(tLookup), "journal+period")
     const tRpc = performance.now()
     const { data: journalEntryId, error: postError } = await dataClient.rpc("post_journal_entry", {
       p_business_id: resolvedBusinessId,

@@ -42,6 +42,14 @@ export type PnLMovementFetchOptions = {
   scheduleBackground?: (promise: Promise<unknown>) => void
 }
 
+export type PnLMovementComputeTimings = {
+  snapshot_meta_ms: number
+  snapshot_lines_ms: number
+  period_check_ms: number
+  live_rpc_ms: number
+  total_ms: number
+}
+
 export type PnLMovementFetchResult = {
   rows: PnLMovementRow[]
   error: string
@@ -50,6 +58,7 @@ export type PnLMovementFetchResult = {
   refreshJobId?: string | null
   /** True only when live ledger RPC was skipped for a verified empty period. */
   liveFallbackSkipped?: boolean
+  computeTimings?: PnLMovementComputeTimings
 }
 
 const livePnlSingleflight = new Map<string, Promise<PnLMovementFetchResult>>()
@@ -212,50 +221,71 @@ export async function fetchProfitAndLossMovementRows(
   options?: PnLMovementFetchOptions
 ): Promise<PnLMovementFetchResult> {
   const refreshOnRequest = options?.refreshOnRequest !== false
+  const tAll = performance.now()
+  const computeTimings: PnLMovementComputeTimings = {
+    snapshot_meta_ms: 0,
+    snapshot_lines_ms: 0,
+    period_check_ms: 0,
+    live_rpc_ms: 0,
+    total_ms: 0,
+  }
+  const finish = (result: PnLMovementFetchResult): PnLMovementFetchResult => ({
+    ...result,
+    computeTimings: { ...computeTimings, total_ms: Math.round((performance.now() - tAll) * 10) / 10 },
+  })
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    return { rows: [], error: "Invalid date range", source: "ledger", snapshotStale: false }
+    return finish({ rows: [], error: "Invalid date range", source: "ledger", snapshotStale: false })
   }
   if (startDate > endDate) {
-    return {
+    return finish({
       rows: [],
       error: "start_date must be on or before end_date",
       source: "ledger",
       snapshotStale: false,
-    }
+    })
   }
 
   // Fresh valid snapshot (metadata RPC excludes invalidated / stale-beyond-window).
+  const tMeta = performance.now()
   const freshMeta = await readPnlSnapshotMetadata(supabase, businessId, startDate, endDate)
+  computeTimings.snapshot_meta_ms = Math.round((performance.now() - tMeta) * 10) / 10
   if (freshMeta && !freshMeta.snapshotStale && !isMateriallyStale(freshMeta.refreshed_at)) {
     if (freshMeta.line_count === 0) {
-      return {
+      return finish({
         rows: [],
         error: "",
         source: "snapshot",
         snapshotStale: false,
-      }
+      })
     }
+    const tLines = performance.now()
     const lines = await loadFreshSnapshotLines(supabase, businessId, startDate, endDate)
+    computeTimings.snapshot_lines_ms = Math.round((performance.now() - tLines) * 10) / 10
     if (lines.length > 0 || freshMeta.line_count === 0) {
-      return {
+      return finish({
         rows: lines,
         error: "",
         source: "snapshot",
         snapshotStale: false,
-      }
+      })
     }
   }
 
   // Custom ranges (not an exact accounting period): always live.
+  const tPeriod = performance.now()
   const isExactPeriod = await isExactAccountingPeriodRange(
     supabase,
     businessId,
     startDate,
     endDate
   )
+  computeTimings.period_check_ms = Math.round((performance.now() - tPeriod) * 10) / 10
   if (!isExactPeriod) {
-    return fetchLivePnLMovement(supabase, businessId, startDate, endDate)
+    const tLive = performance.now()
+    const live = await fetchLivePnLMovement(supabase, businessId, startDate, endDate)
+    computeTimings.live_rpc_ms = Math.round((performance.now() - tLive) * 10) / 10
+    return finish(live)
   }
 
   // Invalidated / missing / materially stale → bounded live + durable refresh.

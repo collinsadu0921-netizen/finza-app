@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import {
   createRouteDiag,
   jsonResponseWithServerTiming,
@@ -38,29 +40,34 @@ export async function GET(request: NextRequest) {
       return respond({ error: message }, message === "Unauthorized" ? 401 : 403)
     }
 
-    const tCtx = performance.now()
-    const resolved = await resolveAccountingContext({
-      supabase,
-      userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
-    })
-    diag.recordTiming("context", timedStepMs(tCtx))
-    if ("error" in resolved) {
+    const businessId = (
+      searchParams.get("business_id") ??
+      searchParams.get("businessId") ??
+      ""
+    ).trim()
+    if (!businessId) {
       return respond({ error: "business_id parameter is required" }, 400)
     }
-    const businessId = resolved.businessId
 
-    const tAuthority = performance.now()
-    const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
-    diag.recordTiming("authority", timedStepMs(tAuthority))
-    if (!auth.authorized) {
+    const auth = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId,
+      requiredLevel: "read",
+      authorityContext: "practice-client-books",
+    })
+    if (auth.timings) {
+      diag.recordTiming("role", auth.timings.role_ms)
+      diag.recordTiming("authority", auth.timings.authority_ms)
+    }
+    if (!auth.ok) {
       return respond({ error: "Unauthorized. No access to this business." }, 403)
     }
 
+    const dataClient = getAccountingDataClient(auth, supabase)
+
     const tDb = performance.now()
-    const { data: periods, error } = await supabase
+    const { data: periods, error } = await dataClient
       .from("accounting_periods")
       .select("*")
       .eq("business_id", businessId)
@@ -76,7 +83,7 @@ export async function GET(request: NextRequest) {
     ]
     const usersById = new Map<string, { id: string; email: string | null; full_name: string | null }>()
     if (closedByIds.length > 0) {
-      const { data: users } = await supabase
+      const { data: users } = await dataClient
         .from("users")
         .select("id, email, full_name")
         .in("id", closedByIds)

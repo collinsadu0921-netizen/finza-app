@@ -8,35 +8,27 @@ export async function getUserRole(
   userId: string,
   businessId: string
 ): Promise<string | null> {
-  // First check if user is the business owner
-  const { data: business, error: businessError } = await supabase
-    .from("businesses")
-    .select("owner_id")
-    .eq("id", businessId)
-    .maybeSingle()
+  // Owner and membership are independent reads — overlap them.
+  const [businessRes, memberRes] = await Promise.all([
+    supabase.from("businesses").select("owner_id").eq("id", businessId).maybeSingle(),
+    supabase
+      .from("business_users")
+      .select("role")
+      .eq("business_id", businessId)
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ])
 
-  if (!businessError && business && business.owner_id === userId) {
+  if (!businessRes.error && businessRes.data && businessRes.data.owner_id === userId) {
     return "owner"
   }
 
-  // Then check business_users table
-  const { data, error } = await supabase
-    .from("business_users")
-    .select("role")
-    .eq("business_id", businessId)
-    .eq("user_id", userId)
-    .maybeSingle()
-
-  if (error) {
-    console.error("Error getting user role:", error)
+  if (memberRes.error) {
+    console.error("Error getting user role:", memberRes.error)
     return null
   }
 
-  if (!data) {
-    return null
-  }
-
-  return data.role
+  return memberRes.data?.role ?? null
 }
 
 export async function hasAccessToSalesHistory(

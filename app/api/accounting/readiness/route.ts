@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
-import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
-import { getAccountingAuthority } from "@/lib/accounting/authorityEngine"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { ACCOUNTING_NOT_READY } from "@/lib/accounting/reasonCodes"
+import {
+  getAccountingDataClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import {
   createRouteDiag,
   jsonResponseWithServerTiming,
@@ -18,6 +19,7 @@ import {
  * Read-only probe: is accounting initialized for this business?
  * Returns { ready, authority_source } for client readiness guard.
  * Never triggers bootstrap.
+ * Authority is resolved once; engagement facts are reused from that result.
  */
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
@@ -48,48 +50,46 @@ export async function GET(request: NextRequest) {
       return respond({ error: message }, message === "Unauthorized" ? 401 : 403)
     }
 
-    const tCtx = performance.now()
-    const resolved = await resolveAccountingContext({
-      supabase,
-      userId: user.id,
-      searchParams,
-      pathname: new URL(request.url).pathname,
-      source: "api",
-    })
-    diag.recordTiming("context", timedStepMs(tCtx))
-    if ("error" in resolved) {
+    const resolvedBusinessId = (
+      searchParams.get("business_id") ??
+      searchParams.get("businessId") ??
+      ""
+    ).trim()
+    if (!resolvedBusinessId) {
       return respond({ error: "Missing required parameter: business_id" }, 400)
     }
-    const resolvedBusinessId = resolved.businessId
 
-    const tAuthority = performance.now()
-    const auth = await checkAccountingAuthority(supabase, user.id, resolvedBusinessId, "read")
-    diag.recordTiming("authority", timedStepMs(tAuthority))
-    if (!auth.authorized) {
+    const auth = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: resolvedBusinessId,
+      requiredLevel: "read",
+      authorityContext: "practice-client-books",
+    })
+    if (auth.timings) {
+      diag.recordTiming("role", auth.timings.role_ms)
+      diag.recordTiming("authority", auth.timings.authority_ms)
+      diag.recordTiming("membership", auth.timings.membership_ms)
+      diag.recordTiming("engagement", auth.timings.engagement_ms)
+    }
+    if (!auth.ok) {
       return respond({ error: ACCOUNTING_NOT_READY, business_id: resolvedBusinessId }, 403)
     }
 
+    const dataClient = getAccountingDataClient(auth, supabase)
     const tReady = performance.now()
-    const { ready } = await checkAccountingReadiness(supabase, resolvedBusinessId)
+    const { ready } = await checkAccountingReadiness(dataClient, resolvedBusinessId)
     diag.recordTiming("readiness", timedStepMs(tReady))
 
     const payload: Record<string, unknown> = {
       ready,
-      authority_source: auth.authority_source,
+      authority_source: auth.isPractice ? "accountant" : auth.authoritySource,
       business_id: resolvedBusinessId,
     }
 
-    if (auth.authority_source === "accountant") {
-      const tFirm = performance.now()
-      const firmAuth = await getAccountingAuthority({
-        supabase,
-        firmUserId: user.id,
-        businessId: resolvedBusinessId,
-        requiredLevel: "read",
-      })
-      diag.recordTiming("engagement", timedStepMs(tFirm))
-      payload.access_level = firmAuth.level ?? null
-      payload.engagement_status = firmAuth.engagementStatus ?? null
+    if (auth.isPractice) {
+      payload.access_level = auth.grantedLevel ?? null
+      payload.engagement_status = auth.engagementStatus ?? null
     }
 
     return respond(payload, 200)
