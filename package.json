@@ -19,7 +19,8 @@
     "ci:detect-bypass": "npx tsx scripts/detect-report-bypass.ts",
     "ci:detect-non-ledger": "npx tsx scripts/detect-non-ledger-reports.ts",
     "ci:accounting": "npm run ci:accounting-audit && npm run ci:detect-bypass && npm run ci:detect-non-ledger",
-    "check:boundaries": "node scripts/check-boundaries.js"
+    "check:boundaries": "node scripts/check-boundaries.js",
+    "release:production": "node scripts/release-production.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.48",

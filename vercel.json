@@ -1,4 +1,10 @@
 {
+  "regions": ["arn1"],
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/accounting-snapshots",
