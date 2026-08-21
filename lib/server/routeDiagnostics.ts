@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseErrorLike } from "@/lib/server/logSupabaseRpcError"
+import { runtimeRegion } from "@/lib/server/buildInfo"
 import { NextResponse } from "next/server"
 
 export function isRouteDiagnosticsEnabled(): boolean {
@@ -49,6 +50,10 @@ export function createRouteDiag(route: string, businessId?: string | null) {
   const routeT0 = performance.now()
   const base: RouteDiagFields = businessId ? { business_id: businessId } : {}
   const serverTimings: Array<{ name: string; dur: number; desc?: string }> = []
+  const region = runtimeRegion()
+  if (region) {
+    serverTimings.push({ name: "region", dur: 0, desc: region })
+  }
 
   return {
     step(step: string, extra?: RouteDiagFields) {

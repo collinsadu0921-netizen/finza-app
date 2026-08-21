@@ -80,32 +80,55 @@ export async function GET(request: NextRequest) {
     }
 
     const dataClient = getAccountingDataClient(auth, supabase)
-
-    if (!canUserInitializeAccounting(auth.isPractice ? "accountant" : auth.authoritySource)) {
-      const { ready } = await checkAccountingReadiness(dataClient, businessId)
-      if (!ready) {
-        return NextResponse.json(
-          {
-            error: "ACCOUNTING_NOT_READY",
-            business_id: businessId,
-            authority_source: auth.authoritySource,
-          },
-          { status: 403 }
-        )
-      }
-    } else {
-      await supabase.rpc("create_system_accounts", { p_business_id: businessId })
-    }
-
-    const tReport = performance.now()
-    const { data, error } = await getBalanceSheetReport(dataClient, {
+    const reportInput = {
       businessId,
       period_id: searchParams.get("period_id") ?? undefined,
       period_start: searchParams.get("period_start") ?? undefined,
       as_of_date: searchParams.get("as_of_date") ?? undefined,
       start_date: searchParams.get("start_date") ?? undefined,
       end_date: searchParams.get("end_date") ?? undefined,
-    })
+    }
+
+    const canBootstrap = canUserInitializeAccounting(
+      auth.isPractice ? "accountant" : auth.authoritySource
+    )
+
+    // After authority: Practice readiness and report reads are independent.
+    // Service bootstrap must complete before privileged report reads.
+    let ready = true
+    const tReadyReport = performance.now()
+    if (canBootstrap) {
+      await supabase.rpc("create_system_accounts", { p_business_id: businessId })
+    }
+
+    const reportPromise = getBalanceSheetReport(dataClient, reportInput)
+    const readinessPromise = canBootstrap
+      ? Promise.resolve({ ready: true })
+      : checkAccountingReadiness(dataClient, businessId)
+
+    const [readinessResult, reportResult] = await Promise.all([readinessPromise, reportPromise])
+    ready = readinessResult.ready
+    diag.recordTiming("ready_report", timedStepMs(tReadyReport), "parallel")
+
+    if (!canBootstrap && !ready) {
+      return NextResponse.json(
+        {
+          error: "ACCOUNTING_NOT_READY",
+          business_id: businessId,
+          authority_source: auth.authoritySource,
+        },
+        { status: 403 }
+      )
+    }
+
+    const { data, error, timings } = reportResult
+    if (timings) {
+      diag.recordTiming("period", timings.period_ms)
+      diag.recordTiming("bs_rpc", timings.bs_rpc_ms)
+      diag.recordTiming("earnings", timings.earnings_rpc_ms)
+      diag.recordTiming("biz", timings.business_ms)
+      diag.recordTiming("report", timings.total_ms)
+    }
 
     if (error) {
       return NextResponse.json({ error }, { status: 500 })
@@ -117,7 +140,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    diag.recordTiming("report", timedStepMs(tReport))
     return respond(data, 200)
   } catch (err: unknown) {
     console.error("Error in balance sheet:", err)
