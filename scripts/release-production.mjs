@@ -6,6 +6,7 @@
  * This script is the only intended production release path.
  *
  *   node scripts/release-production.mjs
+ *   node scripts/release-production.mjs --preflight
  *   node scripts/release-production.mjs --verify-only
  *
  * Application rollback (stay on ARN1):
@@ -17,7 +18,7 @@
  */
 
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
@@ -37,7 +38,7 @@ const {
   parseXVercelIdRegion,
   assertAlias,
   assertCrons,
-  assertSupabaseIdentity,
+  assertProductionSupabasePair,
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
@@ -47,10 +48,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const TEAM_QUERY = `teamId=${PRODUCTION.teamId}`
 
 function parseArgs(argv) {
-  const args = { verifyOnly: false, expectedSha: null }
+  const args = { verifyOnly: false, preflight: false, expectedSha: null }
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i]
     if (token === "--verify-only") args.verifyOnly = true
+    else if (token === "--preflight") args.preflight = true
     else if (token === "--expected-sha") {
       args.expectedSha = argv[i + 1] || ""
       i += 1
@@ -59,6 +61,24 @@ function parseArgs(argv) {
     }
   }
   return args
+}
+
+function parseDotEnv(text) {
+  const out = {}
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue
+    const i = trimmed.indexOf("=")
+    let value = trimmed.slice(i + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    out[trimmed.slice(0, i).trim()] = value
+  }
+  return out
 }
 
 function run(command, args, opts = {}) {
@@ -131,24 +151,32 @@ async function vercelApi(path) {
   return JSON.parse(stdout.slice(start))
 }
 
-async function readProductionSupabaseUrl() {
+async function readProductionSupabaseEnv() {
+  const dest = join(ROOT, ".vercel", "_production.env.pull")
   try {
-    const { stdout } = await run(
+    await run(
       "npx",
-      ["vercel", "env", "get", "NEXT_PUBLIC_SUPABASE_URL", "production", "--yes"],
+      ["vercel", "env", "pull", dest, "--environment", "production", "--yes"],
       { failCode: "ENV_UNVERIFIED" },
     )
-    const line = stdout
-      .split(/\r?\n/)
-      .map((entry) => entry.trim())
-      .find((entry) => /supabase\.co/i.test(entry) || entry.includes(PRODUCTION.supabaseRef) || entry.includes(PRODUCTION.forbiddenSupabaseRef))
-    if (line) return line
-  } catch (error) {
-    if (error instanceof ReleaseGuardError && error.code === "ENV_UNVERIFIED") {
-      throw error
+    if (!existsSync(dest)) {
+      throw new ReleaseGuardError("ENV_UNVERIFIED", "Could not read production Supabase environment")
     }
+    const parsed = parseDotEnv(readFileSync(dest, "utf8"))
+    return {
+      url: parsed.NEXT_PUBLIC_SUPABASE_URL || "",
+      serviceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY || "",
+    }
+  } catch (error) {
+    if (error && typeof error === "object") {
+      error.stdout = ""
+      error.stderr = ""
+    }
+    if (error instanceof ReleaseGuardError) throw error
+    throw new ReleaseGuardError("ENV_UNVERIFIED", "Could not read production Supabase environment")
+  } finally {
+    if (existsSync(dest)) unlinkSync(dest)
   }
-  throw new ReleaseGuardError("ENV_UNVERIFIED", "Could not read production NEXT_PUBLIC_SUPABASE_URL")
 }
 
 function lastHttpsUrl(text) {
@@ -207,7 +235,30 @@ async function main() {
     functionDefaultRegions: project.defaultResourceConfig?.functionDefaultRegions,
     resourceFunctionRegions: project.resourceConfig?.functionDefaultRegions,
   })
-  assertSupabaseIdentity(await readProductionSupabaseUrl())
+  const supabaseEnv = await readProductionSupabaseEnv()
+  const supabasePair = assertProductionSupabasePair(supabaseEnv.url, supabaseEnv.serviceRoleKey)
+  supabaseEnv.serviceRoleKey = ""
+
+  if (args.preflight) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          preflight: true,
+          project: PRODUCTION.projectName,
+          projectId: PRODUCTION.projectId,
+          sha: expectedSha,
+          region: PRODUCTION.region,
+          supabase_ref: PRODUCTION.supabaseRef,
+          service_role_format: supabasePair.format,
+          service_role_ref: supabasePair.ref,
+        },
+        null,
+        2,
+      ),
+    )
+    return
+  }
 
   let deploymentId = project.targets?.production?.id
   if (!args.verifyOnly) {

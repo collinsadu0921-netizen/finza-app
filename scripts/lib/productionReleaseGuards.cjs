@@ -188,6 +188,80 @@ function assertSupabaseIdentity(url) {
   }
 }
 
+const JWT_RE = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+
+function classifyServiceRoleCredential(value) {
+  if (typeof value !== "string" || !value.trim()) return "missing"
+  const key = value.trim()
+  if (JWT_RE.test(key)) return "jwt"
+  if (/^sb_secret_/.test(key) || /^sb_service_/.test(key)) return "secret"
+  return "malformed"
+}
+
+function decodeJwtPayloadJson(token) {
+  const parts = String(token || "").split(".")
+  if (parts.length !== 3) return null
+  try {
+    const json = Buffer.from(parts[1], "base64url").toString("utf8")
+    const payload = JSON.parse(json)
+    return payload && typeof payload === "object" ? payload : null
+  } catch {
+    return null
+  }
+}
+
+function decodeServiceRoleJwtClaims(key) {
+  const payload = decodeJwtPayloadJson(key)
+  if (!payload) fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY is malformed")
+  const ref = typeof payload.ref === "string" ? payload.ref.trim().toLowerCase() : ""
+  const role = typeof payload.role === "string" ? payload.role.trim() : ""
+  if (!ref) fail("SERVICE_ROLE_UNVERIFIED", "Production service-role credential has no project ref")
+  return { ref, role }
+}
+
+/**
+ * URL and service-role must both identify the production Supabase project.
+ * Never include the credential in thrown messages.
+ */
+function assertProductionSupabasePair(url, serviceRoleKey) {
+  assertSupabaseIdentity(url)
+  if (typeof serviceRoleKey !== "string" || !serviceRoleKey.trim()) {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY could not be read")
+  }
+
+  const format = classifyServiceRoleCredential(serviceRoleKey)
+  if (format === "missing") {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY could not be read")
+  }
+  if (format === "malformed") {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY is malformed")
+  }
+  if (format === "secret") {
+    fail(
+      "SERVICE_ROLE_UNVERIFIED",
+      "Non-JWT service-role identity cannot be established from a local payload",
+    )
+  }
+
+  const claims = decodeServiceRoleJwtClaims(serviceRoleKey)
+  if (claims.ref === PRODUCTION.forbiddenSupabaseRef) {
+    fail("STAGING_ENV", "Production service-role credential belongs to the staging Supabase project")
+  }
+  if (claims.ref !== PRODUCTION.supabaseRef) {
+    fail("SERVICE_ROLE_MISMATCH", "Production service-role credential is not the production Supabase project")
+  }
+  if (claims.role && claims.role !== "service_role") {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production credential is not a service-role key")
+  }
+
+  const urlRef = extractSupabaseRef(url)
+  if (urlRef !== claims.ref) {
+    fail("SERVICE_ROLE_MISMATCH", "Production Supabase URL and service-role credential are not the same project")
+  }
+
+  return { format: "jwt", ref: claims.ref, role: claims.role || "service_role" }
+}
+
 function buildDeployArgs(sha) {
   const expected = assertExpectedSha(sha)
   return [
@@ -232,6 +306,9 @@ module.exports = {
   assertAlias,
   assertCrons,
   assertSupabaseIdentity,
+  assertProductionSupabasePair,
+  classifyServiceRoleCredential,
+  decodeServiceRoleJwtClaims,
   extractSupabaseRef,
   buildDeployArgs,
   parseDeployedSha,

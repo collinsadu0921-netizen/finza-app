@@ -16,6 +16,11 @@ const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
   assertAlias: (aliases: unknown[], deploymentId: string, productionTargetId?: string) => void
   assertCrons: (definitions: unknown) => void
   assertSupabaseIdentity: (url: string) => void
+  assertProductionSupabasePair: (
+    url: string,
+    serviceRoleKey: string
+  ) => { format: string; ref: string; role: string }
+  classifyServiceRoleCredential: (value: string) => string
   buildDeployArgs: (sha: string) => string[]
   parseDeployedSha: (deployment: unknown) => string
   assertCleanWorktree: (porcelain: string) => void
@@ -36,6 +41,8 @@ const {
   assertAlias,
   assertCrons,
   assertSupabaseIdentity,
+  assertProductionSupabasePair,
+  classifyServiceRoleCredential,
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
@@ -173,5 +180,82 @@ describe("production release guards", () => {
       "--meta",
       `gitCommitSha=${GOOD_SHA}`,
     ])
+  })
+})
+
+function syntheticJwt(claims: Record<string, string>, secret = "test-signature-not-a-real-key") {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url")
+  return `${header}.${payload}.${Buffer.from(secret).toString("base64url")}`
+}
+
+const PROD_URL = "https://qjxhibvbmzogyzbhswjj.supabase.co"
+const STAGING_URL = "https://adonhhtooawkeemdqqeo.supabase.co"
+const PROD_JWT = syntheticJwt({
+  iss: "supabase",
+  ref: "qjxhibvbmzogyzbhswjj",
+  role: "service_role",
+})
+const STAGING_JWT = syntheticJwt({
+  iss: "supabase",
+  ref: "adonhhtooawkeemdqqeo",
+  role: "service_role",
+})
+
+describe("production service-role identity", () => {
+  it("accepts production URL plus production service-role JWT", () => {
+    const result = assertProductionSupabasePair(PROD_URL, PROD_JWT)
+    expect(result).toEqual({
+      format: "jwt",
+      ref: "qjxhibvbmzogyzbhswjj",
+      role: "service_role",
+    })
+  })
+
+  it("rejects production URL plus staging service-role JWT", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, STAGING_JWT), "STAGING_ENV")
+  })
+
+  it("rejects staging URL plus production service-role JWT", () => {
+    expectCode(() => assertProductionSupabasePair(STAGING_URL, PROD_JWT), "STAGING_ENV")
+  })
+
+  it("fails closed when the service-role is missing", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, ""), "SERVICE_ROLE_UNVERIFIED")
+    expectCode(() => assertProductionSupabasePair(PROD_URL, "   "), "SERVICE_ROLE_UNVERIFIED")
+  })
+
+  it("fails closed when the service-role is malformed", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, "not-a-jwt-or-secret"), "SERVICE_ROLE_UNVERIFIED")
+    expectCode(() => assertProductionSupabasePair(PROD_URL, "eyJonlyonepart"), "SERVICE_ROLE_UNVERIFIED")
+    expectCode(
+      () => assertProductionSupabasePair(PROD_URL, "sb_secret_synthetic_unidentifiable"),
+      "SERVICE_ROLE_UNVERIFIED",
+    )
+    expect(classifyServiceRoleCredential(PROD_JWT)).toBe("jwt")
+    expect(classifyServiceRoleCredential("sb_secret_synthetic_unidentifiable")).toBe("secret")
+  })
+
+  it("never includes the supplied secret in error messages", () => {
+    const secrets = [STAGING_JWT, PROD_JWT, "super-secret-service-role-value-xyz", "sb_secret_synthetic_unidentifiable"]
+    const cases: Array<() => unknown> = [
+      () => assertProductionSupabasePair(PROD_URL, STAGING_JWT),
+      () => assertProductionSupabasePair(STAGING_URL, PROD_JWT),
+      () => assertProductionSupabasePair(PROD_URL, ""),
+      () => assertProductionSupabasePair(PROD_URL, "super-secret-service-role-value-xyz"),
+      () => assertProductionSupabasePair(PROD_URL, "sb_secret_synthetic_unidentifiable"),
+    ]
+    for (const run of cases) {
+      try {
+        run()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const serialized = JSON.stringify(error)
+        for (const secret of secrets) {
+          expect(message).not.toContain(secret)
+          expect(serialized).not.toContain(secret)
+        }
+      }
+    }
   })
 })
