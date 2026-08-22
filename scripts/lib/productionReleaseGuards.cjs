@@ -110,7 +110,7 @@ function assertProjectDefaultRegion(project) {
 
 function parseInspectFunctionRegions(text) {
   if (typeof text !== "string" || !text.trim()) return []
-  const matches = [...text.matchAll(/\[([a-z0-9]+)\]/gi)].map((m) => m[1].toLowerCase())
+  const matches = [...text.matchAll(/\[([a-z]{3}\d+)\]/gi)].map((m) => m[1].toLowerCase())
   return uniqueRegions(matches)
 }
 

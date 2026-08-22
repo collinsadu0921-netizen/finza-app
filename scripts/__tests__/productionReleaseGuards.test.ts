@@ -142,6 +142,7 @@ describe("production release guards", () => {
     expect(parseInspectFunctionRegions(inspect)).toEqual(["arn1"])
     expect(parseInspectFunctionRegions("λ index (4.52MB) [iad1]")).toEqual(["iad1"])
     expect(parseInspectFunctionRegions("")).toEqual([])
+    expect(parseInspectFunctionRegions("λ index (4.52MB) [630ms] [0ms] [arn1]")).toEqual(["arn1"])
   })
 
   it("parses x-vercel-id runtime region", () => {
