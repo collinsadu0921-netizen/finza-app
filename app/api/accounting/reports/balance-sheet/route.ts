@@ -93,32 +93,31 @@ export async function GET(request: NextRequest) {
       auth.isPractice ? "accountant" : auth.authoritySource
     )
 
-    // After authority: Practice readiness and report reads are independent.
-    // Service bootstrap must complete before privileged report reads.
-    let ready = true
-    const tReadyReport = performance.now()
-    if (canBootstrap) {
+    // After authority: readiness is a cheap existence check and is independent
+    // of ledger reads. Do not serialize create_system_accounts on every GET.
+    const tReady = performance.now()
+    const [readinessResult, firstReport] = await Promise.all([
+      checkAccountingReadiness(dataClient, businessId),
+      getBalanceSheetReport(dataClient, reportInput),
+    ])
+    diag.recordTiming("ready", timedStepMs(tReady), "parallel")
+
+    let reportResult = firstReport
+    if (!readinessResult.ready) {
+      if (!canBootstrap) {
+        return NextResponse.json(
+          {
+            error: "ACCOUNTING_NOT_READY",
+            business_id: businessId,
+            authority_source: auth.authoritySource,
+          },
+          { status: 403 }
+        )
+      }
+      const tBootstrap = performance.now()
       await supabase.rpc("create_system_accounts", { p_business_id: businessId })
-    }
-
-    const reportPromise = getBalanceSheetReport(dataClient, reportInput)
-    const readinessPromise = canBootstrap
-      ? Promise.resolve({ ready: true })
-      : checkAccountingReadiness(dataClient, businessId)
-
-    const [readinessResult, reportResult] = await Promise.all([readinessPromise, reportPromise])
-    ready = readinessResult.ready
-    diag.recordTiming("ready_report", timedStepMs(tReadyReport), "parallel")
-
-    if (!canBootstrap && !ready) {
-      return NextResponse.json(
-        {
-          error: "ACCOUNTING_NOT_READY",
-          business_id: businessId,
-          authority_source: auth.authoritySource,
-        },
-        { status: 403 }
-      )
+      diag.recordTiming("bootstrap", timedStepMs(tBootstrap))
+      reportResult = await getBalanceSheetReport(dataClient, reportInput)
     }
 
     const { data, error, timings } = reportResult
@@ -127,6 +126,7 @@ export async function GET(request: NextRequest) {
       diag.recordTiming("bs_rpc", timings.bs_rpc_ms)
       diag.recordTiming("earnings", timings.earnings_rpc_ms)
       diag.recordTiming("biz", timings.business_ms)
+      diag.recordTiming("assemble", timings.assemble_ms)
       diag.recordTiming("report", timings.total_ms)
     }
 

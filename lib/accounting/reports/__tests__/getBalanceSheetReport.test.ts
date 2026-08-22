@@ -257,3 +257,37 @@ describe("K. Financial parity and equation", () => {
     expect(data!.period.period_start).toBe("2026-01-01")
   })
 })
+
+describe("L. Parallel timing isolation", () => {
+  it("does not attribute a slow BS RPC to period_ms when as-of is explicit", async () => {
+    const slow = {
+      rpc: jest.fn(async (name: string) => {
+        if (name === "get_balance_sheet_as_of") {
+          await new Promise((r) => setTimeout(r, 40))
+          return { data: BALANCE_SHEET_ROWS, error: null }
+        }
+        if (name === "get_cumulative_net_income_as_of") {
+          return { data: 15000, error: null }
+        }
+        return { data: [], error: null }
+      }),
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: { default_currency: "GHS", business_type: "limited_company" },
+          error: null,
+        }),
+      })),
+    } as unknown as SupabaseClient
+
+    const { data, timings } = await getBalanceSheetReport(slow, {
+      businessId: "biz-001",
+      as_of_date: "2026-08-21",
+    })
+    expect(data).not.toBeNull()
+    expect(timings?.parallel_ledger_reads).toBe(true)
+    expect(timings!.bs_rpc_ms).toBeGreaterThanOrEqual(35)
+    expect(timings!.period_ms).toBeLessThan(30)
+  })
+})

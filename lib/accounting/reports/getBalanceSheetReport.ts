@@ -228,6 +228,12 @@ export async function getBalanceSheetReport(
     timings.business_ms = Math.round((performance.now() - t) * 10) / 10
     return data
   }
+  const loadPeriod = async () => {
+    const t = performance.now()
+    const result = await resolveAccountingPeriodForReport(supabase, periodInput)
+    timings.period_ms = Math.round((performance.now() - t) * 10) / 10
+    return result
+  }
   const loadRows = async (asOf: string) => {
     const t = performance.now()
     const result = await fetchCumulativeBalanceSheetRows(supabase, businessId, asOf)
@@ -244,14 +250,12 @@ export async function getBalanceSheetReport(
   if (explicitAsOf) {
     // Period metadata and ledger reads are independent once as-of is known.
     timings.parallel_ledger_reads = true
-    const tPeriod = performance.now()
     const [periodRes, bsRes, niRes, bizRow] = await Promise.all([
-      resolveAccountingPeriodForReport(supabase, periodInput),
+      loadPeriod(),
       loadRows(explicitAsOf),
       loadEarnings(explicitAsOf),
       loadBiz(),
     ])
-    timings.period_ms = Math.round((performance.now() - tPeriod) * 10) / 10
     if (periodRes.error || !periodRes.period) {
       return finish({
         data: null,
@@ -265,9 +269,7 @@ export async function getBalanceSheetReport(
     currentPeriodNetIncome = niRes.netIncome
     biz = bizRow
   } else {
-    const tPeriod = performance.now()
-    const periodRes = await resolveAccountingPeriodForReport(supabase, periodInput)
-    timings.period_ms = Math.round((performance.now() - tPeriod) * 10) / 10
+    const periodRes = await loadPeriod()
     if (periodRes.error || !periodRes.period) {
       return finish({
         data: null,
