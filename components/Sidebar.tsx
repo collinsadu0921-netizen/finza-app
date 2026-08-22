@@ -44,6 +44,7 @@ import {
 import { ChevronDown, Lock, LogOut, PanelLeft, PanelLeftClose } from "lucide-react"
 import { useSidebarLayout } from "@/components/sidebar/SidebarLayoutContext"
 import SidebarNavTooltip from "@/components/sidebar/SidebarNavTooltip"
+import { beginSharedJsonGetAuthLogout } from "@/lib/client/sharedJsonGetAuthBoundary"
 
 type MenuSection = {
   title: string
@@ -1178,6 +1179,7 @@ export default function Sidebar() {
                   onClick={async () => {
                     clearTabIndustryMode()
                     clearSelectedBusinessId()
+                    beginSharedJsonGetAuthLogout()
                     await supabase.auth.signOut()
                     router.push("/login")
                   }}
@@ -1193,6 +1195,7 @@ export default function Sidebar() {
                 onClick={async () => {
                   clearTabIndustryMode()
                   clearSelectedBusinessId()
+                  beginSharedJsonGetAuthLogout()
                   await supabase.auth.signOut()
                   router.push("/login")
                 }}

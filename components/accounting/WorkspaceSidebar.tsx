@@ -4,6 +4,7 @@ import Link from "next/link"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { usePathname, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { beginSharedJsonGetAuthLogout } from "@/lib/client/sharedJsonGetAuthBoundary"
 
 const MAIN_ITEMS = [
   { label: "Dashboard", href: "/accounting/dashboard" },
@@ -60,6 +61,7 @@ export default function WorkspaceSidebar({ hasClientSelected, hasFirm }: Workspa
   const router = useRouter()
 
   async function handleLogout() {
+    beginSharedJsonGetAuthLogout()
     await supabase.auth.signOut()
     router.push("/login")
   }

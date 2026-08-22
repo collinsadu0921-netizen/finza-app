@@ -6,6 +6,8 @@
  * - optional short TTL only absorbs proven remount/effect double-hits
  * - 4xx/5xx and thrown errors never remain in the store
  * - keys include the full URL (and optional tenant suffix), so businesses cannot share
+ * - auth-boundary clear increments a generation so pre-clear inflight results cannot
+ *   repopulate the store for a later identity
  */
 
 export const SERVICE_LIST_REMOUNT_TTL_MS = 2_500
@@ -24,15 +26,31 @@ type CacheEntry = {
 }
 
 const store = new Map<string, CacheEntry>()
-let fetchImpl: typeof fetch = fetch
+let fetchImpl: typeof fetch | null = null
+let generation = 0
+
+function runtimeFetch(): typeof fetch {
+  return fetchImpl ?? fetch
+}
 
 export function setSharedJsonGetFetch(next: typeof fetch | null): void {
-  fetchImpl = next ?? fetch
+  fetchImpl = next
+}
+
+/**
+ * Drop every cached value and inflight handle, and bump the cache generation.
+ * In-flight requests started before this call may still resolve to their callers,
+ * but they must not write a reusable entry for the new generation.
+ */
+export function clearSharedJsonGet(): void {
+  generation += 1
+  store.clear()
 }
 
 export function resetSharedJsonGetForTests(): void {
   store.clear()
-  fetchImpl = fetch
+  generation = 0
+  fetchImpl = null
 }
 
 function resolveKey(url: string, cacheKey?: string): string {
@@ -57,11 +75,15 @@ export function sharedJsonGet<T = unknown>(
     return hit.inflight as Promise<SharedJsonResult<T>>
   }
 
+  const startedGeneration = generation
   const inflight = Promise.resolve()
-    .then(() => fetchImpl(url, { cache: "no-store", credentials: "same-origin" }))
+    .then(() => runtimeFetch()(url, { cache: "no-store", credentials: "same-origin" }))
     .then(async (res) => {
       const json = (await res.json().catch(() => ({}))) as T
       const result: SharedJsonResult<T> = { ok: res.ok, status: res.status, json }
+      if (startedGeneration !== generation) {
+        return result
+      }
       if (res.ok && ttlMs > 0) {
         store.set(key, { value: result, at: Date.now() })
       } else {
@@ -70,7 +92,9 @@ export function sharedJsonGet<T = unknown>(
       return result
     })
     .catch((err) => {
-      store.delete(key)
+      if (startedGeneration === generation) {
+        store.delete(key)
+      }
       throw err
     })
 

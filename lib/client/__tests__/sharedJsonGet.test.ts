@@ -1,5 +1,6 @@
 import {
   SERVICE_LIST_REMOUNT_TTL_MS,
+  clearSharedJsonGet,
   invalidateSharedJsonGet,
   invalidateSharedJsonGetBusiness,
   resetSharedJsonGetForTests,
@@ -106,5 +107,56 @@ describe("sharedJsonGet", () => {
     invalidateSharedJsonGetBusiness("biz-a")
     await sharedJsonGet(url, { cacheKey: `${url}::biz-a`, ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
     expect(seen).toHaveLength(3)
+  })
+
+  it("clearSharedJsonGet forces a new GET for the same key", async () => {
+    let calls = 0
+    setSharedJsonGetFetch(async () => {
+      calls += 1
+      return jsonResponse({ n: calls })
+    })
+    const url = "/api/invoices/list?business_id=biz-a"
+    await sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    clearSharedJsonGet()
+    const next = await sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    expect(calls).toBe(2)
+    expect(next.json).toEqual({ n: 2 })
+  })
+
+  it("does not let a pre-clear inflight response repopulate the store", async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let calls = 0
+    setSharedJsonGetFetch(async () => {
+      calls += 1
+      await gate
+      return jsonResponse({ owner: calls === 1 ? "A" : "B" })
+    })
+    const url = "/api/invoices/list?business_id=biz-a"
+    const pending = sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    clearSharedJsonGet()
+    release?.()
+    const stale = await pending
+    expect(stale.json).toEqual({ owner: "A" })
+    const after = await sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    expect(calls).toBe(2)
+    expect(after.json).toEqual({ owner: "B" })
+  })
+
+  it("after clear, remount dedup still works for the new session", async () => {
+    let calls = 0
+    setSharedJsonGetFetch(async () => {
+      calls += 1
+      return jsonResponse({ n: calls })
+    })
+    const url = "/api/customers?business_id=biz-a"
+    await sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    clearSharedJsonGet()
+    const first = await sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    const remount = await sharedJsonGet(url, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+    expect(calls).toBe(2)
+    expect(remount.json).toEqual(first.json)
   })
 })
