@@ -215,3 +215,79 @@ describe("J. RPC error propagation", () => {
     expect(error).toMatch(/rpc not found/i)
   })
 })
+
+describe("K. Financial parity and equation", () => {
+  const balancedRows = [
+    { account_id: "a1", account_code: "1010", account_name: "Bank", account_type: "asset", balance: 50000 },
+    { account_id: "a2", account_code: "1100", account_name: "Accounts Rec.", account_type: "asset", balance: 20000 },
+    { account_id: "l1", account_code: "2000", account_name: "Accounts Pay.", account_type: "liability", balance: 15000 },
+    { account_id: "e1", account_code: "3000", account_name: "Owner's Equity", account_type: "equity", balance: 40000 },
+    { account_id: "e2", account_code: "3100", account_name: "Retained Earnings", account_type: "equity", balance: 0 },
+  ]
+
+  it("keeps section totals and Assets = Liabilities + Equity", async () => {
+    const { data } = await getBalanceSheetReport(
+      buildMockSupabase("limited_company", balancedRows, 15000),
+      { businessId: "biz-001", as_of_date: "2026-08-21" }
+    )
+    expect(data!.totals.assets).toBe(70000)
+    expect(data!.totals.liabilities).toBe(15000)
+    expect(data!.totals.equity).toBe(40000)
+    expect(data!.as_of_date).toBe("2026-08-21")
+    const equityLines = data!.sections
+      .find((s) => s.key === "equity")!
+      .groups.find((g) => g.key === "equity")!.lines
+    expect(equityLines.find((l) => l.account_code === "3100")!.amount).toBe(0)
+    expect(equityLines.find((l) => l.account_id === "__net_income__")!.amount).toBe(15000)
+    expect(data!.sections.find((s) => s.key === "equity")!.subtotal).toBe(55000)
+    expect(data!.totals.liabilities + data!.sections.find((s) => s.key === "equity")!.subtotal).toBe(
+      data!.totals.assets
+    )
+    expect(data!.totals.liabilities_plus_equity).toBe(data!.totals.assets)
+    expect(data!.totals.is_balanced).toBe(true)
+    expect(data!.totals.imbalance).toBe(0)
+  })
+
+  it("uses resolved period_end when period_start is supplied", async () => {
+    const { data } = await getBalanceSheetReport(buildMockSupabase(), {
+      businessId: "biz-001",
+      period_start: "2026-01-01",
+    })
+    expect(data!.as_of_date).toBe("2026-12-31")
+    expect(data!.period.period_start).toBe("2026-01-01")
+  })
+})
+
+describe("L. Parallel timing isolation", () => {
+  it("does not attribute a slow BS RPC to period_ms when as-of is explicit", async () => {
+    const slow = {
+      rpc: jest.fn(async (name: string) => {
+        if (name === "get_balance_sheet_as_of") {
+          await new Promise((r) => setTimeout(r, 40))
+          return { data: BALANCE_SHEET_ROWS, error: null }
+        }
+        if (name === "get_cumulative_net_income_as_of") {
+          return { data: 15000, error: null }
+        }
+        return { data: [], error: null }
+      }),
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: { default_currency: "GHS", business_type: "limited_company" },
+          error: null,
+        }),
+      })),
+    } as unknown as SupabaseClient
+
+    const { data, timings } = await getBalanceSheetReport(slow, {
+      businessId: "biz-001",
+      as_of_date: "2026-08-21",
+    })
+    expect(data).not.toBeNull()
+    expect(timings?.parallel_ledger_reads).toBe(true)
+    expect(timings!.bs_rpc_ms).toBeGreaterThanOrEqual(35)
+    expect(timings!.period_ms).toBeLessThan(30)
+  })
+})

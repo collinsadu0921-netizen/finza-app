@@ -110,12 +110,10 @@ function groupKeyFromAccount(code: string, accountType: string): BSGroupKey {
   return "current_assets"
 }
 
-/** Effective cumulative as-of date for balance sheet positions. */
-export async function resolveBalanceSheetAsOfDate(
-  supabase: SupabaseClient,
-  input: BalanceSheetReportInput,
-  resolvedPeriod: { period_start: string; period_end: string }
-): Promise<string> {
+/** As-of date that can be known without period or timezone lookups. */
+export function peekExplicitBalanceSheetAsOfDate(
+  input: BalanceSheetReportInput
+): string | null {
   const explicit = input.as_of_date?.trim()
   if (explicit && /^\d{4}-\d{2}-\d{2}$/.test(explicit)) {
     return explicit
@@ -132,10 +130,23 @@ export async function resolveBalanceSheetAsOfDate(
     return rangeEnd
   }
 
+  return null
+}
+
+/** Effective cumulative as-of date for balance sheet positions. */
+export async function resolveBalanceSheetAsOfDate(
+  supabase: SupabaseClient,
+  input: BalanceSheetReportInput,
+  resolvedPeriod: { period_start: string; period_end: string }
+): Promise<string> {
+  const peeked = peekExplicitBalanceSheetAsOfDate(input)
+  if (peeked) return peeked
+
+  const rangeStart = input.start_date?.trim()
   const hasExplicitPeriod =
     Boolean(input.period_id?.trim()) ||
     Boolean(input.period_start?.trim()) ||
-    (Boolean(rangeStart) && !rangeEnd)
+    (Boolean(rangeStart) && !input.end_date?.trim())
 
   if (hasExplicitPeriod) {
     return resolvedPeriod.period_end
@@ -144,56 +155,145 @@ export async function resolveBalanceSheetAsOfDate(
   return getBusinessToday(supabase, input.businessId)
 }
 
+export type BalanceSheetComputeTimings = {
+  period_ms: number
+  as_of_ms: number
+  bs_rpc_ms: number
+  earnings_rpc_ms: number
+  business_ms: number
+  assemble_ms: number
+  total_ms: number
+  parallel_ledger_reads: boolean
+}
+
 export async function getBalanceSheetReport(
   supabase: SupabaseClient,
   input: BalanceSheetReportInput
-): Promise<{ data: BalanceSheetReportResponse | null; error: string }> {
+): Promise<{
+  data: BalanceSheetReportResponse | null
+  error: string
+  timings?: BalanceSheetComputeTimings
+}> {
   const { businessId } = input
   if (!businessId?.trim()) {
     return { data: null, error: "Missing required parameter: business_id" }
   }
 
-  const { period: resolvedPeriod, error: resolveError } = await resolveAccountingPeriodForReport(
-    supabase,
-    {
-      businessId,
-      period_id: input.period_id,
-      period_start: input.period_start,
-      as_of_date: input.as_of_date,
-      start_date: input.start_date,
-      end_date: input.end_date,
+  const tAll = performance.now()
+  const timings: BalanceSheetComputeTimings = {
+    period_ms: 0,
+    as_of_ms: 0,
+    bs_rpc_ms: 0,
+    earnings_rpc_ms: 0,
+    business_ms: 0,
+    assemble_ms: 0,
+    total_ms: 0,
+    parallel_ledger_reads: false,
+  }
+  const finish = <T extends { data: BalanceSheetReportResponse | null; error: string }>(
+    result: T
+  ) => ({
+    ...result,
+    timings: { ...timings, total_ms: Math.round((performance.now() - tAll) * 10) / 10 },
+  })
+
+  const periodInput = {
+    businessId,
+    period_id: input.period_id,
+    period_start: input.period_start,
+    as_of_date: input.as_of_date,
+    start_date: input.start_date,
+    end_date: input.end_date,
+  }
+  const explicitAsOf = peekExplicitBalanceSheetAsOfDate(input)
+
+  let resolvedPeriod: {
+    period_id: string
+    period_start: string
+    period_end: string
+    resolution_reason: string
+  } | null = null
+  let asOfDate = explicitAsOf ?? ""
+  let raw: CumulativeBsRow[] = []
+  let currentPeriodNetIncome = 0
+  let biz: { default_currency?: string; business_type?: BusinessType } | null = null
+
+  const loadBiz = async () => {
+    const t = performance.now()
+    const { data } = await supabase
+      .from("businesses")
+      .select("default_currency, business_type")
+      .eq("id", businessId)
+      .single()
+    timings.business_ms = Math.round((performance.now() - t) * 10) / 10
+    return data
+  }
+  const loadPeriod = async () => {
+    const t = performance.now()
+    const result = await resolveAccountingPeriodForReport(supabase, periodInput)
+    timings.period_ms = Math.round((performance.now() - t) * 10) / 10
+    return result
+  }
+  const loadRows = async (asOf: string) => {
+    const t = performance.now()
+    const result = await fetchCumulativeBalanceSheetRows(supabase, businessId, asOf)
+    timings.bs_rpc_ms = Math.round((performance.now() - t) * 10) / 10
+    return result
+  }
+  const loadEarnings = async (asOf: string) => {
+    const t = performance.now()
+    const result = await fetchCumulativeNetIncomeAsOf(supabase, businessId, asOf)
+    timings.earnings_rpc_ms = Math.round((performance.now() - t) * 10) / 10
+    return result
+  }
+
+  if (explicitAsOf) {
+    // Period metadata and ledger reads are independent once as-of is known.
+    timings.parallel_ledger_reads = true
+    const [periodRes, bsRes, niRes, bizRow] = await Promise.all([
+      loadPeriod(),
+      loadRows(explicitAsOf),
+      loadEarnings(explicitAsOf),
+      loadBiz(),
+    ])
+    if (periodRes.error || !periodRes.period) {
+      return finish({
+        data: null,
+        error: periodRes.error ?? "Accounting period could not be resolved",
+      })
     }
-  )
-  if (resolveError || !resolvedPeriod) {
-    return { data: null, error: resolveError ?? "Accounting period could not be resolved" }
+    if (bsRes.error) return finish({ data: null, error: bsRes.error })
+    if (niRes.error) return finish({ data: null, error: niRes.error })
+    resolvedPeriod = periodRes.period
+    raw = bsRes.rows
+    currentPeriodNetIncome = niRes.netIncome
+    biz = bizRow
+  } else {
+    const periodRes = await loadPeriod()
+    if (periodRes.error || !periodRes.period) {
+      return finish({
+        data: null,
+        error: periodRes.error ?? "Accounting period could not be resolved",
+      })
+    }
+    resolvedPeriod = periodRes.period
+    const tAsOf = performance.now()
+    asOfDate = await resolveBalanceSheetAsOfDate(supabase, input, resolvedPeriod)
+    timings.as_of_ms = Math.round((performance.now() - tAsOf) * 10) / 10
+    timings.parallel_ledger_reads = true
+    const [bsRes, niRes, bizRow] = await Promise.all([
+      loadRows(asOfDate),
+      loadEarnings(asOfDate),
+      loadBiz(),
+    ])
+    if (bsRes.error) return finish({ data: null, error: bsRes.error })
+    if (niRes.error) return finish({ data: null, error: niRes.error })
+    raw = bsRes.rows
+    currentPeriodNetIncome = niRes.netIncome
+    biz = bizRow
   }
 
-  const asOfDate = await resolveBalanceSheetAsOfDate(supabase, input, resolvedPeriod)
-
-  const { rows: raw, error: bsError } = await fetchCumulativeBalanceSheetRows(
-    supabase,
-    businessId,
-    asOfDate
-  )
-  if (bsError) {
-    return { data: null, error: bsError }
-  }
-
-  const { netIncome: cumulativeNetIncome, error: niError } = await fetchCumulativeNetIncomeAsOf(
-    supabase,
-    businessId,
-    asOfDate
-  )
-  if (niError) {
-    return { data: null, error: niError }
-  }
-  const currentPeriodNetIncome = cumulativeNetIncome
-
-  const { data: biz } = await supabase
-    .from("businesses")
-    .select("default_currency, business_type")
-    .eq("id", businessId)
-    .single()
+  const tAssemble = performance.now()
   const currencyCode = (biz as { default_currency?: string })?.default_currency ?? "USD"
   const currency = {
     code: currencyCode,
@@ -297,13 +397,15 @@ export async function getBalanceSheetReport(
     },
   ]
 
-  return {
+  timings.assemble_ms = Math.round((performance.now() - tAssemble) * 10) / 10
+
+  return finish({
     data: {
       period: {
-        period_id: resolvedPeriod.period_id,
-        period_start: resolvedPeriod.period_start,
-        period_end: resolvedPeriod.period_end,
-        resolution_reason: resolvedPeriod.resolution_reason,
+        period_id: resolvedPeriod!.period_id,
+        period_start: resolvedPeriod!.period_start,
+        period_end: resolvedPeriod!.period_end,
+        resolution_reason: resolvedPeriod!.resolution_reason,
       },
       currency,
       as_of_date: asOfDate,
@@ -318,13 +420,13 @@ export async function getBalanceSheetReport(
         imbalance,
       },
       telemetry: {
-        resolved_period_reason: resolvedPeriod.resolution_reason,
-        resolved_period_start: resolvedPeriod.period_start,
-        resolved_period_end: resolvedPeriod.period_end,
+        resolved_period_reason: resolvedPeriod!.resolution_reason,
+        resolved_period_start: resolvedPeriod!.period_start,
+        resolved_period_end: resolvedPeriod!.period_end,
         source: "ledger",
         version: 2,
       },
     },
     error: "",
-  }
+  })
 }
