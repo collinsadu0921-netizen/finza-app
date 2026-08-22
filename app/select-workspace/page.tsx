@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getAllUserBusinesses, setSelectedBusinessId, clearSelectedBusinessId } from "@/lib/business"
 import { setTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { beginSharedJsonGetAuthLogout } from "@/lib/client/sharedJsonGetAuthBoundary"
 
 type WorkspaceBusiness = {
   id: string
@@ -111,6 +112,7 @@ export default function SelectWorkspacePage() {
   const handleLogout = async () => {
     clearTabIndustryMode()
     clearSelectedBusinessId()
+    beginSharedJsonGetAuthLogout()
     await supabase.auth.signOut()
     router.push("/login")
   }

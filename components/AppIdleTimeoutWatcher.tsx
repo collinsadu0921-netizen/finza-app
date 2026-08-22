@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import {
+  beginSharedJsonGetAuthLogout,
+  ensureSharedJsonGetAuthBoundary,
+} from "@/lib/client/sharedJsonGetAuthBoundary"
 import { clearTabIndustryMode } from "@/lib/industryMode"
 import { clearSelectedBusinessId } from "@/lib/business"
 import {
@@ -50,6 +54,10 @@ export default function AppIdleTimeoutWatcher({
   // Updated inside useEffect so JSX button callbacks are never stale.
   const stayRef = useRef<() => void>(() => {})
   const signOutRef = useRef<() => Promise<void>>(async () => {})
+
+  useEffect(() => {
+    ensureSharedJsonGetAuthBoundary()
+  }, [])
 
   useEffect(() => {
     if (isExcludedFromAppIdleTimeout(pathname)) {
@@ -111,6 +119,7 @@ export default function AppIdleTimeoutWatcher({
 
       clearTabIndustryMode()
       clearSelectedBusinessId()
+      beginSharedJsonGetAuthLogout()
 
       try {
         await supabase.auth.signOut()
