@@ -9,6 +9,14 @@
  *   node scripts/release-production.mjs --preflight
  *   node scripts/release-production.mjs --verify-only
  *
+ * --preflight and --verify-only both prove candidate SHA, clean worktree,
+ * project, ARN1 default, production URL, and production service-role identity.
+ * They never deploy.
+ *
+ * --verify-only also inspects the live production alias/region/crons.
+ * It does NOT require the live deployment SHA to equal the undeployed candidate.
+ * A real release still requires the deployed SHA to equal the candidate SHA.
+ *
  * Application rollback (stay on ARN1):
  *   checkout the previous good SHA in a clean worktree
  *   node scripts/release-production.mjs
@@ -18,7 +26,8 @@
  */
 
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
@@ -39,6 +48,11 @@ const {
   assertAlias,
   assertCrons,
   assertProductionSupabasePair,
+  classifyServiceRoleCredential,
+  evaluateOpaqueSecretVerifierStatus,
+  buildOpaqueSecretIdentityRequest,
+  extractProductionSupabaseEnv,
+  toSafeReleaseFailure,
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
@@ -120,6 +134,81 @@ async function gitOutput(args) {
   return stdout.trim()
 }
 
+function runSecretSafe(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: ROOT,
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    child.stdout.on("data", () => {})
+    child.stderr.on("data", () => {})
+    child.on("error", () => {
+      reject(
+        new ReleaseGuardError(
+          "SERVICE_ROLE_ENV_UNVERIFIED",
+          "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+        ),
+      )
+    })
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(
+          new ReleaseGuardError(
+            "SERVICE_ROLE_ENV_UNVERIFIED",
+            "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+          ),
+        )
+        return
+      }
+      resolve()
+    })
+  })
+}
+
+async function discardResponseBody(res) {
+  try {
+    if (res && res.body && typeof res.body.cancel === "function") {
+      await res.body.cancel()
+      return
+    }
+    if (res && typeof res.arrayBuffer === "function") {
+      await res.arrayBuffer()
+    }
+  } catch {
+    // Body is discarded; never inspect or log it.
+  }
+}
+
+async function proveOpaqueSecretIdentity(url, secret, fetchImpl = fetch) {
+  const request = buildOpaqueSecretIdentityRequest(url)
+  let status
+  try {
+    const res = await fetchImpl(request.url, {
+      method: request.method,
+      headers: {
+        Accept: "application/json",
+        apikey: secret,
+      },
+    })
+    status = res.status
+    await discardResponseBody(res)
+  } catch {
+    throw new ReleaseGuardError(
+      "SERVICE_ROLE_UNVERIFIED",
+      "Production service-role credential could not be verified against the production project",
+    )
+  }
+  const evaluated = evaluateOpaqueSecretVerifierStatus(status)
+  if (!evaluated.accepted) {
+    throw new ReleaseGuardError(
+      "SERVICE_ROLE_UNVERIFIED",
+      "Production service-role credential could not be verified against the production project",
+    )
+  }
+  return { accepted: true, projectRef: PRODUCTION.supabaseRef }
+}
+
 function ensureLocalProjectLink() {
   const vercelDir = join(ROOT, ".vercel")
   const projectFile = join(vercelDir, "project.json")
@@ -152,30 +241,47 @@ async function vercelApi(path) {
 }
 
 async function readProductionSupabaseEnv() {
-  const dest = join(ROOT, ".vercel", "_production.env.pull")
+  const dir = mkdtempSync(join(tmpdir(), "finza-release-env-"))
+  const dest = join(dir, "production.env")
   try {
-    await run(
-      "npx",
-      ["vercel", "env", "pull", dest, "--environment", "production", "--yes"],
-      { failCode: "ENV_UNVERIFIED" },
-    )
+    await runSecretSafe("npx", [
+      "vercel",
+      "env",
+      "pull",
+      dest,
+      "--environment",
+      "production",
+      "--yes",
+    ])
     if (!existsSync(dest)) {
-      throw new ReleaseGuardError("ENV_UNVERIFIED", "Could not read production Supabase environment")
+      throw new ReleaseGuardError(
+        "SERVICE_ROLE_ENV_UNVERIFIED",
+        "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+      )
     }
-    const parsed = parseDotEnv(readFileSync(dest, "utf8"))
-    return {
-      url: parsed.NEXT_PUBLIC_SUPABASE_URL || "",
-      serviceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY || "",
+    const extracted = extractProductionSupabaseEnv(parseDotEnv(readFileSync(dest, "utf8")))
+    if (!extracted.url) {
+      throw new ReleaseGuardError("ENV_UNVERIFIED", "Production Supabase URL could not be read")
     }
+    if (!extracted.serviceRoleKey) {
+      throw new ReleaseGuardError(
+        "SERVICE_ROLE_ENV_UNVERIFIED",
+        "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+      )
+    }
+    return extracted
   } catch (error) {
-    if (error && typeof error === "object") {
-      error.stdout = ""
-      error.stderr = ""
-    }
     if (error instanceof ReleaseGuardError) throw error
-    throw new ReleaseGuardError("ENV_UNVERIFIED", "Could not read production Supabase environment")
+    throw new ReleaseGuardError(
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+      "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
   } finally {
-    if (existsSync(dest)) unlinkSync(dest)
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      if (existsSync(dest)) unlinkSync(dest)
+    }
   }
 }
 
@@ -236,7 +342,14 @@ async function main() {
     resourceFunctionRegions: project.resourceConfig?.functionDefaultRegions,
   })
   const supabaseEnv = await readProductionSupabaseEnv()
-  const supabasePair = assertProductionSupabasePair(supabaseEnv.url, supabaseEnv.serviceRoleKey)
+  const credentialFormat = classifyServiceRoleCredential(supabaseEnv.serviceRoleKey)
+  let opaqueProof
+  if (credentialFormat === "secret") {
+    opaqueProof = await proveOpaqueSecretIdentity(supabaseEnv.url, supabaseEnv.serviceRoleKey)
+  }
+  const supabasePair = assertProductionSupabasePair(supabaseEnv.url, supabaseEnv.serviceRoleKey, {
+    opaqueProof,
+  })
   supabaseEnv.serviceRoleKey = ""
 
   if (args.preflight) {
@@ -245,6 +358,7 @@ async function main() {
         {
           ok: true,
           preflight: true,
+          deployed: false,
           project: PRODUCTION.projectName,
           projectId: PRODUCTION.projectId,
           sha: expectedSha,
@@ -281,7 +395,10 @@ async function main() {
   assertProject({ id: deployment.projectId || project.id, name: deployment.name || project.name })
   assertProductionTarget(deployment.target)
   assertReady(deployment.readyState)
-  assertShaMatch(expectedSha, parseDeployedSha(deployment))
+  const liveSha = parseDeployedSha(deployment)
+  if (!args.verifyOnly) {
+    assertShaMatch(expectedSha, liveSha)
+  }
   assertRegion(deployment.regions)
 
   const inspect = await inspectText(deployment.id)
@@ -310,10 +427,16 @@ async function main() {
         project: PRODUCTION.projectName,
         projectId: PRODUCTION.projectId,
         sha: expectedSha,
+        live_sha: liveSha || null,
+        live_sha_matches_candidate: Boolean(liveSha) && liveSha === expectedSha,
         deploymentId: deployment.id,
         region: PRODUCTION.region,
         alias: PRODUCTION.domain,
         verifyOnly: args.verifyOnly,
+        deployed: !args.verifyOnly,
+        supabase_ref: PRODUCTION.supabaseRef,
+        service_role_format: supabasePair.format,
+        service_role_ref: supabasePair.ref,
       },
       null,
       2,
@@ -327,7 +450,6 @@ function normalizeCompare(expected, head) {
 }
 
 main().catch((error) => {
-  const code = error && error.code ? error.code : "RELEASE_FAILED"
-  console.error(JSON.stringify({ ok: false, code, message: error.message }, null, 2))
+  console.error(JSON.stringify(toSafeReleaseFailure(error), null, 2))
   process.exit(1)
 })

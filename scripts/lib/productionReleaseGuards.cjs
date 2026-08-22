@@ -189,6 +189,7 @@ function assertSupabaseIdentity(url) {
 }
 
 const JWT_RE = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+const OPAQUE_IDENTITY_PATH = "/auth/v1/admin/users?page=1&per_page=1"
 
 function classifyServiceRoleCredential(value) {
   if (typeof value !== "string" || !value.trim()) return "missing"
@@ -197,6 +198,8 @@ function classifyServiceRoleCredential(value) {
   if (/^sb_secret_/.test(key) || /^sb_service_/.test(key)) return "secret"
   return "malformed"
 }
+
+const detectSupabaseCredentialFormat = classifyServiceRoleCredential
 
 function decodeJwtPayloadJson(token) {
   const parts = String(token || "").split(".")
@@ -210,57 +213,144 @@ function decodeJwtPayloadJson(token) {
   }
 }
 
-function decodeServiceRoleJwtClaims(key) {
+function decodeSupabaseServiceRoleJwtIdentity(key) {
+  const format = classifyServiceRoleCredential(key)
+  if (format !== "jwt") {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY is not a JWT")
+  }
   const payload = decodeJwtPayloadJson(key)
   if (!payload) fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY is malformed")
-  const ref = typeof payload.ref === "string" ? payload.ref.trim().toLowerCase() : ""
-  const role = typeof payload.role === "string" ? payload.role.trim() : ""
+  return {
+    ref: typeof payload.ref === "string" ? payload.ref.trim().toLowerCase() : "",
+    role: typeof payload.role === "string" ? payload.role.trim() : "",
+  }
+}
+
+const decodeServiceRoleJwtClaims = decodeSupabaseServiceRoleJwtIdentity
+
+function assertLegacyServiceRoleClaims(claims) {
+  if (!claims || typeof claims !== "object") {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production service-role credential has no identity claims")
+  }
+  const ref = typeof claims.ref === "string" ? claims.ref.trim().toLowerCase() : ""
+  const role = typeof claims.role === "string" ? claims.role.trim() : ""
   if (!ref) fail("SERVICE_ROLE_UNVERIFIED", "Production service-role credential has no project ref")
+  if (ref === PRODUCTION.forbiddenSupabaseRef) {
+    fail("STAGING_ENV", "Production service-role credential belongs to the staging Supabase project")
+  }
+  if (ref !== PRODUCTION.supabaseRef) {
+    fail("SERVICE_ROLE_MISMATCH", "Production service-role credential is not the production Supabase project")
+  }
+  if (!role) fail("SERVICE_ROLE_UNVERIFIED", "Production service-role credential has no role claim")
+  if (role !== "service_role") {
+    fail("SERVICE_ROLE_UNVERIFIED", "Production credential is not a service-role key")
+  }
   return { ref, role }
+}
+
+function buildOpaqueSecretIdentityRequest(url) {
+  assertSupabaseIdentity(url)
+  return {
+    method: "GET",
+    url: `https://${PRODUCTION.supabaseRef}.supabase.co${OPAQUE_IDENTITY_PATH}`,
+    headers: { Accept: "application/json" },
+  }
+}
+
+function evaluateOpaqueSecretVerifierStatus(status) {
+  if (status === 200) return { accepted: true }
+  if (status === 401 || status === 403) return { accepted: false, reason: "rejected" }
+  return { accepted: false, reason: "unverifiable" }
+}
+
+function assertOpaqueSecretProof(proof) {
+  if (!proof || proof.accepted !== true) {
+    fail(
+      "SERVICE_ROLE_UNVERIFIED",
+      "Production service-role credential could not be verified against the production project",
+    )
+  }
+  const ref = typeof proof.projectRef === "string" ? proof.projectRef.trim().toLowerCase() : ""
+  if (!ref) {
+    fail("SERVICE_ROLE_UNVERIFIED", "Opaque service-role identity proof has no project ref")
+  }
+  if (ref === PRODUCTION.forbiddenSupabaseRef) {
+    fail("STAGING_ENV", "Production service-role credential belongs to the staging Supabase project")
+  }
+  if (ref !== PRODUCTION.supabaseRef) {
+    fail("SERVICE_ROLE_MISMATCH", "Production service-role credential is not the production Supabase project")
+  }
+  return { ref, role: "service_role" }
+}
+
+function extractProductionSupabaseEnv(parsed) {
+  const source = parsed && typeof parsed === "object" ? parsed : {}
+  const url = typeof source.NEXT_PUBLIC_SUPABASE_URL === "string" ? source.NEXT_PUBLIC_SUPABASE_URL.trim() : ""
+  const serviceRoleKey =
+    typeof source.SUPABASE_SERVICE_ROLE_KEY === "string" ? source.SUPABASE_SERVICE_ROLE_KEY.trim() : ""
+  return { url, serviceRoleKey }
+}
+
+function redactCredentialFragments(text) {
+  if (typeof text !== "string") return ""
+  return text
+    .replace(/sb_secret_[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/sb_service_[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted]")
+}
+
+function toSafeReleaseFailure(error) {
+  if (error && typeof error === "object") {
+    error.stdout = ""
+    error.stderr = ""
+    delete error.stdout
+    delete error.stderr
+  }
+  return {
+    ok: false,
+    code: error && error.code ? error.code : "RELEASE_FAILED",
+    message: redactCredentialFragments(error && error.message ? error.message : "Release failed"),
+  }
 }
 
 /**
  * URL and service-role must both identify the production Supabase project.
  * Never include the credential in thrown messages.
+ * Opaque `sb_secret_` keys require an injected read-only proof; this helper stays network-free.
  */
-function assertProductionSupabasePair(url, serviceRoleKey) {
+function assertProductionSupabasePair(url, serviceRoleKey, options) {
   assertSupabaseIdentity(url)
   if (typeof serviceRoleKey !== "string" || !serviceRoleKey.trim()) {
-    fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY could not be read")
+    fail("SERVICE_ROLE_ENV_UNVERIFIED", "Could not securely read production SUPABASE_SERVICE_ROLE_KEY")
   }
 
   const format = classifyServiceRoleCredential(serviceRoleKey)
   if (format === "missing") {
-    fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY could not be read")
+    fail("SERVICE_ROLE_ENV_UNVERIFIED", "Could not securely read production SUPABASE_SERVICE_ROLE_KEY")
   }
   if (format === "malformed") {
     fail("SERVICE_ROLE_UNVERIFIED", "Production SUPABASE_SERVICE_ROLE_KEY is malformed")
   }
-  if (format === "secret") {
-    fail(
-      "SERVICE_ROLE_UNVERIFIED",
-      "Non-JWT service-role identity cannot be established from a local payload",
-    )
-  }
-
-  const claims = decodeServiceRoleJwtClaims(serviceRoleKey)
-  if (claims.ref === PRODUCTION.forbiddenSupabaseRef) {
-    fail("STAGING_ENV", "Production service-role credential belongs to the staging Supabase project")
-  }
-  if (claims.ref !== PRODUCTION.supabaseRef) {
-    fail("SERVICE_ROLE_MISMATCH", "Production service-role credential is not the production Supabase project")
-  }
-  if (claims.role && claims.role !== "service_role") {
-    fail("SERVICE_ROLE_UNVERIFIED", "Production credential is not a service-role key")
-  }
 
   const urlRef = extractSupabaseRef(url)
+  const opts = options && typeof options === "object" ? options : {}
+
+  if (format === "secret") {
+    const identity = assertOpaqueSecretProof(opts.opaqueProof)
+    if (urlRef !== identity.ref) {
+      fail("SERVICE_ROLE_MISMATCH", "Production Supabase URL and service-role credential are not the same project")
+    }
+    return { format: "secret", ref: identity.ref, role: identity.role }
+  }
+
+  const claims = assertLegacyServiceRoleClaims(decodeSupabaseServiceRoleJwtIdentity(serviceRoleKey))
   if (urlRef !== claims.ref) {
     fail("SERVICE_ROLE_MISMATCH", "Production Supabase URL and service-role credential are not the same project")
   }
-
-  return { format: "jwt", ref: claims.ref, role: claims.role || "service_role" }
+  return { format: "jwt", ref: claims.ref, role: claims.role }
 }
+
+const assertSupabaseServiceCredentialIdentity = assertProductionSupabasePair
 
 function buildDeployArgs(sha) {
   const expected = assertExpectedSha(sha)
@@ -307,8 +397,18 @@ module.exports = {
   assertCrons,
   assertSupabaseIdentity,
   assertProductionSupabasePair,
+  assertSupabaseServiceCredentialIdentity,
   classifyServiceRoleCredential,
+  detectSupabaseCredentialFormat,
   decodeServiceRoleJwtClaims,
+  decodeSupabaseServiceRoleJwtIdentity,
+  assertLegacyServiceRoleClaims,
+  buildOpaqueSecretIdentityRequest,
+  evaluateOpaqueSecretVerifierStatus,
+  assertOpaqueSecretProof,
+  extractProductionSupabaseEnv,
+  redactCredentialFragments,
+  toSafeReleaseFailure,
   extractSupabaseRef,
   buildDeployArgs,
   parseDeployedSha,

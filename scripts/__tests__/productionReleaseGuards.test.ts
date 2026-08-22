@@ -18,9 +18,18 @@ const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
   assertSupabaseIdentity: (url: string) => void
   assertProductionSupabasePair: (
     url: string,
-    serviceRoleKey: string
+    serviceRoleKey: string,
+    options?: { opaqueProof?: { accepted?: boolean; projectRef?: string } },
   ) => { format: string; ref: string; role: string }
   classifyServiceRoleCredential: (value: string) => string
+  detectSupabaseCredentialFormat: (value: string) => string
+  decodeSupabaseServiceRoleJwtIdentity: (key: string) => { ref: string; role: string }
+  assertLegacyServiceRoleClaims: (claims: { ref?: string; role?: string }) => { ref: string; role: string }
+  evaluateOpaqueSecretVerifierStatus: (status: number) => { accepted: boolean; reason?: string }
+  assertOpaqueSecretProof: (proof: unknown) => { ref: string; role: string }
+  buildOpaqueSecretIdentityRequest: (url: string) => { method: string; url: string; headers: Record<string, string> }
+  redactCredentialFragments: (text: string) => string
+  toSafeReleaseFailure: (error: unknown) => { ok: false; code: string; message: string }
   buildDeployArgs: (sha: string) => string[]
   parseDeployedSha: (deployment: unknown) => string
   assertCleanWorktree: (porcelain: string) => void
@@ -43,6 +52,13 @@ const {
   assertSupabaseIdentity,
   assertProductionSupabasePair,
   classifyServiceRoleCredential,
+  detectSupabaseCredentialFormat,
+  decodeSupabaseServiceRoleJwtIdentity,
+  evaluateOpaqueSecretVerifierStatus,
+  assertOpaqueSecretProof,
+  buildOpaqueSecretIdentityRequest,
+  redactCredentialFragments,
+  toSafeReleaseFailure,
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
@@ -201,6 +217,39 @@ const STAGING_JWT = syntheticJwt({
   ref: "adonhhtooawkeemdqqeo",
   role: "service_role",
 })
+const WRONG_ROLE_JWT = syntheticJwt({
+  iss: "supabase",
+  ref: "qjxhibvbmzogyzbhswjj",
+  role: "anon",
+})
+const MISSING_REF_JWT = syntheticJwt({
+  iss: "supabase",
+  role: "service_role",
+})
+const MISSING_ROLE_JWT = syntheticJwt({
+  iss: "supabase",
+  ref: "qjxhibvbmzogyzbhswjj",
+})
+const OPAQUE_SECRET = "sb_secret_DO_NOT_LEAK_TEST_VALUE"
+const PROD_OPAQUE_PROOF = { accepted: true, projectRef: "qjxhibvbmzogyzbhswjj" }
+
+function expectNoSecretLeak(run: () => unknown, secrets: string[]) {
+  try {
+    run()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const serialized = JSON.stringify(error)
+    const safe = toSafeReleaseFailure(error)
+    for (const secret of secrets) {
+      expect(message).not.toContain(secret)
+      expect(serialized).not.toContain(secret)
+      expect(safe.message).not.toContain(secret)
+      expect(JSON.stringify(safe)).not.toContain(secret)
+    }
+    return
+  }
+  throw new Error("expected failure")
+}
 
 describe("production service-role identity", () => {
   it("accepts production URL plus production service-role JWT", () => {
@@ -221,41 +270,100 @@ describe("production service-role identity", () => {
   })
 
   it("fails closed when the service-role is missing", () => {
-    expectCode(() => assertProductionSupabasePair(PROD_URL, ""), "SERVICE_ROLE_UNVERIFIED")
-    expectCode(() => assertProductionSupabasePair(PROD_URL, "   "), "SERVICE_ROLE_UNVERIFIED")
+    expectCode(() => assertProductionSupabasePair(PROD_URL, ""), "SERVICE_ROLE_ENV_UNVERIFIED")
+    expectCode(() => assertProductionSupabasePair(PROD_URL, "   "), "SERVICE_ROLE_ENV_UNVERIFIED")
   })
 
   it("fails closed when the service-role is malformed", () => {
     expectCode(() => assertProductionSupabasePair(PROD_URL, "not-a-jwt-or-secret"), "SERVICE_ROLE_UNVERIFIED")
     expectCode(() => assertProductionSupabasePair(PROD_URL, "eyJonlyonepart"), "SERVICE_ROLE_UNVERIFIED")
-    expectCode(
-      () => assertProductionSupabasePair(PROD_URL, "sb_secret_synthetic_unidentifiable"),
-      "SERVICE_ROLE_UNVERIFIED",
-    )
-    expect(classifyServiceRoleCredential(PROD_JWT)).toBe("jwt")
-    expect(classifyServiceRoleCredential("sb_secret_synthetic_unidentifiable")).toBe("secret")
   })
 
-  it("never includes the supplied secret in error messages", () => {
-    const secrets = [STAGING_JWT, PROD_JWT, "super-secret-service-role-value-xyz", "sb_secret_synthetic_unidentifiable"]
+  it("rejects a JWT with the production ref but the wrong role", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, WRONG_ROLE_JWT), "SERVICE_ROLE_UNVERIFIED")
+  })
+
+  it("rejects a JWT missing the project ref", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, MISSING_REF_JWT), "SERVICE_ROLE_UNVERIFIED")
+  })
+
+  it("rejects a JWT missing the role claim", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, MISSING_ROLE_JWT), "SERVICE_ROLE_UNVERIFIED")
+  })
+
+  it("explicitly rejects the staging project ref", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, STAGING_JWT), "STAGING_ENV")
+    expectCode(() => assertProductionSupabasePair(STAGING_URL, STAGING_JWT), "STAGING_ENV")
+    expectCode(
+      () => assertProductionSupabasePair(PROD_URL, OPAQUE_SECRET, {
+        opaqueProof: { accepted: true, projectRef: "adonhhtooawkeemdqqeo" },
+      }),
+      "STAGING_ENV",
+    )
+  })
+
+  it("classifies opaque sb_secret keys without JWT parsing", () => {
+    expect(detectSupabaseCredentialFormat(OPAQUE_SECRET)).toBe("secret")
+    expect(classifyServiceRoleCredential(OPAQUE_SECRET)).toBe("secret")
+    expect(classifyServiceRoleCredential(PROD_JWT)).toBe("jwt")
+    expectCode(() => decodeSupabaseServiceRoleJwtIdentity(OPAQUE_SECRET), "SERVICE_ROLE_UNVERIFIED")
+  })
+
+  it("fails closed when opaque-key verification is missing or rejected", () => {
+    expectCode(() => assertProductionSupabasePair(PROD_URL, OPAQUE_SECRET), "SERVICE_ROLE_UNVERIFIED")
+    expectCode(
+      () => assertProductionSupabasePair(PROD_URL, OPAQUE_SECRET, { opaqueProof: { accepted: false } }),
+      "SERVICE_ROLE_UNVERIFIED",
+    )
+    expectCode(() => assertOpaqueSecretProof({ accepted: false }), "SERVICE_ROLE_UNVERIFIED")
+  })
+
+  it("accepts an opaque key only with a production identity proof", () => {
+    expect(
+      assertProductionSupabasePair(PROD_URL, OPAQUE_SECRET, { opaqueProof: PROD_OPAQUE_PROOF }),
+    ).toEqual({
+      format: "secret",
+      ref: "qjxhibvbmzogyzbhswjj",
+      role: "service_role",
+    })
+    expectCode(
+      () => assertProductionSupabasePair(STAGING_URL, OPAQUE_SECRET, { opaqueProof: PROD_OPAQUE_PROOF }),
+      "STAGING_ENV",
+    )
+  })
+
+  it("evaluates opaque verifier statuses without network", () => {
+    expect(evaluateOpaqueSecretVerifierStatus(200)).toEqual({ accepted: true })
+    expect(evaluateOpaqueSecretVerifierStatus(401)).toEqual({ accepted: false, reason: "rejected" })
+    expect(evaluateOpaqueSecretVerifierStatus(403)).toEqual({ accepted: false, reason: "rejected" })
+    expect(evaluateOpaqueSecretVerifierStatus(500)).toEqual({ accepted: false, reason: "unverifiable" })
+    expect(evaluateOpaqueSecretVerifierStatus(0)).toEqual({ accepted: false, reason: "unverifiable" })
+    const request = buildOpaqueSecretIdentityRequest(PROD_URL)
+    expect(request.method).toBe("GET")
+    expect(request.url).toBe(
+      "https://qjxhibvbmzogyzbhswjj.supabase.co/auth/v1/admin/users?page=1&per_page=1",
+    )
+    expect(JSON.stringify(request)).not.toContain("apikey")
+    expectCode(() => buildOpaqueSecretIdentityRequest(STAGING_URL), "STAGING_ENV")
+  })
+
+  it("never includes the supplied secret in thrown or serialized diagnostics", () => {
+    const secrets = [STAGING_JWT, PROD_JWT, WRONG_ROLE_JWT, OPAQUE_SECRET, "super-secret-service-role-value-xyz"]
     const cases: Array<() => unknown> = [
       () => assertProductionSupabasePair(PROD_URL, STAGING_JWT),
       () => assertProductionSupabasePair(STAGING_URL, PROD_JWT),
       () => assertProductionSupabasePair(PROD_URL, ""),
+      () => assertProductionSupabasePair(PROD_URL, WRONG_ROLE_JWT),
+      () => assertProductionSupabasePair(PROD_URL, MISSING_REF_JWT),
+      () => assertProductionSupabasePair(PROD_URL, MISSING_ROLE_JWT),
       () => assertProductionSupabasePair(PROD_URL, "super-secret-service-role-value-xyz"),
-      () => assertProductionSupabasePair(PROD_URL, "sb_secret_synthetic_unidentifiable"),
+      () => assertProductionSupabasePair(PROD_URL, OPAQUE_SECRET),
+      () => decodeSupabaseServiceRoleJwtIdentity(OPAQUE_SECRET),
     ]
     for (const run of cases) {
-      try {
-        run()
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        const serialized = JSON.stringify(error)
-        for (const secret of secrets) {
-          expect(message).not.toContain(secret)
-          expect(serialized).not.toContain(secret)
-        }
-      }
+      expectNoSecretLeak(run, secrets)
     }
+    expect(redactCredentialFragments(`key was ${OPAQUE_SECRET}`)).not.toContain(OPAQUE_SECRET)
+    expect(redactCredentialFragments(`token ${PROD_JWT}`)).not.toContain(PROD_JWT)
   })
 })
