@@ -9,6 +9,7 @@ import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
 
 type Bill = {
   id: string
@@ -152,10 +153,13 @@ export default function BillsPage() {
       if (filters.end_date) params.append("end_date", filters.end_date)
       if (searchQuery) params.append("search", searchQuery)
 
-      const response = await fetch(`/api/bills/list?${params.toString()}`)
-      if (!response.ok) throw new Error("Failed to load bills")
+      const response = await sharedJsonGet<{ bills?: Bill[]; error?: string }>(
+        `/api/bills/list?${params.toString()}`,
+        { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS }
+      )
+      if (!response.ok) throw new Error(response.json?.error || "Failed to load bills")
 
-      const { bills: data } = await response.json()
+      const data = response.json.bills
       setBills(data || [])
       setLoading(false)
     } catch (err: any) {

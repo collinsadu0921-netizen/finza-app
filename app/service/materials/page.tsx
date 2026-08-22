@@ -7,6 +7,8 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { stockStatusLabel } from "@/lib/service/materialMovementLabels"
+import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
+import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
 
 type MaterialRow = {
   id: string
@@ -31,6 +33,8 @@ export default function ServiceMaterialsPage() {
   const searchParams = useSearchParams()
   const searchParamsString = searchParams.toString()
   const { format } = useBusinessCurrency()
+  const { business } = useWorkspaceBusiness()
+  const workspaceBusinessId = business?.id ?? ""
   const PAGE_SIZE = 25
   const [rows, setRows] = useState<MaterialRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,7 +55,10 @@ export default function ServiceMaterialsPage() {
   const [summary, setSummary] = useState<MaterialsSummary>({ totalItems: 0, activeItems: 0, lowStockItems: 0 })
   const searchDebounce = useRef<NodeJS.Timeout | null>(null)
 
-  useEffect(() => { load() }, [searchQuery, filterStatus, filterStock, page])
+  useEffect(() => {
+    if (!workspaceBusinessId) return
+    void load()
+  }, [searchQuery, filterStatus, filterStock, page, workspaceBusinessId])
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
@@ -69,8 +76,17 @@ export default function ServiceMaterialsPage() {
       if (filterStock !== "all") params.set("stock", filterStock)
       params.set("page", String(page))
       params.set("limit", String(PAGE_SIZE))
-      const res = await fetch(`/api/service/materials/workspace?${params.toString()}`)
-      const data = await res.json().catch(() => ({}))
+      const url = `/api/service/materials/workspace?${params.toString()}`
+      const res = await sharedJsonGet<{
+        rows?: MaterialRow[]
+        pagination?: { page: number; pageSize: number; totalCount: number; totalPages: number }
+        summary?: MaterialsSummary
+        error?: string
+      }>(url, {
+        ttlMs: workspaceBusinessId ? SERVICE_LIST_REMOUNT_TTL_MS : 0,
+        cacheKey: workspaceBusinessId ? `${url}::${workspaceBusinessId}` : url,
+      })
+      const data = res.json
       if (!res.ok) {
         setError(typeof data?.error === "string" ? data.error : "Failed to load materials")
         setLoading(false)

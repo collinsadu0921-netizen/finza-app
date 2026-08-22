@@ -16,9 +16,9 @@ export default function ServiceLayout({
 
   return (
     <ProtectedLayout>
-      <Suspense fallback={null}>
-        <ServiceWalkthroughProvider>{children}</ServiceWalkthroughProvider>
-      </Suspense>
+      <ServiceWalkthroughProvider>
+        <Suspense fallback={null}>{children}</Suspense>
+      </ServiceWalkthroughProvider>
     </ProtectedLayout>
   )
 }

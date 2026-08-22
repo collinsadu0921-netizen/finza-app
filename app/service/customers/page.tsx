@@ -6,6 +6,7 @@ import { replaceIfChanged } from "@/lib/navigation/safeReplace"
 import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import Link from "next/link"
+import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
 
 type Customer = {
   id: string
@@ -72,8 +73,12 @@ export default function ServiceCustomersPage() {
       params.append("page", String(page))
       params.append("limit", String(PAGE_SIZE))
 
-      const response = await fetch(`/api/customers?${params.toString()}`)
-      const data = await response.json()
+      const response = await sharedJsonGet<{
+        customers?: Customer[]
+        pagination?: { page: number; pageSize: number; totalCount: number; totalPages: number }
+        error?: string
+      }>(`/api/customers?${params.toString()}`, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+      const data = response.json
 
       if (!response.ok) throw new Error(data.error || "Failed to load customers")
       setCustomers(data.customers || [])

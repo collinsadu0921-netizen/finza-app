@@ -13,6 +13,7 @@ import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import Link from "next/link"
+import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
 
 type Expense = {
   id: string
@@ -127,10 +128,14 @@ export default function ExpensesPage() {
       if (searchQuery.trim()) query += `search=${encodeURIComponent(searchQuery.trim())}&`
       query += `page=${page}&limit=${PAGE_SIZE}&`
 
-      const response = await fetch(query)
-      if (!response.ok) throw new Error("Failed to load expenses")
+      const response = await sharedJsonGet<{
+        expenses?: Expense[]
+        pagination?: { page: number; pageSize: number; totalCount: number; totalPages: number }
+        error?: string
+      }>(query, { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS })
+      if (!response.ok) throw new Error(response.json?.error || "Failed to load expenses")
 
-      const payload = await response.json()
+      const payload = response.json
       setExpenses(payload.expenses || [])
       setPagination(payload.pagination || { page, pageSize: PAGE_SIZE, totalCount: 0, totalPages: 0 })
       setLoading(false)
