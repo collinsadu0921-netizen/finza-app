@@ -25,6 +25,7 @@ import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
+import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
 
 function devInvoiceTiming(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
@@ -296,20 +297,24 @@ function InvoicesPageContent() {
   const fetchInvoiceList = useCallback(
     async (
       bid: string,
-      pageOverride?: number
+      pageOverride?: number,
+      opts?: { fresh?: boolean }
     ): Promise<{ invoices: Invoice[]; pagination: InvoiceListPagination }> => {
       const params = buildInvoiceListParams(bid)
       if (pageOverride != null) {
         params.set("page", String(pageOverride))
       }
       const t0 = performance.now()
-      const res = await fetch(`/api/invoices/list?${params.toString()}`)
+      const res = await sharedJsonGet<{ invoices?: Invoice[]; pagination?: InvoiceListPagination; error?: string }>(
+        `/api/invoices/list?${params.toString()}`,
+        { ttlMs: SERVICE_LIST_REMOUNT_TTL_MS, fresh: opts?.fresh }
+      )
       devInvoiceTiming("invoices API load", t0)
       if (res.status === 403) {
         throw new Error("You do not have access to invoices for this business")
       }
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load invoices")
-      const payload = await res.json()
+      if (!res.ok) throw new Error(res.json?.error || "Failed to load invoices")
+      const payload = res.json
       return {
         invoices: (payload.invoices || []) as Invoice[],
         pagination:
@@ -338,9 +343,15 @@ function InvoicesPageContent() {
   }, [])
 
   const applyInvoiceListResult = useCallback(
-    async (bid: string, currentPage: number, opts?: { allowBusinessRecovery?: boolean }) => {
+    async (
+      bid: string,
+      currentPage: number,
+      opts?: { allowBusinessRecovery?: boolean; fresh?: boolean }
+    ) => {
       let activeBid = bid
-      let { invoices: data, pagination: pg } = await fetchInvoiceList(activeBid, currentPage)
+      let { invoices: data, pagination: pg } = await fetchInvoiceList(activeBid, currentPage, {
+        fresh: opts?.fresh,
+      })
 
       const filtersActive = hasActiveInvoiceListFilters({
         statusFilter,
@@ -423,7 +434,7 @@ function InvoicesPageContent() {
         }
       }
       try {
-        await applyInvoiceListResult(bid, page, { allowBusinessRecovery: true })
+        await applyInvoiceListResult(bid, page, { allowBusinessRecovery: true, fresh: true })
         setError("")
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to load invoices")

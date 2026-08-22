@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -12,6 +13,11 @@ import {
 } from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
+import {
+  SERVICE_WALKTHROUGH_REMOUNT_TTL_MS,
+  invalidateSharedJsonGet,
+  sharedJsonGet,
+} from "@/lib/client/sharedJsonGet"
 import {
   getActiveTourForPath,
   getTourDefinitionByKey,
@@ -38,15 +44,23 @@ export function useServiceWalkthrough(): ServiceWalkthroughContextValue {
   return useContext(ServiceWalkthroughContext) ?? { replayTourKey: () => {} }
 }
 
+function ForcedTourKeyReader({ onKey }: { onKey: (key: string) => void }) {
+  const searchParams = useSearchParams()
+  const key = (searchParams?.get("tour") ?? "").trim()
+  useEffect(() => {
+    onKey(key)
+  }, [key, onKey])
+  return null
+}
+
 export function ServiceWalkthroughProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "/"
-  const searchParams = useSearchParams()
   const { business, sessionUser } = useWorkspaceBusiness()
   const businessId = business?.id ?? null
   const userId = sessionUser?.id ?? null
 
   const normalizedPath = useMemo(() => normalizeServiceTourPathname(pathname), [pathname])
-  const forcedTourKey = (searchParams?.get("tour") ?? "").trim()
+  const [forcedTourKey, setForcedTourKey] = useState("")
 
   const [progressByKey, setProgressByKey] = useState<Map<string, ProgressRow>>(new Map())
   const [progressLoading, setProgressLoading] = useState(false)
@@ -78,19 +92,22 @@ export function ServiceWalkthroughProvider({ children }: { children: ReactNode }
     setProgressLoading(true)
     setProgressLoadError(null)
     try {
-      const res = await fetch(
-        `/api/service/walkthrough/progress?business_id=${encodeURIComponent(businessId)}`,
-        { credentials: "same-origin" }
-      )
+      const url = `/api/service/walkthrough/progress?business_id=${encodeURIComponent(businessId)}`
+      const res = await sharedJsonGet<{ rows?: ProgressRow[] }>(url, {
+        ttlMs: SERVICE_WALKTHROUGH_REMOUNT_TTL_MS,
+      })
       if (!res.ok) {
-        const bodyText = await res.text().catch(() => "")
+        const bodyText =
+          typeof res.json === "object" && res.json && "error" in res.json
+            ? String((res.json as { error?: unknown }).error || "")
+            : ""
         const message = `progress read failed (${res.status})${bodyText ? `: ${bodyText}` : ""}`
         console.warn("[service/walkthrough] GET /progress", message)
         setProgressLoadError(message)
         setProgressLoaded(true)
         return
       }
-      const j = (await res.json()) as { rows?: ProgressRow[] }
+      const j = res.json
       const m = new Map<string, ProgressRow>()
       for (const r of j.rows ?? []) {
         if (r.tour_key) m.set(r.tour_key, r)
@@ -168,6 +185,7 @@ export function ServiceWalkthroughProvider({ children }: { children: ReactNode }
             status,
           })
         )
+        invalidateSharedJsonGet("/api/service/walkthrough/progress")
         await loadProgress()
       } catch (error) {
         const msg = error instanceof Error ? error.message : "unknown error"
@@ -254,6 +272,9 @@ export function ServiceWalkthroughProvider({ children }: { children: ReactNode }
   return (
     <ServiceWalkthroughContext.Provider value={ctx}>
       {children}
+      <Suspense fallback={null}>
+        <ForcedTourKeyReader onKey={setForcedTourKey} />
+      </Suspense>
       {tourOpen && activeTour ? (
         <ServiceWalkthroughHost
           tour={activeTour}
