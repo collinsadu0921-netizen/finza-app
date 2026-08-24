@@ -24,6 +24,7 @@ import {
   shouldPollDashboardCluster,
   type DashboardClusterStatus,
 } from "@/lib/dashboard/serviceClusterClient"
+import { fetchServiceClusterJson } from "@/lib/dashboard/fetchServiceCluster"
 import { formatAccountingPeriodLabel } from "@/lib/dashboard/formatAccountingPeriodLabel"
 
 const TrendsSectionLazy = dynamic(() => import("./TrendsSection"), {
@@ -129,8 +130,11 @@ const QUICK_ACTIONS = [
 
 async function fetchDashboardCluster(
   businessId: string,
-  options: { periodStart?: string | null; previousPeriodStart?: string | null },
-  signal?: AbortSignal
+  options: {
+    periodStart?: string | null
+    previousPeriodStart?: string | null
+    fresh?: boolean
+  }
 ): Promise<{
   timeline: TimelineItem[]
   metrics: Metrics
@@ -138,32 +142,25 @@ async function fetchDashboardCluster(
   dashboard_status?: DashboardClusterStatus
   dashboard_ready?: boolean
 } | null> {
-  const params = new URLSearchParams({
-    business_id: businessId,
-    periods: "12",
-    activity_limit: "10",
-  })
-  if (options.periodStart) {
-    params.set("period_start", options.periodStart)
-    if (options.previousPeriodStart) {
-      params.set("previous_period_start", options.previousPeriodStart)
-    }
-  }
-  const res = await fetch(`/api/dashboard/service-cluster?${params.toString()}`, {
-    signal,
-    cache: "no-store",
-  })
+  const res = await fetchServiceClusterJson<{
+    timeline?: TimelineItem[]
+    metrics?: Metrics
+    activity?: { items: ActivityItem[] }
+    dashboard_status?: DashboardClusterStatus
+    dashboard_ready?: boolean
+    error?: string
+    message?: string
+  }>(businessId, options)
   if (!res.ok) {
-    let errMessage = `Request failed (${res.status})`
-    try {
-      const body = await res.json()
-      errMessage = body?.error ?? body?.message ?? errMessage
-    } catch {
-      /* ignore */
-    }
-    throw new Error(errMessage)
+    throw new Error(res.json?.error ?? res.json?.message ?? `Request failed (${res.status})`)
   }
-  return res.json()
+  return res.json as {
+    timeline: TimelineItem[]
+    metrics: Metrics
+    activity: { items: ActivityItem[] }
+    dashboard_status?: DashboardClusterStatus
+    dashboard_ready?: boolean
+  }
 }
 
 async function fetchTimelineData(
@@ -245,7 +242,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
   const loadAbortRef = useRef<AbortController | null>(null)
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollAttemptRef = useRef(0)
-  const loadRef = useRef<() => Promise<void>>(async () => {})
+  const loadRef = useRef<(opts?: { fresh?: boolean }) => Promise<void>>(async () => {})
 
   const rawMetricsCurrency = metrics?.currency
   const metricsCurrencyCode = typeof rawMetricsCurrency === "object" && rawMetricsCurrency !== null
@@ -268,11 +265,11 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
     pollAttemptRef.current += 1
     pollTimeoutRef.current = setTimeout(() => {
       pollTimeoutRef.current = null
-      void loadRef.current()
+      void loadRef.current({ fresh: true })
     }, delay)
   }, [clearDashboardPoll])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { fresh?: boolean }) => {
     const businessId = business?.id
     if (!businessId) {
       loadAbortRef.current?.abort()
@@ -403,16 +400,13 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
       } else {
         const [clusterSettled] = await Promise.allSettled([
           runTimed("service-cluster fetch", () =>
-            fetchDashboardCluster(
-              businessId,
-              {
-                periodStart:
-                  selectedPeriodStart != null && selectedPeriodStart !== ""
-                    ? selectedPeriodStart
-                    : undefined,
-              },
-              signal
-            )
+            fetchDashboardCluster(businessId, {
+              periodStart:
+                selectedPeriodStart != null && selectedPeriodStart !== ""
+                  ? selectedPeriodStart
+                  : undefined,
+              fresh: opts?.fresh,
+            })
           ),
         ])
 
@@ -565,7 +559,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
               year: "numeric",
             })}
           </p>
-          <DashboardTopActions onRefresh={load} refreshing={anyLoading} />
+          <DashboardTopActions onRefresh={() => void load({ fresh: true })} refreshing={anyLoading} />
         </div>
       </div>
     ) : null
@@ -593,7 +587,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
                 ? "We could not load your dashboard summary. Please refresh and try again."
                 : undefined
             }
-            onRetry={load}
+            onRetry={() => void load({ fresh: true })}
           />
         )}
 
@@ -616,7 +610,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           onPeriodChange={(v) => setSelectedPeriodStart(v || null)}
           showEmptyPeriodCta={showEmptyPeriodCta}
           onSwitchToLastActive={handleSwitchToLastActive}
-          onRefresh={load}
+          onRefresh={() => void load({ fresh: true })}
           showRefreshButton={headerLead == null}
           showHelpLink={headerLead == null}
         />

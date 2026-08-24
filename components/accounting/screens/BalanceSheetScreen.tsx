@@ -9,9 +9,9 @@ import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 import {
   PERIODS_TTL_MS,
-  REPORT_REMOUNT_TTL_MS,
   sharedClientBooksJson,
 } from "@/lib/accounting/clientBooksRequestShare"
+import { fetchAccountingReportJson } from "@/lib/accounting/fetchAccountingReportJson"
 
 type AccountingPeriod = {
   id: string
@@ -247,14 +247,21 @@ export default function BalanceSheetScreen({ mode, businessId }: ScreenProps) {
         }
       }
 
-      const response = await sharedClientBooksJson<{
-        sections?: Array<{ key?: string }>
-        totals?: Record<string, number>
+      const response = await fetchAccountingReportJson<{
+        sections?: any[]
         as_of_date?: string
+        totals?: {
+          assets: number
+          liabilities: number
+          equity: number
+          liabilities_plus_equity: number
+          imbalance: number
+          is_balanced: boolean
+        }
         error?: string
-      }>(url, { ttlMs: REPORT_REMOUNT_TTL_MS })
+      }>(url)
       if (!response.ok) {
-        throw new Error(response.json.error || "Failed to load balance sheet")
+        throw new Error(response.json?.error || "Failed to load balance sheet")
       }
       const data = response.json
       const sections: any[] = data.sections ?? []

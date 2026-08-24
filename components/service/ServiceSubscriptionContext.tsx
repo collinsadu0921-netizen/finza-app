@@ -25,6 +25,7 @@ import {
 } from "@/lib/serviceWorkspace/resolveServiceEntitlement"
 import { tierIncludes } from "@/lib/serviceWorkspace/subscriptionTiers"
 import {
+  initialServiceEntitlementFromWorkspace,
   resolveSubscriptionEntitlementScopeMode,
   SERVICE_SUBSCRIPTION_BUSINESS_COLUMNS,
   subscriptionEntitlementFromBusinessRow,
@@ -127,12 +128,13 @@ export function ServiceSubscriptionProvider({
 
   const shouldMount = shouldMountServiceSubscriptionProvider(pathname)
 
-  const [entitlement, setEntitlement] = useState<ServiceEntitlement>(() =>
-    resolveServiceEntitlement({})
+  const [boot] = useState(() =>
+    initialServiceEntitlementFromWorkspace(ctxBusiness as Record<string, unknown> | null)
   )
-  const [businessId, setBusinessId] = useState<string | null>(null)
+  const [entitlement, setEntitlement] = useState<ServiceEntitlement>(boot.entitlement)
+  const [businessId, setBusinessId] = useState<string | null>(boot.businessId)
   const [loading, setLoading] = useState(false)
-  const [entitlementResolved, setEntitlementResolved] = useState(false)
+  const [entitlementResolved, setEntitlementResolved] = useState(boot.resolved)
 
   const urlBusinessId = searchParams.get("business_id")?.trim() || null
   const ctxBusinessId = ctxBusiness?.id ?? null

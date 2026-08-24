@@ -49,6 +49,24 @@ export function resolveSubscriptionEntitlementScopeMode(
 }
 
 /** Stable key for subscription-relevant fields on a workspace business row. */
+export function initialServiceEntitlementFromWorkspace(
+  ctxBusiness: Record<string, unknown> | null | undefined
+): { entitlement: ServiceEntitlement; businessId: string | null; resolved: boolean } {
+  const id = typeof ctxBusiness?.id === "string" ? ctxBusiness.id.trim() : ""
+  if (!id) {
+    return {
+      entitlement: resolveServiceEntitlement({}),
+      businessId: null,
+      resolved: false,
+    }
+  }
+  return {
+    entitlement: subscriptionEntitlementFromBusinessRow(ctxBusiness),
+    businessId: id,
+    resolved: true,
+  }
+}
+
 export function workspaceBusinessSubscriptionKey(
   row: Record<string, unknown> | null | undefined
 ): string | null {

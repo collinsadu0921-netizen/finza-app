@@ -1,4 +1,5 @@
 import {
+  initialServiceEntitlementFromWorkspace,
   resolveSubscriptionEntitlementScopeMode,
   subscriptionEntitlementFromBusinessRow,
   workspaceBusinessSubscriptionKey,
@@ -49,5 +50,22 @@ describe("subscriptionEntitlementFromBusinessRow", () => {
       service_subscription_status: "active",
     })
     expect(before).not.toBe(after)
+  })
+
+  it("does not resolve entitlement without an authoritative business id", () => {
+    expect(initialServiceEntitlementFromWorkspace(null).resolved).toBe(false)
+    expect(initialServiceEntitlementFromWorkspace({}).resolved).toBe(false)
+    expect(initialServiceEntitlementFromWorkspace({ id: "   " }).resolved).toBe(false)
+  })
+
+  it("resolves entitlement immediately from a known workspace business", () => {
+    const boot = initialServiceEntitlementFromWorkspace({
+      id: "biz-1",
+      service_subscription_tier: "professional",
+      service_subscription_status: "active",
+    })
+    expect(boot.resolved).toBe(true)
+    expect(boot.businessId).toBe("biz-1")
+    expect(boot.entitlement.rawTier).toBe("professional")
   })
 })

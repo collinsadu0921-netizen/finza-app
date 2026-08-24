@@ -9,9 +9,10 @@ import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
 import {
   PERIODS_TTL_MS,
-  REPORT_REMOUNT_TTL_MS,
   sharedClientBooksJson,
 } from "@/lib/accounting/clientBooksRequestShare"
+import { fetchAccountingReportJson } from "@/lib/accounting/fetchAccountingReportJson"
+import { mapProfitAndLossTotals } from "@/lib/accounting/reportClientTotals"
 
 type AccountingPeriod = {
   id: string
@@ -140,14 +141,14 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
       } else if (useDateRange && startDate && endDate) {
         url += `&start_date=${startDate}&end_date=${endDate}`
       }
-      const response = await sharedClientBooksJson<{
+      const response = await fetchAccountingReportJson<{
         sections?: ReportSection[]
         totals?: { net_profit?: number; gross_profit?: number }
         period?: { period_start: string; period_end: string }
         error?: string
-      }>(url, { ttlMs: REPORT_REMOUNT_TTL_MS })
+      }>(url)
       if (!response.ok) {
-        throw new Error(response.json.error || "Failed to load profit & loss")
+        throw new Error(response.json?.error || "Failed to load profit & loss")
       }
       const data = response.json
       const allSections: ReportSection[] = data.sections ?? []
@@ -155,14 +156,11 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
       const expense = allSections.filter((s) => s.key !== "income" && s.key !== "other_income")
       setIncomeSections(income)
       setExpenseSections(expense)
-      const rev = income.reduce((sum, s) => sum + s.subtotal, 0)
-      const exp = expense.reduce((sum, s) => sum + s.subtotal, 0)
-      setRevenueTotal(rev)
-      setExpenseTotal(exp)
-      setNetProfit(data.totals?.net_profit ?? 0)
-      setGrossProfit(
-        typeof data.totals?.gross_profit === "number" ? data.totals.gross_profit : null
-      )
+      const mapped = mapProfitAndLossTotals(data)
+      setRevenueTotal(mapped.revenue)
+      setExpenseTotal(mapped.expenses)
+      setNetProfit(mapped.net)
+      setGrossProfit(mapped.gross)
       if (data.period) {
         const s = new Date(data.period.period_start)
         const e = new Date(data.period.period_end)

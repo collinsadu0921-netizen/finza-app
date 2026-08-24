@@ -9,6 +9,10 @@ import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { stockStatusLabel } from "@/lib/service/materialMovementLabels"
 import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
 import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
+import {
+  buildMaterialsWorkspaceUrl,
+  materialsWorkspaceCacheKey,
+} from "@/lib/service/materialsWorkspaceCache"
 
 type MaterialRow = {
   id: string
@@ -70,21 +74,26 @@ export default function ServiceMaterialsPage() {
     try {
       setLoading(true)
       setError("")
-      const params = new URLSearchParams()
-      if (searchQuery) params.set("search", searchQuery)
-      if (filterStatus !== "all") params.set("status", filterStatus)
-      if (filterStock !== "all") params.set("stock", filterStock)
-      params.set("page", String(page))
-      params.set("limit", String(PAGE_SIZE))
-      const url = `/api/service/materials/workspace?${params.toString()}`
+      const url = buildMaterialsWorkspaceUrl({
+        search: searchQuery,
+        status: filterStatus,
+        stock: filterStock,
+        page,
+        limit: PAGE_SIZE,
+      })
+      const cacheKey = materialsWorkspaceCacheKey(url, workspaceBusinessId)
+      if (!cacheKey) {
+        setLoading(false)
+        return
+      }
       const res = await sharedJsonGet<{
         rows?: MaterialRow[]
         pagination?: { page: number; pageSize: number; totalCount: number; totalPages: number }
         summary?: MaterialsSummary
         error?: string
       }>(url, {
-        ttlMs: workspaceBusinessId ? SERVICE_LIST_REMOUNT_TTL_MS : 0,
-        cacheKey: workspaceBusinessId ? `${url}::${workspaceBusinessId}` : url,
+        ttlMs: SERVICE_LIST_REMOUNT_TTL_MS,
+        cacheKey,
       })
       const data = res.json
       if (!res.ok) {
