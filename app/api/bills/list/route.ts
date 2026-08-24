@@ -1,10 +1,15 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { loadOrComputeOperationalListCache } from "@/lib/server/operationalListCache"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
-import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
+import {
+  createRouteDiag,
+  jsonResponseWithServerTiming,
+  supabaseErrorDiag,
+  timedStepMs,
+} from "@/lib/server/routeDiagnostics"
 
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 50
@@ -84,29 +89,23 @@ async function loadBillsListPayload(
     p_search: params.search || null,
   })
 
+  const rpcMs = timedStepMs(tRpc)
+  diag.recordTiming("bills_rpc", rpcMs, "get_bills_list_page")
+
   if (error) {
     diag.step("bills_rpc", {
       rpc: "get_bills_list_page",
-      ms_rpc: timedStepMs(tRpc),
+      ms_rpc: rpcMs,
       ...supabaseErrorDiag(error),
     })
     throw error
   }
 
   const rpcResult = (data ?? { total_count: 0, bills: [] }) as BillsListRpcResult
+  const tAssembly = performance.now()
   const bills = Array.isArray(rpcResult.bills) ? rpcResult.bills : []
   const total = Number(rpcResult.total_count) || 0
-
-  diag.step("bills_rpc", {
-    rpc: "get_bills_list_page",
-    ms_rpc: timedStepMs(tRpc),
-    row_count: bills.length,
-    total_count: total,
-    page: params.page,
-    limit: params.limit,
-  })
-
-  return {
+  const payload = {
     bills,
     pagination: {
       page: params.page,
@@ -115,15 +114,33 @@ async function loadBillsListPayload(
       hasMore: from + bills.length < total,
     },
   }
+  diag.recordTiming("assembly", timedStepMs(tAssembly), "map")
+
+  diag.step("bills_rpc", {
+    rpc: "get_bills_list_page",
+    ms_rpc: rpcMs,
+    row_count: bills.length,
+    total_count: total,
+    page: params.page,
+    limit: params.limit,
+  })
+
+  return payload
 }
 
 export async function GET(request: NextRequest) {
+  const routeT0 = performance.now()
   const { searchParams } = new URL(request.url)
   const routeName =
     searchParams.has("page") || searchParams.has("limit")
       ? "bills_list_paginated"
       : "bills_list_default_bounded"
-  let diag = createRouteDiag(routeName)
+  const diag = createRouteDiag(routeName)
+  const respond = <T>(body: T, status: number) =>
+    jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0), desc: "handler" }]),
+    })
 
   try {
     const tAuth = performance.now()
@@ -131,26 +148,41 @@ export async function GET(request: NextRequest) {
     const auth = await resolveAuthenticatedApiUser(supabase, {
       cookieHeader: request.headers.get("cookie"),
     })
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
 
     if (!auth.ok) {
       diag.fail(auth.status, auth.error, { auth_failure_stage: auth.authFailureStage })
-      return NextResponse.json(
+      return respond(
         { error: auth.error, auth_failure_stage: auth.authFailureStage },
-        { status: auth.status }
+        auth.status
       )
     }
     const user = auth.user
 
+    const tScope = performance.now()
     const scope = await resolveBusinessScopeForUser(
       supabase,
       user.id,
-      searchParams.get("business_id") ?? searchParams.get("businessId")
+      searchParams.get("business_id") ?? searchParams.get("businessId"),
+      {
+        diag: {
+          recordTiming: (name, durMs, desc) =>
+            diag.recordTiming(`scope_${name}`, durMs, desc),
+          step: (name, fields) =>
+            diag.step(
+              `scope_${name}`,
+              fields as Record<string, string | number | boolean | null | undefined>
+            ),
+        },
+      }
     )
-    diag.step("auth", { ms_auth: timedStepMs(tAuth) })
+    diag.recordTiming("scope", timedStepMs(tScope), "tenant")
+    diag.step("auth", { ms_auth: timedStepMs(tAuth), auth_source: auth.authSource })
+    diag.step("scope", { ms_scope: timedStepMs(tScope) })
 
     if (!scope.ok) {
       diag.fail(scope.status, scope.error)
-      return NextResponse.json({ error: scope.error }, { status: scope.status })
+      return respond({ error: scope.error }, scope.status)
     }
 
     const tTier = performance.now()
@@ -160,13 +192,13 @@ export async function GET(request: NextRequest) {
       scope.businessId,
       "professional"
     )
+    diag.recordTiming("entitlement", timedStepMs(tTier), "tier")
     diag.step("entitlement", { ms_entitlement: timedStepMs(tTier) })
     if (tierDenied) {
       diag.fail(tierDenied.status, "tier_denied")
-      return tierDenied
+      const body = await tierDenied.json().catch(() => ({ error: "Forbidden" }))
+      return respond(body, tierDenied.status)
     }
-
-    diag = createRouteDiag(routeName, scope.businessId)
 
     const page = Math.max(
       DEFAULT_PAGE,
@@ -188,21 +220,29 @@ export async function GET(request: NextRequest) {
     }
 
     const cacheKey = billsCacheKey(listParams)
-    const tTotal = performance.now()
+    const tCache = performance.now()
     const { value: payload, source: cacheSource, cache_enabled } =
       await loadOrComputeOperationalListCache(cacheKey, () =>
         loadBillsListPayload(supabase, listParams, diag)
       )
+    const cacheMs = timedStepMs(tCache)
+    if (cacheSource === "cache_hit" || cacheSource === "cache_coalesce") {
+      diag.recordTiming("bills_rpc", 0, `skipped_${cacheSource}`)
+      diag.recordTiming("assembly", 0, `skipped_${cacheSource}`)
+      diag.recordTiming("cache", cacheMs, cacheSource)
+    } else {
+      diag.recordTiming("cache", 0, cache_enabled ? "cache_miss" : "cache_disabled")
+    }
 
     diag.step("cache", {
       cache_source: cacheSource,
       cache_enabled,
-      ms_total: timedStepMs(tTotal),
+      ms_total: cacheMs,
       row_count: payload.bills.length,
     })
 
     diag.finish(200, { row_count: payload.bills.length, total: payload.pagination.total })
-    return NextResponse.json(payload)
+    return respond(payload, 200)
   } catch (error: unknown) {
     console.error("Error in bills list:", error)
     const msg = rpcErrorMessage(error)
@@ -213,6 +253,6 @@ export async function GET(request: NextRequest) {
           )
         : undefined
     diag.fail(500, msg, meta)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return respond({ error: msg }, 500)
   }
 }

@@ -18,9 +18,11 @@ jest.mock("@/lib/server/resolveAuthenticatedApiUser", () => ({
   resolveAuthenticatedApiUser: jest.fn(),
 }))
 
+import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
+import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
@@ -85,6 +87,52 @@ describe("GET /api/bills/list", () => {
       total: 1,
       hasMore: false,
     })
+    const timing = res.headers.get("Server-Timing") || ""
+    for (const name of ["auth", "scope", "entitlement", "bills_rpc", "cache", "assembly", "total"]) {
+      expect(timing).toContain(`${name};dur=`)
+    }
+    expect(timing).not.toContain("biz-a")
+    expect(timing).not.toContain("user-001")
+    expect(timing).not.toMatch(/select |get_bills_list_page\(/i)
+  })
+
+  it("returns 401 without a session", async () => {
+    mockResolveAuth.mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: "Unauthorized",
+      authFailureStage: "missing_cookie",
+    })
+    mockCreateSupabase.mockResolvedValue({ rpc: jest.fn() } as never)
+    const res = await GET(new NextRequest("http://localhost/api/bills/list?business_id=biz-a"))
+    expect(res.status).toBe(401)
+    expect(mockResolveScope).not.toHaveBeenCalled()
+  })
+
+  it("rejects a business the user cannot access", async () => {
+    mockResolveScope.mockResolvedValue({ ok: false, status: 403, error: "Forbidden" })
+    mockCreateSupabase.mockResolvedValue({ rpc: jest.fn() } as never)
+    const res = await GET(
+      new NextRequest("http://localhost/api/bills/list?business_id=biz-forged")
+    )
+    expect(res.status).toBe(403)
+    expect(enforceServiceIndustryMinTier).not.toHaveBeenCalled()
+  })
+
+  it("returns TIER_REQUIRED without calling the bills RPC", async () => {
+    const rpc = mockBillsRpc([], 0)
+    mockCreateSupabase.mockResolvedValue({ rpc } as never)
+    jest.mocked(enforceServiceIndustryMinTier).mockResolvedValueOnce(
+      NextResponse.json(
+        { error: "Forbidden: requires professional plan or higher", code: "TIER_REQUIRED" },
+        { status: 403 }
+      )
+    )
+    const res = await GET(new NextRequest("http://localhost/api/bills/list?business_id=biz-a"))
+    expect(res.status).toBe(403)
+    const body = await res.json()
+    expect(body.code).toBe("TIER_REQUIRED")
+    expect(rpc).not.toHaveBeenCalled()
   })
 
   it("caps limit at 100", async () => {
