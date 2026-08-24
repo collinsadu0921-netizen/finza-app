@@ -252,6 +252,7 @@ describe("loadServiceDashboardMetrics summary-first", () => {
     expect(payload.netProfit).toBe(-2985.66)
     expect(payload.accountsReceivable).toBe(737654.2)
     expect(payload.unpaidInvoicesTotal).toBe(733574.2)
+    expect(rpc.mock.calls.filter(([name]) => name === "finza_dashboard_positions_as_of")).toHaveLength(1)
   })
 
   it("does not mark live fallback as fresh", async () => {

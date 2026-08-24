@@ -166,9 +166,15 @@ export type SummaryMetricsMissReason =
   | "rpc_error"
   | "unknown"
 
+type SummarySideLoads = {
+  currency: { code: string; symbol: string; name: string }
+  positions: PositionRow
+  cashCollected: number
+}
+
 type SummarySnapshotBuildResult =
   | { ok: true; payload: ServiceDashboardMetricsPayload }
-  | { ok: false; reason: SummaryMetricsMissReason }
+  | { ok: false; reason: SummaryMetricsMissReason; reuse?: SummarySideLoads }
 
 type PeriodPnlSummaryReadResult = {
   row: {
@@ -379,7 +385,11 @@ async function buildMetricsFromSummarySnapshot(
     ])
 
   if (!currentPnl.row) {
-    return { ok: false, reason: currentPnl.reason ?? "missing_row" }
+    return {
+      ok: false,
+      reason: currentPnl.reason ?? "missing_row",
+      reuse: { currency, positions, cashCollected },
+    }
   }
   const freshPnl = currentPnl.row
 
@@ -510,10 +520,11 @@ async function buildMetricsFromLiveLedgerFallback(
     period: { period_id: string; resolution_reason?: string }
   },
   positionAsOfDate: string,
-  options?: { softPositionReads?: boolean }
+  options?: { softPositionReads?: boolean; reuse?: SummarySideLoads }
 ): Promise<LiveLedgerMetricsBuildResult> {
   const timeoutMs = dashboardLiveFallbackTimeoutMs()
   const softReads = options?.softPositionReads === true
+  const reuse = options?.reuse
   const [pnlRead, currency, positions, cashCollected] = await Promise.all([
     loadLivePeriodPnlFromLedger(
       supabase,
@@ -522,11 +533,17 @@ async function buildMetricsFromLiveLedgerFallback(
       range.movementEnd,
       timeoutMs
     ),
-    loadBusinessCurrency(supabase, businessId),
-    loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
-    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
-      throwOnError: !softReads,
-    }),
+    reuse?.currency
+      ? Promise.resolve(reuse.currency)
+      : loadBusinessCurrency(supabase, businessId),
+    reuse?.positions
+      ? Promise.resolve(reuse.positions)
+      : loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
+    reuse && reuse.cashCollected !== undefined
+      ? Promise.resolve(reuse.cashCollected)
+      : loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+          throwOnError: !softReads,
+        }),
   ])
   if (!pnlRead.row) {
     return {
@@ -709,7 +726,7 @@ export async function loadServiceDashboardMetrics(
         businessId,
         range,
         positionAsOfDate,
-        { softPositionReads: true }
+        { softPositionReads: true, reuse: snapshotResult.reuse }
       )
       if (liveFallback.ok) {
         usedLiveLedgerFallback = true
