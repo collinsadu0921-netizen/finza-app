@@ -475,4 +475,35 @@ describe("loadServiceDashboardMetrics summary-first", () => {
     expect(header).not.toContain('metrics_previous_pnl;dur=0;desc="skipped"')
     expect(header).not.toContain("biz-load")
   })
+
+  it("overlaps current P&L with positions, cash, and currency", async () => {
+    const started: Record<string, number> = {}
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    const rpc = jest.fn().mockImplementation(async (name: string) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        started.pnl = Date.now()
+        await delay(40)
+        return { data: [freshSummaryRow()], error: null }
+      }
+      if (name === "finza_dashboard_positions_as_of") {
+        started.positions = Date.now()
+        await delay(40)
+        return positionsRpc()
+      }
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return { data: null, error: null }
+    })
+    const payload = await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-load",
+      {},
+      createRouteDiag("dashboard_cluster"),
+      { refreshOnRequest: false }
+    )
+    expect(payload.revenue).toBe(4133.34)
+    expect(payload.accountsReceivable).toBe(737654.2)
+    expect(started.pnl).toBeDefined()
+    expect(started.positions).toBeDefined()
+    expect(Math.abs(started.positions - started.pnl)).toBeLessThan(20)
+  })
 })

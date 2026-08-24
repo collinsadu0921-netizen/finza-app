@@ -318,80 +318,84 @@ async function buildMetricsFromSummarySnapshot(
   options?: { allowStalePnl?: boolean; softPositionReads?: boolean },
   diag?: RouteDiag
 ): Promise<SummarySnapshotBuildResult> {
+  const softReads = options?.softPositionReads === true
+  const hasCompare = Boolean(compareStart && compareEnd)
   const tPnl = performance.now()
-  const currentPnl = await readPeriodPnlSummaryRow(
-    supabase,
-    businessId,
-    range.movementStart,
-    range.movementEnd,
-    { allowStalePnl: options?.allowStalePnl }
-  )
-  diag?.recordTiming("metrics_pnl", timedStepMs(tPnl), "summary")
+  const tPrevPnl = performance.now()
+  const tCurrency = performance.now()
+  const tPositions = performance.now()
+  const tCash = performance.now()
+
+  const [currentPnl, prevPnlRead, currency, positions, cashCollected, prevPositions, prevCash] =
+    await Promise.all([
+      recordMetricsPhase(
+        diag,
+        "metrics_pnl",
+        tPnl,
+        "summary",
+        readPeriodPnlSummaryRow(supabase, businessId, range.movementStart, range.movementEnd, {
+          allowStalePnl: options?.allowStalePnl,
+        })
+      ),
+      hasCompare
+        ? recordMetricsPhase(
+            diag,
+            "metrics_previous_pnl",
+            tPrevPnl,
+            "summary",
+            readPeriodPnlSummaryRow(supabase, businessId, compareStart as string, compareEnd as string, {
+              allowStalePnl: options?.allowStalePnl,
+            })
+          )
+        : Promise.resolve(null).then((value) => {
+            diag?.recordTiming("metrics_previous_pnl", 0, "skipped")
+            return value
+          }),
+      recordMetricsPhase(diag, "metrics_currency", tCurrency, "business", loadBusinessCurrency(supabase, businessId)),
+      recordMetricsPhase(
+        diag,
+        "metrics_positions",
+        tPositions,
+        "rpc",
+        loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads })
+      ),
+      recordMetricsPhase(
+        diag,
+        "metrics_cash",
+        tCash,
+        "payments",
+        loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+          throwOnError: !softReads,
+        })
+      ),
+      hasCompare
+        ? loadPositionsAsOf(supabase, businessId, compareEnd as string, { throwOnError: !softReads })
+        : Promise.resolve({} as PositionRow),
+      hasCompare
+        ? loadCashCollected(supabase, businessId, compareStart as string, compareEnd as string, {
+            throwOnError: !softReads,
+          })
+        : Promise.resolve(0),
+    ])
+
   if (!currentPnl.row) {
     return { ok: false, reason: currentPnl.reason ?? "missing_row" }
   }
   const freshPnl = currentPnl.row
 
-  const softReads = options?.softPositionReads === true
-
-  // Missing compare-period summary must not force current-period onto live RPC.
-  // Soft-omit previousPeriod when comparison data is unavailable.
   let previousPeriod: PreviousPeriodPayload | null = null
-  if (compareStart && compareEnd) {
-    const tPrevPnl = performance.now()
-    const prevPnlRead = await readPeriodPnlSummaryRow(
-      supabase,
-      businessId,
-      compareStart,
-      compareEnd,
-      { allowStalePnl: options?.allowStalePnl }
-    )
-    diag?.recordTiming("metrics_previous_pnl", timedStepMs(tPrevPnl), "summary")
-    if (prevPnlRead.row) {
-      const prevPnl = prevPnlRead.row
-      const [prevPositions, prevCash] = await Promise.all([
-        loadPositionsAsOf(supabase, businessId, compareEnd, { throwOnError: !softReads }),
-        loadCashCollected(supabase, businessId, compareStart, compareEnd, {
-          throwOnError: !softReads,
-        }),
-      ])
-
-      previousPeriod = {
-        revenue: num(prevPnl.revenue),
-        expenses: num(prevPnl.expenses),
-        netProfit: num(prevPnl.net_profit),
-        cashCollected: prevCash,
-        accountsReceivable: num(prevPositions.accounts_receivable),
-        accountsPayable: num(prevPositions.accounts_payable),
-        cashBalance: num(prevPositions.cash_balance),
-      }
+  if (prevPnlRead?.row) {
+    const prevPnl = prevPnlRead.row
+    previousPeriod = {
+      revenue: num(prevPnl.revenue),
+      expenses: num(prevPnl.expenses),
+      netProfit: num(prevPnl.net_profit),
+      cashCollected: prevCash,
+      accountsReceivable: num(prevPositions.accounts_receivable),
+      accountsPayable: num(prevPositions.accounts_payable),
+      cashBalance: num(prevPositions.cash_balance),
     }
-  } else {
-    diag?.recordTiming("metrics_previous_pnl", 0, "skipped")
   }
-
-  const tCurrency = performance.now()
-  const tPositions = performance.now()
-  const tCash = performance.now()
-  const [currency, positions, cashCollected] = await Promise.all([
-    recordMetricsPhase(diag, "metrics_currency", tCurrency, "business", loadBusinessCurrency(supabase, businessId)),
-    recordMetricsPhase(
-      diag,
-      "metrics_positions",
-      tPositions,
-      "rpc",
-      loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads })
-    ),
-    recordMetricsPhase(
-      diag,
-      "metrics_cash",
-      tCash,
-      "payments",
-      loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
-        throwOnError: !softReads,
-      })
-    ),
-  ])
 
   return {
     ok: true,
@@ -509,13 +513,21 @@ async function buildMetricsFromLiveLedgerFallback(
   options?: { softPositionReads?: boolean }
 ): Promise<LiveLedgerMetricsBuildResult> {
   const timeoutMs = dashboardLiveFallbackTimeoutMs()
-  const pnlRead = await loadLivePeriodPnlFromLedger(
-    supabase,
-    businessId,
-    range.movementStart,
-    range.movementEnd,
-    timeoutMs
-  )
+  const softReads = options?.softPositionReads === true
+  const [pnlRead, currency, positions, cashCollected] = await Promise.all([
+    loadLivePeriodPnlFromLedger(
+      supabase,
+      businessId,
+      range.movementStart,
+      range.movementEnd,
+      timeoutMs
+    ),
+    loadBusinessCurrency(supabase, businessId),
+    loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
+    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+      throwOnError: !softReads,
+    }),
+  ])
   if (!pnlRead.row) {
     return {
       ok: false,
@@ -523,15 +535,6 @@ async function buildMetricsFromLiveLedgerFallback(
       error: pnlRead.error,
     }
   }
-
-  const softReads = options?.softPositionReads === true
-  const [currency, positions, cashCollected] = await Promise.all([
-    loadBusinessCurrency(supabase, businessId),
-    loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
-    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
-      throwOnError: !softReads,
-    }),
-  ])
   const positionsReady = positionsPayloadReady(positions)
 
   return {
