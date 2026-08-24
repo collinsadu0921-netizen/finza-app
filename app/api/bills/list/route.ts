@@ -1,7 +1,11 @@
 import { NextRequest } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
-import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
+import { loadBillsListEntitlementRow } from "@/lib/bills/billsListEntitlement"
+import {
+  decideMaterialsWorkspaceRead,
+  lookupAccountingFirmUser,
+} from "@/lib/service/enforceMaterialsWorkspaceRead"
 import { loadOrComputeOperationalListCache } from "@/lib/server/operationalListCache"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import {
@@ -186,14 +190,17 @@ export async function GET(request: NextRequest) {
     }
 
     const tTier = performance.now()
-    const tierDenied = await enforceServiceIndustryMinTier(
-      supabase,
-      user.id,
-      scope.businessId,
-      "professional"
-    )
-    diag.recordTiming("entitlement", timedStepMs(tTier), "tier")
+    const [firmRow, entitlementRow] = await Promise.all([
+      lookupAccountingFirmUser(supabase, user.id),
+      loadBillsListEntitlementRow(supabase, scope.businessId),
+    ])
+    diag.recordTiming("entitlement", timedStepMs(tTier), "parallel")
     diag.step("entitlement", { ms_entitlement: timedStepMs(tTier) })
+    if (!entitlementRow) {
+      diag.fail(404, "Business not found")
+      return respond({ error: "Business not found" }, 404)
+    }
+    const tierDenied = decideMaterialsWorkspaceRead(firmRow, entitlementRow, "professional")
     if (tierDenied) {
       diag.fail(tierDenied.status, "tier_denied")
       const body = await tierDenied.json().catch(() => ({ error: "Forbidden" }))
