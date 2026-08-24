@@ -171,7 +171,7 @@ describe("GET /api/service/materials/workspace", () => {
     jest.mocked(createSupabaseServerClient).mockResolvedValue(supabase as never)
     const res = await GET(new NextRequest("http://localhost/api/service/materials/workspace?page=1&limit=25"))
     expect(res.status).toBe(401)
-    expect(supabase.from).not.toHaveBeenCalledWith("service_material_inventory")
+    expect(supabase.from).not.toHaveBeenCalled()
   })
 
   it("returns 404 when no current business exists", async () => {
@@ -180,6 +180,100 @@ describe("GET /api/service/materials/workspace", () => {
     const res = await GET(new NextRequest("http://localhost/api/service/materials/workspace?page=1&limit=25"))
     expect(res.status).toBe(404)
     expect(supabase.from).not.toHaveBeenCalledWith("service_material_inventory")
+  })
+
+  it("returns 404 before inventory even when the user is a firm member", async () => {
+    const supabase = makeSupabase({ business: null, isFirmUser: true })
+    jest.mocked(createSupabaseServerClient).mockResolvedValue(supabase as never)
+    const res = await GET(new NextRequest("http://localhost/api/service/materials/workspace?page=1&limit=25"))
+    expect(res.status).toBe(404)
+    expect(supabase.from).not.toHaveBeenCalledWith("service_material_inventory")
+  })
+
+  it("starts business and firm lookups after auth without waiting on each other", async () => {
+    let releaseBusiness: (value: { data: typeof professionalBusiness; error: null }) => void = () => {}
+    let releaseFirm: (value: { data: null; error: null }) => void = () => {}
+    const businessGate = new Promise<{ data: typeof professionalBusiness; error: null }>((resolve) => {
+      releaseBusiness = resolve
+    })
+    const firmGate = new Promise<{ data: null; error: null }>((resolve) => {
+      releaseFirm = resolve
+    })
+    const started: string[] = []
+    const supabase = {
+      auth: {
+        getUser: jest.fn().mockResolvedValue({
+          data: { user: { id: USER } },
+          error: null,
+        }),
+      },
+      from: jest.fn((table: string) => {
+        started.push(table)
+        if (table === "accounting_firm_users") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            limit: jest.fn().mockReturnThis(),
+            maybeSingle: () => firmGate,
+          }
+        }
+        if (table === "businesses") {
+          return {
+            select: jest.fn().mockReturnThis(),
+            eq: jest.fn().mockReturnThis(),
+            is: jest.fn().mockReturnThis(),
+            order: jest.fn().mockReturnThis(),
+            limit: jest.fn().mockReturnThis(),
+            maybeSingle: () => businessGate,
+          }
+        }
+        if (table === "service_material_inventory") {
+          const chain: Record<string, unknown> = {}
+          const self = () => chain
+          chain.select = jest.fn(self)
+          chain.eq = jest.fn(self)
+          chain.order = jest.fn(self)
+          chain.range = jest.fn(async () => ({ data: [inventoryRow], count: 1, error: null }))
+          chain.then = (resolve: (value: unknown) => unknown) =>
+            Promise.resolve({
+              data: [
+                {
+                  quantity_on_hand: 94,
+                  average_cost: 10,
+                  reorder_level: 0,
+                  is_active: true,
+                },
+              ],
+              error: null,
+            }).then(resolve)
+          return chain
+        }
+        if (table === "service_material_movements") {
+          const chain: Record<string, unknown> = {}
+          const self = () => chain
+          chain.select = jest.fn(self)
+          chain.eq = jest.fn(self)
+          chain.in = jest.fn(self)
+          chain.order = jest.fn(self)
+          chain.then = (resolve: (value: unknown) => unknown) =>
+            Promise.resolve({ data: [], error: null }).then(resolve)
+          return chain
+        }
+        return {}
+      }),
+    }
+    jest.mocked(createSupabaseServerClient).mockResolvedValue(supabase as never)
+
+    const pending = GET(
+      new NextRequest("http://localhost/api/service/materials/workspace?page=1&limit=25")
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(started).toEqual(expect.arrayContaining(["businesses", "accounting_firm_users"]))
+    expect(started).not.toContain("service_material_inventory")
+    releaseBusiness({ data: professionalBusiness, error: null })
+    releaseFirm({ data: null, error: null })
+    const res = await pending
+    expect(res.status).toBe(200)
   })
 
   it("returns 403 TIER_REQUIRED for starter Service tenants", async () => {

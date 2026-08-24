@@ -4,28 +4,35 @@ import { entitlementIncludesTier } from "@/lib/serviceWorkspace/resolveServiceEn
 import { subscriptionEntitlementFromBusinessRow } from "@/lib/serviceWorkspace/subscriptionEntitlementFromBusinessRow"
 import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptionTiers"
 
+export type MaterialsFirmMembership = { firm_id: string }
+
 /**
- * Same gates as enforceServiceIndustryMinTier for this route, but reuse the
- * business row already resolved by getCurrentBusiness:
- * - industry is already on the row
- * - membership/owner access is already established
- * - subscription columns are already on select("*")
- *
- * Still queries accounting_firm_users so firm members skip the Service tier gate.
+ * Read-only firm membership. Depends only on userId — not business.id.
+ * Query errors are treated as "not a firm user", matching the previous helper.
  */
-export async function enforceMaterialsWorkspaceRead(
+export async function lookupAccountingFirmUser(
   supabase: SupabaseClient,
-  userId: string,
-  business: Record<string, unknown>,
-  minTier: ServiceSubscriptionTier = "professional"
-): Promise<NextResponse | null> {
-  const { data: firmRow } = await supabase
+  userId: string
+): Promise<MaterialsFirmMembership | null> {
+  const { data } = await supabase
     .from("accounting_firm_users")
     .select("firm_id")
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle()
 
+  return data ?? null
+}
+
+/**
+ * In-memory decision after business + firm rows are already loaded.
+ * Order: firm skip → industry skip → tier gate. Same codes as before.
+ */
+export function decideMaterialsWorkspaceRead(
+  firmRow: MaterialsFirmMembership | null,
+  business: Record<string, unknown>,
+  minTier: ServiceSubscriptionTier = "professional"
+): NextResponse | null {
   if (firmRow) return null
 
   const industry = String(business.industry ?? "").toLowerCase()
@@ -44,4 +51,18 @@ export async function enforceMaterialsWorkspaceRead(
   }
 
   return null
+}
+
+/**
+ * Same gates as enforceServiceIndustryMinTier for this route, but reuse the
+ * business row already resolved by getCurrentBusiness.
+ */
+export async function enforceMaterialsWorkspaceRead(
+  supabase: SupabaseClient,
+  userId: string,
+  business: Record<string, unknown>,
+  minTier: ServiceSubscriptionTier = "professional"
+): Promise<NextResponse | null> {
+  const firmRow = await lookupAccountingFirmUser(supabase, userId)
+  return decideMaterialsWorkspaceRead(firmRow, business, minTier)
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it, jest } from "@jest/globals"
-import { enforceMaterialsWorkspaceRead } from "@/lib/service/enforceMaterialsWorkspaceRead"
+import {
+  decideMaterialsWorkspaceRead,
+  enforceMaterialsWorkspaceRead,
+  lookupAccountingFirmUser,
+} from "@/lib/service/enforceMaterialsWorkspaceRead"
 
 const USER = "user-1"
 const BIZ = "biz-a"
@@ -64,6 +68,40 @@ describe("enforceMaterialsWorkspaceRead", () => {
     const body = await denied!.json()
     expect(body.code).toBe("TIER_REQUIRED")
     expect(body.effectiveTier).toBe("starter")
+  })
+
+  it("looks up firm membership by user id only", async () => {
+    const eqs: Array<{ col: string; value: unknown }> = []
+    const supabase = {
+      from: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn((col: string, value: unknown) => {
+          eqs.push({ col, value })
+          return {
+            limit: jest.fn().mockReturnThis(),
+            maybeSingle: jest.fn().mockResolvedValue({ data: { firm_id: "firm-1" }, error: null }),
+          }
+        }),
+      })),
+    }
+    const row = await lookupAccountingFirmUser(supabase as never, USER)
+    expect(row).toEqual({ firm_id: "firm-1" })
+    expect(eqs).toEqual([{ col: "user_id", value: USER }])
+    expect(eqs.some((entry) => entry.col === "business_id")).toBe(false)
+  })
+
+  it("decides firm skip and tier without another query", () => {
+    expect(
+      decideMaterialsWorkspaceRead({ firm_id: "firm-1" }, {
+        ...professionalRow,
+        service_subscription_tier: "starter",
+      })
+    ).toBeNull()
+    const denied = decideMaterialsWorkspaceRead(null, {
+      ...professionalRow,
+      service_subscription_tier: "starter",
+    })
+    expect(denied?.status).toBe(403)
   })
 
   it("allows professional Service tenants without re-reading businesses", async () => {

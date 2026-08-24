@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceMaterialsWorkspaceRead } from "@/lib/service/enforceMaterialsWorkspaceRead"
+import {
+  decideMaterialsWorkspaceRead,
+  lookupAccountingFirmUser,
+} from "@/lib/service/enforceMaterialsWorkspaceRead"
 import {
   assembleMaterialsWorkspaceRows,
   loadLastMovementsForMaterials,
@@ -40,16 +43,26 @@ export async function GET(request: NextRequest) {
       return respond({ error: "Unauthorized" }, 401)
     }
 
-    const tBusiness = performance.now()
-    const business = await getCurrentBusiness(supabase, user.id)
-    diag.recordTiming("business", timedStepMs(tBusiness), "session")
+    const tAuthority = performance.now()
+    let businessMs = 0
+    let firmMs = 0
+    const [business, firmRow] = await Promise.all([
+      getCurrentBusiness(supabase, user.id).then((row) => {
+        businessMs = timedStepMs(tAuthority)
+        return row
+      }),
+      lookupAccountingFirmUser(supabase, user.id).then((row) => {
+        firmMs = timedStepMs(tAuthority)
+        return row
+      }),
+    ])
+    diag.recordTiming("business", businessMs, "parallel")
+    diag.recordTiming("entitlement", firmMs, "parallel_firm")
     if (!business) {
       return respond({ error: "Business not found" }, 404)
     }
 
-    const tEntitlement = performance.now()
-    const denied = await enforceMaterialsWorkspaceRead(supabase, user.id, business, "professional")
-    diag.recordTiming("entitlement", timedStepMs(tEntitlement), "reuse")
+    const denied = decideMaterialsWorkspaceRead(firmRow, business, "professional")
     if (denied) {
       const body = await denied.json().catch(() => ({ error: "Forbidden" }))
       return respond(body, denied.status)
