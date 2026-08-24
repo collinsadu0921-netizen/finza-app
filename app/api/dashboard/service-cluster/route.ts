@@ -1,7 +1,8 @@
 /**
  * GET /api/dashboard/service-cluster?business_id=...&periods=12&activity_limit=10
  *
- * Sequenced dashboard load: timeline → metrics → activity (one HTTP round-trip).
+ * After authority: timeline, default period, and activity overlap; metrics waits
+ * for period bounds. One HTTP round-trip.
  * Replaces concurrent client-side fan-out to service-metrics/timeline/activity.
  *
  * Operational load gate: FINZA_DASHBOARD_CLUSTER_REFRESH_ON_REQUEST unset/0 (default)
@@ -186,35 +187,62 @@ async function loadDashboardCluster(
   }
   const metricsMeta: ServiceDashboardMetricsLoadMeta = { source: "degraded" }
 
+  const activityCacheKey = `activity|${businessId}|${options.activityLimit}`
   const tTimeline = performance.now()
-  const timelineResult = await loadServiceDashboardTimeline(
-    supabase,
-    businessId,
-    options.periodsParam,
-    diag,
-    loaderOptions
-  )
+  const tPeriods = performance.now()
+  const tActivity = performance.now()
+
+  const [timelineResult, resolvedPeriodStart, activityWrap] = await Promise.all([
+    loadServiceDashboardTimeline(
+      supabase,
+      businessId,
+      options.periodsParam,
+      diag,
+      loaderOptions
+    ).then((result) => {
+      diag.recordTiming("timeline", timedStepMs(tTimeline), result.source)
+      devClusterLog(`timeline (${result.source})`, tTimeline)
+      return result
+    }),
+    (async () => {
+      if (options.periodStart) return options.periodStart
+      const defaultStart = await resolveDashboardDefaultPeriodStart(supabase, businessId)
+      if (defaultStart) {
+        diag.step("dashboard_default_pnl_period", { period_start: defaultStart })
+      }
+      return defaultStart
+    })().then((start) => {
+      diag.recordTiming("periods", timedStepMs(tPeriods), options.periodStart ? "provided" : "default_pnl")
+      return start
+    }),
+    loadOrComputeDashboardActivityCache(activityCacheKey, () =>
+      loadServiceDashboardActivityFeed(
+        supabase,
+        businessId,
+        options.activityLimit,
+        diag,
+        { degradeOnError: !options.refreshOnRequest }
+      )
+    ).then((result) => {
+      diag.recordTiming("activity", timedStepMs(tActivity), result.source)
+      devClusterLog(`activity (${result.source})`, tActivity)
+      diag.step("activity_cache", { source: result.source })
+      return result
+    }),
+  ])
+
   const { timeline, source: timelineSource } = timelineResult
-  diag.recordTiming("timeline", timedStepMs(tTimeline), timelineSource)
-  devClusterLog(`timeline (${timelineSource})`, tTimeline)
+  const { value: activity, source: activityCacheSource } = activityWrap
+  void activityCacheSource
 
   let previousPeriodStart = options.previousPeriodStart
-  let metricsPeriodStart = options.periodStart
-  const tPeriods = performance.now()
-  if (!metricsPeriodStart) {
-    const defaultStart = await resolveDashboardDefaultPeriodStart(supabase, businessId)
-    if (defaultStart) {
-      metricsPeriodStart = defaultStart
-      diag.step("dashboard_default_pnl_period", { period_start: defaultStart })
-    }
-  }
+  const metricsPeriodStart = resolvedPeriodStart || undefined
   if (metricsPeriodStart && !previousPeriodStart) {
     const idx = timeline.findIndex((t) => t.period_start === metricsPeriodStart)
     if (idx > 0) {
       previousPeriodStart = timeline[idx - 1].period_start
     }
   }
-  diag.recordTiming("periods", timedStepMs(tPeriods), "default_pnl")
 
   const tMetrics = performance.now()
   let metrics: ServiceDashboardMetricsPayload
@@ -244,23 +272,6 @@ async function loadDashboardCluster(
   }
   diag.recordTiming("metrics", timedStepMs(tMetrics), metricsMeta.source)
   devClusterLog("metrics", tMetrics)
-
-  const activityCacheKey = `activity|${businessId}|${options.activityLimit}`
-  const tActivity = performance.now()
-  const { value: activity, source: activityCacheSource } = await loadOrComputeDashboardActivityCache(
-    activityCacheKey,
-    () =>
-      loadServiceDashboardActivityFeed(
-        supabase,
-        businessId,
-        options.activityLimit,
-        diag,
-        { degradeOnError: !options.refreshOnRequest }
-      )
-  )
-  diag.recordTiming("activity", timedStepMs(tActivity), activityCacheSource)
-  devClusterLog(`activity (${activityCacheSource})`, tActivity)
-  diag.step("activity_cache", { source: activityCacheSource })
 
   const fullyDegraded =
     timeline.length === 0 &&

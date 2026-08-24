@@ -29,11 +29,20 @@ jest.mock("@/lib/server/serviceDashboardMetricsLoader", () => ({
 jest.mock("@/lib/server/serviceDashboardActivityLoader", () => ({
   loadServiceDashboardActivityFeed: jest.fn(),
 }))
+jest.mock("@/lib/server/dashboardDefaultPnlPeriod", () => ({
+  resolveDashboardDefaultPeriodStart: jest.fn(),
+}))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accountingAuth"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
-import { loadOrComputeDashboardClusterCache } from "@/lib/server/dashboardClusterCache"
+import {
+  loadOrComputeDashboardClusterCache,
+  loadOrComputeDashboardActivityCache,
+} from "@/lib/server/dashboardClusterCache"
+import { loadServiceDashboardTimeline } from "@/lib/server/serviceDashboardTimeline"
+import { loadServiceDashboardMetrics } from "@/lib/server/serviceDashboardMetricsLoader"
+import { resolveDashboardDefaultPeriodStart } from "@/lib/server/dashboardDefaultPnlPeriod"
 
 const mockCreateSupabase = createSupabaseServerClient as jest.MockedFunction<
   typeof createSupabaseServerClient
@@ -44,6 +53,18 @@ const mockResolveAuth = resolveAuthenticatedApiUser as jest.MockedFunction<
 const mockAuthority = checkAccountingAuthority as jest.MockedFunction<typeof checkAccountingAuthority>
 const mockClusterCache = loadOrComputeDashboardClusterCache as jest.MockedFunction<
   typeof loadOrComputeDashboardClusterCache
+>
+const mockActivityCache = loadOrComputeDashboardActivityCache as jest.MockedFunction<
+  typeof loadOrComputeDashboardActivityCache
+>
+const mockTimeline = loadServiceDashboardTimeline as jest.MockedFunction<
+  typeof loadServiceDashboardTimeline
+>
+const mockMetrics = loadServiceDashboardMetrics as jest.MockedFunction<
+  typeof loadServiceDashboardMetrics
+>
+const mockDefaultPeriod = resolveDashboardDefaultPeriodStart as jest.MockedFunction<
+  typeof resolveDashboardDefaultPeriodStart
 >
 
 const BIZ_A = "4e6cdfba-e2ab-4ee4-ac00-9b077d696544"
@@ -184,5 +205,69 @@ describe("GET /api/dashboard/service-cluster auth", () => {
     expect(timing).not.toContain(USER)
     expect(timing).not.toMatch(/select |get_service_dashboard/i)
     expect(mockAuthority).toHaveBeenCalledWith(expect.anything(), USER, BIZ_A, "read")
+  })
+
+  it("overlaps timeline, default period, and activity before metrics", async () => {
+    authorizedUser()
+    const started: Record<string, number> = {}
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    mockTimeline.mockImplementation(async () => {
+      started.timeline = Date.now()
+      await delay(40)
+      return {
+        timeline: [
+          { period_start: "2026-07-01", period_end: "2026-07-31", revenue: 0, expenses: 0, netProfit: 0 },
+          { period_start: "2026-08-01", period_end: "2026-08-31", revenue: 1, expenses: 0, netProfit: 1 },
+        ],
+        source: "summary_fresh",
+        cacheable: true,
+      } as never
+    })
+    mockDefaultPeriod.mockImplementation(async () => {
+      started.periods = Date.now()
+      await delay(40)
+      return "2026-08-01"
+    })
+    mockActivityCache.mockImplementation(async () => {
+      started.activity = Date.now()
+      await delay(40)
+      return { value: { items: [] }, source: "cache_miss", cache_enabled: true } as never
+    })
+    mockMetrics.mockImplementation(async (_sb, _biz, params, _diag, _opts, loadMeta) => {
+      started.metrics = Date.now()
+      expect(params.periodStart).toBe("2026-08-01")
+      expect(params.previousPeriodStart).toBe("2026-07-01")
+      if (loadMeta) loadMeta.source = "summary"
+      return clusterPayload().metrics as never
+    })
+    mockClusterCache.mockImplementation(async (_key, compute) => {
+      const value = await compute()
+      return {
+        value,
+        cacheSource: "miss",
+        cache_age_ms: 0,
+        refresh_mode: "foreground",
+        cache_enabled: true,
+        source: "cache_miss",
+      } as never
+    })
+
+    const res = await GET(
+      new NextRequest(
+        `http://localhost/api/dashboard/service-cluster?business_id=${BIZ_A}&periods=12&activity_limit=10`
+      )
+    )
+    expect(res.status).toBe(200)
+    expect(started.timeline).toBeDefined()
+    expect(started.periods).toBeDefined()
+    expect(started.activity).toBeDefined()
+    expect(started.metrics).toBeDefined()
+    expect(Math.abs(started.periods - started.timeline)).toBeLessThan(20)
+    expect(Math.abs(started.activity - started.timeline)).toBeLessThan(20)
+    expect(started.metrics - started.timeline).toBeGreaterThanOrEqual(35)
+    const body = await res.json()
+    expect(body.metrics.cashCollected).toBe(80)
+    expect(body.activity.items).toEqual([])
+    expect(body.dashboard_source).toBe("summary")
   })
 })

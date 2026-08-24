@@ -536,13 +536,22 @@ export async function loadServiceDashboardMetrics(
   loadMeta?: ServiceDashboardMetricsLoadMeta
 ): Promise<ServiceDashboardMetricsPayload> {
   const summaryOnly = options?.refreshOnRequest === false
-  const { range, error: rangeError } = await resolvePnLMovementRange(supabase, {
-    businessId,
-    period_id: params.periodId,
-    period_start: params.periodStart,
-  })
-
-  const positionAsOfDate = await getBusinessToday(supabase, businessId)
+  const prevStart = params.previousPeriodStart?.trim() ? params.previousPeriodStart : null
+  const [currentRangeOut, positionAsOfDate, prevRangeOut] = await Promise.all([
+    resolvePnLMovementRange(supabase, {
+      businessId,
+      period_id: params.periodId,
+      period_start: params.periodStart,
+    }),
+    getBusinessToday(supabase, businessId),
+    prevStart
+      ? resolvePnLMovementRange(supabase, {
+          businessId,
+          period_start: prevStart,
+        })
+      : Promise.resolve(null),
+  ])
+  const { range, error: rangeError } = currentRangeOut
   diag.step("business_today", { position_as_of_date: positionAsOfDate })
 
   if (rangeError || !range) {
@@ -571,19 +580,11 @@ export async function loadServiceDashboardMetrics(
     period_end: range.movementEnd,
   })
 
-  const prevStart = params.previousPeriodStart?.trim() ? params.previousPeriodStart : null
   let compareStart: string | null = null
   let compareEnd: string | null = null
-
-  if (prevStart) {
-    const prevRangeOut = await resolvePnLMovementRange(supabase, {
-      businessId,
-      period_start: prevStart,
-    })
-    if (prevRangeOut.range) {
-      compareStart = prevRangeOut.range.movementStart
-      compareEnd = prevRangeOut.range.movementEnd
-    }
+  if (prevRangeOut?.range) {
+    compareStart = prevRangeOut.range.movementStart
+    compareEnd = prevRangeOut.range.movementEnd
   }
 
   const cacheKey = dashboardMetricsCacheKey({
@@ -601,6 +602,10 @@ export async function loadServiceDashboardMetrics(
   let summaryMissReason: SummaryMetricsMissReason | undefined
   let liveFallbackTimedOut = false
   let liveFallbackError: string | undefined
+
+  const unpaidPromise = loadOperationalUnpaidInvoicesSummary(supabase, businessId, {
+    softFail: summaryOnly,
+  })
 
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
@@ -840,9 +845,7 @@ export async function loadServiceDashboardMetrics(
     ...(summaryOnly ? { refresh_skipped: true } : {}),
   })
 
-  const operationalSummary = await loadOperationalUnpaidInvoicesSummary(supabase, businessId, {
-    softFail: summaryOnly,
-  })
+  const operationalSummary = await unpaidPromise
   diag.step("operational_unpaid_invoices", {
     unpaid_count: operationalSummary.unpaidInvoicesCount,
     overdue_count: operationalSummary.overdueInvoicesCount,
