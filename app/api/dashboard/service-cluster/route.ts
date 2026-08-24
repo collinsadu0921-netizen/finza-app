@@ -8,7 +8,7 @@
  * reads summary/cache only — no refresh or live metrics RPC in the request path.
  */
 
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest } from "next/server"
 import { waitUntil } from "@vercel/functions"
 
 export const dynamic = "force-dynamic"
@@ -44,7 +44,13 @@ import {
   type ServiceDashboardTimelineItem,
 } from "@/lib/server/serviceDashboardTimeline"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
-import { createRouteDiag, isRouteDiagnosticsEnabled, type RouteDiagFields } from "@/lib/server/routeDiagnostics"
+import {
+  createRouteDiag,
+  isRouteDiagnosticsEnabled,
+  jsonResponseWithServerTiming,
+  timedStepMs,
+  type RouteDiagFields,
+} from "@/lib/server/routeDiagnostics"
 import { resolveDashboardDefaultPeriodStart } from "@/lib/server/dashboardDefaultPnlPeriod"
 
 const DEFAULT_PERIODS = 12
@@ -189,10 +195,12 @@ async function loadDashboardCluster(
     loaderOptions
   )
   const { timeline, source: timelineSource } = timelineResult
+  diag.recordTiming("timeline", timedStepMs(tTimeline), timelineSource)
   devClusterLog(`timeline (${timelineSource})`, tTimeline)
 
   let previousPeriodStart = options.previousPeriodStart
   let metricsPeriodStart = options.periodStart
+  const tPeriods = performance.now()
   if (!metricsPeriodStart) {
     const defaultStart = await resolveDashboardDefaultPeriodStart(supabase, businessId)
     if (defaultStart) {
@@ -206,6 +214,7 @@ async function loadDashboardCluster(
       previousPeriodStart = timeline[idx - 1].period_start
     }
   }
+  diag.recordTiming("periods", timedStepMs(tPeriods), "default_pnl")
 
   const tMetrics = performance.now()
   let metrics: ServiceDashboardMetricsPayload
@@ -233,6 +242,7 @@ async function loadDashboardCluster(
       throw err
     }
   }
+  diag.recordTiming("metrics", timedStepMs(tMetrics), metricsMeta.source)
   devClusterLog("metrics", tMetrics)
 
   const activityCacheKey = `activity|${businessId}|${options.activityLimit}`
@@ -248,6 +258,7 @@ async function loadDashboardCluster(
         { degradeOnError: !options.refreshOnRequest }
       )
   )
+  diag.recordTiming("activity", timedStepMs(tActivity), activityCacheSource)
   devClusterLog(`activity (${activityCacheSource})`, tActivity)
   diag.step("activity_cache", { source: activityCacheSource })
 
@@ -277,8 +288,24 @@ async function loadDashboardCluster(
 
 export async function GET(request: NextRequest) {
   const routeT0 = performance.now()
-  let diag = createRouteDiag("dashboard_cluster")
+  const diag = createRouteDiag("dashboard_cluster")
   const refreshOnRequest = isDashboardClusterRefreshOnRequestEnabled()
+  const respond = <T>(
+    body: T,
+    status: number,
+    extraHeaders?: Record<string, string>
+  ) => {
+    const res = jsonResponseWithServerTiming(body, {
+      status,
+      serverTiming: diag.serverTimingHeader([{ name: "total", dur: timedStepMs(routeT0), desc: "handler" }]),
+    })
+    if (extraHeaders) {
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        res.headers.set(key, value)
+      }
+    }
+    return res
+  }
 
   try {
     const tAuth = performance.now()
@@ -286,14 +313,15 @@ export async function GET(request: NextRequest) {
     const sessionAuth = await resolveAuthenticatedApiUser(supabase, {
       cookieHeader: request.headers.get("cookie"),
     })
+    diag.recordTiming("auth", timedStepMs(tAuth), "session")
 
     if (!sessionAuth.ok) {
       diag.fail(sessionAuth.status, sessionAuth.error, {
         auth_failure_stage: sessionAuth.authFailureStage,
       })
-      return NextResponse.json(
+      return respond(
         { error: sessionAuth.error, auth_failure_stage: sessionAuth.authFailureStage },
-        { status: sessionAuth.status }
+        sessionAuth.status
       )
     }
     const user = sessionAuth.user
@@ -301,19 +329,20 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get("business_id")
     if (!businessId) {
-      return NextResponse.json({ error: "Missing business_id" }, { status: 400 })
+      return respond({ error: "Missing business_id" }, 400)
     }
 
-    diag = createRouteDiag("dashboard_cluster", businessId)
     diag.step("refresh_policy", {
       dashboard_refresh_on_request: dashboardRefreshOnRequestDiag(),
       dashboard_refresh_skipped: dashboardRefreshSkipped(refreshOnRequest),
     })
 
+    const tScope = performance.now()
     const auth = await checkAccountingAuthority(supabase, user.id, businessId, "read")
+    diag.recordTiming("scope", timedStepMs(tScope), "accounting_authority")
     if (!auth.authorized) {
       diag.fail(403, "forbidden")
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      return respond({ error: "Forbidden" }, 403)
     }
     diag.step("auth", { ms_auth: Math.round((performance.now() - tAuth) * 10) / 10 })
 
@@ -343,6 +372,7 @@ export async function GET(request: NextRequest) {
     try {
       const preparingPayload = () => preparingClusterPayload(refreshOnRequest)
 
+      const tCache = performance.now()
       const {
         value,
         cacheSource,
@@ -373,7 +403,17 @@ export async function GET(request: NextRequest) {
         cacheSource === "refresh_started" ||
         cacheSource === "refresh_skipped"
 
+      if (servedFromCache) {
+        diag.recordTiming("timeline", 0, `skipped_${cacheSource}`)
+        diag.recordTiming("periods", 0, `skipped_${cacheSource}`)
+        diag.recordTiming("metrics", 0, `skipped_${cacheSource}`)
+        diag.recordTiming("activity", 0, `skipped_${cacheSource}`)
+      }
+      diag.recordTiming("cache", timedStepMs(tCache), cacheSource)
+
+      const tAssembly = performance.now()
       const payload = attachDashboardClusterMetadata(value, cacheSource, servedFromCache)
+      diag.recordTiming("assembly", timedStepMs(tAssembly), "metadata")
 
       diag.step("cache", {
         cache_source: legacyCacheSource,
@@ -386,14 +426,16 @@ export async function GET(request: NextRequest) {
       })
       diag.finish(200)
       devClusterLog("total route", routeT0)
-      return NextResponse.json(payload, {
-        headers: dashboardClusterCacheResponseHeaders({
+      return respond(
+        payload,
+        200,
+        dashboardClusterCacheResponseHeaders({
           cacheSource,
           cacheAgeMs: cache_age_ms,
           refreshMode: refresh_mode,
           dashboardStatus: payload.dashboard_status,
-        }),
-      })
+        })
+      )
     } catch (err) {
       if (!refreshOnRequest) {
         console.warn(
@@ -407,36 +449,40 @@ export async function GET(request: NextRequest) {
         })
         diag.finish(200)
         devClusterLog("total route (preparing)", routeT0)
-        return NextResponse.json(degraded, {
-          headers: dashboardClusterCacheResponseHeaders({
+        return respond(
+          degraded,
+          200,
+          dashboardClusterCacheResponseHeaders({
             cacheSource: "preparing",
             cacheAgeMs: 0,
             refreshMode: "skipped",
             dashboardStatus: "preparing",
-          }),
-        })
+          })
+        )
       }
 
       const rpcMeta = (err as { rpcMeta?: RouteDiagFields }).rpcMeta
       diag.fail(500, err instanceof Error ? err.message : "cluster_load_failed", rpcMeta)
       devClusterLog("total route", routeT0)
-      return NextResponse.json({ error: "Could not load dashboard cluster" }, { status: 500 })
+      return respond({ error: "Could not load dashboard cluster" }, 500)
     }
   } catch (err) {
     if (!refreshOnRequest) {
       const degraded = preparingClusterPayload(refreshOnRequest)
       diag.finish(200)
-      return NextResponse.json(degraded, {
-        headers: dashboardClusterCacheResponseHeaders({
+      return respond(
+        degraded,
+        200,
+        dashboardClusterCacheResponseHeaders({
           cacheSource: "preparing",
           cacheAgeMs: 0,
           refreshMode: "skipped",
           dashboardStatus: "preparing",
-        }),
-      })
+        })
+      )
     }
     diag.fail(500, err instanceof Error ? err.message : "Server error")
     console.error("Dashboard service-cluster error:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    return respond({ error: "Server error" }, 500)
   }
 }
