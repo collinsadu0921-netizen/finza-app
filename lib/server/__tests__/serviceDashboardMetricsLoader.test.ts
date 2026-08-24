@@ -406,4 +406,73 @@ describe("loadServiceDashboardMetrics summary-first", () => {
       p_end_date: "2026-07-31",
     })
   })
+
+  it("records metrics sub-phase timings without ids or SQL", async () => {
+    const rpc = jest.fn().mockImplementation((name: string) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        return Promise.resolve({ data: [freshSummaryRow()], error: null })
+      }
+      if (name === "finza_dashboard_positions_as_of") return positionsRpc()
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return Promise.resolve({ data: null, error: null })
+    })
+    const diag = createRouteDiag("dashboard_cluster")
+    const payload = await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-load",
+      {},
+      diag,
+      { refreshOnRequest: false }
+    )
+    expect(payload.revenue).toBe(4133.34)
+    const header = diag.serverTimingHeader() || ""
+    for (const name of [
+      "metrics_period",
+      "metrics_today",
+      "metrics_pnl",
+      "metrics_previous_pnl",
+      "metrics_positions",
+      "metrics_currency",
+      "metrics_cash",
+      "metrics_unpaid",
+      "metrics_cache",
+      "metrics_assembly",
+      "metrics_total",
+    ]) {
+      expect(header).toContain(`${name};dur=`)
+    }
+    expect(header).toContain('desc="skipped"')
+    expect(header).not.toContain("biz-load")
+    expect(header).not.toMatch(/select |get_fresh_service_dashboard|finza_dashboard_positions/i)
+  })
+
+  it("records previous P&L timing when a compare range exists", async () => {
+    mockResolveRange
+      .mockResolvedValueOnce({ range: defaultRange, error: "" })
+      .mockResolvedValueOnce({ range: compareRange, error: "" })
+    const rpc = jest.fn().mockImplementation((name: string, args?: Record<string, unknown>) => {
+      if (name === "get_fresh_service_dashboard_period_pnl") {
+        if (args?.p_start_date === "2026-06-01") {
+          return Promise.resolve({ data: [freshSummaryRow({ revenue: 10, expenses: 4, net_profit: 6 })], error: null })
+        }
+        return Promise.resolve({ data: [freshSummaryRow()], error: null })
+      }
+      if (name === "finza_dashboard_positions_as_of") return positionsRpc()
+      if (name === "get_operational_unpaid_invoices_total") return unpaidRpc()
+      return Promise.resolve({ data: null, error: null })
+    })
+    const diag = createRouteDiag("dashboard_cluster")
+    const payload = await loadServiceDashboardMetrics(
+      mockSupabase(rpc),
+      "biz-load",
+      { previousPeriodStart: "2026-06-01" },
+      diag,
+      { refreshOnRequest: false }
+    )
+    expect(payload.previousPeriod?.revenue).toBe(10)
+    const header = diag.serverTimingHeader() || ""
+    expect(header).toContain("metrics_previous_pnl;dur=")
+    expect(header).not.toContain('metrics_previous_pnl;dur=0;desc="skipped"')
+    expect(header).not.toContain("biz-load")
+  })
 })

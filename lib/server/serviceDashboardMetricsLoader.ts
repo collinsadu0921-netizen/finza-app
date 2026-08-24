@@ -28,7 +28,7 @@ import {
   type OperationalUnpaidInvoicesSummary,
 } from "@/lib/server/operationalUnpaidInvoicesLoader"
 import type { RouteDiagFields } from "@/lib/server/routeDiagnostics"
-import type { createRouteDiag } from "@/lib/server/routeDiagnostics"
+import { timedStepMs, type createRouteDiag } from "@/lib/server/routeDiagnostics"
 import {
   dashboardLiveFallbackTimeoutMs,
   loadLivePeriodPnlFromLedger,
@@ -123,6 +123,25 @@ function withOperationalUnpaidFields(
 
 function emptyOperationalFields(): OperationalUnpaidInvoicesSummary {
   return { ...EMPTY_OPERATIONAL_UNPAID_INVOICES }
+}
+
+function recordMetricsPhase<T>(
+  diag: RouteDiag | undefined,
+  name: string,
+  startedAt: number,
+  desc: string | undefined,
+  work: Promise<T>
+): Promise<T> {
+  return work.then(
+    (value) => {
+      diag?.recordTiming(name, timedStepMs(startedAt), desc)
+      return value
+    },
+    (err) => {
+      diag?.recordTiming(name, timedStepMs(startedAt), desc)
+      throw err
+    }
+  )
 }
 
 export type ServiceDashboardMetricsParams = {
@@ -296,8 +315,10 @@ async function buildMetricsFromSummarySnapshot(
   positionAsOfDate: string,
   compareStart: string | null,
   compareEnd: string | null,
-  options?: { allowStalePnl?: boolean; softPositionReads?: boolean }
+  options?: { allowStalePnl?: boolean; softPositionReads?: boolean },
+  diag?: RouteDiag
 ): Promise<SummarySnapshotBuildResult> {
+  const tPnl = performance.now()
   const currentPnl = await readPeriodPnlSummaryRow(
     supabase,
     businessId,
@@ -305,6 +326,7 @@ async function buildMetricsFromSummarySnapshot(
     range.movementEnd,
     { allowStalePnl: options?.allowStalePnl }
   )
+  diag?.recordTiming("metrics_pnl", timedStepMs(tPnl), "summary")
   if (!currentPnl.row) {
     return { ok: false, reason: currentPnl.reason ?? "missing_row" }
   }
@@ -316,6 +338,7 @@ async function buildMetricsFromSummarySnapshot(
   // Soft-omit previousPeriod when comparison data is unavailable.
   let previousPeriod: PreviousPeriodPayload | null = null
   if (compareStart && compareEnd) {
+    const tPrevPnl = performance.now()
     const prevPnlRead = await readPeriodPnlSummaryRow(
       supabase,
       businessId,
@@ -323,6 +346,7 @@ async function buildMetricsFromSummarySnapshot(
       compareEnd,
       { allowStalePnl: options?.allowStalePnl }
     )
+    diag?.recordTiming("metrics_previous_pnl", timedStepMs(tPrevPnl), "summary")
     if (prevPnlRead.row) {
       const prevPnl = prevPnlRead.row
       const [prevPositions, prevCash] = await Promise.all([
@@ -342,14 +366,31 @@ async function buildMetricsFromSummarySnapshot(
         cashBalance: num(prevPositions.cash_balance),
       }
     }
+  } else {
+    diag?.recordTiming("metrics_previous_pnl", 0, "skipped")
   }
 
+  const tCurrency = performance.now()
+  const tPositions = performance.now()
+  const tCash = performance.now()
   const [currency, positions, cashCollected] = await Promise.all([
-    loadBusinessCurrency(supabase, businessId),
-    loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads }),
-    loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
-      throwOnError: !softReads,
-    }),
+    recordMetricsPhase(diag, "metrics_currency", tCurrency, "business", loadBusinessCurrency(supabase, businessId)),
+    recordMetricsPhase(
+      diag,
+      "metrics_positions",
+      tPositions,
+      "rpc",
+      loadPositionsAsOf(supabase, businessId, positionAsOfDate, { throwOnError: !softReads })
+    ),
+    recordMetricsPhase(
+      diag,
+      "metrics_cash",
+      tCash,
+      "payments",
+      loadCashCollected(supabase, businessId, range.movementStart, range.movementEnd, {
+        throwOnError: !softReads,
+      })
+    ),
   ])
 
   return {
@@ -536,14 +577,23 @@ export async function loadServiceDashboardMetrics(
   loadMeta?: ServiceDashboardMetricsLoadMeta
 ): Promise<ServiceDashboardMetricsPayload> {
   const summaryOnly = options?.refreshOnRequest === false
+  const metricsT0 = performance.now()
   const prevStart = params.previousPeriodStart?.trim() ? params.previousPeriodStart : null
+  const tPeriod = performance.now()
+  const tToday = performance.now()
   const [currentRangeOut, positionAsOfDate, prevRangeOut] = await Promise.all([
-    resolvePnLMovementRange(supabase, {
-      businessId,
-      period_id: params.periodId,
-      period_start: params.periodStart,
-    }),
-    getBusinessToday(supabase, businessId),
+    recordMetricsPhase(
+      diag,
+      "metrics_period",
+      tPeriod,
+      "range",
+      resolvePnLMovementRange(supabase, {
+        businessId,
+        period_id: params.periodId,
+        period_start: params.periodStart,
+      })
+    ),
+    recordMetricsPhase(diag, "metrics_today", tToday, "timezone", getBusinessToday(supabase, businessId)),
     prevStart
       ? resolvePnLMovementRange(supabase, {
           businessId,
@@ -570,6 +620,15 @@ export async function loadServiceDashboardMetrics(
         refresh_skipped: true,
         period_resolution_error: rangeError ?? "missing_range",
       })
+      diag.recordTiming("metrics_pnl", 0, "skipped_range")
+      diag.recordTiming("metrics_previous_pnl", 0, "skipped_range")
+      diag.recordTiming("metrics_currency", 0, "skipped_range")
+      diag.recordTiming("metrics_positions", 0, "skipped_range")
+      diag.recordTiming("metrics_cash", 0, "skipped_range")
+      diag.recordTiming("metrics_unpaid", 0, "skipped_range")
+      diag.recordTiming("metrics_cache", 0, "skipped_range")
+      diag.recordTiming("metrics_assembly", 0, "skipped_range")
+      diag.recordTiming("metrics_total", timedStepMs(metricsT0), "degraded")
       return degraded
     }
     throw new Error(rangeError ?? "Could not resolve period or fetch P&L")
@@ -603,10 +662,18 @@ export async function loadServiceDashboardMetrics(
   let liveFallbackTimedOut = false
   let liveFallbackError: string | undefined
 
-  const unpaidPromise = loadOperationalUnpaidInvoicesSummary(supabase, businessId, {
-    softFail: summaryOnly,
-  })
+  const tUnpaid = performance.now()
+  const unpaidPromise = recordMetricsPhase(
+    diag,
+    "metrics_unpaid",
+    tUnpaid,
+    "rpc",
+    loadOperationalUnpaidInvoicesSummary(supabase, businessId, {
+      softFail: summaryOnly,
+    })
+  )
 
+  const tCache = performance.now()
   const { value: payload, source: cacheSource, cache_enabled: cacheEnabled } =
     await loadOrComputeDashboardMetrics(cacheKey, async () => {
       const summaryOptions = {
@@ -623,7 +690,8 @@ export async function loadServiceDashboardMetrics(
         positionAsOfDate,
         compareStart,
         compareEnd,
-        summaryOptions
+        summaryOptions,
+        diag
       )
       if (snapshotResult.ok) {
         usedSummaryFastPath = true
@@ -790,6 +858,7 @@ export async function loadServiceDashboardMetrics(
 
       return built
     })
+  diag.recordTiming("metrics_cache", timedStepMs(tCache), cacheSource)
 
   const metricsSource: ServiceDashboardMetricsLoadMeta["source"] = usedLiveLedgerFallback
     ? "ledger_live_fallback"
@@ -804,6 +873,13 @@ export async function loadServiceDashboardMetrics(
   }
 
   const cacheHit = cacheSource === "cache_hit" || cacheSource === "cache_coalesce"
+  if (cacheHit) {
+    diag.recordTiming("metrics_pnl", 0, "skipped_cache")
+    diag.recordTiming("metrics_previous_pnl", 0, "skipped_cache")
+    diag.recordTiming("metrics_currency", 0, "skipped_cache")
+    diag.recordTiming("metrics_positions", 0, "skipped_cache")
+    diag.recordTiming("metrics_cash", 0, "skipped_cache")
+  }
 
   diag.step("metrics", {
     cache_enabled: cacheEnabled,
@@ -851,5 +927,9 @@ export async function loadServiceDashboardMetrics(
     overdue_count: operationalSummary.overdueInvoicesCount,
   })
 
-  return withOperationalUnpaidFields(payload, operationalSummary)
+  const tAssembly = performance.now()
+  const assembled = withOperationalUnpaidFields(payload, operationalSummary)
+  diag.recordTiming("metrics_assembly", timedStepMs(tAssembly), "merge")
+  diag.recordTiming("metrics_total", timedStepMs(metricsT0), metricsSource)
+  return assembled
 }
