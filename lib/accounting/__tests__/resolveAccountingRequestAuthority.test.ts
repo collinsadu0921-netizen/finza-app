@@ -1,6 +1,7 @@
 import {
   deniedMutationResponse,
   getAccountingDataClient,
+  getAccountingIdentityClient,
   type AccountingRequestAuthorityOk,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
 
@@ -28,6 +29,29 @@ describe("getAccountingDataClient", () => {
     } as AccountingRequestAuthorityOk
     const user = { kind: "user" } as never
     expect(getAccountingDataClient(auth, user)).toBe(user)
+  })
+})
+
+describe("getAccountingIdentityClient", () => {
+  it("returns the user session for Practice — never the admin data client", () => {
+    const auth = {
+      ok: true,
+      isPractice: true,
+      businessId: "b1",
+    } as AccountingRequestAuthorityOk
+    const user = { kind: "user" } as never
+    expect(getAccountingIdentityClient(auth, user)).toBe(user)
+    expect(getAccountingDataClient(auth, user)).not.toBe(user)
+  })
+
+  it("returns the user session for Service owner", () => {
+    const auth = {
+      ok: true,
+      isPractice: false,
+      businessId: "b1",
+    } as AccountingRequestAuthorityOk
+    const user = { kind: "user" } as never
+    expect(getAccountingIdentityClient(auth, user)).toBe(user)
   })
 })
 

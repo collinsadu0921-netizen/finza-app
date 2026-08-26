@@ -258,6 +258,31 @@ describe("K. Financial parity and equation", () => {
   })
 })
 
+describe("M. Practice identity vs privileged table client", () => {
+  it("calls 577 RPCs on rpcClient and keeps period/business reads on the table client", async () => {
+    const table = buildMockSupabase()
+    const rpc = buildMockSupabase()
+    const { data, error } = await getBalanceSheetReport(
+      table,
+      { businessId: "biz-001", as_of_date: "2026-08-26" },
+      { rpcClient: rpc }
+    )
+    expect(error).toBe("")
+    expect(data!.totals.assets).toBe(70000)
+    expect(table.rpc).not.toHaveBeenCalled()
+    expect(rpc.rpc).toHaveBeenCalledWith("get_balance_sheet_as_of", {
+      p_business_id: "biz-001",
+      p_as_of_date: "2026-08-26",
+    })
+    expect(rpc.rpc).toHaveBeenCalledWith("get_cumulative_net_income_as_of", {
+      p_business_id: "biz-001",
+      p_as_of_date: "2026-08-26",
+    })
+    expect(table.from).toHaveBeenCalledWith("businesses")
+    expect(rpc.from).not.toHaveBeenCalled()
+  })
+})
+
 describe("L. Parallel timing isolation", () => {
   it("does not attribute a slow BS RPC to period_ms when as-of is explicit", async () => {
     const slow = {

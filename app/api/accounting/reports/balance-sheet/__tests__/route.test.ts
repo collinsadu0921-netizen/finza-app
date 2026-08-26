@@ -11,6 +11,7 @@ jest.mock("@/lib/accounting/permissions", () => {
 jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => ({
   resolveAccountingRequestAuthority: jest.fn(),
   getAccountingDataClient: jest.fn((_auth, client) => client),
+  getAccountingIdentityClient: jest.fn((_auth, client) => client),
 }))
 jest.mock("@/lib/accounting/bootstrap", () => ({
   canUserInitializeAccounting: jest.fn(),
@@ -23,7 +24,11 @@ jest.mock("@/lib/accounting/reports/getBalanceSheetReport", () => ({
 }))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import {
+  getAccountingDataClient,
+  getAccountingIdentityClient,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { canUserInitializeAccounting } from "@/lib/accounting/bootstrap"
 import { checkAccountingReadiness } from "@/lib/accounting/readiness"
 import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetReport"
@@ -31,6 +36,10 @@ import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetR
 const mockCreate = createSupabaseServerClient as jest.MockedFunction<typeof createSupabaseServerClient>
 const mockAuth = resolveAccountingRequestAuthority as jest.MockedFunction<
   typeof resolveAccountingRequestAuthority
+>
+const mockDataClient = getAccountingDataClient as jest.MockedFunction<typeof getAccountingDataClient>
+const mockIdentityClient = getAccountingIdentityClient as jest.MockedFunction<
+  typeof getAccountingIdentityClient
 >
 const mockCanBootstrap = canUserInitializeAccounting as jest.MockedFunction<
   typeof canUserInitializeAccounting
@@ -106,6 +115,8 @@ describe("GET /api/accounting/reports/balance-sheet", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockDataClient.mockImplementation((_auth, client) => client)
+    mockIdentityClient.mockImplementation((_auth, client) => client)
     mockCreate.mockResolvedValue({
       auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) },
       rpc,
@@ -193,6 +204,122 @@ describe("GET /api/accounting/reports/balance-sheet", () => {
     expect(mockReport).toHaveBeenCalledTimes(1)
     const body = await res.json()
     expect(body.totals.assets).toBe(10)
+  })
+
+  it("uses the user session as rpcClient for 577 RPCs when Practice authority succeeds", async () => {
+    const userClient = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "firm-1" } } }) },
+      rpc,
+    }
+    const adminClient = { kind: "admin" }
+    mockCreate.mockResolvedValue(userClient as never)
+    mockDataClient.mockReturnValue(adminClient as never)
+    mockIdentityClient.mockImplementation((_auth, client) => client)
+    mockCanBootstrap.mockReturnValue(false)
+    mockAuth.mockResolvedValue({
+      ...ownerAuth,
+      userId: "firm-1",
+      isPractice: true,
+      authoritySource: "practice",
+      grantedLevel: "read",
+      engagementStatus: "accepted",
+    })
+    const res = await GET(
+      makeRequest(
+        "/api/accounting/reports/balance-sheet?business_id=4e6cdfba-e2ab-4ee4-ac00-9b077d696544&as_of_date=2026-08-26"
+      )
+    )
+    expect(res.status).toBe(200)
+    expect(mockIdentityClient).toHaveBeenCalled()
+    expect(mockReport).toHaveBeenCalledWith(
+      adminClient,
+      expect.objectContaining({
+        businessId: "4e6cdfba-e2ab-4ee4-ac00-9b077d696544",
+        as_of_date: "2026-08-26",
+      }),
+      { rpcClient: userClient }
+    )
+    expect(mockReady).toHaveBeenCalledWith(
+      adminClient,
+      "4e6cdfba-e2ab-4ee4-ac00-9b077d696544"
+    )
+  })
+
+  it("uses the user session as rpcClient for Practice active engagement", async () => {
+    const userClient = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "firm-1" } } }) },
+      rpc,
+    }
+    mockCreate.mockResolvedValue(userClient as never)
+    mockIdentityClient.mockImplementation((_auth, client) => client)
+    mockAuth.mockResolvedValue({
+      ...ownerAuth,
+      isPractice: true,
+      authoritySource: "practice",
+      grantedLevel: "read",
+      engagementStatus: "active",
+    })
+    const res = await GET(
+      makeRequest("/api/accounting/reports/balance-sheet?business_id=biz-a&as_of_date=2026-08-26")
+    )
+    expect(res.status).toBe(200)
+    expect(mockReport.mock.calls[0][2]).toEqual({ rpcClient: userClient })
+  })
+
+  it.each([
+    "INSUFFICIENT_AUTHORITY",
+    "ENGAGEMENT_PENDING",
+    "ENGAGEMENT_SUSPENDED",
+    "ENGAGEMENT_EXPIRED",
+  ])("denies Practice HTTP when authority is %s", async (reasonCode) => {
+    mockAuth.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode,
+      businessId: "biz-a",
+    })
+    const res = await GET(
+      makeRequest("/api/accounting/reports/balance-sheet?business_id=biz-a&as_of_date=2026-08-26")
+    )
+    expect(res.status).toBe(403)
+    expect(mockReport).not.toHaveBeenCalled()
+  })
+
+  it("denies a forged business_id before any report RPC", async () => {
+    mockAuth.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode: "INSUFFICIENT_AUTHORITY",
+      businessId: "00000000-0000-4000-8000-000000000001",
+    })
+    const res = await GET(
+      makeRequest(
+        "/api/accounting/reports/balance-sheet?business_id=00000000-0000-4000-8000-000000000001"
+      )
+    )
+    expect(res.status).toBe(403)
+    expect(mockReport).not.toHaveBeenCalled()
+  })
+
+  it("keeps the owner session as both data and identity client", async () => {
+    const userClient = {
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) },
+      rpc,
+    }
+    mockCreate.mockResolvedValue(userClient as never)
+    mockDataClient.mockImplementation((_auth, client) => client)
+    mockIdentityClient.mockImplementation((_auth, client) => client)
+    const res = await GET(
+      makeRequest("/api/accounting/reports/balance-sheet?business_id=biz-a&as_of_date=2026-08-26")
+    )
+    expect(res.status).toBe(200)
+    expect(mockReport).toHaveBeenCalledWith(
+      userClient,
+      expect.objectContaining({ businessId: "biz-a" }),
+      { rpcClient: userClient }
+    )
   })
 
   it("propagates report computation failure as 500", async () => {

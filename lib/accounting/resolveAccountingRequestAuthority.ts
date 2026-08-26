@@ -286,6 +286,10 @@ export async function resolveAccountingRequestAuthority(opts: {
  * privileged client for those requests only.
  *
  * Callers MUST filter every query by auth.businessId.
+ *
+ * Do NOT use this client for SECURITY DEFINER RPCs that authorize via
+ * auth.uid() (get_balance_sheet_as_of, get_cumulative_net_income_as_of,
+ * finza_dashboard_positions_as_of). Use getAccountingIdentityClient.
  */
 export function getAccountingDataClient(
   auth: AccountingRequestAuthorityOk,
@@ -294,5 +298,19 @@ export function getAccountingDataClient(
   if (auth.isPractice) {
     return createSupabaseAdminClient()
   }
+  return userScoped
+}
+
+/**
+ * Session client for RPCs that independently authorize from persisted
+ * auth.uid(). Always the requesting user's JWT — never service_role.
+ *
+ * Practice table reads may still use getAccountingDataClient; 577 (and 576)
+ * DEFINER functions must not.
+ */
+export function getAccountingIdentityClient(
+  _auth: AccountingRequestAuthorityOk,
+  userScoped: SupabaseClient
+): SupabaseClient {
   return userScoped
 }

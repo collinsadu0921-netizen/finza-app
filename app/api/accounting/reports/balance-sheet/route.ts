@@ -6,6 +6,7 @@ import { getBalanceSheetReport } from "@/lib/accounting/reports/getBalanceSheetR
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import {
   getAccountingDataClient,
+  getAccountingIdentityClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
 import {
@@ -80,6 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     const dataClient = getAccountingDataClient(auth, supabase)
+    const rpcClient = getAccountingIdentityClient(auth, supabase)
     const reportInput = {
       businessId,
       period_id: searchParams.get("period_id") ?? undefined,
@@ -98,7 +100,7 @@ export async function GET(request: NextRequest) {
     const tReady = performance.now()
     const [readinessResult, firstReport] = await Promise.all([
       checkAccountingReadiness(dataClient, businessId),
-      getBalanceSheetReport(dataClient, reportInput),
+      getBalanceSheetReport(dataClient, reportInput, { rpcClient }),
     ])
     diag.recordTiming("ready", timedStepMs(tReady), "parallel")
 
@@ -117,7 +119,7 @@ export async function GET(request: NextRequest) {
       const tBootstrap = performance.now()
       await supabase.rpc("create_system_accounts", { p_business_id: businessId })
       diag.recordTiming("bootstrap", timedStepMs(tBootstrap))
-      reportResult = await getBalanceSheetReport(dataClient, reportInput)
+      reportResult = await getBalanceSheetReport(dataClient, reportInput, { rpcClient })
     }
 
     const { data, error, timings } = reportResult
