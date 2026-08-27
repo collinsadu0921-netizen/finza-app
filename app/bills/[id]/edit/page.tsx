@@ -12,12 +12,7 @@ import {
   billSupplierIdPayload,
   hydrateBillSupplierSelection,
 } from "@/lib/bills/resolveBillSupplierLink"
-import {
-  applyBillSupplierSelection,
-  loadBillSuppliers,
-  supplierSelectLabel,
-  type BillSupplierOption,
-} from "@/lib/bills/loadBillSuppliers"
+import BillSupplierSelector from "@/components/bills/BillSupplierSelector"
 
 type LineItem = {
   id: string
@@ -52,8 +47,6 @@ type Material = {
   unit: string | null
 }
 
-type Supplier = BillSupplierOption
-
 export default function EditBillPage() {
   const pathname = usePathname()
   const isUnderService = pathname?.startsWith("/service") ?? false
@@ -76,9 +69,6 @@ function EditBillPageContent() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [businessId, setBusinessId] = useState("")
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [suppliersLoading, setSuppliersLoading] = useState(false)
-  const [suppliersError, setSuppliersError] = useState("")
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [supplierName, setSupplierName] = useState("")
   const [supplierPhone, setSupplierPhone] = useState("")
@@ -128,37 +118,15 @@ function EditBillPageContent() {
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    if (!businessId) return
-    let cancelled = false
-    setSuppliersLoading(true)
-    setSuppliersError("")
-    loadBillSuppliers(businessId)
-      .then((result) => {
-        if (cancelled) return
-        if (result.ok) {
-          setSuppliers(result.suppliers)
-          setSuppliersError("")
-        } else {
-          setSuppliers([])
-          setSuppliersError(result.error)
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSuppliersLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [businessId])
-
-  const handleSupplierSelect = (supplierId: string) => {
-    const result = applyBillSupplierSelection(supplierId, suppliers)
-    setSelectedSupplierId(result.selectedId)
-    if (result.hydrate) {
-      setSupplierName(result.hydrate.name)
-      setSupplierPhone(result.hydrate.phone)
-      setSupplierEmail(result.hydrate.email)
+  const handleSupplierSelect = (
+    supplierId: string,
+    hydrate: { name: string; phone: string; email: string } | null
+  ) => {
+    setSelectedSupplierId(supplierId)
+    if (hydrate) {
+      setSupplierName(hydrate.name)
+      setSupplierPhone(hydrate.phone)
+      setSupplierEmail(hydrate.email)
     }
   }
 
@@ -563,29 +531,12 @@ function EditBillPageContent() {
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Supplier Information</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Choose Existing Supplier
-                  </label>
-                  <select
-                    value={selectedSupplierId}
-                    onChange={(e) => handleSupplierSelect(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
-                  >
-                    <option value="">Type manually (or select supplier)</option>
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplierSelectLabel(supplier)}
-                      </option>
-                    ))}
-                  </select>
-                  {suppliersLoading ? (
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Loading suppliers…</p>
-                  ) : null}
-                  {suppliersError ? (
-                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                      {suppliersError}. You can still type a supplier name.
-                    </p>
-                  ) : null}
+                  <BillSupplierSelector
+                    businessId={businessId || null}
+                    selectedSupplierId={selectedSupplierId}
+                    onChange={handleSupplierSelect}
+                    variant="edit"
+                  />
                 </div>
                 <div />
                 <div>
