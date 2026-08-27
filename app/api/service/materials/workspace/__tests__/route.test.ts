@@ -70,15 +70,54 @@ function makeSupabase(opts: MakeOpts = {}) {
   } = opts
 
   const scoped: Array<{ table: string; col: string; value: unknown }> = []
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+
+  const rpcPayload = {
+    rows: inventoryRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      unit: row.unit,
+      quantity_on_hand: row.quantity_on_hand,
+      cost_price: row.default_cost_price != null ? row.default_cost_price : row.average_cost,
+      selling_price: row.default_selling_price,
+      reorder_level: row.reorder_level,
+      is_active: row.is_active,
+      last_movement_at: "2026-07-22T00:00:00.000Z",
+      last_movement_type: "job_usage",
+      last_movement_reference_id: "ref-1",
+    })),
+    pagination: {
+      page: 1,
+      pageSize: 25,
+      totalCount: inventoryCount,
+      totalPages: Math.max(1, Math.ceil(inventoryCount / 25)),
+    },
+    summary: {
+      totalItems: summaryRows.length,
+      activeItems: summaryRows.filter((row) => row.is_active).length,
+      lowStockItems: summaryRows.filter(
+        (row) => row.is_active && row.reorder_level > 0 && row.quantity_on_hand <= row.reorder_level
+      ).length,
+      totalValue: summaryRows.reduce(
+        (sum, row) => sum + row.quantity_on_hand * row.average_cost,
+        0
+      ),
+    },
+  }
 
   return {
     scoped,
+    rpcCalls,
     auth: {
       getUser: jest.fn().mockResolvedValue({
         data: { user },
         error: null,
       }),
     },
+    rpc: jest.fn(async (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ name, args })
+      return { data: rpcPayload, error: null }
+    }),
     from: jest.fn((table: string) => {
       if (table === "accounting_firm_users") {
         return {
@@ -172,6 +211,7 @@ describe("GET /api/service/materials/workspace", () => {
     const res = await GET(new NextRequest("http://localhost/api/service/materials/workspace?page=1&limit=25"))
     expect(res.status).toBe(401)
     expect(supabase.from).not.toHaveBeenCalled()
+    expect(supabase.rpc).not.toHaveBeenCalled()
   })
 
   it("returns 404 when no current business exists", async () => {
@@ -227,40 +267,30 @@ describe("GET /api/service/materials/workspace", () => {
             maybeSingle: () => businessGate,
           }
         }
-        if (table === "service_material_inventory") {
-          const chain: Record<string, unknown> = {}
-          const self = () => chain
-          chain.select = jest.fn(self)
-          chain.eq = jest.fn(self)
-          chain.order = jest.fn(self)
-          chain.range = jest.fn(async () => ({ data: [inventoryRow], count: 1, error: null }))
-          chain.then = (resolve: (value: unknown) => unknown) =>
-            Promise.resolve({
-              data: [
-                {
-                  quantity_on_hand: 94,
-                  average_cost: 10,
-                  reorder_level: 0,
-                  is_active: true,
-                },
-              ],
-              error: null,
-            }).then(resolve)
-          return chain
-        }
-        if (table === "service_material_movements") {
-          const chain: Record<string, unknown> = {}
-          const self = () => chain
-          chain.select = jest.fn(self)
-          chain.eq = jest.fn(self)
-          chain.in = jest.fn(self)
-          chain.order = jest.fn(self)
-          chain.then = (resolve: (value: unknown) => unknown) =>
-            Promise.resolve({ data: [], error: null }).then(resolve)
-          return chain
-        }
         return {}
       }),
+      rpc: jest.fn(async () => ({
+        data: {
+          rows: [
+            {
+              id: "mat-a",
+              name: "Ac units",
+              unit: "pcs",
+              quantity_on_hand: 94,
+              cost_price: 21.43,
+              selling_price: 20,
+              reorder_level: 0,
+              is_active: true,
+              last_movement_at: null,
+              last_movement_type: null,
+              last_movement_reference_id: null,
+            },
+          ],
+          pagination: { page: 1, pageSize: 25, totalCount: 1, totalPages: 1 },
+          summary: { totalItems: 1, activeItems: 1, lowStockItems: 0, totalValue: 940 },
+        },
+        error: null,
+      })),
     }
     jest.mocked(createSupabaseServerClient).mockResolvedValue(supabase as never)
 
@@ -286,6 +316,7 @@ describe("GET /api/service/materials/workspace", () => {
     const body = await res.json()
     expect(body.code).toBe("TIER_REQUIRED")
     expect(supabase.from).not.toHaveBeenCalledWith("service_material_inventory")
+    expect(supabase.rpc).not.toHaveBeenCalled()
   })
 
   it("ignores a client-supplied business_id and scopes inventory to the server business", async () => {
@@ -309,19 +340,13 @@ describe("GET /api/service/materials/workspace", () => {
       totalCount: 1,
       totalPages: 1,
     })
-    const businessScopes = supabase.scoped.filter((entry) => entry.col === "business_id")
-    expect(businessScopes.length).toBeGreaterThanOrEqual(3)
-    expect(businessScopes.every((entry) => entry.value === BIZ_A)).toBe(true)
-    expect(businessScopes.some((entry) => entry.value === BIZ_B)).toBe(false)
     expect(supabase.from).not.toHaveBeenCalledWith("business_users")
-    const inventoryCalls = jest
-      .mocked(supabase.from)
-      .mock.calls.filter(([table]) => table === "service_material_inventory")
-    expect(inventoryCalls).toHaveLength(2)
-    const movementCalls = jest
-      .mocked(supabase.from)
-      .mock.calls.filter(([table]) => table === "service_material_movements")
-    expect(movementCalls).toHaveLength(1)
+    expect(supabase.from).not.toHaveBeenCalledWith("service_material_inventory")
+    expect(supabase.from).not.toHaveBeenCalledWith("service_material_movements")
+    expect(supabase.rpcCalls).toHaveLength(1)
+    expect(supabase.rpcCalls[0].name).toBe("get_service_materials_workspace")
+    expect(supabase.rpcCalls[0].args.p_business_id).toBe(BIZ_A)
+    expect(supabase.rpcCalls[0].args.p_business_id).not.toBe(BIZ_B)
   })
 
   it("exposes granular Server-Timing without ids", async () => {

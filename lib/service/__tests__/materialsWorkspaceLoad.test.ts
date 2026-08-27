@@ -5,7 +5,9 @@ import {
   isLowStockRow,
   loadLastMovementsForMaterials,
   loadMaterialsWorkspacePage,
+  loadMaterialsWorkspacePayload,
   loadMaterialsWorkspaceSummary,
+  mapMaterialsWorkspaceRpcPayload,
   materialCostPrice,
   materialsWorkspacePagination,
   parseMaterialsWorkspaceFilters,
@@ -111,6 +113,83 @@ describe("materials workspace load helpers", () => {
     expect(isLowStockRow({ is_active: false, reorder_level: 5, quantity_on_hand: 1 })).toBe(false)
     expect(isLowStockRow({ is_active: true, reorder_level: 0, quantity_on_hand: 0 })).toBe(false)
     expect(isLowStockRow({ is_active: true, reorder_level: 5, quantity_on_hand: 5 })).toBe(true)
+  })
+})
+
+describe("materials workspace composite RPC mapping", () => {
+  it("maps one RPC payload into the current workspace contract", () => {
+    const filters = parseMaterialsWorkspaceFilters(new URLSearchParams("page=1&limit=25"))
+    const payload = mapMaterialsWorkspaceRpcPayload(
+      {
+        rows: [
+          {
+            id: "a",
+            name: "Ac units",
+            unit: "pcs",
+            quantity_on_hand: "94",
+            cost_price: "21.43",
+            selling_price: null,
+            reorder_level: 0,
+            is_active: true,
+            last_movement_at: "2026-07-22T00:00:00+00:00",
+            last_movement_type: "job_usage",
+            last_movement_reference_id: "ref-1",
+          },
+        ],
+        pagination: { page: 1, pageSize: 25, totalCount: 7, totalPages: 1 },
+        summary: { totalItems: 3, activeItems: 2, lowStockItems: 1, totalValue: 18 },
+      },
+      filters
+    )
+    expect(payload.rows[0]).toEqual({
+      id: "a",
+      name: "Ac units",
+      unit: "pcs",
+      quantity_on_hand: 94,
+      cost_price: 21.43,
+      selling_price: null,
+      reorder_level: 0,
+      is_active: true,
+      last_movement_at: "2026-07-22T00:00:00+00:00",
+      last_movement_type: "job_usage",
+      last_movement_reference_id: "ref-1",
+    })
+    expect(payload.pagination.totalCount).toBe(7)
+    expect(payload.summary).toEqual({
+      totalItems: 3,
+      activeItems: 2,
+      lowStockItems: 1,
+      totalValue: 18,
+    })
+  })
+
+  it("calls get_service_materials_workspace with the server business id", async () => {
+    const rpc = jest.fn(async () => ({
+      data: {
+        rows: [],
+        pagination: { page: 2, pageSize: 10, totalCount: 0, totalPages: 1 },
+        summary: { totalItems: 0, activeItems: 0, lowStockItems: 0, totalValue: 0 },
+      },
+      error: null,
+    }))
+    const filters = parseMaterialsWorkspaceFilters(
+      new URLSearchParams("page=2&limit=10&search=pipe&status=active&stock=low")
+    )
+    const payload = await loadMaterialsWorkspacePayload(
+      { rpc } as never,
+      "biz-a",
+      filters
+    )
+    expect(rpc).toHaveBeenCalledWith("get_service_materials_workspace", {
+      p_business_id: "biz-a",
+      p_search: "pipe",
+      p_status: "active",
+      p_stock: "low",
+      p_page: 2,
+      p_page_size: 10,
+    })
+    expect(payload.pagination.page).toBe(2)
+    expect(payload.pagination.pageSize).toBe(10)
   })
 })
 

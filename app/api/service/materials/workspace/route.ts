@@ -6,11 +6,7 @@ import {
   lookupAccountingFirmUser,
 } from "@/lib/service/enforceMaterialsWorkspaceRead"
 import {
-  assembleMaterialsWorkspaceRows,
-  loadLastMovementsForMaterials,
-  loadMaterialsWorkspacePage,
-  loadMaterialsWorkspaceSummary,
-  materialsWorkspacePagination,
+  loadMaterialsWorkspacePayload,
   parseMaterialsWorkspaceFilters,
 } from "@/lib/service/materialsWorkspaceLoad"
 import {
@@ -72,31 +68,13 @@ export async function GET(request: NextRequest) {
     const businessId = String(business.id)
 
     const tData = performance.now()
-    const [pageResult, summary] = await Promise.all([
-      loadMaterialsWorkspacePage(supabase, businessId, filters),
-      loadMaterialsWorkspaceSummary(supabase, businessId),
-    ])
+    const payload = await loadMaterialsWorkspacePayload(supabase, businessId, filters)
     const dataMs = timedStepMs(tData)
-    diag.recordTiming("items", dataMs, "page")
-    diag.recordTiming("count", 0, "included_in_items")
-    diag.recordTiming("summary", dataMs, "parallel")
-
-    const tInventory = performance.now()
-    const lastByMaterial = await loadLastMovementsForMaterials(
-      supabase,
-      businessId,
-      pageResult.materials.map((row) => row.id)
-    )
-    diag.recordTiming("inventory", timedStepMs(tInventory), "last_movement")
-
-    const tAssembly = performance.now()
-    const rows = assembleMaterialsWorkspaceRows(pageResult.materials, lastByMaterial)
-    const payload = {
-      rows,
-      pagination: materialsWorkspacePagination(filters.page, filters.limit, pageResult.count),
-      summary,
-    }
-    diag.recordTiming("assembly", timedStepMs(tAssembly))
+    diag.recordTiming("items", dataMs, "workspace_rpc")
+    diag.recordTiming("count", 0, "included_in_rpc")
+    diag.recordTiming("summary", 0, "included_in_rpc")
+    diag.recordTiming("inventory", 0, "included_in_rpc")
+    diag.recordTiming("assembly", 0, "mapped")
     return respond(payload, 200)
   } catch (err: unknown) {
     console.error("GET /api/service/materials/workspace:", err)
