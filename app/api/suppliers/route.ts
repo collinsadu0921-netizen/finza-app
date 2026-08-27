@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { getCurrentBusiness, resolveBusinessScopeForUser } from "@/lib/business"
 import {
   isSupplierPaymentPreference,
   isSupplierPaymentTermsType,
@@ -150,19 +150,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const { searchParams } = new URL(request.url)
+    const requestedBusinessId =
+      searchParams.get("business_id") ?? searchParams.get("businessId")
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      requestedBusinessId
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
-    const { searchParams } = new URL(request.url)
     const search = searchParams.get("search") || ""
     const status = searchParams.get("status")
 
     let query = supabase
       .from("suppliers")
       .select("*")
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .order("name", { ascending: true })
 
     if (status === "active" || status === "blocked") {
