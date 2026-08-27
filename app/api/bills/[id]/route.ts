@@ -10,6 +10,7 @@ import {
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveMaterialInventoryAccount } from "@/lib/bills/resolveMaterialInventoryAccount"
+import { resolveBillSupplierLink } from "@/lib/bills/resolveBillSupplierLink"
 
 type HeaderDiscountRejection = {
   error: string
@@ -171,6 +172,7 @@ export async function PUT(
 
     const body = await request.json()
     const {
+      supplier_id,
       supplier_name,
       supplier_phone,
       supplier_email,
@@ -359,6 +361,29 @@ export async function PUT(
         mid != null ? Number(body_import_quantity) || 1 : null
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, "supplier_id")) {
+      const supplierLink = await resolveBillSupplierLink(
+        supabase,
+        business.id,
+        supplier_id
+      )
+      if (!supplierLink.ok) {
+        return NextResponse.json(
+          { error: supplierLink.error },
+          { status: supplierLink.status }
+        )
+      }
+      updateData.supplier_id = supplierLink.supplier_id
+      if (!supplier_name?.trim() && supplierLink.name) {
+        updateData.supplier_name = supplierLink.name
+      }
+      if (supplier_phone === undefined && supplierLink.phone) {
+        updateData.supplier_phone = supplierLink.phone
+      }
+      if (supplier_email === undefined && supplierLink.email) {
+        updateData.supplier_email = supplierLink.email
+      }
+    }
     if (supplier_name     !== undefined) updateData.supplier_name  = supplier_name.trim()
     if (supplier_phone    !== undefined) updateData.supplier_phone = supplier_phone?.trim() || null
     if (supplier_email    !== undefined) updateData.supplier_email = supplier_email?.trim() || null

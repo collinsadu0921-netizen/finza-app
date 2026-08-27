@@ -12,6 +12,7 @@ import { createAuditLog } from "@/lib/auditLog"
 import { getCurrencySymbol } from "@/lib/currency"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { resolveMaterialInventoryAccount } from "@/lib/bills/resolveMaterialInventoryAccount"
+import { resolveBillSupplierLink } from "@/lib/bills/resolveBillSupplierLink"
 
 type HeaderDiscountRejection = {
   error: string
@@ -178,29 +179,20 @@ export async function POST(request: NextRequest) {
     )
     if (tierDenied) return tierDenied
 
+    const supplierLink = await resolveBillSupplierLink(supabase, business_id, supplier_id)
+    if (!supplierLink.ok) {
+      return NextResponse.json(
+        { success: false, error: supplierLink.error },
+        { status: supplierLink.status }
+      )
+    }
+
     let supplierNameValue = supplier_name?.trim() || ""
     let supplierPhoneValue = supplier_phone?.trim() || null
     let supplierEmailValue = supplier_email?.trim() || null
-
-    if (supplier_id) {
-      const { data: supplierRow, error: supplierError } = await supabase
-        .from("suppliers")
-        .select("id, name, phone, email")
-        .eq("id", supplier_id)
-        .eq("business_id", business_id)
-        .maybeSingle()
-
-      if (supplierError || !supplierRow) {
-        return NextResponse.json(
-          { success: false, error: "Selected supplier not found for this business" },
-          { status: 400 }
-        )
-      }
-
-      if (!supplierNameValue) supplierNameValue = supplierRow.name
-      if (!supplierPhoneValue) supplierPhoneValue = supplierRow.phone
-      if (!supplierEmailValue) supplierEmailValue = supplierRow.email
-    }
+    if (!supplierNameValue && supplierLink.name) supplierNameValue = supplierLink.name
+    if (!supplierPhoneValue && supplierLink.phone) supplierPhoneValue = supplierLink.phone
+    if (!supplierEmailValue && supplierLink.email) supplierEmailValue = supplierLink.email
 
     // Resolve home currency for FX validation
     const { data: businessProfile } = await supabase
@@ -298,7 +290,7 @@ export async function POST(request: NextRequest) {
       .from("bills")
       .insert({
         business_id,
-        supplier_id: supplier_id || null,
+        supplier_id: supplierLink.supplier_id,
         supplier_name: supplierNameValue,
         supplier_phone: supplierPhoneValue,
         supplier_email: supplierEmailValue,

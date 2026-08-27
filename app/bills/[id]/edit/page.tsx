@@ -8,6 +8,10 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { supabase } from "@/lib/supabaseClient"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
+import {
+  billSupplierIdPayload,
+  hydrateBillSupplierSelection,
+} from "@/lib/bills/resolveBillSupplierLink"
 
 type LineItem = {
   id: string
@@ -42,6 +46,14 @@ type Material = {
   unit: string | null
 }
 
+type Supplier = {
+  id: string
+  name: string
+  phone?: string | null
+  email?: string | null
+  status?: string
+}
+
 export default function EditBillPage() {
   const pathname = usePathname()
   const isUnderService = pathname?.startsWith("/service") ?? false
@@ -63,6 +75,8 @@ function EditBillPageContent() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [supplierName, setSupplierName] = useState("")
   const [supplierPhone, setSupplierPhone] = useState("")
   const [supplierEmail, setSupplierEmail] = useState("")
@@ -111,6 +125,25 @@ function EditBillPageContent() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    fetch("/api/suppliers")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.suppliers)) setSuppliers(d.suppliers)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleSupplierSelect = (supplierId: string) => {
+    setSelectedSupplierId(supplierId)
+    if (!supplierId) return
+    const selected = suppliers.find((s) => s.id === supplierId)
+    if (!selected) return
+    setSupplierName(selected.name || "")
+    setSupplierPhone(selected.phone || "")
+    setSupplierEmail(selected.email || "")
+  }
+
   const loadBill = async () => {
     try {
       setLoading(true)
@@ -123,6 +156,7 @@ function EditBillPageContent() {
       const data = await response.json()
       const bill = data.bill
 
+      setSelectedSupplierId(hydrateBillSupplierSelection(bill.supplier_id))
       setSupplierName(bill.supplier_name || "")
       setSupplierPhone(bill.supplier_phone || "")
       setSupplierEmail(bill.supplier_email || "")
@@ -399,6 +433,7 @@ function EditBillPageContent() {
       setSaving(true)
 
       const body: any = {
+        supplier_id: billSupplierIdPayload(selectedSupplierId),
         supplier_name: supplierName.trim(),
         supplier_phone: supplierPhone.trim() || null,
         supplier_email: supplierEmail.trim() || null,
@@ -508,6 +543,25 @@ function EditBillPageContent() {
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-100 dark:border-gray-700">
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Supplier Information</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    Choose Existing Supplier
+                  </label>
+                  <select
+                    value={selectedSupplierId}
+                    onChange={(e) => handleSupplierSelect(e.target.value)}
+                    className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">Type manually (or select supplier)</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                        {supplier.status === "blocked" ? " (blocked)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div />
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Supplier Name *

@@ -93,7 +93,14 @@ beforeEach(() => {
 
 describe("GET /api/bills/list", () => {
   it("applies default page=1 and limit=50 via RPC", async () => {
-    const bills = [{ id: "bill-1", total: 100, total_paid: 0, balance: 100 }]
+    const bills = [{
+      id: "bill-1",
+      total: 100,
+      total_paid: 0,
+      balance: 100,
+      supplier_id: "saaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      supplier_name: "Supplier A",
+    }]
     const rpc = mockBillsRpc(bills, 1)
     const { from } = mockFrom()
     mockCreateSupabase.mockResolvedValue({
@@ -117,6 +124,8 @@ describe("GET /api/bills/list", () => {
 
     const body = await res.json()
     expect(body.bills).toHaveLength(1)
+    expect(body.bills[0].supplier_id).toBe("saaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    expect(body.bills[0].supplier_name).toBe("Supplier A")
     expect(body.pagination).toMatchObject({
       page: 1,
       limit: 50,
