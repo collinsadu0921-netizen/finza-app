@@ -10,6 +10,12 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
+import {
+  applyBillSupplierSelection,
+  loadBillSuppliers,
+  supplierSelectLabel,
+  type BillSupplierOption,
+} from "@/lib/bills/loadBillSuppliers"
 
 type LineItem = {
   id: string
@@ -44,13 +50,7 @@ type Material = {
   unit: string | null
 }
 
-type Supplier = {
-  id: string
-  name: string
-  phone: string | null
-  email: string | null
-  status: "active" | "blocked"
-}
+type Supplier = BillSupplierOption
 
 export default function CreateBillPage() {
   const router = useRouter()
@@ -79,6 +79,8 @@ export default function CreateBillPage() {
   ])
   const [materials, setMaterials] = useState<Material[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(false)
+  const [suppliersError, setSuppliersError] = useState("")
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [applyWHT, setApplyWHT] = useState(false)
@@ -138,15 +140,35 @@ export default function CreateBillPage() {
 
   useEffect(() => {
     loadBusiness()
-    fetch("/api/suppliers")
-      .then((r) => r.json())
-      .then((d) => { if (Array.isArray(d.suppliers)) setSuppliers(d.suppliers) })
-      .catch(() => {})
     fetch("/api/service/materials/list")
       .then((r) => r.json())
       .then((d) => { if (d.materials) setMaterials(d.materials) })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!businessId) return
+    let cancelled = false
+    setSuppliersLoading(true)
+    setSuppliersError("")
+    loadBillSuppliers(businessId)
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok) {
+          setSuppliers(result.suppliers)
+          setSuppliersError("")
+        } else {
+          setSuppliers([])
+          setSuppliersError(result.error)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSuppliersLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [businessId])
 
   useEffect(() => {
     const dsn = searchParams.get("draft_supplier_name")
@@ -260,14 +282,14 @@ export default function CreateBillPage() {
   }, [businessId, searchParams])
 
   const handleSupplierSelect = (supplierId: string) => {
-    setSelectedSupplierId(supplierId)
-    if (!supplierId) return
-    const selected = suppliers.find((s) => s.id === supplierId)
-    if (!selected) return
-    setSupplierName(selected.name || "")
-    setSupplierPhone(selected.phone || "")
-    setSupplierEmail(selected.email || "")
-    setOcrSuggestedFields((prev) => ({ ...prev, supplier_name: false }))
+    const result = applyBillSupplierSelection(supplierId, suppliers)
+    setSelectedSupplierId(result.selectedId)
+    if (result.hydrate) {
+      setSupplierName(result.hydrate.name)
+      setSupplierPhone(result.hydrate.phone)
+      setSupplierEmail(result.hydrate.email)
+      setOcrSuggestedFields((prev) => ({ ...prev, supplier_name: false }))
+    }
   }
 
   const loadBusiness = async () => {
@@ -791,10 +813,18 @@ export default function CreateBillPage() {
                     <option value="">Type manually (or select supplier)</option>
                     {suppliers.map((supplier) => (
                       <option key={supplier.id} value={supplier.id}>
-                        {supplier.name}{supplier.status === "blocked" ? " (blocked)" : ""}
+                        {supplierSelectLabel(supplier)}
                       </option>
                     ))}
                   </select>
+                  {suppliersLoading ? (
+                    <p className="mt-1 text-xs text-slate-500">Loading suppliers…</p>
+                  ) : null}
+                  {suppliersError ? (
+                    <p className="mt-1 text-xs text-amber-700">
+                      {suppliersError}. You can still type a supplier name.
+                    </p>
+                  ) : null}
                 </div>
                 <div />
                 <div>

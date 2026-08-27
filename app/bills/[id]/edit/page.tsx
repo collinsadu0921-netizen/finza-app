@@ -12,6 +12,12 @@ import {
   billSupplierIdPayload,
   hydrateBillSupplierSelection,
 } from "@/lib/bills/resolveBillSupplierLink"
+import {
+  applyBillSupplierSelection,
+  loadBillSuppliers,
+  supplierSelectLabel,
+  type BillSupplierOption,
+} from "@/lib/bills/loadBillSuppliers"
 
 type LineItem = {
   id: string
@@ -46,13 +52,7 @@ type Material = {
   unit: string | null
 }
 
-type Supplier = {
-  id: string
-  name: string
-  phone?: string | null
-  email?: string | null
-  status?: string
-}
+type Supplier = BillSupplierOption
 
 export default function EditBillPage() {
   const pathname = usePathname()
@@ -75,7 +75,10 @@ function EditBillPageContent() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [businessId, setBusinessId] = useState("")
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(false)
+  const [suppliersError, setSuppliersError] = useState("")
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [supplierName, setSupplierName] = useState("")
   const [supplierPhone, setSupplierPhone] = useState("")
@@ -126,22 +129,37 @@ function EditBillPageContent() {
   }, [])
 
   useEffect(() => {
-    fetch("/api/suppliers")
-      .then((r) => r.json())
-      .then((d) => {
-        if (Array.isArray(d.suppliers)) setSuppliers(d.suppliers)
+    if (!businessId) return
+    let cancelled = false
+    setSuppliersLoading(true)
+    setSuppliersError("")
+    loadBillSuppliers(businessId)
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok) {
+          setSuppliers(result.suppliers)
+          setSuppliersError("")
+        } else {
+          setSuppliers([])
+          setSuppliersError(result.error)
+        }
       })
-      .catch(() => {})
-  }, [])
+      .finally(() => {
+        if (!cancelled) setSuppliersLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [businessId])
 
   const handleSupplierSelect = (supplierId: string) => {
-    setSelectedSupplierId(supplierId)
-    if (!supplierId) return
-    const selected = suppliers.find((s) => s.id === supplierId)
-    if (!selected) return
-    setSupplierName(selected.name || "")
-    setSupplierPhone(selected.phone || "")
-    setSupplierEmail(selected.email || "")
+    const result = applyBillSupplierSelection(supplierId, suppliers)
+    setSelectedSupplierId(result.selectedId)
+    if (result.hydrate) {
+      setSupplierName(result.hydrate.name)
+      setSupplierPhone(result.hydrate.phone)
+      setSupplierEmail(result.hydrate.email)
+    }
   }
 
   const loadBill = async () => {
@@ -156,6 +174,7 @@ function EditBillPageContent() {
       const data = await response.json()
       const bill = data.bill
 
+      if (bill.business_id) setBusinessId(bill.business_id)
       setSelectedSupplierId(hydrateBillSupplierSelection(bill.supplier_id))
       setSupplierName(bill.supplier_name || "")
       setSupplierPhone(bill.supplier_phone || "")
@@ -555,11 +574,18 @@ function EditBillPageContent() {
                     <option value="">Type manually (or select supplier)</option>
                     {suppliers.map((supplier) => (
                       <option key={supplier.id} value={supplier.id}>
-                        {supplier.name}
-                        {supplier.status === "blocked" ? " (blocked)" : ""}
+                        {supplierSelectLabel(supplier)}
                       </option>
                     ))}
                   </select>
+                  {suppliersLoading ? (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Loading suppliers…</p>
+                  ) : null}
+                  {suppliersError ? (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                      {suppliersError}. You can still type a supplier name.
+                    </p>
+                  ) : null}
                 </div>
                 <div />
                 <div>
