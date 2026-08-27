@@ -10,12 +10,7 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
-import {
-  applyBillSupplierSelection,
-  loadBillSuppliers,
-  supplierSelectLabel,
-  type BillSupplierOption,
-} from "@/lib/bills/loadBillSuppliers"
+import BillSupplierSelector from "@/components/bills/BillSupplierSelector"
 
 type LineItem = {
   id: string
@@ -50,8 +45,6 @@ type Material = {
   unit: string | null
 }
 
-type Supplier = BillSupplierOption
-
 export default function CreateBillPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -78,9 +71,6 @@ export default function CreateBillPage() {
     },
   ])
   const [materials, setMaterials] = useState<Material[]>([])
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [suppliersLoading, setSuppliersLoading] = useState(false)
-  const [suppliersError, setSuppliersError] = useState("")
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [applyWHT, setApplyWHT] = useState(false)
@@ -145,30 +135,6 @@ export default function CreateBillPage() {
       .then((d) => { if (d.materials) setMaterials(d.materials) })
       .catch(() => {})
   }, [])
-
-  useEffect(() => {
-    if (!businessId) return
-    let cancelled = false
-    setSuppliersLoading(true)
-    setSuppliersError("")
-    loadBillSuppliers(businessId)
-      .then((result) => {
-        if (cancelled) return
-        if (result.ok) {
-          setSuppliers(result.suppliers)
-          setSuppliersError("")
-        } else {
-          setSuppliers([])
-          setSuppliersError(result.error)
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSuppliersLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [businessId])
 
   useEffect(() => {
     const dsn = searchParams.get("draft_supplier_name")
@@ -281,13 +247,15 @@ export default function CreateBillPage() {
     }
   }, [businessId, searchParams])
 
-  const handleSupplierSelect = (supplierId: string) => {
-    const result = applyBillSupplierSelection(supplierId, suppliers)
-    setSelectedSupplierId(result.selectedId)
-    if (result.hydrate) {
-      setSupplierName(result.hydrate.name)
-      setSupplierPhone(result.hydrate.phone)
-      setSupplierEmail(result.hydrate.email)
+  const handleSupplierSelect = (
+    supplierId: string,
+    hydrate: { name: string; phone: string; email: string } | null
+  ) => {
+    setSelectedSupplierId(supplierId)
+    if (hydrate) {
+      setSupplierName(hydrate.name)
+      setSupplierPhone(hydrate.phone)
+      setSupplierEmail(hydrate.email)
       setOcrSuggestedFields((prev) => ({ ...prev, supplier_name: false }))
     }
   }
@@ -802,29 +770,12 @@ export default function CreateBillPage() {
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Supplier Information</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Choose Existing Supplier
-                  </label>
-                  <select
-                    value={selectedSupplierId}
-                    onChange={(e) => handleSupplierSelect(e.target.value)}
-                    className="border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
-                  >
-                    <option value="">Type manually (or select supplier)</option>
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplierSelectLabel(supplier)}
-                      </option>
-                    ))}
-                  </select>
-                  {suppliersLoading ? (
-                    <p className="mt-1 text-xs text-slate-500">Loading suppliers…</p>
-                  ) : null}
-                  {suppliersError ? (
-                    <p className="mt-1 text-xs text-amber-700">
-                      {suppliersError}. You can still type a supplier name.
-                    </p>
-                  ) : null}
+                  <BillSupplierSelector
+                    businessId={businessId || null}
+                    selectedSupplierId={selectedSupplierId}
+                    onChange={handleSupplierSelect}
+                    variant="create"
+                  />
                 </div>
                 <div />
                 <div>
