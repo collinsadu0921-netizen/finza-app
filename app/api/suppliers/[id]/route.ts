@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import {
   isSupplierPaymentPreference,
   isSupplierPaymentTermsType,
 } from "@/lib/retail/supplierRetailFields"
+
+type SupplierBillHistoryRow = {
+  id: string
+  bill_number: string
+  issue_date: string
+  due_date: string | null
+  total: number
+  status: string
+  supplier_id: string
+}
 
 /**
  * GET /api/suppliers/[id]
@@ -25,18 +35,21 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const { searchParams } = new URL(request.url)
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      searchParams.get("business_id") ?? searchParams.get("businessId")
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
-
-    // supplierId already extracted from params above
 
     const { data: supplier, error } = await supabase
       .from("suppliers")
       .select("*")
       .eq("id", supplierId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .single()
 
     if (error || !supplier) {
@@ -46,7 +59,31 @@ export async function GET(
       )
     }
 
-    return NextResponse.json({ supplier })
+    const include = (searchParams.get("include") || "").split(",").map((part) => part.trim())
+    if (!include.includes("bills")) {
+      return NextResponse.json({ supplier })
+    }
+
+    const { data: bills, error: billsError } = await supabase
+      .from("bills")
+      .select("id, bill_number, issue_date, due_date, total, status, supplier_id")
+      .eq("business_id", scope.businessId)
+      .eq("supplier_id", supplierId)
+      .order("issue_date", { ascending: false })
+      .limit(50)
+
+    if (billsError) {
+      return NextResponse.json({
+        supplier,
+        bills: [] as SupplierBillHistoryRow[],
+        bills_error: "Unable to load supplier bills",
+      })
+    }
+
+    return NextResponse.json({
+      supplier,
+      bills: (bills || []) as SupplierBillHistoryRow[],
+    })
   } catch (error: any) {
     console.error("Error in GET /api/suppliers/[id]:", error)
     return NextResponse.json(
@@ -75,12 +112,16 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const body = await request.json()
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      body?.business_id ?? body?.businessId ?? new URL(request.url).searchParams.get("business_id")
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
-    const body = await request.json()
     const {
       name,
       phone,
@@ -108,7 +149,7 @@ export async function PATCH(
       .from("suppliers")
       .select("*")
       .eq("id", supplierId)
-      .eq("business_id", business.id)
+      .eq("business_id", scope.businessId)
       .single()
 
     if (fetchError || !existingSupplier) {
@@ -218,6 +259,7 @@ export async function PATCH(
       .from("suppliers")
       .update(updates)
       .eq("id", supplierId)
+      .eq("business_id", scope.businessId)
       .select()
       .single()
 

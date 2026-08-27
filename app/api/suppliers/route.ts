@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness, resolveBusinessScopeForUser } from "@/lib/business"
+import { resolveBusinessScopeForUser } from "@/lib/business"
 import {
   isSupplierPaymentPreference,
   isSupplierPaymentTermsType,
 } from "@/lib/retail/supplierRetailFields"
+import { findExactNameDuplicates } from "@/lib/suppliers/duplicateName"
 
 /**
  * POST /api/suppliers
@@ -21,12 +22,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const body = await request.json()
+    const scope = await resolveBusinessScopeForUser(
+      supabase,
+      user.id,
+      body?.business_id ?? body?.businessId
+    )
+    if (!scope.ok) {
+      return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
 
-    const body = await request.json()
     const {
       name,
       phone,
@@ -86,8 +91,14 @@ export async function POST(request: NextRequest) {
       leadVal = n
     }
 
+    const { data: sameNameRows } = await supabase
+      .from("suppliers")
+      .select("id, name")
+      .eq("business_id", scope.businessId)
+    const name_matches = findExactNameDuplicates(name.trim(), sameNameRows || [])
+
     const insertRow: Record<string, unknown> = {
-      business_id: business.id,
+      business_id: scope.businessId,
       name: name.trim(),
       phone: phone?.trim() || null,
       email: email?.trim() || null,
@@ -125,6 +136,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       supplier,
+      name_matches,
     })
   } catch (error: any) {
     console.error("Error in POST /api/suppliers:", error)

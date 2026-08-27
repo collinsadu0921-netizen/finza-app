@@ -19,6 +19,7 @@ export function isLegacyServiceShellPath(pathname: string | null | undefined): b
     "/reports",
     "/vat-returns",
     "/bills",
+    "/suppliers",
     "/payroll",
     "/assets",
     "/credit-notes",

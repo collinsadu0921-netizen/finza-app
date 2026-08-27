@@ -55,6 +55,7 @@ const LEGACY_SERVICE_NAV_ALIASES: ReadonlyArray<readonly [legacyRoot: string, ca
   ["/proforma", "/service/proforma"],
   ["/credit-notes", "/service/credit-notes"],
   ["/bills", "/service/bills"],
+  ["/suppliers", "/service/suppliers"],
   ["/payroll", "/service/payroll"],
   ["/assets", "/service/assets"],
 ]
