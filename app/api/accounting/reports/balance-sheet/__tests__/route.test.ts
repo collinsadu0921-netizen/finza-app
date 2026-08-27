@@ -140,6 +140,11 @@ describe("GET /api/accounting/reports/balance-sheet", () => {
     expect(rpc).not.toHaveBeenCalled()
     expect(mockReady).toHaveBeenCalledTimes(1)
     expect(mockReport).toHaveBeenCalledTimes(1)
+    expect(mockReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ businessId: "biz-a" }),
+      expect.objectContaining({ rpcClient: expect.anything() })
+    )
     const body = await res.json()
     expect(body.totals.assets).toBe(10)
     expect(body.as_of_date).toBe("2026-08-22")

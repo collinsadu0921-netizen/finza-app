@@ -291,3 +291,28 @@ describe("L. Parallel timing isolation", () => {
     expect(timings!.period_ms).toBeLessThan(30)
   })
 })
+
+describe("577 identity: rpcClient carries the user JWT", () => {
+  it("calls ledger RPCs on rpcClient, not the table client", async () => {
+    const table = buildMockSupabase()
+    const rpc = buildMockSupabase()
+    const { data, error } = await getBalanceSheetReport(
+      table,
+      { businessId: "biz-001", as_of_date: "2026-08-21" },
+      { rpcClient: rpc }
+    )
+    expect(error).toBe("")
+    expect(data).not.toBeNull()
+    expect(rpc.rpc).toHaveBeenCalledWith(
+      "get_balance_sheet_as_of",
+      expect.objectContaining({ p_business_id: "biz-001" })
+    )
+    expect(rpc.rpc).toHaveBeenCalledWith(
+      "get_cumulative_net_income_as_of",
+      expect.objectContaining({ p_business_id: "biz-001" })
+    )
+    expect(table.rpc).not.toHaveBeenCalled()
+    expect(table.from).toHaveBeenCalledWith("businesses")
+    expect(rpc.from).not.toHaveBeenCalled()
+  })
+})

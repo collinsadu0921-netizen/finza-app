@@ -155,6 +155,15 @@ export async function resolveBalanceSheetAsOfDate(
   return getBusinessToday(supabase, input.businessId)
 }
 
+export type BalanceSheetReportOptions = {
+  /**
+   * Client for get_balance_sheet_as_of / get_cumulative_net_income_as_of.
+   * Must carry the authenticated user's JWT so 577 DEFINER auth.uid() resolves.
+   * Defaults to `supabase` (period / businesses client).
+   */
+  rpcClient?: SupabaseClient
+}
+
 export type BalanceSheetComputeTimings = {
   period_ms: number
   as_of_ms: number
@@ -166,9 +175,19 @@ export type BalanceSheetComputeTimings = {
   parallel_ledger_reads: boolean
 }
 
+export type BalanceSheetReportOptions = {
+  /**
+   * Client for get_balance_sheet_as_of / get_cumulative_net_income_as_of.
+   * Must carry the authenticated user's JWT so 577 DEFINER auth.uid() resolves.
+   * Defaults to `supabase` (period / businesses client).
+   */
+  rpcClient?: SupabaseClient
+}
+
 export async function getBalanceSheetReport(
   supabase: SupabaseClient,
-  input: BalanceSheetReportInput
+  input: BalanceSheetReportInput,
+  options?: BalanceSheetReportOptions
 ): Promise<{
   data: BalanceSheetReportResponse | null
   error: string
@@ -178,6 +197,7 @@ export async function getBalanceSheetReport(
   if (!businessId?.trim()) {
     return { data: null, error: "Missing required parameter: business_id" }
   }
+  const rpcClient = options?.rpcClient ?? supabase
 
   const tAll = performance.now()
   const timings: BalanceSheetComputeTimings = {
@@ -236,13 +256,13 @@ export async function getBalanceSheetReport(
   }
   const loadRows = async (asOf: string) => {
     const t = performance.now()
-    const result = await fetchCumulativeBalanceSheetRows(supabase, businessId, asOf)
+    const result = await fetchCumulativeBalanceSheetRows(rpcClient, businessId, asOf)
     timings.bs_rpc_ms = Math.round((performance.now() - t) * 10) / 10
     return result
   }
   const loadEarnings = async (asOf: string) => {
     const t = performance.now()
-    const result = await fetchCumulativeNetIncomeAsOf(supabase, businessId, asOf)
+    const result = await fetchCumulativeNetIncomeAsOf(rpcClient, businessId, asOf)
     timings.earnings_rpc_ms = Math.round((performance.now() - t) * 10) / 10
     return result
   }

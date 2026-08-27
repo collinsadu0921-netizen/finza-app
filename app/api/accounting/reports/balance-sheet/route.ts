@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     const tReady = performance.now()
     const [readinessResult, firstReport] = await Promise.all([
       checkAccountingReadiness(supabase, businessId),
-      getBalanceSheetReport(supabase, reportInput),
+      getBalanceSheetReport(supabase, reportInput, { rpcClient: supabase }),
     ])
     diag.recordTiming("ready", timedStepMs(tReady), "parallel")
 
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
       const tBootstrap = performance.now()
       await supabase.rpc("create_system_accounts", { p_business_id: businessId })
       diag.recordTiming("bootstrap", timedStepMs(tBootstrap))
-      reportResult = await getBalanceSheetReport(supabase, reportInput)
+      reportResult = await getBalanceSheetReport(supabase, reportInput, { rpcClient: supabase })
     }
 
     const { data, error, timings } = reportResult
