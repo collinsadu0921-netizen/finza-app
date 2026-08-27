@@ -155,15 +155,6 @@ export async function resolveBalanceSheetAsOfDate(
   return getBusinessToday(supabase, input.businessId)
 }
 
-export type BalanceSheetReportOptions = {
-  /**
-   * Client for get_balance_sheet_as_of / get_cumulative_net_income_as_of.
-   * Must carry the authenticated user's JWT so 577 DEFINER auth.uid() resolves.
-   * Defaults to `supabase` (period / businesses client).
-   */
-  rpcClient?: SupabaseClient
-}
-
 export type BalanceSheetComputeTimings = {
   period_ms: number
   as_of_ms: number
