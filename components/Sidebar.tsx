@@ -528,6 +528,7 @@ export default function Sidebar() {
             { label: "Credit Notes", route: "/service/credit-notes", minTier: "starter" },
             { label: "Expenses", route: "/service/expenses", minTier: "starter" },
             { label: "Supplier Bills", route: "/service/bills", minTier: "professional" },
+            { label: "Suppliers", route: "/service/suppliers", minTier: "professional" },
             {
               label: "Incoming documents",
               route: buildServiceRoute("/service/incoming-documents", effectiveServiceBusinessId ?? undefined),

@@ -18,6 +18,11 @@ describe("routePermissionRules", () => {
     expect(getRequiredPermissionForPath("/service/bills")).toBe("bills.view")
   })
 
+  it("service suppliers use the bills permission", () => {
+    expect(getRequiredPermissionForPath("/service/suppliers")).toBe("bills.view")
+    expect(getRequiredPermissionForPath("/service/suppliers/abc")).toBe("bills.view")
+  })
+
   it("dashboard has no extra permission gate", () => {
     expect(getRequiredPermissionForPath("/service/dashboard")).toBeNull()
   })

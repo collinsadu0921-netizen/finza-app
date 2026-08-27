@@ -39,6 +39,7 @@ describe("shouldMountServiceSubscriptionProvider", () => {
     expect(shouldMountServiceSubscriptionProvider("/service/jobs")).toBe(true)
     expect(shouldMountServiceSubscriptionProvider("/reports/vat")).toBe(true)
     expect(shouldMountServiceSubscriptionProvider("/bills")).toBe(true)
+    expect(shouldMountServiceSubscriptionProvider("/suppliers")).toBe(true)
   })
 
   it("strips query string before matching", () => {
