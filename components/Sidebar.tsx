@@ -19,6 +19,8 @@ import type { ServiceSubscriptionTier } from "@/lib/serviceWorkspace/subscriptio
 import { upgradeLabel } from "@/lib/serviceWorkspace/subscriptionTiers"
 import { useServiceSubscription } from "@/components/service/ServiceSubscriptionContext"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { FinzaIcon } from "@/components/FinzaIcon"
+import { FinzaLogo } from "@/components/FinzaLogo"
 import {
   BUSINESS_BRANDING_UPDATED_EVENT,
   type BusinessBrandingUpdatedDetail,
@@ -858,14 +860,9 @@ export default function Sidebar() {
               >
                 {isDesktopRail ? (
                   !finzaSidebarSvgFailed ? (
-                    <img
-                      src="/finza-mark.svg"
-                      alt=""
-                      width={36}
-                      height={36}
-                      decoding="async"
-                      loading="eager"
-                      className="block h-9 w-9 shrink-0 object-contain object-center"
+                    <FinzaIcon
+                      size={36}
+                      decorative
                       onError={() => setFinzaSidebarSvgFailed(true)}
                     />
                   ) : (
@@ -873,18 +870,13 @@ export default function Sidebar() {
                       className="flex h-9 w-9 shrink-0 items-center justify-center"
                       aria-hidden
                     >
-                      <span className="h-[10px] w-[10px] shrink-0 rounded-[3px] bg-[#112033] dark:bg-slate-100" />
+                      <span className="h-[10px] w-[10px] shrink-0 rounded-[3px] bg-[#0B1A2F] dark:bg-slate-100" />
                     </span>
                   )
                 ) : !finzaSidebarSvgFailed ? (
-                  <img
-                    src="/brand/finza-logo-colored-solid.svg"
-                    alt="Finza"
-                    width={220}
-                    height={56}
-                    decoding="async"
-                    loading="eager"
-                    className="block h-[34px] w-auto max-h-[40px] max-w-[200px] object-contain object-left dark:brightness-[1.06]"
+                  <FinzaLogo
+                    width={160}
+                    className="dark:brightness-[1.06]"
                     onError={() => setFinzaSidebarSvgFailed(true)}
                   />
                 ) : (

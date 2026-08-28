@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { getActiveFirmId } from "@/lib/accounting/firm/session"
+import { FinzaLogo } from "@/components/FinzaLogo"
 
 type FirmOnboardingData = {
   id: string
@@ -165,6 +166,9 @@ export default function FirmOnboardingPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="mb-8">
+          <div className="mb-4">
+            <FinzaLogo width={200} className="max-w-[min(200px,100%)]" />
+          </div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
             Firm Onboarding
           </h1>

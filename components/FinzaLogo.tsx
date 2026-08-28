@@ -1,26 +1,24 @@
 /**
- * Official Finza brand lockup: raster from /public/brand (approved export; do not redraw).
- * variant="white" requires /public/brand/finza-logo-white.png from design (not approximated).
+ * Official Finza wordmark from /public/brand/finza-logo.svg.
+ * Transparent, tightly cropped. Do not redraw, recolour, or stretch.
  */
 
 type FinzaLogoProps = {
-  /** default: full color logo; white: for dark backgrounds */
-  variant?: "default" | "white"
-  /** Rendered height in CSS pixels; width follows aspect ratio */
-  height?: number
+  /** Rendered width in CSS pixels; height follows the SVG aspect ratio */
+  width?: number
   className?: string
+  onError?: () => void
 }
 
-export function FinzaLogo({ variant = "default", height = 26, className = "" }: FinzaLogoProps) {
-  const src =
-    variant === "white" ? "/brand/finza-logo-white.png" : "/brand/finza-logo.png"
+export function FinzaLogo({ width = 148, className = "", onError }: FinzaLogoProps) {
   return (
     <img
-      src={src}
+      src="/brand/finza-logo.svg"
       alt="Finza"
-      className={`w-auto max-w-full ${className}`.trim()}
-      style={{ height, width: "auto" }}
+      className={`h-auto max-w-full object-contain object-left ${className}`.trim()}
+      style={{ width, height: "auto" }}
       decoding="async"
+      onError={onError}
     />
   )
 }

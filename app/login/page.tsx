@@ -78,7 +78,7 @@ function LoginPageContent() {
         {/* Header Section */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
-            <FinzaLogo height={72} />
+            <FinzaLogo width={240} className="max-w-[min(240px,100%)]" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h1>
           <p className="text-gray-600 text-sm">Sign in to Finza Service to manage quotes, invoices, and payments.</p>

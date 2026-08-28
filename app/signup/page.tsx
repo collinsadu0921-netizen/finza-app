@@ -196,7 +196,7 @@ function SignupPageInner() {
       <div className="mx-auto w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="mb-6 flex justify-center">
-            <FinzaLogo height={72} />
+            <FinzaLogo width={220} className="max-w-[min(220px,100%)]" />
           </div>
           {hasTrial ? (
             <>
