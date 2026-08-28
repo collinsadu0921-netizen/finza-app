@@ -65,7 +65,7 @@ function CheckEmailInner() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-100 px-4 py-8">
       <div className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-10 shadow-xl">
         <div className="mb-8 flex justify-center">
-          <FinzaLogo height={64} />
+          <FinzaLogo width={220} className="max-w-[min(220px,100%)]" />
         </div>
         <h1 className="text-2xl font-bold text-gray-900 text-center mb-2">Check your email</h1>
         <p className="text-sm text-gray-600 text-center mb-6">

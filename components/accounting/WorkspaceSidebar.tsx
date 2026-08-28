@@ -79,7 +79,7 @@ export default function WorkspaceSidebar({ hasClientSelected, hasFirm }: Workspa
         className="rounded-xl border border-gray-200 bg-white p-3 lg:sticky lg:top-4"
       >
         <div className="px-2 py-2 mb-2">
-          <FinzaLogo height={26} />
+          <FinzaLogo width={148} className="max-w-[min(148px,100%)]" />
         </div>
 
         <p className="px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Main</p>

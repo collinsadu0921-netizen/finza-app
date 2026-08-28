@@ -212,7 +212,7 @@ export default function ResetPasswordPage() {
       <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-6">
-            <FinzaLogo height={72} />
+            <FinzaLogo width={240} className="max-w-[min(240px,100%)]" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Choose a new password</h1>
           <p className="text-gray-600 text-sm">Use a strong password you don&apos;t use elsewhere.</p>

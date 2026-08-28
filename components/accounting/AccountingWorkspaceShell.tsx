@@ -202,7 +202,7 @@ export default function AccountingWorkspaceShell({ children }: AccountingWorkspa
       <div className="min-h-[70vh] flex items-center justify-center px-4">
         <div className="w-full max-w-xl rounded-2xl border border-gray-200 bg-white p-8">
           <div className="mb-3">
-            <FinzaLogo height={26} />
+            <FinzaLogo width={160} className="max-w-[min(160px,100%)]" />
           </div>
           <h1 className="text-3xl font-semibold text-gray-900 mb-3">Set up your accounting firm</h1>
           <p className="text-gray-600 mb-6">

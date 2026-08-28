@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 241 198" role="img" aria-labelledby="title desc">
+  <title id="title">Finza icon</title>
+  <desc id="desc">Finza brand icon on a transparent square canvas.</desc>
+  <g transform="translate(0 0)">
+    <path d="M 20 140 L 20 178 L 151 178 L 151 140 Z M 173 79 L 173 117 L 172 118 L 173 119 L 221 119 L 221 79 Z M 20 79 L 20 119 L 151 119 L 151 79 Z M 173 20 L 173 56 L 172 57 L 173 58 L 221 58 L 221 23 L 220 22 L 220 21 L 219 20 Z M 20 20 L 20 58 L 151 58 L 151 20 Z" fill="#0B1A2F" fill-rule="evenodd"/>
+    <path d="M 173 141 L 173 177 L 220 177 L 220 140 L 174 140 Z" fill="#02B376" fill-rule="evenodd"/>
+  </g>
+</svg>

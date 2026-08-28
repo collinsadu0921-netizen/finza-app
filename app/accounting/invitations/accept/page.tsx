@@ -132,7 +132,7 @@ function AcceptInvitationInner() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 py-12">
       <div className="mb-8">
-        <FinzaLogo className="h-8" />
+        <FinzaLogo width={160} className="max-w-[min(160px,100%)]" />
       </div>
       <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
         {error && !preview ? (

@@ -143,7 +143,7 @@ export default function FirmOnboardingPage() {
     <div className="min-h-screen bg-slate-50 px-4 py-10">
       <div className="mx-auto w-full max-w-md">
         <div className="mb-8 flex justify-center">
-          <FinzaLogo height={48} />
+          <FinzaLogo width={200} className="max-w-[min(200px,100%)]" />
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Firm details</h1>
