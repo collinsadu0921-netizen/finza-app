@@ -656,6 +656,7 @@ export default function ServiceDashboardCockpit({ business, headerLead }: Servic
           fallbackPeriodEnd={metrics?.period?.period_end}
           dashboardPeriodStart={metrics?.period?.period_start ?? null}
           dashboardPeriodEnd={metrics?.period?.period_end ?? null}
+          businessToday={metrics?.positionAsOfDate ?? null}
           periodCaption={
             ledgerFallbackActive ? "Based on ledger records for this period" : undefined
           }
