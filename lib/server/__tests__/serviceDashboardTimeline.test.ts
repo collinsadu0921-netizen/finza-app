@@ -5,6 +5,7 @@
 import {
   isTimelineResultCacheable,
   loadServiceDashboardTimeline,
+  mergeFreshAndStaleTimelineRows,
   shouldCacheDashboardClusterPayload,
 } from "../serviceDashboardTimeline"
 
@@ -45,6 +46,9 @@ describe("loadServiceDashboardTimeline", () => {
       get_service_dashboard_timeline_from_summary: jest
         .fn()
         .mockResolvedValue({ data: [row(1), row(2)], error: null }),
+      get_service_dashboard_timeline_stale_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [], error: null }),
     })
 
     const result = await loadServiceDashboardTimeline(supabase, "biz-a", 12, diag)
@@ -154,6 +158,40 @@ describe("loadServiceDashboardTimeline", () => {
     expect(result.timeline).toHaveLength(1)
     await Promise.resolve()
     expect(tryRefresh).toHaveBeenCalled()
+  })
+
+  it("merges a fresh July snapshot with a stale-but-valid August row", async () => {
+    const july = {
+      period_id: "p-jul",
+      period_start: "2026-07-01",
+      period_end: "2026-07-31",
+      revenue: 50291.67,
+      expenses: 6441,
+      net_profit: 43850.67,
+    }
+    const august = {
+      period_id: "p-aug",
+      period_start: "2026-08-01",
+      period_end: "2026-08-31",
+      revenue: 50981.67,
+      expenses: 6441,
+      net_profit: 44540.67,
+    }
+    const supabase = mockSupabase({
+      get_service_dashboard_timeline_from_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [july], error: null }),
+      get_service_dashboard_timeline_stale_summary: jest
+        .fn()
+        .mockResolvedValue({ data: [july, august], error: null }),
+    })
+
+    const result = await loadServiceDashboardTimeline(supabase, "biz-a", 6, diag, {
+      refreshOnRequest: false,
+    })
+    expect(result.source).toBe("summary_fresh")
+    expect(result.timeline.map((t) => t.period_start)).toEqual(["2026-07-01", "2026-08-01"])
+    expect(result.timeline[1].revenue).toBe(50981.67)
   })
 
   it("cold start runs blocking refresh then returns refreshed rows", async () => {
@@ -297,6 +335,44 @@ describe("loadServiceDashboardTimeline", () => {
     expect(result.source).toBe("empty_with_ledger")
     expect(result.cacheable).toBe(false)
     expect(result.diagnostic).toBe("summary_and_live_fallback_empty")
+  })
+})
+
+describe("mergeFreshAndStaleTimelineRows", () => {
+  const julyFresh = {
+    period_id: "p-jul",
+    period_start: "2026-07-01",
+    period_end: "2026-07-31",
+    revenue: 50291.67,
+    expenses: 6441,
+    net_profit: 43850.67,
+  }
+  const julyStale = {
+    ...julyFresh,
+    revenue: 24750,
+    net_profit: 18309,
+  }
+  const augustStale = {
+    period_id: "p-aug",
+    period_start: "2026-08-01",
+    period_end: "2026-08-31",
+    revenue: 50981.67,
+    expenses: 6441,
+    net_profit: 44540.67,
+  }
+
+  it("keeps stale August when only July is fresh", () => {
+    const merged = mergeFreshAndStaleTimelineRows([julyFresh], [julyStale, augustStale], 6)
+    expect(merged.map((r) => r.period_start)).toEqual(["2026-07-01", "2026-08-01"])
+    expect(merged[0].revenue).toBe(50291.67)
+    expect(merged[1].revenue).toBe(50981.67)
+  })
+
+  it("keeps one deterministic row when fresh and stale both have the same period", () => {
+    const merged = mergeFreshAndStaleTimelineRows([julyFresh], [julyStale], 6)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].revenue).toBe(50291.67)
+    expect(merged[0].period_start).toBe("2026-07-01")
   })
 })
 

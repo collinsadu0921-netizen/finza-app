@@ -10,6 +10,7 @@ import {
   loadLiveTimelineRowsBounded,
   mergeTimelineWithLiveMissingPeriods,
 } from "@/lib/server/dashboardMetricsLedgerFallback"
+import { normalizePeriodStart } from "@/lib/accounting/periodDate"
 
 export const SUMMARY_FRESH_SECONDS = 300
 
@@ -56,6 +57,34 @@ export type ServiceDashboardTimelineResult = {
   /** False when empty timeline but ledger movement exists — do not cache. */
   cacheable: boolean
   diagnostic?: string
+}
+
+export function timelinePeriodKey(periodStart: unknown): string {
+  return normalizePeriodStart(periodStart)
+}
+
+/**
+ * Overlay fresh snapshot rows onto the stale window.
+ * Fresh wins per period; stale-but-valid months stay; chronological, latest N.
+ */
+export function mergeFreshAndStaleTimelineRows(
+  freshRows: TimelineRpcRow[],
+  staleRows: TimelineRpcRow[],
+  periodsLimit: number
+): TimelineRpcRow[] {
+  const byStart = new Map<string, TimelineRpcRow>()
+  for (const row of staleRows) {
+    const key = timelinePeriodKey(row.period_start)
+    if (key) byStart.set(key, row)
+  }
+  for (const row of freshRows) {
+    const key = timelinePeriodKey(row.period_start)
+    if (key) byStart.set(key, row)
+  }
+  const limit = Math.max(1, Math.min(periodsLimit || 6, 24))
+  return Array.from(byStart.values())
+    .sort((a, b) => timelinePeriodKey(a.period_start).localeCompare(timelinePeriodKey(b.period_start)))
+    .slice(-limit)
 }
 
 export function mapTimelineRows(rows: TimelineRpcRow[]): ServiceDashboardTimelineItem[] {
@@ -315,12 +344,27 @@ export async function loadServiceDashboardTimeline(
   const refreshOnRequest = options?.refreshOnRequest !== false
   const scheduleBackground = options?.scheduleBackground
 
-  const freshRows = await readFreshSummary(supabase, businessId, periodsParam)
+  const [freshRows, staleForMerge] = await Promise.all([
+    readFreshSummary(supabase, businessId, periodsParam),
+    readStaleSummary(supabase, businessId, periodsParam),
+  ])
   if (freshRows.length > 0) {
-    return finish(diag, t0, periodsParam, rowsResult(freshRows, "summary_fresh"))
+    const merged = mergeFreshAndStaleTimelineRows(freshRows, staleForMerge, periodsParam)
+    const freshKeys = new Set(freshRows.map((r) => timelinePeriodKey(r.period_start)))
+    const hasStaleExtras = merged.some((r) => !freshKeys.has(timelinePeriodKey(r.period_start)))
+    if (hasStaleExtras && refreshOnRequest) {
+      void tryRefreshSummary(supabase, businessId, periodsParam)
+    }
+    return finish(
+      diag,
+      t0,
+      periodsParam,
+      rowsResult(merged, "summary_fresh"),
+      hasStaleExtras ? { merged_stale_periods: true } : undefined
+    )
   }
 
-  const staleRows = await readStaleSummary(supabase, businessId, periodsParam)
+  const staleRows = staleForMerge
   if (staleRows.length > 0) {
     if (!refreshOnRequest) {
       const liveRead = await loadLiveTimelineRowsBounded(supabase, businessId, periodsParam)
@@ -372,9 +416,11 @@ export async function loadServiceDashboardTimeline(
   }
 
   const blockingCount = await blockingRefreshSummary(supabase, businessId, periodsParam)
-  const afterFresh = await readFreshSummary(supabase, businessId, periodsParam)
-  const afterRows =
-    afterFresh.length > 0 ? afterFresh : await readStaleSummary(supabase, businessId, periodsParam)
+  const [afterFresh, afterStale] = await Promise.all([
+    readFreshSummary(supabase, businessId, periodsParam),
+    readStaleSummary(supabase, businessId, periodsParam),
+  ])
+  const afterRows = mergeFreshAndStaleTimelineRows(afterFresh, afterStale, periodsParam)
 
   if (afterRows.length > 0) {
     return finish(

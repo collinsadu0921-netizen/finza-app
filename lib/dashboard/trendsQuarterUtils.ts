@@ -204,6 +204,7 @@ export function resolveSelectedQuarterKey(
     if (quarterlyPoints.some((q) => q.key === fromDashboard)) {
       return fromDashboard
     }
+    return null
   }
   return quarterlyPoints[quarterlyPoints.length - 1]?.key ?? null
 }
