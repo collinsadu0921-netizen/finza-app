@@ -28,8 +28,9 @@ export type MonthlyTrendsSelection = {
 }
 
 /**
- * Drop periods that start after business today. If every row is future-dated,
- * keep the full list rather than inventing or emptying the chart.
+ * Drop periods that start after business today.
+ * With a valid business date, do not restore future rows to fill an empty chart.
+ * Without a business date, keep the sorted list (caller has no calendar cutoff).
  */
 export function filterNonFutureTimelinePoints<T extends { period_start: string }>(
   points: T[],
@@ -41,8 +42,7 @@ export function filterNonFutureTimelinePoints<T extends { period_start: string }
   )
   const todayYm = periodStartYearMonth(businessToday)
   if (!todayYm) return sorted
-  const notFuture = sorted.filter((p) => periodStartYearMonth(p.period_start) <= todayYm)
-  return notFuture.length > 0 ? notFuture : sorted
+  return sorted.filter((p) => periodStartYearMonth(p.period_start) <= todayYm)
 }
 
 export function resolveMonthlyTrendsSelection(input: {
