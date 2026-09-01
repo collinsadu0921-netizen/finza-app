@@ -30,6 +30,11 @@ import {
   resolveSelectedQuarterKey,
   type QuarterlyChartPoint,
 } from "@/lib/dashboard/trendsQuarterUtils"
+import {
+  filterNonFutureTimelinePoints,
+  resolveMonthlyTrendsSelection,
+} from "@/lib/dashboard/trendsPeriodSelection"
+import { normalizePeriodStart } from "@/lib/accounting/periodDate"
 import DashboardExpensesInfo from "./DashboardExpensesInfo"
 
 export type TimelinePoint = {
@@ -59,6 +64,8 @@ export type TrendsSectionProps = {
   /** Dashboard period picker — monthly hero/breakdown follow this when set. */
   dashboardPeriodStart?: string | null
   dashboardPeriodEnd?: string | null
+  /** Business-calendar today (YYYY-MM-DD). Used instead of the browser clock. */
+  businessToday?: string | null
 }
 
 type PeriodMode = "monthly" | "quarterly" | "ytd"
@@ -68,6 +75,7 @@ type ChartPoint = {
   revenue: number
   expenses: number
   netProfit: number
+  periodStart?: string
   /** Present in quarterly mode — used for bar selection. */
   quarterKey?: string
 }
@@ -91,27 +99,6 @@ const COLORS = {
  * affected, and periods are never fabricated.
  */
 const MONTHLY_WINDOW = 6
-
-/** Current calendar month as a comparable "YYYY-MM" string (local time). */
-function currentYearMonth(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-}
-
-/**
- * Returns the timeline sorted chronologically with future-dated periods
- * removed. Anchors on real data only — if every period is future-dated, falls
- * back to the full sorted list rather than inventing or dropping all data.
- */
-function sortedNonFuture(points: TimelinePoint[]): TimelinePoint[] {
-  if (points.length === 0) return []
-  const sorted = [...points].sort((a, b) =>
-    a.period_start.localeCompare(b.period_start)
-  )
-  const currentYM = currentYearMonth()
-  const notFuture = sorted.filter((p) => p.period_start.slice(0, 7) <= currentYM)
-  return notFuture.length > 0 ? notFuture : sorted
-}
 
 /** Short, locale-aware month label (e.g. "May") derived from the period start. */
 function shortMonthLabel(periodStart: string): string {
@@ -361,6 +348,7 @@ export default function TrendsSection({
   fallbackPeriodEnd,
   dashboardPeriodStart,
   dashboardPeriodEnd,
+  businessToday,
 }: TrendsSectionProps) {
   const [mode, setMode] = useState<PeriodMode>("monthly")
   const [selectedQuarterKey, setSelectedQuarterKey] = useState<string | null>(null)
@@ -375,7 +363,7 @@ export default function TrendsSection({
   }
 
   const view = useMemo(() => {
-    const nonFuture = sortedNonFuture(data)
+    const nonFuture = filterNonFutureTimelinePoints(data, businessToday)
 
     let chartData: ChartPoint[]
     let profitLaneLabel: string
@@ -388,37 +376,38 @@ export default function TrendsSection({
 
     let selectedPeriodStart: string | undefined
     let selectedPeriodEnd: string | undefined
+    let monthlyHighlightStart: string | null = null
 
     const quarterlyPoints = buildQuarterlyChartPoints(nonFuture)
 
     if (mode === "monthly") {
       const windowMonths = nonFuture.slice(-MONTHLY_WINDOW)
-      const dashboardMonth =
-        dashboardPeriodStart != null && dashboardPeriodStart !== ""
-          ? nonFuture.find((m) => m.period_start === dashboardPeriodStart) ?? null
-          : null
-      const latestMonth =
-        dashboardMonth ??
-        (windowMonths.length > 0 ? windowMonths[windowMonths.length - 1] : null)
-      if (latestMonth) {
-        selectedPeriodStart = latestMonth.period_start
-        selectedPeriodEnd = latestMonth.period_end
-      } else if (dashboardPeriodStart && dashboardPeriodEnd) {
-        selectedPeriodStart = dashboardPeriodStart
-        selectedPeriodEnd = dashboardPeriodEnd
-      }
+      const monthly = resolveMonthlyTrendsSelection({
+        visibleMonths: windowMonths,
+        dashboardPeriodStart,
+        dashboardPeriodEnd,
+        currentRevenue,
+        currentExpenses,
+        currentNetProfit,
+      })
+      selectedPeriodStart = monthly.selectedPeriodStart
+      selectedPeriodEnd = monthly.selectedPeriodEnd
+      monthlyHighlightStart = monthly.highlightPeriodStart
       chartData = windowMonths.map((m) => ({
         label: shortMonthLabel(m.period_start),
         revenue: m.revenue,
         expenses: m.expenses,
         netProfit: m.netProfit,
+        periodStart: normalizePeriodStart(m.period_start),
       }))
       profitLaneLabel = "Net profit by month"
-      breakdownTitle = dashboardMonth
-        ? `${shortMonthLabel(dashboardMonth.period_start)} breakdown`
+      breakdownTitle = monthly.selectedPeriodStart
+        ? `${shortMonthLabel(monthly.selectedPeriodStart)} breakdown`
         : "Latest breakdown"
-      breakdownSubtitle = dashboardMonth
-        ? `${shortMonthLabel(dashboardMonth.period_start)} summary`
+      breakdownSubtitle = monthly.selectedPeriodStart
+        ? monthly.barVisible
+          ? `${shortMonthLabel(monthly.selectedPeriodStart)} summary`
+          : `${shortMonthLabel(monthly.selectedPeriodStart)} summary · not on chart`
         : "Latest month summary"
       scopeLabel = "Monthly"
       operatingCaption = "Revenue and expenses by month"
@@ -429,9 +418,9 @@ export default function TrendsSection({
         dashboardPeriodStart
       )
       const selectedQuarter =
-        quarterlyPoints.find((q) => q.key === activeQuarterKey) ??
-        quarterlyPoints[quarterlyPoints.length - 1] ??
-        null
+        activeQuarterKey
+          ? quarterlyPoints.find((q) => q.key === activeQuarterKey) ?? null
+          : null
 
       chartData = quarterlyPoints.map((q) => ({
         label: q.label,
@@ -484,50 +473,53 @@ export default function TrendsSection({
 
     const latestPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null
 
-    const dashboardTimelineMonth =
-      mode === "monthly" && dashboardPeriodStart
-        ? nonFuture.find((m) => m.period_start === dashboardPeriodStart)
-        : null
-
     const selectedQuarter =
       mode === "quarterly" && activeQuarterKey
         ? quarterlyPoints.find((q) => q.key === activeQuarterKey) ?? null
         : null
 
-    const selectedRevenue = dashboardTimelineMonth
-      ? dashboardTimelineMonth.revenue
+    const monthlySelected =
+      mode === "monthly"
+        ? resolveMonthlyTrendsSelection({
+            visibleMonths: nonFuture.slice(-MONTHLY_WINDOW),
+            dashboardPeriodStart,
+            dashboardPeriodEnd,
+            currentRevenue,
+            currentExpenses,
+            currentNetProfit,
+          })
+        : null
+
+    const selectedRevenue = monthlySelected
+      ? monthlySelected.selectedRevenue
       : selectedQuarter
         ? selectedQuarter.revenue
-        : latestPoint
+        : mode === "ytd" && latestPoint
           ? latestPoint.revenue
           : currentRevenue
-    const selectedExpenses = dashboardTimelineMonth
-      ? dashboardTimelineMonth.expenses
+    const selectedExpenses = monthlySelected
+      ? monthlySelected.selectedExpenses
       : selectedQuarter
         ? selectedQuarter.expenses
-        : latestPoint
+        : mode === "ytd" && latestPoint
           ? latestPoint.expenses
           : currentExpenses
-    const selectedNetProfit = dashboardTimelineMonth
-      ? dashboardTimelineMonth.netProfit
+    const selectedNetProfit = monthlySelected
+      ? monthlySelected.selectedNetProfit
       : selectedQuarter
         ? selectedQuarter.netProfit
-        : latestPoint
+        : mode === "ytd" && latestPoint
           ? latestPoint.netProfit
           : currentNetProfit
 
-    if (mode === "monthly") {
-      if (dashboardTimelineMonth) {
-        breakdownTitle = `${shortMonthLabel(dashboardTimelineMonth.period_start)} breakdown`
-      } else if (latestPoint) {
-        breakdownTitle = `${latestPoint.label} breakdown`
-      } else if (dashboardPeriodStart) {
+    if (mode === "quarterly" && !selectedQuarter) {
+      if (dashboardPeriodStart) {
         breakdownTitle = `${shortMonthLabel(dashboardPeriodStart)} breakdown`
+        breakdownSubtitle = "Selected period is not on this chart"
+      } else {
+        breakdownTitle = "Latest breakdown"
+        breakdownSubtitle = "Latest quarter summary"
       }
-    } else if (mode === "ytd") {
-      // breakdownTitle set in branch above
-    } else if (!breakdownTitle) {
-      breakdownTitle = latestPoint ? `${latestPoint.label} breakdown` : "Latest breakdown"
     }
 
     let footerLabel: string
@@ -545,7 +537,8 @@ export default function TrendsSection({
 
     return {
       chartData,
-      hasData: chartData.length > 0,
+      hasChartBars: chartData.length > 0,
+      hasData: chartData.length > 0 || Boolean(selectedPeriodStart),
       selectedRevenue,
       selectedExpenses,
       selectedNetProfit,
@@ -562,6 +555,7 @@ export default function TrendsSection({
       breakdownSubtitleExtra,
       activeQuarterKey,
       quarterlyPoints,
+      monthlyHighlightStart,
     }
   }, [
     data,
@@ -572,6 +566,7 @@ export default function TrendsSection({
     currentNetProfit,
     dashboardPeriodStart,
     dashboardPeriodEnd,
+    businessToday,
   ])
 
   const breakdownPeriodStart =
@@ -597,6 +592,11 @@ export default function TrendsSection({
   const quarterBarOpacity = (quarterKey?: string) => {
     if (mode !== "quarterly" || !quarterKey) return 1
     return quarterKey === view.activeQuarterKey ? 1 : 0.42
+  }
+
+  const monthlyBarOpacity = (periodStart?: string) => {
+    if (mode !== "monthly" || !view.monthlyHighlightStart) return 1
+    return periodStart === view.monthlyHighlightStart ? 1 : 0.42
   }
 
   const expensesInfo = (
@@ -733,6 +733,13 @@ export default function TrendsSection({
                 />
               ) : null}
 
+              {!view.hasChartBars ? (
+                <div className="flex h-[156px] w-full min-w-0 items-center justify-center px-4 text-center sm:h-[168px]">
+                  <p className="max-w-xs text-xs leading-relaxed text-slate-400">
+                    No historical months to plot. The selected period is still shown above.
+                  </p>
+                </div>
+              ) : (
               <div className="h-[156px] w-full min-w-0 sm:h-[168px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
@@ -788,7 +795,13 @@ export default function TrendsSection({
                               cursor="pointer"
                             />
                           ))
-                        : null}
+                        : view.chartData.map((entry, index) => (
+                            <Cell
+                              key={`rev-${entry.periodStart ?? index}`}
+                              fill={COLORS.revenue}
+                              fillOpacity={monthlyBarOpacity(entry.periodStart)}
+                            />
+                          ))}
                     </Bar>
                     <Bar
                       dataKey="expenses"
@@ -811,11 +824,18 @@ export default function TrendsSection({
                               cursor="pointer"
                             />
                           ))
-                        : null}
+                        : view.chartData.map((entry, index) => (
+                            <Cell
+                              key={`exp-${entry.periodStart ?? index}`}
+                              fill={COLORS.expenses}
+                              fillOpacity={monthlyBarOpacity(entry.periodStart)}
+                            />
+                          ))}
                     </Bar>
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
+              )}
 
               {/* Separate signed net-profit outcome lane */}
               <div className="mt-3 rounded-xl border border-slate-200/70 bg-slate-50/50 px-3 pb-2 pt-2.5">
@@ -829,6 +849,11 @@ export default function TrendsSection({
                       : "Hover a bar for the amount"}
                   </span>
                 </div>
+                {!view.hasChartBars ? (
+                  <div className="flex h-[120px] w-full min-w-0 items-center justify-center sm:h-[132px]">
+                    <p className="text-xs text-slate-400">No month bars in this range.</p>
+                  </div>
+                ) : (
                 <div className="h-[120px] w-full min-w-0 sm:h-[132px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -878,7 +903,11 @@ export default function TrendsSection({
                           <Cell
                             key={`${entry.label}-${index}`}
                             fill={entry.netProfit >= 0 ? COLORS.profitPos : COLORS.profitNeg}
-                            fillOpacity={quarterBarOpacity(entry.quarterKey)}
+                            fillOpacity={
+                              quarterly
+                                ? quarterBarOpacity(entry.quarterKey)
+                                : monthlyBarOpacity(entry.periodStart)
+                            }
                             stroke={
                               quarterly && entry.quarterKey === view.activeQuarterKey
                                 ? entry.netProfit >= 0
@@ -896,6 +925,7 @@ export default function TrendsSection({
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                )}
               </div>
             </div>
 

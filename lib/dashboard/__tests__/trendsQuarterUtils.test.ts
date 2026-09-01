@@ -145,10 +145,10 @@ describe("trendsQuarterUtils", () => {
     expect(resolveSelectedQuarterKey(points, "2026-Q3", "2026-06-01")).toBe("2026-Q3")
   })
 
-  it("falls back to latest when dashboard period is absent or outside data", () => {
+  it("falls back to latest only when no dashboard period is provided", () => {
     const points = buildQuarterlyChartPoints(sampleMonths, "2026-07-15")
     expect(resolveSelectedQuarterKey(points, null, null)).toBe("2026-Q3")
-    expect(resolveSelectedQuarterKey(points, null, "2020-01-01")).toBe("2026-Q3")
+    expect(resolveSelectedQuarterKey(points, null, "2020-01-01")).toBeNull()
     expect(resolveSelectedQuarterKey(points, "2020-Q1", "2026-06-01")).toBe("2026-Q2")
   })
 })
