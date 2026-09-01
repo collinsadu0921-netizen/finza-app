@@ -306,10 +306,172 @@ function toSafeReleaseFailure(error) {
     delete error.stdout
     delete error.stderr
   }
-  return {
+  const safe = {
     ok: false,
     code: error && error.code ? error.code : "RELEASE_FAILED",
     message: redactCredentialFragments(error && error.message ? error.message : "Release failed"),
+  }
+  const diagnostic = toSafeEnvPullDiagnostic(error)
+  if (diagnostic) Object.assign(safe, diagnostic)
+  return safe
+}
+
+function sanitizeToolVersion(value) {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!/^[v0-9][A-Za-z0-9.+_-]{0,40}$/.test(trimmed)) return null
+  return trimmed
+}
+
+function sanitizeToolVersions(versions) {
+  if (!versions || typeof versions !== "object") return null
+  const node = sanitizeToolVersion(versions.node)
+  const npm = sanitizeToolVersion(versions.npm)
+  const vercel = sanitizeToolVersion(versions.vercel)
+  if (!node && !npm && !vercel) return null
+  return { node, npm, vercel }
+}
+
+function envPullDiagnosticError(stage, extras) {
+  const error = new ReleaseGuardError(
+    "SERVICE_ROLE_ENV_UNVERIFIED",
+    "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+  )
+  error.stage = stage
+  const source = extras && typeof extras === "object" ? extras : {}
+  error.exitCode = Number.isInteger(source.exitCode) ? source.exitCode : null
+  error.signal = typeof source.signal === "string" && source.signal ? source.signal : null
+  error.exportFileExists = typeof source.exportFileExists === "boolean" ? source.exportFileExists : null
+  error.hasUrl = typeof source.hasUrl === "boolean" ? source.hasUrl : null
+  error.hasServiceRoleKey = typeof source.hasServiceRoleKey === "boolean" ? source.hasServiceRoleKey : null
+  error.serviceRoleKeyNonEmpty =
+    typeof source.serviceRoleKeyNonEmpty === "boolean" ? source.serviceRoleKeyNonEmpty : null
+  const versions = sanitizeToolVersions(source.versions)
+  if (versions) error.versions = versions
+  return error
+}
+
+function toSafeEnvPullDiagnostic(error) {
+  if (!error || typeof error !== "object" || typeof error.stage !== "string" || !error.stage) return null
+  return {
+    stage: error.stage,
+    exitCode: Number.isInteger(error.exitCode) ? error.exitCode : null,
+    signal: typeof error.signal === "string" && error.signal ? error.signal : null,
+    exportFileExists: typeof error.exportFileExists === "boolean" ? error.exportFileExists : null,
+    hasUrl: typeof error.hasUrl === "boolean" ? error.hasUrl : null,
+    hasServiceRoleKey: typeof error.hasServiceRoleKey === "boolean" ? error.hasServiceRoleKey : null,
+    serviceRoleKeyNonEmpty:
+      typeof error.serviceRoleKeyNonEmpty === "boolean" ? error.serviceRoleKeyNonEmpty : null,
+    versions: sanitizeToolVersions(error.versions),
+  }
+}
+
+function diagnoseSecretSafeChild(result) {
+  const source = result && typeof result === "object" ? result : {}
+  if (source.started !== true) {
+    return { ok: false, stage: "CHILD_SPAWN_FAILED", exitCode: null, signal: null }
+  }
+  const signal = typeof source.signal === "string" && source.signal ? source.signal : null
+  const exitCode = Number.isInteger(source.exitCode) ? source.exitCode : source.exitCode === 0 ? 0 : null
+  if (signal || exitCode !== 0) {
+    return { ok: false, stage: "ENV_PULL_NONZERO", exitCode, signal }
+  }
+  return { ok: true, stage: null, exitCode: 0, signal: null }
+}
+
+function parseDotEnv(text) {
+  if (typeof text !== "string") throw new Error("EXPORT_PARSE_FAILED")
+  const out = {}
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue
+    const i = trimmed.indexOf("=")
+    let value = trimmed.slice(i + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    out[trimmed.slice(0, i).trim()] = value
+  }
+  return out
+}
+
+function inspectPulledProductionEnv(dest, io) {
+  const ops = io && typeof io === "object" ? io : {}
+  const exists = typeof ops.existsSync === "function" ? ops.existsSync : null
+  const readFile = typeof ops.readFileSync === "function" ? ops.readFileSync : null
+  const parse = typeof ops.parseDotEnv === "function" ? ops.parseDotEnv : parseDotEnv
+  if (typeof exists !== "function" || !exists(dest)) {
+    throw envPullDiagnosticError("EXPORT_FILE_MISSING", { exportFileExists: false })
+  }
+  let text
+  try {
+    text = readFile(dest, "utf8")
+  } catch {
+    throw envPullDiagnosticError("EXPORT_READ_FAILED", { exportFileExists: true })
+  }
+  let parsed
+  try {
+    parsed = parse(text)
+    if (!parsed || typeof parsed !== "object") throw new Error("EXPORT_PARSE_FAILED")
+  } catch {
+    throw envPullDiagnosticError("EXPORT_PARSE_FAILED", { exportFileExists: true })
+  }
+  const extracted = extractProductionSupabaseEnv(parsed)
+  const hasServiceRoleKey = Object.prototype.hasOwnProperty.call(parsed, "SUPABASE_SERVICE_ROLE_KEY")
+  const hasUrl = Boolean(extracted.url)
+  const serviceRoleKeyNonEmpty = Boolean(extracted.serviceRoleKey)
+  const extras = {
+    exportFileExists: true,
+    hasUrl,
+    hasServiceRoleKey,
+    serviceRoleKeyNonEmpty,
+  }
+  if (!hasUrl) {
+    const error = envPullDiagnosticError("URL_ABSENT_OR_EMPTY", extras)
+    error.code = "ENV_UNVERIFIED"
+    error.message = "Production Supabase URL could not be read"
+    throw error
+  }
+  if (!serviceRoleKeyNonEmpty) throw envPullDiagnosticError("SERVICE_ROLE_KEY_ABSENT_OR_EMPTY", extras)
+  return { stage: "KEYS_PRESENT", extracted, ...extras }
+}
+
+function withTempProductionEnvDir(fn) {
+  const fs = require("node:fs")
+  const os = require("node:os")
+  const path = require("node:path")
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "finza-release-env-test-"))
+  const dest = path.join(dir, "production.env")
+  try {
+    return fn({ dir, dest })
+  } finally {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+    } catch {
+      if (fs.existsSync(dest)) fs.unlinkSync(dest)
+    }
+  }
+}
+
+function resolveHostedReleaseMode(inputs) {
+  const source = inputs && typeof inputs === "object" ? inputs : {}
+  const confirm = source.confirm
+  const mode = source.mode
+  const diagnose = mode === "diagnose"
+  const release = confirm === "RELEASE" && !diagnose
+  return {
+    runReleaseJob: release,
+    runDiagnoseJob: diagnose,
+    mayDeploy: release,
+    releaseRequiresConfirm: true,
+    scriptArgs: diagnose
+      ? ["--preflight", "--expected-sha"]
+      : ["--expected-sha"],
+    includesPreflight: diagnose,
+    includesDeploy: release,
   }
 }
 
@@ -409,6 +571,14 @@ module.exports = {
   extractProductionSupabaseEnv,
   redactCredentialFragments,
   toSafeReleaseFailure,
+  toSafeEnvPullDiagnostic,
+  envPullDiagnosticError,
+  diagnoseSecretSafeChild,
+  parseDotEnv,
+  inspectPulledProductionEnv,
+  resolveHostedReleaseMode,
+  withTempProductionEnvDir,
+  sanitizeToolVersions,
   extractSupabaseRef,
   buildDeployArgs,
   parseDeployedSha,

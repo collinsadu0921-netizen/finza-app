@@ -29,7 +29,33 @@ const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
   assertOpaqueSecretProof: (proof: unknown) => { ref: string; role: string }
   buildOpaqueSecretIdentityRequest: (url: string) => { method: string; url: string; headers: Record<string, string> }
   redactCredentialFragments: (text: string) => string
-  toSafeReleaseFailure: (error: unknown) => { ok: false; code: string; message: string }
+  toSafeReleaseFailure: (error: unknown) => { ok: false; code: string; message: string; stage?: string }
+  toSafeEnvPullDiagnostic: (error: unknown) => Record<string, unknown> | null
+  envPullDiagnosticError: (stage: string, extras?: Record<string, unknown>) => Error
+  diagnoseSecretSafeChild: (result: {
+    started?: boolean
+    exitCode?: number | null
+    signal?: string | null
+  }) => { ok: boolean; stage: string | null; exitCode: number | null; signal: string | null }
+  parseDotEnv: (text: string) => Record<string, string>
+  inspectPulledProductionEnv: (
+    dest: string,
+    io: {
+      existsSync: (path: string) => boolean
+      readFileSync: (path: string, encoding: string) => string
+      parseDotEnv?: (text: string) => Record<string, string>
+    },
+  ) => { stage: string; extracted: { url: string; serviceRoleKey: string } }
+  resolveHostedReleaseMode: (inputs: { confirm?: string; mode?: string }) => {
+    runReleaseJob: boolean
+    runDiagnoseJob: boolean
+    mayDeploy: boolean
+    releaseRequiresConfirm: boolean
+    scriptArgs: string[]
+    includesPreflight: boolean
+    includesDeploy: boolean
+  }
+  withTempProductionEnvDir: <T>(fn: (paths: { dir: string; dest: string }) => T) => T
   buildDeployArgs: (sha: string) => string[]
   parseDeployedSha: (deployment: unknown) => string
   assertCleanWorktree: (porcelain: string) => void
@@ -59,6 +85,13 @@ const {
   buildOpaqueSecretIdentityRequest,
   redactCredentialFragments,
   toSafeReleaseFailure,
+  toSafeEnvPullDiagnostic,
+  envPullDiagnosticError,
+  diagnoseSecretSafeChild,
+  parseDotEnv,
+  inspectPulledProductionEnv,
+  resolveHostedReleaseMode,
+  withTempProductionEnvDir,
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
@@ -366,5 +399,207 @@ describe("production service-role identity", () => {
     }
     expect(redactCredentialFragments(`key was ${OPAQUE_SECRET}`)).not.toContain(OPAQUE_SECRET)
     expect(redactCredentialFragments(`token ${PROD_JWT}`)).not.toContain(PROD_JWT)
+  })
+})
+
+describe("production env-pull diagnostics", () => {
+  const SYNTHETIC_EXPORT = [
+    `NEXT_PUBLIC_SUPABASE_URL=${PROD_URL}`,
+    `SUPABASE_SERVICE_ROLE_KEY=${PROD_JWT}`,
+  ].join("\n")
+
+  function inspectText(text: string, parse?: (value: string) => Record<string, string>) {
+    return inspectPulledProductionEnv("production.env", {
+      existsSync: () => true,
+      readFileSync: () => text,
+      parseDotEnv: parse,
+    })
+  }
+
+  it("classifies child spawn and nonzero export exits", () => {
+    expect(diagnoseSecretSafeChild({ started: false })).toEqual({
+      ok: false,
+      stage: "CHILD_SPAWN_FAILED",
+      exitCode: null,
+      signal: null,
+    })
+    expect(diagnoseSecretSafeChild({ started: true, exitCode: 1 })).toEqual({
+      ok: false,
+      stage: "ENV_PULL_NONZERO",
+      exitCode: 1,
+      signal: null,
+    })
+    expect(diagnoseSecretSafeChild({ started: true, exitCode: null, signal: "SIGTERM" })).toEqual({
+      ok: false,
+      stage: "ENV_PULL_NONZERO",
+      exitCode: null,
+      signal: "SIGTERM",
+    })
+    expect(diagnoseSecretSafeChild({ started: true, exitCode: 0 })).toEqual({
+      ok: true,
+      stage: null,
+      exitCode: 0,
+      signal: null,
+    })
+  })
+
+  it("classifies missing file, read failure, and parse failure", () => {
+    expectCode(
+      () => inspectPulledProductionEnv("missing.env", { existsSync: () => false, readFileSync: () => "" }),
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+    )
+    try {
+      inspectPulledProductionEnv("missing.env", { existsSync: () => false, readFileSync: () => "" })
+    } catch (error) {
+      expect((error as { stage: string }).stage).toBe("EXPORT_FILE_MISSING")
+      expect((error as { exportFileExists: boolean }).exportFileExists).toBe(false)
+    }
+    expectCode(
+      () =>
+        inspectPulledProductionEnv("production.env", {
+          existsSync: () => true,
+          readFileSync: () => {
+            throw new Error(`cannot read ${PROD_JWT}`)
+          },
+        }),
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+    )
+    try {
+      inspectPulledProductionEnv("production.env", {
+        existsSync: () => true,
+        readFileSync: () => {
+          throw new Error(`cannot read ${PROD_JWT}`)
+        },
+      })
+    } catch (error) {
+      expect((error as { stage: string }).stage).toBe("EXPORT_READ_FAILED")
+      expect(JSON.stringify(toSafeReleaseFailure(error))).not.toContain(PROD_JWT)
+    }
+    expectCode(
+      () => inspectText(SYNTHETIC_EXPORT, () => {
+        throw new Error(`bad parse ${OPAQUE_SECRET}`)
+      }),
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+    )
+    try {
+      inspectText(SYNTHETIC_EXPORT, () => {
+        throw new Error(`bad parse ${OPAQUE_SECRET}`)
+      })
+    } catch (error) {
+      expect((error as { stage: string }).stage).toBe("EXPORT_PARSE_FAILED")
+      expect(JSON.stringify(toSafeReleaseFailure(error))).not.toContain(OPAQUE_SECRET)
+    }
+  })
+
+  it("classifies empty URL, empty service-role, and both keys present", () => {
+    try {
+      inspectText("SUPABASE_SERVICE_ROLE_KEY=sb_secret_SYNTHETIC_EMPTY_URL_PATH")
+    } catch (error) {
+      expect((error as { code: string }).code).toBe("ENV_UNVERIFIED")
+      expect((error as { stage: string }).stage).toBe("URL_ABSENT_OR_EMPTY")
+      expect((error as { hasUrl: boolean }).hasUrl).toBe(false)
+      expect((error as { hasServiceRoleKey: boolean }).hasServiceRoleKey).toBe(true)
+      expect((error as { serviceRoleKeyNonEmpty: boolean }).serviceRoleKeyNonEmpty).toBe(true)
+    }
+    try {
+      inspectText(`NEXT_PUBLIC_SUPABASE_URL=${PROD_URL}\nSUPABASE_SERVICE_ROLE_KEY=`)
+    } catch (error) {
+      expect((error as { code: string }).code).toBe("SERVICE_ROLE_ENV_UNVERIFIED")
+      expect((error as { stage: string }).stage).toBe("SERVICE_ROLE_KEY_ABSENT_OR_EMPTY")
+      expect((error as { hasUrl: boolean }).hasUrl).toBe(true)
+      expect((error as { serviceRoleKeyNonEmpty: boolean }).serviceRoleKeyNonEmpty).toBe(false)
+    }
+    const present = inspectText(SYNTHETIC_EXPORT)
+    expect(present.stage).toBe("KEYS_PRESENT")
+    expect(present.extracted.url).toBe(PROD_URL)
+    expect(parseDotEnv(SYNTHETIC_EXPORT).SUPABASE_SERVICE_ROLE_KEY).toBe(PROD_JWT)
+  })
+
+  it("never includes synthetic credentials in safe diagnostic JSON", () => {
+    const secrets = [PROD_JWT, OPAQUE_SECRET, "sb_secret_SYNTHETIC_EMPTY_URL_PATH"]
+    const error = envPullDiagnosticError("SERVICE_ROLE_KEY_ABSENT_OR_EMPTY", {
+      exitCode: 1,
+      exportFileExists: true,
+      hasUrl: true,
+      hasServiceRoleKey: true,
+      serviceRoleKeyNonEmpty: false,
+      versions: { node: "v20.20.2", npm: "10.8.2", vercel: "59.10.0" },
+    })
+    ;(error as { message: string }).message += ` leaked ${PROD_JWT} ${OPAQUE_SECRET}`
+    const safe = toSafeReleaseFailure(error)
+    const serialized = JSON.stringify(safe)
+    for (const secret of secrets) {
+      expect(serialized).not.toContain(secret)
+    }
+    expect(safe.stage).toBe("SERVICE_ROLE_KEY_ABSENT_OR_EMPTY")
+    expect(safe).toMatchObject({
+      exitCode: 1,
+      exportFileExists: true,
+      hasUrl: true,
+      hasServiceRoleKey: true,
+      serviceRoleKeyNonEmpty: false,
+    })
+    expect(toSafeEnvPullDiagnostic({ message: PROD_JWT })).toBeNull()
+  })
+
+  it("removes the temporary export directory after success and failure", () => {
+    const { existsSync } = require("node:fs") as { existsSync: (path: string) => boolean }
+    let captured = ""
+    withTempProductionEnvDir(({ dir }) => {
+      captured = dir
+      expect(existsSync(dir)).toBe(true)
+    })
+    expect(captured).toBeTruthy()
+    expect(existsSync(captured)).toBe(false)
+    expect(() =>
+      withTempProductionEnvDir(({ dir }) => {
+        captured = dir
+        throw new Error("synthetic cleanup failure")
+      }),
+    ).toThrow("synthetic cleanup failure")
+    expect(existsSync(captured)).toBe(false)
+  })
+
+  it("selects preflight for diagnose and keeps RELEASE required for deploy", () => {
+    const diagnose = resolveHostedReleaseMode({ confirm: "RELEASE", mode: "diagnose" })
+    expect(diagnose.runDiagnoseJob).toBe(true)
+    expect(diagnose.runReleaseJob).toBe(false)
+    expect(diagnose.mayDeploy).toBe(false)
+    expect(diagnose.includesPreflight).toBe(true)
+    expect(diagnose.includesDeploy).toBe(false)
+    expect(diagnose.scriptArgs).toEqual(["--preflight", "--expected-sha"])
+
+    const blocked = resolveHostedReleaseMode({ confirm: "nope", mode: "release" })
+    expect(blocked.runReleaseJob).toBe(false)
+    expect(blocked.mayDeploy).toBe(false)
+    expect(blocked.releaseRequiresConfirm).toBe(true)
+
+    const release = resolveHostedReleaseMode({ confirm: "RELEASE", mode: "release" })
+    expect(release.runReleaseJob).toBe(true)
+    expect(release.runDiagnoseJob).toBe(false)
+    expect(release.mayDeploy).toBe(true)
+    expect(release.includesPreflight).toBe(false)
+    expect(release.scriptArgs).toEqual(["--expected-sha"])
+  })
+
+  it("keeps the hosted diagnose job on --preflight and off vercel deploy", () => {
+    const { readFileSync } = require("node:fs") as { readFileSync: (path: string, encoding: string) => string }
+    const { join } = require("node:path") as { join: (...parts: string[]) => string }
+    const yaml = readFileSync(join(__dirname, "../../.github/workflows/production-release.yml"), "utf8")
+    expect(yaml).toContain("required: true")
+    expect(yaml).toContain("Type RELEASE to deploy the selected SHA to production ARN1")
+    expect(yaml).toContain("github.event.inputs.confirm == 'RELEASE'")
+    expect(yaml).toContain("github.event.inputs.mode != 'diagnose'")
+    expect(yaml).toContain("github.event.inputs.mode == 'diagnose'")
+    const diagnoseBlock = yaml.slice(yaml.indexOf("diagnose:"))
+    expect(diagnoseBlock).toContain("node scripts/release-production.mjs --preflight --expected-sha ${{ github.sha }}")
+    expect(diagnoseBlock).not.toMatch(/vercel deploy/)
+    expect(diagnoseBlock).not.toContain("release-production.mjs --expected-sha ${{ github.sha }}\n")
+    expect(diagnoseBlock).toContain("secrets.VERCEL_TOKEN")
+    expect(diagnoseBlock).toContain("secrets.VERCEL_ORG_ID")
+    expect(diagnoseBlock).toContain("secrets.VERCEL_PROJECT_ID")
+    const releaseBlock = yaml.slice(yaml.indexOf("release:"), yaml.indexOf("diagnose:"))
+    expect(releaseBlock).toContain("node scripts/release-production.mjs --expected-sha ${{ github.sha }}")
+    expect(releaseBlock).not.toContain("--preflight")
   })
 })

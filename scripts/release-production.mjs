@@ -51,8 +51,12 @@ const {
   classifyServiceRoleCredential,
   evaluateOpaqueSecretVerifierStatus,
   buildOpaqueSecretIdentityRequest,
-  extractProductionSupabaseEnv,
   toSafeReleaseFailure,
+  envPullDiagnosticError,
+  diagnoseSecretSafeChild,
+  parseDotEnv,
+  inspectPulledProductionEnv,
+  sanitizeToolVersions,
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
@@ -75,24 +79,6 @@ function parseArgs(argv) {
     }
   }
   return args
-}
-
-function parseDotEnv(text) {
-  const out = {}
-  for (const line of String(text || "").split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue
-    const i = trimmed.indexOf("=")
-    let value = trimmed.slice(i + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    out[trimmed.slice(0, i).trim()] = value
-  }
-  return out
 }
 
 function run(command, args, opts = {}) {
@@ -134,31 +120,72 @@ async function gitOutput(args) {
   return stdout.trim()
 }
 
-function runSecretSafe(command, args) {
-  return new Promise((resolve, reject) => {
+function discardChildOutput(child) {
+  child.stdout.on("data", () => {})
+  child.stderr.on("data", () => {})
+}
+
+function runVersionCommand(command, args) {
+  return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: ROOT,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
     })
-    child.stdout.on("data", () => {})
-    child.stderr.on("data", () => {})
-    child.on("error", () => {
-      reject(
-        new ReleaseGuardError(
-          "SERVICE_ROLE_ENV_UNVERIFIED",
-          "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
-        ),
-      )
+    let stdout = ""
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk
     })
+    child.stderr.on("data", () => {})
+    child.on("error", () => resolve(null))
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(
-          new ReleaseGuardError(
-            "SERVICE_ROLE_ENV_UNVERIFIED",
-            "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
-          ),
-        )
+        resolve(null)
+        return
+      }
+      const match = String(stdout).match(/v?\d+\.\d+\.\d+/)
+      resolve(match ? match[0] : null)
+    })
+  })
+}
+
+async function readReleaseToolVersions() {
+  const [npm, vercel] = await Promise.all([
+    runVersionCommand("npm", ["--version"]),
+    runVersionCommand("npx", ["vercel", "--version"]),
+  ])
+  return sanitizeToolVersions({
+    node: process.version,
+    npm,
+    vercel,
+  })
+}
+
+function runSecretSafe(command, args) {
+  return new Promise((resolve, reject) => {
+    let child
+    try {
+      child = spawn(command, args, {
+        cwd: ROOT,
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    } catch {
+      reject(envPullDiagnosticError("CHILD_SPAWN_FAILED", diagnoseSecretSafeChild({ started: false })))
+      return
+    }
+    discardChildOutput(child)
+    child.on("error", () => {
+      reject(envPullDiagnosticError("CHILD_SPAWN_FAILED", diagnoseSecretSafeChild({ started: false })))
+    })
+    child.on("close", (code, signal) => {
+      const diagnosed = diagnoseSecretSafeChild({
+        started: true,
+        exitCode: code,
+        signal,
+      })
+      if (!diagnosed.ok) {
+        reject(envPullDiagnosticError(diagnosed.stage, diagnosed))
         return
       }
       resolve()
@@ -253,29 +280,11 @@ async function readProductionSupabaseEnv() {
       "production",
       "--yes",
     ])
-    if (!existsSync(dest)) {
-      throw new ReleaseGuardError(
-        "SERVICE_ROLE_ENV_UNVERIFIED",
-        "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
-      )
-    }
-    const extracted = extractProductionSupabaseEnv(parseDotEnv(readFileSync(dest, "utf8")))
-    if (!extracted.url) {
-      throw new ReleaseGuardError("ENV_UNVERIFIED", "Production Supabase URL could not be read")
-    }
-    if (!extracted.serviceRoleKey) {
-      throw new ReleaseGuardError(
-        "SERVICE_ROLE_ENV_UNVERIFIED",
-        "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
-      )
-    }
-    return extracted
+    const inspected = inspectPulledProductionEnv(dest, { existsSync, readFileSync, parseDotEnv })
+    return inspected.extracted
   } catch (error) {
     if (error instanceof ReleaseGuardError) throw error
-    throw new ReleaseGuardError(
-      "SERVICE_ROLE_ENV_UNVERIFIED",
-      "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
-    )
+    throw envPullDiagnosticError("EXPORT_READ_FAILED", { exportFileExists: existsSync(dest) })
   } finally {
     try {
       rmSync(dir, { recursive: true, force: true })
@@ -341,7 +350,17 @@ async function main() {
     functionDefaultRegions: project.defaultResourceConfig?.functionDefaultRegions,
     resourceFunctionRegions: project.resourceConfig?.functionDefaultRegions,
   })
-  const supabaseEnv = await readProductionSupabaseEnv()
+  const toolVersions = await readReleaseToolVersions()
+  if (toolVersions) {
+    console.log(JSON.stringify({ ok: true, diagnostic: "tool-versions", versions: toolVersions }))
+  }
+  let supabaseEnv
+  try {
+    supabaseEnv = await readProductionSupabaseEnv()
+  } catch (error) {
+    if (error && typeof error === "object" && toolVersions) error.versions = toolVersions
+    throw error
+  }
   const credentialFormat = classifyServiceRoleCredential(supabaseEnv.serviceRoleKey)
   let opaqueProof
   if (credentialFormat === "secret") {
@@ -366,6 +385,8 @@ async function main() {
           supabase_ref: PRODUCTION.supabaseRef,
           service_role_format: supabasePair.format,
           service_role_ref: supabasePair.ref,
+          env_pull_stage: "KEYS_PRESENT",
+          versions: toolVersions,
         },
         null,
         2,
