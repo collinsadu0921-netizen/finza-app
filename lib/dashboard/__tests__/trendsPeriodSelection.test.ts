@@ -26,9 +26,18 @@ const october = {
 }
 
 describe("filterNonFutureTimelinePoints", () => {
-  it("drops months after business today and keeps July and August", () => {
+  it("keeps July and August when October is also present", () => {
     const visible = filterNonFutureTimelinePoints([july, august, october], "2026-08-31")
     expect(visible.map((p) => p.period_start)).toEqual(["2026-07-01", "2026-08-01"])
+  })
+
+  it("returns no bars when only a future month has activity", () => {
+    const visible = filterNonFutureTimelinePoints([october], "2026-08-31")
+    expect(visible).toEqual([])
+  })
+
+  it("returns an empty list for an empty timeline", () => {
+    expect(filterNonFutureTimelinePoints([], "2026-08-31")).toEqual([])
   })
 
   it("uses business today, not an implicit local September rollover", () => {
@@ -54,6 +63,28 @@ describe("resolveMonthlyTrendsSelection", () => {
     expect(selection.highlightPeriodStart).toBeNull()
     expect(selection.usedMetricsFallback).toBe(true)
     expect(selection.selectedRevenue).toBe(0)
+    expect(selection.selectedNetProfit).toBe(-6441)
+  })
+
+  it("keeps a selected future period and its metrics when no bar is visible", () => {
+    const visible = filterNonFutureTimelinePoints([october], "2026-08-31")
+    const selection = resolveMonthlyTrendsSelection({
+      visibleMonths: visible,
+      dashboardPeriodStart: "2026-10-01",
+      dashboardPeriodEnd: "2026-10-31",
+      currentRevenue: 0,
+      currentExpenses: 6441,
+      currentNetProfit: -6441,
+    })
+
+    expect(visible).toEqual([])
+    expect(selection.selectedPeriodStart).toBe("2026-10-01")
+    expect(selection.selectedPeriodEnd).toBe("2026-10-31")
+    expect(selection.barVisible).toBe(false)
+    expect(selection.highlightPeriodStart).toBeNull()
+    expect(selection.usedMetricsFallback).toBe(true)
+    expect(selection.selectedRevenue).toBe(0)
+    expect(selection.selectedExpenses).toBe(6441)
     expect(selection.selectedNetProfit).toBe(-6441)
   })
 

@@ -537,7 +537,8 @@ export default function TrendsSection({
 
     return {
       chartData,
-      hasData: chartData.length > 0,
+      hasChartBars: chartData.length > 0,
+      hasData: chartData.length > 0 || Boolean(selectedPeriodStart),
       selectedRevenue,
       selectedExpenses,
       selectedNetProfit,
@@ -732,6 +733,13 @@ export default function TrendsSection({
                 />
               ) : null}
 
+              {!view.hasChartBars ? (
+                <div className="flex h-[156px] w-full min-w-0 items-center justify-center px-4 text-center sm:h-[168px]">
+                  <p className="max-w-xs text-xs leading-relaxed text-slate-400">
+                    No historical months to plot. The selected period is still shown above.
+                  </p>
+                </div>
+              ) : (
               <div className="h-[156px] w-full min-w-0 sm:h-[168px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
@@ -827,6 +835,7 @@ export default function TrendsSection({
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
+              )}
 
               {/* Separate signed net-profit outcome lane */}
               <div className="mt-3 rounded-xl border border-slate-200/70 bg-slate-50/50 px-3 pb-2 pt-2.5">
@@ -840,6 +849,11 @@ export default function TrendsSection({
                       : "Hover a bar for the amount"}
                   </span>
                 </div>
+                {!view.hasChartBars ? (
+                  <div className="flex h-[120px] w-full min-w-0 items-center justify-center sm:h-[132px]">
+                    <p className="text-xs text-slate-400">No month bars in this range.</p>
+                  </div>
+                ) : (
                 <div className="h-[120px] w-full min-w-0 sm:h-[132px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -911,6 +925,7 @@ export default function TrendsSection({
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                )}
               </div>
             </div>
 
