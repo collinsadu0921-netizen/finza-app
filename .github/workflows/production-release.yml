@@ -35,6 +35,71 @@ jobs:
       - name: Release-guard unit tests
         run: npx jest --testPathPatterns=productionReleaseGuards --runInBand
 
+      - name: Load Production public Supabase build configuration
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          node <<'NODE'
+          const { appendFileSync } = require("node:fs");
+          const { PRODUCTION } = require("./scripts/lib/productionReleaseGuards.cjs");
+          const keys = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"];
+          const isProduction = (env) =>
+            (Array.isArray(env.target) ? env.target : [env.target]).includes("production") &&
+            !env.gitBranch;
+          async function get(path, query = "") {
+            const response = await fetch(
+              "https://api.vercel.com" + path + "?teamId=" + encodeURIComponent(PRODUCTION.teamId) + query,
+              {
+                headers: { Authorization: "Bearer " + process.env.VERCEL_TOKEN },
+                signal: AbortSignal.timeout(20000),
+              }
+            );
+            if (!response.ok) throw new Error("Vercel configuration request failed");
+            return response.json();
+          }
+          async function main() {
+            if (!process.env.VERCEL_TOKEN || !process.env.GITHUB_ENV)
+              throw new Error("Missing release configuration");
+            const project = encodeURIComponent(PRODUCTION.projectId);
+            // Do not decrypt the environment listing or pull unrelated credentials.
+            const listing = await get("/v10/projects/" + project + "/env", "&decrypt=false");
+            if (!Array.isArray(listing.envs) || listing.pagination?.next != null)
+              throw new Error("Incomplete Production environment listing");
+            const values = {};
+            for (const key of keys) {
+              const matches = listing.envs.filter((env) => env.key === key && isProduction(env));
+              if (matches.length !== 1 || !matches[0].id)
+                throw new Error("Missing or ambiguous Production public configuration");
+              const env = await get("/v1/projects/" + project + "/env/" + encodeURIComponent(matches[0].id));
+              if (env.key !== key || !isProduction(env) ||
+                  typeof env.value !== "string" || !env.value.trim() || /[\r\n\0]/.test(env.value))
+                throw new Error("Invalid Production public configuration");
+              values[key] = env.value;
+            }
+            const url = new URL(values.NEXT_PUBLIC_SUPABASE_URL);
+            if (url.protocol !== "https:" || url.hostname !== PRODUCTION.supabaseRef + ".supabase.co" ||
+                url.port || url.username || url.password || url.search || url.hash || url.pathname !== "/")
+              throw new Error("Production Supabase URL identity mismatch");
+            const key = values.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+            if (!key.startsWith("sb_publishable_")) {
+              const parts = key.split(".");
+              if (parts.length !== 3) throw new Error("Expected a public Supabase key");
+              const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+              if (claims.role !== "anon" || claims.ref !== PRODUCTION.supabaseRef)
+                throw new Error("Production public key identity mismatch");
+            }
+            for (const name of keys) {
+              console.log("::add-mask::" + values[name].replace(/%/g, "%25"));
+            }
+            appendFileSync(process.env.GITHUB_ENV, keys.map((name) => name + "=" + values[name]).join("\n") + "\n");
+            console.log("Production public Supabase build configuration loaded.");
+          }
+          main().catch(() => {
+            console.error("Unable to load validated Production public Supabase build configuration.");
+            process.exitCode = 1;
+          });
+          NODE
+
       - name: Production build
         run: npm run build
 
