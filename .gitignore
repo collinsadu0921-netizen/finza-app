@@ -29,3 +29,9 @@ tsconfig.tsbuildinfo
 
 # Ephemeral dashboard probe outputs
 load-tests/probe-cluster*.json
+
+# Supabase CLI local files
+/supabase/.temp/
+
+# Local development temporary files
+/tmp/
