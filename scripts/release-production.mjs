@@ -234,6 +234,36 @@ function ensureLocalProjectLink() {
   writeFileSync(projectFile, `${JSON.stringify(desired, null, 2)}\n`)
 }
 
+/**
+ * In GitHub Actions, writing project.json alone still left vercel deploy with
+ * deployReason project_unlinked. Run the CLI's documented non-interactive link.
+ */
+async function ensureHostedProjectLink() {
+  if (!preferHostedProductionEnvApi(process.env)) return
+  await run(
+    "npx",
+    [
+      "vercel",
+      "link",
+      "--yes",
+      "--team",
+      PRODUCTION.teamId,
+      "--project",
+      PRODUCTION.projectId,
+    ],
+    { failCode: "DEPLOY_FAILURE" },
+  )
+  const projectFile = join(ROOT, ".vercel", "project.json")
+  if (!existsSync(projectFile)) {
+    throw new ReleaseGuardError("DEPLOY_FAILURE", "vercel link did not create .vercel/project.json")
+  }
+  const linked = JSON.parse(readFileSync(projectFile, "utf8"))
+  assertProject({ id: linked.projectId, name: linked.projectName || PRODUCTION.projectName })
+  if (linked.projectId !== PRODUCTION.projectId) {
+    throw new ReleaseGuardError("WRONG_PROJECT", "vercel link targeted the wrong project")
+  }
+}
+
 async function vercelApi(path) {
   const { stdout } = await run(
     "npx",
@@ -412,6 +442,7 @@ async function main() {
   }
   assertCleanWorktree(await gitOutput(["status", "--porcelain"]))
   ensureLocalProjectLink()
+  await ensureHostedProjectLink()
 
   const project = await vercelApi(`/v9/projects/${PRODUCTION.projectId}?${TEAM_QUERY}`)
   assertProject({ id: project.id, name: project.name })
