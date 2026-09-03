@@ -5,6 +5,8 @@
 
 export type ServiceActivityType =
   | "invoice"
+  | "credit_note"
+  | "credit_note_reclass"
   | "expense"
   | "payment"
   | "customer"
@@ -64,7 +66,20 @@ export function formatLoanActivityLabel(
 }
 
 const INVOICE_NUMBER_RE = /\b(INV-[\w-]+)\b/i
+const CREDIT_NOTE_NUMBER_RE = /\b(CN-[\w-]+)\b/i
 const BILL_NUMBER_RE = /\b(Bill\s*#\s*[\w-]+)\b/i
+
+/**
+ * Ledger posting context for the over-credit reclass journal.
+ * Matches `journal_entries.description LIKE 'Credit Note Reclass #%'`.
+ */
+export function isCreditNoteReclassJournal(description: string | null | undefined): boolean {
+  return /^Credit Note Reclass #/i.test((description ?? "").trim())
+}
+
+function creditNoteNumberFromDescription(raw: string): string | undefined {
+  return raw.match(CREDIT_NOTE_NUMBER_RE)?.[1]
+}
 
 /** Display-only copy; does not change API payloads. */
 export function formatServiceActivityDescription(item: ServiceActivityItemLike): string {
@@ -83,6 +98,20 @@ export function formatServiceActivityDescription(item: ServiceActivityItemLike):
       if (invNum) return `Invoice created — ${invNum}`
       if (/^invoice created/i.test(raw)) return raw
       return raw ? `Invoice created — ${raw}` : "Invoice activity"
+    }
+    case "credit_note": {
+      if (isCreditNoteReclassJournal(raw)) {
+        const cnNum = creditNoteNumberFromDescription(raw)
+        return cnNum ? `Credit note adjustment — ${cnNum}` : "Credit note adjustment"
+      }
+      const cnNum = creditNoteNumberFromDescription(raw)
+      if (cnNum) return `Credit note created — ${cnNum}`
+      if (/^credit note created/i.test(raw)) return raw
+      return raw ? `Credit note created — ${raw}` : "Credit note created"
+    }
+    case "credit_note_reclass": {
+      const cnNum = creditNoteNumberFromDescription(raw)
+      return cnNum ? `Credit note adjustment — ${cnNum}` : "Credit note adjustment"
     }
     case "expense": {
       const loanKind = classifyLoanActivityKind(raw, null)
@@ -133,4 +162,9 @@ export function supplierBillDetailHref(billId: string): string {
 
 export function expenseDetailHref(expenseId: string): string {
   return `/service/expenses/${expenseId}/view`
+}
+
+/** Canonical service credit-note view used by the dashboard activity feed. */
+export function creditNoteDetailHref(creditNoteId: string): string {
+  return `/service/credit-notes/${creditNoteId}/view`
 }
