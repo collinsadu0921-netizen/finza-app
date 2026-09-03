@@ -306,11 +306,18 @@ function toSafeReleaseFailure(error) {
     delete error.stdout
     delete error.stderr
   }
-  return {
+  const safe = {
     ok: false,
     code: error && error.code ? error.code : "RELEASE_FAILED",
     message: redactCredentialFragments(error && error.message ? error.message : "Release failed"),
   }
+  if (error && typeof error === "object" && typeof error.stage === "string" && error.stage) {
+    safe.stage = error.stage
+  }
+  if (error && typeof error === "object" && Number.isInteger(error.exitCode)) {
+    safe.exitCode = error.exitCode
+  }
+  return safe
 }
 
 /**
@@ -352,6 +359,9 @@ function assertProductionSupabasePair(url, serviceRoleKey, options) {
 
 const assertSupabaseServiceCredentialIdentity = assertProductionSupabasePair
 
+/** Public build/runtime env used by /api/health/version for CLI releases. */
+const BUILD_COMMIT_ENV = "FINZA_BUILD_COMMIT_SHA"
+
 function buildDeployArgs(sha) {
   const expected = assertExpectedSha(sha)
   return [
@@ -362,7 +372,76 @@ function buildDeployArgs(sha) {
     PRODUCTION.region,
     "--meta",
     `gitCommitSha=${expected}`,
+    // CLI deploys do not set VERCEL_GIT_COMMIT_SHA; inject the exact candidate SHA.
+    "--build-env",
+    `${BUILD_COMMIT_ENV}=${expected}`,
+    "--env",
+    `${BUILD_COMMIT_ENV}=${expected}`,
   ]
+}
+
+/**
+ * Prefer API env reads when VERCEL_TOKEN is present (GitHub Actions).
+ * Local interactive releases keep using `vercel env pull`.
+ */
+function preferHostedProductionEnvApi(env) {
+  const source = env && typeof env === "object" ? env : process.env
+  return typeof source.VERCEL_TOKEN === "string" && source.VERCEL_TOKEN.trim().length > 0
+}
+
+function isProductionScopedEnv(entry) {
+  if (!entry || typeof entry !== "object") return false
+  const targets = Array.isArray(entry.target) ? entry.target : [entry.target]
+  if (!targets.includes("production")) return false
+  return !entry.gitBranch
+}
+
+/**
+ * Validate a decrypted Production env listing entry without retaining the value
+ * in thrown messages. Returns { key, value } or throws SERVICE_ROLE_ENV_UNVERIFIED /
+ * ENV_UNVERIFIED with stage metadata.
+ */
+function selectDecryptedProductionEnvValue(listing, key) {
+  const envs = listing && Array.isArray(listing.envs) ? listing.envs : null
+  if (!envs) {
+    const error = new ReleaseGuardError(
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+      "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
+    error.stage = "API_ENV_LISTING_INVALID"
+    throw error
+  }
+  const matches = envs.filter((entry) => entry && entry.key === key && isProductionScopedEnv(entry))
+  if (matches.length !== 1 || !matches[0].id) {
+    const error = new ReleaseGuardError(
+      key === "NEXT_PUBLIC_SUPABASE_URL" ? "ENV_UNVERIFIED" : "SERVICE_ROLE_ENV_UNVERIFIED",
+      key === "NEXT_PUBLIC_SUPABASE_URL"
+        ? "Production Supabase URL could not be read"
+        : "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
+    error.stage = "API_ENV_KEY_MISSING_OR_AMBIGUOUS"
+    error.hasUrl = key === "NEXT_PUBLIC_SUPABASE_URL" ? false : null
+    error.hasServiceRoleKey = key === "SUPABASE_SERVICE_ROLE_KEY" ? false : null
+    throw error
+  }
+  return { id: matches[0].id, key }
+}
+
+function assertDecryptedProductionEnvValue(key, value) {
+  if (typeof value !== "string" || !value.trim() || /[\r\n\0]/.test(value)) {
+    const error = new ReleaseGuardError(
+      key === "NEXT_PUBLIC_SUPABASE_URL" ? "ENV_UNVERIFIED" : "SERVICE_ROLE_ENV_UNVERIFIED",
+      key === "NEXT_PUBLIC_SUPABASE_URL"
+        ? "Production Supabase URL could not be read"
+        : "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
+    error.stage = "API_ENV_VALUE_ABSENT_OR_EMPTY"
+    error.hasUrl = key === "NEXT_PUBLIC_SUPABASE_URL" ? false : true
+    error.hasServiceRoleKey = key === "SUPABASE_SERVICE_ROLE_KEY" ? false : true
+    error.serviceRoleKeyNonEmpty = key === "SUPABASE_SERVICE_ROLE_KEY" ? false : null
+    throw error
+  }
+  return value.trim()
 }
 
 function parseDeployedSha(deployment) {
@@ -413,5 +492,10 @@ module.exports = {
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
+  preferHostedProductionEnvApi,
+  isProductionScopedEnv,
+  selectDecryptedProductionEnvValue,
+  assertDecryptedProductionEnvValue,
+  BUILD_COMMIT_ENV,
   aliasNames,
 }

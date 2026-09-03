@@ -29,10 +29,23 @@ const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
   assertOpaqueSecretProof: (proof: unknown) => { ref: string; role: string }
   buildOpaqueSecretIdentityRequest: (url: string) => { method: string; url: string; headers: Record<string, string> }
   redactCredentialFragments: (text: string) => string
-  toSafeReleaseFailure: (error: unknown) => { ok: false; code: string; message: string }
+  toSafeReleaseFailure: (error: unknown) => {
+    ok: false
+    code: string
+    message: string
+    stage?: string
+    exitCode?: number
+  }
   buildDeployArgs: (sha: string) => string[]
   parseDeployedSha: (deployment: unknown) => string
   assertCleanWorktree: (porcelain: string) => void
+  preferHostedProductionEnvApi: (env?: Record<string, string | undefined>) => boolean
+  selectDecryptedProductionEnvValue: (
+    listing: { envs?: Array<{ id?: string; key?: string; target?: string | string[]; gitBranch?: string }> },
+    key: string,
+  ) => { id: string; key: string }
+  assertDecryptedProductionEnvValue: (key: string, value: unknown) => string
+  BUILD_COMMIT_ENV: string
 }
 
 const {
@@ -62,6 +75,10 @@ const {
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
+  preferHostedProductionEnvApi,
+  selectDecryptedProductionEnvValue,
+  assertDecryptedProductionEnvValue,
+  BUILD_COMMIT_ENV,
 } = guards
 
 const GOOD_SHA = "45ca3db06b8a0175a018cdaf9b8dbc8bf7f94656"
@@ -187,7 +204,8 @@ describe("production release guards", () => {
     expectCode(() => assertSupabaseIdentity(""), "ENV_UNVERIFIED")
   })
 
-  it("always includes --prod and --regions arn1", () => {
+  it("always includes --prod, --regions arn1, and build commit injection", () => {
+    expect(BUILD_COMMIT_ENV).toBe("FINZA_BUILD_COMMIT_SHA")
     expect(buildDeployArgs(GOOD_SHA)).toEqual([
       "deploy",
       "--prod",
@@ -196,7 +214,46 @@ describe("production release guards", () => {
       "arn1",
       "--meta",
       `gitCommitSha=${GOOD_SHA}`,
+      "--build-env",
+      `FINZA_BUILD_COMMIT_SHA=${GOOD_SHA}`,
+      "--env",
+      `FINZA_BUILD_COMMIT_SHA=${GOOD_SHA}`,
     ])
+  })
+
+  it("prefers hosted API env reads when VERCEL_TOKEN is present", () => {
+    expect(preferHostedProductionEnvApi({ VERCEL_TOKEN: "vercel_xxx" })).toBe(true)
+    expect(preferHostedProductionEnvApi({ VERCEL_TOKEN: "   " })).toBe(false)
+    expect(preferHostedProductionEnvApi({})).toBe(false)
+  })
+
+  it("selects a unique Production-scoped env id without retaining values", () => {
+    const listing = {
+      envs: [
+        { id: "env_url", key: "NEXT_PUBLIC_SUPABASE_URL", target: ["production"] },
+        { id: "env_preview", key: "NEXT_PUBLIC_SUPABASE_URL", target: ["preview"], gitBranch: "staging" },
+        { id: "env_sr", key: "SUPABASE_SERVICE_ROLE_KEY", target: ["production"] },
+      ],
+    }
+    expect(selectDecryptedProductionEnvValue(listing, "NEXT_PUBLIC_SUPABASE_URL")).toEqual({
+      id: "env_url",
+      key: "NEXT_PUBLIC_SUPABASE_URL",
+    })
+    expect(selectDecryptedProductionEnvValue(listing, "SUPABASE_SERVICE_ROLE_KEY")).toEqual({
+      id: "env_sr",
+      key: "SUPABASE_SERVICE_ROLE_KEY",
+    })
+    expectCode(
+      () => selectDecryptedProductionEnvValue({ envs: [] }, "SUPABASE_SERVICE_ROLE_KEY"),
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+    )
+    expect(assertDecryptedProductionEnvValue("NEXT_PUBLIC_SUPABASE_URL", "https://qjxhibvbmzogyzbhswjj.supabase.co")).toBe(
+      "https://qjxhibvbmzogyzbhswjj.supabase.co",
+    )
+    expectCode(
+      () => assertDecryptedProductionEnvValue("SUPABASE_SERVICE_ROLE_KEY", ""),
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+    )
   })
 })
 
