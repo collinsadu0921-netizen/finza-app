@@ -208,7 +208,7 @@ describe("production release guards", () => {
     expectCode(() => assertSupabaseIdentity(""), "ENV_UNVERIFIED")
   })
 
-  it("always includes --prod and --regions arn1 without one-off env flags", () => {
+  it("always includes --prod, --regions arn1, and --project without one-off env flags", () => {
     expect(BUILD_COMMIT_GENERATED_RELATIVE).toBe("lib/server/buildCommit.generated.ts")
     expect(buildDeployArgs(GOOD_SHA)).toEqual([
       "deploy",
@@ -216,6 +216,8 @@ describe("production release guards", () => {
       "--yes",
       "--regions",
       "arn1",
+      "--project",
+      "finza-app",
       "--meta",
       `gitCommitSha=${GOOD_SHA}`,
     ])

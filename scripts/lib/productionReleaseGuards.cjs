@@ -378,6 +378,8 @@ function buildDeployArgs(sha) {
     "--yes",
     "--regions",
     PRODUCTION.region,
+    "--project",
+    PRODUCTION.projectName,
     "--meta",
     `gitCommitSha=${expected}`,
   ]
