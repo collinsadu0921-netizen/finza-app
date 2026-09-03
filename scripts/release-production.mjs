@@ -56,6 +56,9 @@ const {
   buildDeployArgs,
   parseDeployedSha,
   assertCleanWorktree,
+  preferHostedProductionEnvApi,
+  selectDecryptedProductionEnvValue,
+  assertDecryptedProductionEnvValue,
 } = require("./lib/productionReleaseGuards.cjs")
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -240,7 +243,70 @@ async function vercelApi(path) {
   return JSON.parse(stdout.slice(start))
 }
 
-async function readProductionSupabaseEnv() {
+async function readProductionSupabaseEnvViaApi() {
+  const token = typeof process.env.VERCEL_TOKEN === "string" ? process.env.VERCEL_TOKEN.trim() : ""
+  if (!token) {
+    throw new ReleaseGuardError(
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+      "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
+  }
+
+  async function get(path, query = "") {
+    const response = await fetch(
+      "https://api.vercel.com" + path + "?teamId=" + encodeURIComponent(PRODUCTION.teamId) + query,
+      {
+        headers: { Authorization: "Bearer " + token },
+        signal: AbortSignal.timeout(20000),
+      },
+    )
+    if (!response.ok) {
+      const error = new ReleaseGuardError(
+        "SERVICE_ROLE_ENV_UNVERIFIED",
+        "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+      )
+      error.stage = "API_ENV_HTTP_" + response.status
+      error.exitCode = response.status
+      throw error
+    }
+    return response.json()
+  }
+
+  const project = encodeURIComponent(PRODUCTION.projectId)
+  // Same approved Production credential source as the workflow public-config step:
+  // list without decrypt, then fetch each Production-scoped id (returns value).
+  const listing = await get("/v10/projects/" + project + "/env", "&decrypt=false")
+  if (!Array.isArray(listing.envs) || listing.pagination?.next != null) {
+    const error = new ReleaseGuardError(
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+      "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
+    error.stage = "API_ENV_LISTING_INVALID"
+    throw error
+  }
+
+  const urlRef = selectDecryptedProductionEnvValue(listing, "NEXT_PUBLIC_SUPABASE_URL")
+  const keyRef = selectDecryptedProductionEnvValue(listing, "SUPABASE_SERVICE_ROLE_KEY")
+  const urlEnv = await get("/v1/projects/" + project + "/env/" + encodeURIComponent(urlRef.id))
+  const keyEnv = await get("/v1/projects/" + project + "/env/" + encodeURIComponent(keyRef.id))
+  if (urlEnv.key !== "NEXT_PUBLIC_SUPABASE_URL" || keyEnv.key !== "SUPABASE_SERVICE_ROLE_KEY") {
+    const error = new ReleaseGuardError(
+      "SERVICE_ROLE_ENV_UNVERIFIED",
+      "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
+    )
+    error.stage = "API_ENV_KEY_MISMATCH"
+    throw error
+  }
+
+  const url = assertDecryptedProductionEnvValue("NEXT_PUBLIC_SUPABASE_URL", urlEnv.value)
+  const serviceRoleKey = assertDecryptedProductionEnvValue(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    keyEnv.value,
+  )
+  return { url, serviceRoleKey, source: "vercel_api" }
+}
+
+async function readProductionSupabaseEnvViaCliPull() {
   const dir = mkdtempSync(join(tmpdir(), "finza-release-env-"))
   const dest = join(dir, "production.env")
   try {
@@ -252,6 +318,8 @@ async function readProductionSupabaseEnv() {
       "--environment",
       "production",
       "--yes",
+      "--scope",
+      PRODUCTION.teamId,
     ])
     if (!existsSync(dest)) {
       throw new ReleaseGuardError(
@@ -269,7 +337,7 @@ async function readProductionSupabaseEnv() {
         "Could not securely read production SUPABASE_SERVICE_ROLE_KEY",
       )
     }
-    return extracted
+    return { ...extracted, source: "vercel_cli_pull" }
   } catch (error) {
     if (error instanceof ReleaseGuardError) throw error
     throw new ReleaseGuardError(
@@ -283,6 +351,15 @@ async function readProductionSupabaseEnv() {
       if (existsSync(dest)) unlinkSync(dest)
     }
   }
+}
+
+async function readProductionSupabaseEnv() {
+  // Evidence: CI `vercel env pull` exits 1 (ENV_PULL_NONZERO) under VERCEL_TOKEN,
+  // while the same workflow already decrypts Production env via the REST API.
+  if (preferHostedProductionEnvApi(process.env)) {
+    return readProductionSupabaseEnvViaApi()
+  }
+  return readProductionSupabaseEnvViaCliPull()
 }
 
 function lastHttpsUrl(text) {
