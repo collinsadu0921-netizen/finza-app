@@ -33,6 +33,8 @@ export type RecentActivityFeedProps = {
 
 const TYPE_DOT: Record<string, string> = {
   invoice: "bg-blue-500",
+  credit_note: "bg-rose-500",
+  credit_note_reclass: "bg-rose-400",
   payment: "bg-emerald-500",
   expense: "bg-amber-500",
   bill: "bg-violet-500",

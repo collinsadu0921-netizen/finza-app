@@ -228,6 +228,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
     expect(creditNoteData.subtotal).toBe(100.00) // result.base_amount
     expect(creditNoteData.total_tax).toBe(21.90) // result.total_tax
     expect(creditNoteData.total).toBe(121.90) // result.total_amount
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('journal_entries')
   })
 
   it('stores tax_lines JSONB from TaxResult', async () => {
@@ -507,6 +508,7 @@ describe('POST /api/credit-notes/create - credit capacity', () => {
     expect(response.status).toBe(400)
     expect(body.error).toContain('fully credited')
     expect(mockSupabase.creditNotesInsert).not.toHaveBeenCalled()
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('journal_entries')
   })
 
   it('rejects when credit note exceeds remaining creditable amount', async () => {
@@ -535,6 +537,8 @@ describe('POST /api/credit-notes/create - credit capacity', () => {
     expect(response.status).toBe(400)
     expect(body.error).toContain('Remaining creditable amount')
     expect(body.error).toContain('700.00')
+    expect(mockSupabase.creditNotesInsert).not.toHaveBeenCalled()
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('journal_entries')
   })
 
   it('allows credit note within remaining creditable amount after prior applied credit', async () => {

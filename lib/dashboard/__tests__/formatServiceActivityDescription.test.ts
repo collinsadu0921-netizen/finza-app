@@ -4,9 +4,11 @@
 import { describe, it, expect } from "@jest/globals"
 import {
   classifyLoanActivityKind,
+  creditNoteDetailHref,
   expenseDetailHref,
   formatLoanActivityLabel,
   formatServiceActivityDescription,
+  isCreditNoteReclassJournal,
   supplierBillDetailHref,
 } from "../formatServiceActivityDescription"
 import { mapJournalSourceToActivityType } from "@/lib/server/serviceDashboardActivityLoader"
@@ -110,6 +112,61 @@ describe("formatServiceActivityDescription", () => {
     })
     expect(repayment).toBe("Loan repayment — GCB Bank")
   })
+
+  it("labels applied credit notes as Credit note created, using the CN reference not the invoice", () => {
+    const journalDescription = "Credit Note #CN-0001 for Invoice #INV-1042"
+    expect(
+      formatServiceActivityDescription({
+        type: "credit_note",
+        description: journalDescription,
+      })
+    ).toBe("Credit note created — CN-0001")
+    expect(
+      formatServiceActivityDescription({
+        type: "credit_note",
+        description: "CN-0042",
+      })
+    ).toBe("Credit note created — CN-0042")
+    expect(
+      formatServiceActivityDescription({
+        type: "credit_note",
+        description: null,
+      })
+    ).toBe("Credit note created")
+  })
+
+  it("keeps ordinary invoice creation as Invoice created", () => {
+    expect(
+      formatServiceActivityDescription({
+        type: "invoice",
+        description: "Invoice #INV-1042",
+      })
+    ).toBe("Invoice created — INV-1042")
+    expect(
+      formatServiceActivityDescription({
+        type: "invoice",
+        description: "INV-2001",
+      })
+    ).toBe("Invoice created — INV-2001")
+  })
+
+  it("does not relabel invoices from credit-note wording when the stored type is invoice", () => {
+    const label = formatServiceActivityDescription({
+      type: "invoice",
+      description: "Credit Note #CN-0001 for Invoice #INV-1042",
+    })
+    expect(label).toBe("Invoice created — INV-1042")
+    expect(label).not.toMatch(/Credit note created/i)
+  })
+
+  it("recognizes ledger reclass posting context without treating it as creation", () => {
+    expect(
+      isCreditNoteReclassJournal("Credit Note Reclass #CN-0001 for Invoice #INV-1042")
+    ).toBe(true)
+    expect(isCreditNoteReclassJournal("Credit Note #CN-0001 for Invoice #INV-1042")).toBe(
+      false
+    )
+  })
 })
 
 describe("classifyLoanActivityKind", () => {
@@ -135,6 +192,36 @@ describe("mapJournalSourceToActivityType", () => {
       "bill_payment"
     )
   })
+
+  it("classifies credit-note journals as credit_note, not invoice", () => {
+    expect(mapJournalSourceToActivityType("credit_note", "credit_note")).toBe(
+      "credit_note"
+    )
+    expect(mapJournalSourceToActivityType(null, "credit_note")).toBe("credit_note")
+    expect(mapJournalSourceToActivityType(null, "credit_note")).not.toBe("invoice")
+  })
+
+  it("classifies over-credit reclass journals as credit_note_reclass from posting description", () => {
+    expect(
+      mapJournalSourceToActivityType(
+        null,
+        "credit_note",
+        "Credit Note Reclass #CN-0001 for Invoice #INV-1042"
+      )
+    ).toBe("credit_note_reclass")
+    expect(
+      mapJournalSourceToActivityType(
+        null,
+        "credit_note",
+        "Credit Note #CN-0001 for Invoice #INV-1042"
+      )
+    ).toBe("credit_note")
+  })
+
+  it("keeps invoice journals as invoice", () => {
+    expect(mapJournalSourceToActivityType("invoice", "invoice")).toBe("invoice")
+    expect(mapJournalSourceToActivityType(null, "invoice")).toBe("invoice")
+  })
 })
 
 describe("activity detail hrefs", () => {
@@ -148,5 +235,52 @@ describe("activity detail hrefs", () => {
     expect(expenseDetailHref("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")).toBe(
       "/service/expenses/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee/view"
     )
+  })
+
+  it("links credit notes to the service credit-note view, not the invoice", () => {
+    const href = creditNoteDetailHref("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+    expect(href).toBe("/service/credit-notes/cccccccc-cccc-4ccc-8ccc-cccccccccccc/view")
+    expect(href).not.toMatch(/\/invoices\//)
+  })
+})
+
+describe("credit note activity pipeline", () => {
+  const postedCreditNoteJournalDescription =
+    "Credit Note #CN-0001 for Invoice #INV-1042"
+
+  it("renders successful credit-note posting as Credit note created with the CN reference", () => {
+    const type = mapJournalSourceToActivityType(null, "credit_note")
+    const label = formatServiceActivityDescription({
+      type,
+      description: postedCreditNoteJournalDescription,
+    })
+    expect(type).toBe("credit_note")
+    expect(label).toBe("Credit note created — CN-0001")
+    expect(label).not.toMatch(/^Invoice created/)
+  })
+
+  it("does not label over-credit reclass journals as Credit note created", () => {
+    const type = mapJournalSourceToActivityType(
+      null,
+      "credit_note",
+      "Credit Note Reclass #CN-0001 for Invoice #INV-1042"
+    )
+    const label = formatServiceActivityDescription({
+      type,
+      description: "Credit Note Reclass #CN-0001 for Invoice #INV-1042",
+    })
+    expect(type).toBe("credit_note_reclass")
+    expect(label).toBe("Credit note adjustment — CN-0001")
+    expect(label).not.toMatch(/Credit note created/i)
+  })
+
+  it("renders ordinary invoice posting as Invoice created", () => {
+    const type = mapJournalSourceToActivityType(null, "invoice")
+    const label = formatServiceActivityDescription({
+      type,
+      description: "Invoice #INV-1042",
+    })
+    expect(type).toBe("invoice")
+    expect(label).toBe("Invoice created — INV-1042")
   })
 })
