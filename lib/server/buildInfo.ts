@@ -4,9 +4,12 @@
  *
  * Commit sources (first match wins):
  * - VERCEL_GIT_COMMIT_SHA: set automatically for Git-connected Vercel builds
- * - FINZA_BUILD_COMMIT_SHA: injected by the guarded CLI release deploy for
- *   non-Git production releases (same SHA the release script deploys)
+ * - FINZA_BUILD_COMMIT_SHA env: optional runtime/build override
+ * - buildCommit.generated.ts: written by the guarded CLI release deploy for
+ *   non-Git production releases (exact candidate SHA), then restored locally
  */
+
+import { FINZA_BUILD_COMMIT_SHA as GENERATED_BUILD_COMMIT_SHA } from "@/lib/server/buildCommit.generated"
 
 export type PublicBuildInfo = {
   commit_sha: string | null
@@ -22,7 +25,8 @@ function normalizeCommitSha(value: string | null | undefined): string | null {
 export function publicBuildInfo(): PublicBuildInfo {
   const sha =
     normalizeCommitSha(process.env.VERCEL_GIT_COMMIT_SHA) ||
-    normalizeCommitSha(process.env.FINZA_BUILD_COMMIT_SHA)
+    normalizeCommitSha(process.env.FINZA_BUILD_COMMIT_SHA) ||
+    normalizeCommitSha(GENERATED_BUILD_COMMIT_SHA)
   const environment =
     process.env.VERCEL_ENV?.trim() ||
     process.env.NODE_ENV?.trim() ||

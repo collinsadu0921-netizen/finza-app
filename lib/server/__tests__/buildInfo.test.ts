@@ -47,8 +47,10 @@ describe("publicBuildInfo", () => {
     expect(leaked).not.toMatch(/supabase|service_role|password|token|secret/i)
   })
 
-  it("uses FINZA_BUILD_COMMIT_SHA for CLI release builds without Git metadata", () => {
+  it("uses generated build commit for CLI release builds without Git metadata", () => {
     delete process.env.VERCEL_GIT_COMMIT_SHA
+    delete process.env.FINZA_BUILD_COMMIT_SHA
+    // Generated module is null in the repo; env override still covered separately.
     process.env.FINZA_BUILD_COMMIT_SHA = "0f395f793fda739608e6423af3a956598358ecc2"
     process.env.VERCEL_ENV = "production"
     const info = publicBuildInfo()
