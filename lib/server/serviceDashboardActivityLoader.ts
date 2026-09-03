@@ -5,9 +5,11 @@
 import type { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { supabaseErrorDiag, timedStepMs, type createRouteDiag } from "@/lib/server/routeDiagnostics"
 import {
+  creditNoteDetailHref,
   expenseDetailHref,
   supplierBillDetailHref,
   classifyLoanActivityKind,
+  isCreditNoteReclassJournal,
   type ServiceActivityType,
 } from "@/lib/dashboard/formatServiceActivityDescription"
 
@@ -26,7 +28,7 @@ export type ServiceDashboardActivityItem = {
 
 const SOURCE_TYPE_MAP: Record<string, Exclude<ActivityType, "email">> = {
   invoice: "invoice",
-  credit_note: "invoice",
+  credit_note: "credit_note",
   bill: "bill",
   bill_payment: "bill_payment",
   expense: "expense",
@@ -100,7 +102,11 @@ function mapActivityType(e: JournalActivityRow): Exclude<ActivityType, "email"> 
   if (loanKind) return loanKind
 
   const srcRaw = ((e.source_type ?? e.reference_type ?? "journal") as string).toLowerCase()
-  return SOURCE_TYPE_MAP[srcRaw] ?? "expense"
+  const mapped = SOURCE_TYPE_MAP[srcRaw] ?? "expense"
+  if (mapped === "credit_note" && isCreditNoteReclassJournal(e.description)) {
+    return "credit_note_reclass"
+  }
+  return mapped
 }
 
 function basicJournalActivityItems(entries: JournalActivityRow[]): ServiceDashboardActivityItem[] {
@@ -122,11 +128,13 @@ function basicJournalActivityItems(entries: JournalActivityRow[]): ServiceDashbo
   })
 }
 
-async function buildJournalActivityItems(
+/** Test helper / shared mapper: journal rows → dashboard activity items. */
+export async function buildJournalActivityItems(
   supabase: SupabaseClient,
   entries: JournalActivityRow[]
 ): Promise<ServiceDashboardActivityItem[]> {
   const invoiceIds: string[] = []
+  const creditNoteIds: string[] = []
   const billIds: string[] = []
   const expenseIds: string[] = []
   const paymentIds: string[] = []
@@ -142,6 +150,7 @@ async function buildJournalActivityItems(
     }
     if (!refId) continue
     if (refType === "invoice") invoiceIds.push(refId)
+    else if (refType === "credit_note") creditNoteIds.push(refId)
     else if (refType === "bill") billIds.push(refId)
     else if (refType === "expense") expenseIds.push(refId)
     else if (refType === "bill_payment") billPaymentIds.push(refId)
@@ -151,6 +160,7 @@ async function buildJournalActivityItems(
 
   const [
     { data: invDocs },
+    { data: creditNoteDocs },
     { data: billDocs },
     { data: expDocs },
     { data: paymentRows },
@@ -160,6 +170,19 @@ async function buildJournalActivityItems(
     invoiceIds.length
       ? supabase.from("invoices").select("id, currency_code, total").in("id", invoiceIds)
       : Promise.resolve({ data: [] as { id: string; currency_code: string | null; total: number | null }[] }),
+    creditNoteIds.length
+      ? supabase
+          .from("credit_notes")
+          .select("id, credit_number, total, invoice_id")
+          .in("id", creditNoteIds)
+      : Promise.resolve({
+          data: [] as {
+            id: string
+            credit_number: string | null
+            total: number | null
+            invoice_id: string | null
+          }[],
+        }),
     billIds.length
       ? supabase
           .from("bills")
@@ -204,6 +227,14 @@ async function buildJournalActivityItems(
   const docMap = new Map<string, DocCurrency>()
   for (const d of [...(invDocs ?? []), ...(billDocs ?? []), ...(expDocs ?? [])]) {
     docMap.set(d.id, { currency_code: d.currency_code, total: d.total })
+  }
+
+  const creditNoteMeta = new Map<string, string | null>()
+  const knownCreditNoteIds = new Set<string>()
+  for (const cn of creditNoteDocs ?? []) {
+    knownCreditNoteIds.add(cn.id)
+    creditNoteMeta.set(cn.id, cn.credit_number)
+    docMap.set(cn.id, { currency_code: null, total: cn.total })
   }
 
   const billMeta = new Map<
@@ -268,6 +299,7 @@ async function buildJournalActivityItems(
 
   const knownBillIds = new Set(billMeta.keys())
   const knownExpenseIds = new Set((expDocs ?? []).map((d) => d.id))
+  const knownInvoiceIds = new Set((invDocs ?? []).map((d) => d.id))
 
   return entries.map((e) => {
     const journalAmount = journalAmountFromRow(e)
@@ -302,15 +334,23 @@ async function buildJournalActivityItems(
           ? Math.round(Number(paymentLink.amount) * 100) / 100
           : null
     const amount =
-      paymentAmount != null
-        ? paymentAmount
-        : doc?.total != null
-          ? Math.round(doc.total * 100) / 100
-          : journalAmount
+      type === "credit_note_reclass"
+        ? journalAmount
+        : paymentAmount != null
+          ? paymentAmount
+          : doc?.total != null
+            ? Math.round(doc.total * 100) / 100
+            : journalAmount
 
     let href: string | undefined
-    if (type === "invoice" && refId && docMap.has(refId)) {
+    if (type === "invoice" && refId && knownInvoiceIds.has(refId)) {
       href = `/service/invoices/${refId}`
+    } else if (
+      (type === "credit_note" || type === "credit_note_reclass") &&
+      refId &&
+      knownCreditNoteIds.has(refId)
+    ) {
+      href = creditNoteDetailHref(refId)
     } else if (type === "bill" && refId && knownBillIds.has(refId)) {
       href = supplierBillDetailHref(refId)
     } else if (type === "expense" && refId && knownExpenseIds.has(refId)) {
@@ -338,6 +378,14 @@ async function buildJournalActivityItems(
         description = supplier
           ? `Bill #${meta.bill_number} — ${supplier}`
           : `Bill #${meta.bill_number}`
+      }
+    } else if ((type === "credit_note" || type === "credit_note_reclass") && refId) {
+      const creditNumber = creditNoteMeta.get(refId)?.trim()
+      if (creditNumber) {
+        description =
+          type === "credit_note_reclass"
+            ? `Credit Note Reclass #${creditNumber}`
+            : creditNumber
       }
     } else if (type === "bill_payment" && billIdForPayment) {
       const meta = billMeta.get(billIdForPayment)
@@ -501,12 +549,13 @@ export async function loadServiceDashboardActivityFeed(
 /** Test helper: map journal reference/source to activity type. */
 export function mapJournalSourceToActivityType(
   sourceType: string | null | undefined,
-  referenceType?: string | null
+  referenceType?: string | null,
+  description?: string | null
 ): Exclude<ActivityType, "email"> {
   return mapActivityType({
     id: "",
     created_at: "",
-    description: null,
+    description: description ?? null,
     source_type: sourceType ?? null,
     reference_type: referenceType ?? null,
     reference_id: null,
