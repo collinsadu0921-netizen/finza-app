@@ -59,6 +59,8 @@ const {
   preferHostedProductionEnvApi,
   selectDecryptedProductionEnvValue,
   assertDecryptedProductionEnvValue,
+  buildCommitGeneratedSource,
+  BUILD_COMMIT_GENERATED_RELATIVE,
 } = require("./lib/productionReleaseGuards.cjs")
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -453,17 +455,28 @@ async function main() {
 
   let deploymentId = project.targets?.production?.id
   if (!args.verifyOnly) {
-    const deployArgs = [
-      ...buildDeployArgs(expectedSha),
-      "--scope",
-      PRODUCTION.teamId,
-    ]
-    const deployed = await run("npx", ["vercel", ...deployArgs], { failCode: "DEPLOY_FAILURE" })
-    const url = lastHttpsUrl(`${deployed.stdout}\n${deployed.stderr}`)
-    if (!url) throw new ReleaseGuardError("DEPLOY_FAILURE", "Deploy succeeded but no deployment URL was returned")
-    const created = await vercelApi(`/v13/deployments/${encodeURIComponent(url.replace(/^https:\/\//, ""))}?${TEAM_QUERY}`)
-    deploymentId = created.id || created.uid
-    if (!deploymentId) throw new ReleaseGuardError("MISSING_DEPLOYMENT", "Deployed deployment id is missing")
+    const buildCommitPath = join(ROOT, BUILD_COMMIT_GENERATED_RELATIVE)
+    const previousBuildCommit = existsSync(buildCommitPath)
+      ? readFileSync(buildCommitPath, "utf8")
+      : buildCommitGeneratedSource(null)
+    try {
+      // CLI deploys do not set VERCEL_GIT_COMMIT_SHA. Bake the exact candidate into
+      // the upload, then restore the placeholder so the worktree stays clean.
+      writeFileSync(buildCommitPath, buildCommitGeneratedSource(expectedSha))
+      const deployArgs = [
+        ...buildDeployArgs(expectedSha),
+        "--scope",
+        PRODUCTION.teamId,
+      ]
+      const deployed = await run("npx", ["vercel", ...deployArgs], { failCode: "DEPLOY_FAILURE" })
+      const url = lastHttpsUrl(`${deployed.stdout}\n${deployed.stderr}`)
+      if (!url) throw new ReleaseGuardError("DEPLOY_FAILURE", "Deploy succeeded but no deployment URL was returned")
+      const created = await vercelApi(`/v13/deployments/${encodeURIComponent(url.replace(/^https:\/\//, ""))}?${TEAM_QUERY}`)
+      deploymentId = created.id || created.uid
+      if (!deploymentId) throw new ReleaseGuardError("MISSING_DEPLOYMENT", "Deployed deployment id is missing")
+    } finally {
+      writeFileSync(buildCommitPath, previousBuildCommit)
+    }
   }
 
   if (!deploymentId) throw new ReleaseGuardError("MISSING_DEPLOYMENT", "Production deployment id is missing")

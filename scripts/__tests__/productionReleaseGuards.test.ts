@@ -45,7 +45,9 @@ const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
     key: string,
   ) => { id: string; key: string }
   assertDecryptedProductionEnvValue: (key: string, value: unknown) => string
-  BUILD_COMMIT_ENV: string
+  buildCommitGeneratedSource: (sha: string | null) => string
+  BUILD_COMMIT_GENERATED_RELATIVE: string
+  classifyDeployFailureText: (text: string) => string
 }
 
 const {
@@ -78,7 +80,9 @@ const {
   preferHostedProductionEnvApi,
   selectDecryptedProductionEnvValue,
   assertDecryptedProductionEnvValue,
-  BUILD_COMMIT_ENV,
+  buildCommitGeneratedSource,
+  BUILD_COMMIT_GENERATED_RELATIVE,
+  classifyDeployFailureText,
 } = guards
 
 const GOOD_SHA = "45ca3db06b8a0175a018cdaf9b8dbc8bf7f94656"
@@ -204,8 +208,8 @@ describe("production release guards", () => {
     expectCode(() => assertSupabaseIdentity(""), "ENV_UNVERIFIED")
   })
 
-  it("always includes --prod, --regions arn1, and build commit injection", () => {
-    expect(BUILD_COMMIT_ENV).toBe("FINZA_BUILD_COMMIT_SHA")
+  it("always includes --prod and --regions arn1 without one-off env flags", () => {
+    expect(BUILD_COMMIT_GENERATED_RELATIVE).toBe("lib/server/buildCommit.generated.ts")
     expect(buildDeployArgs(GOOD_SHA)).toEqual([
       "deploy",
       "--prod",
@@ -214,11 +218,11 @@ describe("production release guards", () => {
       "arn1",
       "--meta",
       `gitCommitSha=${GOOD_SHA}`,
-      "--build-env",
-      `FINZA_BUILD_COMMIT_SHA=${GOOD_SHA}`,
-      "--env",
-      `FINZA_BUILD_COMMIT_SHA=${GOOD_SHA}`,
     ])
+    expect(buildCommitGeneratedSource(null)).toContain("= null")
+    expect(buildCommitGeneratedSource(GOOD_SHA)).toContain(JSON.stringify(GOOD_SHA))
+    expect(classifyDeployFailureText("Error: not linked to a project")).toBe("project_unlinked")
+    expect(classifyDeployFailureText("")).toBe("unknown")
   })
 
   it("prefers hosted API env reads when VERCEL_TOKEN is present", () => {
