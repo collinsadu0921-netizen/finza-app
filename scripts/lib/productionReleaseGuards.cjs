@@ -412,13 +412,15 @@ function classifyDeployFailureText(text) {
   const raw = typeof text === "string" ? text : ""
   const lower = raw.toLowerCase()
   if (!lower.trim()) return "unknown"
-  if (/not logged|login required|no existing credentials|token.*invalid|unauthorized|401/.test(lower)) {
+  if (/not logged|login required|no existing credentials|token.*invalid|unauthorized|\b401\b/.test(lower)) {
     return "auth"
   }
-  if (/forbidden|403|permission|access denied/.test(lower)) return "forbidden"
-  if (/isn't linked|not linked|project.*not found|404/.test(lower)) return "project_unlinked"
+  if (/forbidden|\b403\b|permission|access denied/.test(lower)) return "forbidden"
+  if (/isn't linked|not linked|codebase isn’t linked|codebase isn't linked/.test(lower)) {
+    return "project_unlinked"
+  }
+  if (/project.*not found|could not find .*project/.test(lower)) return "project_not_found"
   if (/build-env|environment variable|--env/.test(lower)) return "env_flags"
-  if (/dirty|git/.test(lower) && /worktree|working directory/.test(lower)) return "dirty_tree"
   if (/timeout|etimedout|network/.test(lower)) return "network"
   return "unknown"
 }
