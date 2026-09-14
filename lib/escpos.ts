@@ -3,6 +3,8 @@
  * Supports 58mm and 80mm thermal printers
  */
 
+import { retailReceiptDocumentCss } from "@/lib/retail/receipts/retailReceiptPrintCss"
+
 export type PrinterWidth = "58mm" | "80mm"
 export type ReceiptMode = "compact" | "full"
 
@@ -501,7 +503,6 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
 
   const isCompact = settings.mode === "compact"
   const is58mm = settings.width === "58mm"
-  const maxWidth = is58mm ? "58mm" : "80mm"
 
   let html = `
 <!DOCTYPE html>
@@ -510,139 +511,7 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
   <meta charset="UTF-8">
   <title>Receipt</title>
   <style>
-    @media print {
-      @page {
-        size: ${maxWidth} auto;
-        margin: 0;
-      }
-      body {
-        margin: 0;
-        padding: 8mm;
-        font-family: 'Courier New', monospace;
-        font-size: ${is58mm ? "10px" : "12px"};
-        width: ${maxWidth};
-      }
-    }
-    body {
-      margin: 0;
-      padding: 8mm;
-      font-family: 'Courier New', monospace;
-      font-size: ${is58mm ? "10px" : "12px"};
-      width: ${maxWidth};
-      max-width: ${maxWidth};
-    }
-    .receipt {
-      width: 100%;
-      text-align: center;
-    }
-    .business-name {
-      font-size: ${is58mm ? "14px" : "18px"};
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    .business-location {
-      font-size: ${is58mm ? "9px" : "11px"};
-      margin-bottom: 8px;
-    }
-    .separator {
-      border-top: 1px dashed #000;
-      margin: 8px 0;
-    }
-    .item-compact {
-      text-align: left;
-      font-size: ${is58mm ? "9px" : "11px"};
-      margin: 2px 0;
-    }
-    .item-full {
-      text-align: left;
-      margin: 6px 0;
-    }
-    .item-name {
-      font-weight: bold;
-      font-size: ${is58mm ? "10px" : "12px"};
-    }
-    .item-detail {
-      font-size: ${is58mm ? "8px" : "10px"};
-      color: #666;
-      margin-left: 8px;
-    }
-    .totals {
-      text-align: right;
-      margin-top: 8px;
-    }
-    .total {
-      font-weight: bold;
-      font-size: ${is58mm ? "12px" : "14px"};
-    }
-    .footer {
-      margin-top: 12px;
-      font-size: ${is58mm ? "8px" : "10px"};
-      line-height: 1.4;
-    }
-    .status-banner {
-      background: #fee;
-      color: #900;
-      font-weight: bold;
-      padding: 6px 4px;
-      margin-bottom: 8px;
-      font-size: ${is58mm ? "11px" : "13px"};
-    }
-    .store-line {
-      font-size: ${is58mm ? "11px" : "13px"};
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    .receipt-brand {
-      text-align: center;
-      margin-bottom: 4px;
-    }
-    .receipt-header-receiptno {
-      width: 100%;
-      text-align: right;
-      margin: 4px 0 8px 0;
-    }
-    .receipt-no-label {
-      font-size: ${is58mm ? "7px" : "9px"};
-      font-weight: 600;
-      color: #333;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-    .receipt-no-value {
-      font-family: ui-monospace, monospace;
-      font-size: ${is58mm ? "9px" : "11px"};
-      font-weight: 700;
-      line-height: 1.25;
-      margin-top: 2px;
-      word-break: break-all;
-    }
-    .receipt-header-logo {
-      display: block;
-      margin: 0 auto 6px auto;
-      max-height: ${is58mm ? "36px" : "44px"};
-      max-width: ${is58mm ? "70%" : "65%"};
-      width: auto;
-      height: auto;
-      object-fit: contain;
-      /* Same transparent-PNG / print flattening issue as invoice PDFs — keep logo on white thermal paper */
-      background-color: #ffffff;
-    }
-    .customer-block {
-      text-align: left;
-      font-size: ${is58mm ? "8px" : "10px"};
-      margin: 6px 0;
-    }
-    .qr-code {
-      margin: 12px auto;
-      text-align: center;
-    }
-    .receipt-qr-img {
-      display: block;
-      margin: 8px auto;
-      max-width: 100%;
-      height: auto;
-      image-rendering: pixelated;
-    }
+${retailReceiptDocumentCss(is58mm)}
   </style>
 </head>
 <body>
@@ -677,7 +546,7 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
   html += `    <div class="separator"></div>\n`
 
   // Date/Time and Cashier
-  html += `    <div style="text-align: left; font-size: ${is58mm ? "8px" : "10px"}; margin-bottom: 4px;">
+  html += `    <div class="meta">
       Date: ${escapeHtml(data.dateTime)}<br/>
       ${data.registerSessionId ? `Register: ${escapeHtml(data.registerSessionId)}<br/>` : ""}
       Cashier: ${escapeHtml(data.cashierName)}
@@ -731,7 +600,7 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
       }
       html += `      <div class="item-detail">Qty: ${item.quantity} × ${data.currencyCode} ${item.unitPrice.toFixed(2)} = ${data.currencyCode} ${item.lineTotal.toFixed(2)}</div>\n`
       if (item.lineDiscountAmount && item.lineDiscountAmount > 0) {
-        html += `      <div class="item-detail" style="color:#b45309;">Line discount: -${data.currencyCode} ${item.lineDiscountAmount.toFixed(2)}</div>\n`
+          html += `      <div class="item-detail discount-line">Line discount: -${data.currencyCode} ${item.lineDiscountAmount.toFixed(2)}</div>\n`
       }
       html += `    </div>\n`
     })
@@ -743,15 +612,15 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
   const sbd = data.subtotalBeforeDiscount
   const cartDisc = data.cartDiscountAmount ?? 0
   if (totalDisc > 0) {
-    html += `    <div style="text-align: right; font-size: ${is58mm ? "9px" : "11px"}; margin: 4px 0;">\n`
+    html += `    <div class="totals">\n`
     if (sbd != null && sbd > 0 && totalDisc > 0) {
       html += `      <div>Goods (list): ${data.currencyCode} ${sbd.toFixed(2)}</div>\n`
     }
     if (totalDisc > 0) {
-      html += `      <div style="font-weight:600;color:#b45309;">Discounts: -${data.currencyCode} ${totalDisc.toFixed(2)}</div>\n`
+      html += `      <div class="discount-line">Discounts: -${data.currencyCode} ${totalDisc.toFixed(2)}</div>\n`
     }
     if (cartDisc > 0 && Math.abs(totalDisc - cartDisc) > 0.005) {
-      html += `      <div style="color:#666;">Cart savings: -${data.currencyCode} ${cartDisc.toFixed(2)}</div>\n`
+      html += `      <div class="discount-line">Cart savings: -${data.currencyCode} ${cartDisc.toFixed(2)}</div>\n`
     }
     html += `    </div>\n`
     html += `    <div class="separator"></div>\n`
@@ -762,19 +631,19 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
   // TotalTax is calculated from provided tax components (display purposes only)
   const totalTax = (data.nhil || 0) + (data.getfund || 0) + (data.covid || 0) + (data.vat || 0)
   if (totalTax > 0) {
-      html += `    <div style="text-align: left; margin: 8px 0;">
-      <div style="font-weight: bold; margin-bottom: 4px;">${data.vatInclusive ? 'Tax Breakdown (included in price)' : 'Tax Breakdown'}</div>\n`
+      html += `    <div class="tax-block">
+      <div class="item-name">${data.vatInclusive ? 'Tax Breakdown (included in price)' : 'Tax Breakdown'}</div>\n`
       if (data.nhil && data.nhil > 0) {
-        html += `      <div style="font-size: ${is58mm ? "9px" : "11px"}; margin: 2px 0;">NHIL: ${data.currencyCode} ${data.nhil.toFixed(2)}</div>\n`
+        html += `      <div class="tax-line">NHIL: ${data.currencyCode} ${data.nhil.toFixed(2)}</div>\n`
       }
       if (data.getfund && data.getfund > 0) {
-        html += `      <div style="font-size: ${is58mm ? "9px" : "11px"}; margin: 2px 0;">GETFund: ${data.currencyCode} ${data.getfund.toFixed(2)}</div>\n`
+        html += `      <div class="tax-line">GETFund: ${data.currencyCode} ${data.getfund.toFixed(2)}</div>\n`
       }
       // RETAIL: COVID Levy removed
       if (data.vat && data.vat > 0) {
-        html += `      <div style="font-size: ${is58mm ? "9px" : "11px"}; margin: 2px 0;">VAT: ${data.currencyCode} ${data.vat.toFixed(2)}</div>\n`
+        html += `      <div class="tax-line">VAT: ${data.currencyCode} ${data.vat.toFixed(2)}</div>\n`
       }
-      html += `      <div style="font-size: ${is58mm ? "9px" : "11px"}; margin: 4px 0; ${data.vatInclusive ? 'color: #666;' : 'font-weight: bold;'}">${data.vatInclusive ? 'Total Tax (included)' : 'TOTAL TAX'}: ${data.currencyCode} ${totalTax.toFixed(2)}</div>\n`
+      html += `      <div class="tax-line">${data.vatInclusive ? 'Total Tax (included)' : 'TOTAL TAX'}: ${data.currencyCode} ${totalTax.toFixed(2)}</div>\n`
       html += `    </div>\n`
       html += `    <div class="separator"></div>\n`
   }
@@ -791,12 +660,12 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
     ? data.paymentBreakdown
     : null
   if (payLines) {
-    html += `      <div style="margin-top: 6px; text-align: left; font-weight: 600;">Payment breakdown</div>\n`
+    html += `      <div class="payment-block">Payment breakdown</div>\n`
     payLines.forEach((row) => {
-      html += `      <div style="margin-top: 2px; text-align: left; font-size: ${is58mm ? "9px" : "11px"};">${escapeHtml(receiptPaymentMethodLabel(row.method))}: ${data.currencyCode} ${Number(row.amount).toFixed(2)}</div>\n`
+      html += `      <div class="payment-line">${escapeHtml(receiptPaymentMethodLabel(row.method))}: ${data.currencyCode} ${Number(row.amount).toFixed(2)}</div>\n`
     })
   } else {
-    html += `      <div style="margin-top: 4px;">Payment: ${escapeHtml(data.paymentMethod)}</div>\n`
+    html += `      <div class="payment-line">Payment: ${escapeHtml(data.paymentMethod)}</div>\n`
   }
   const pmHtml = (data.paymentMethod || "").toLowerCase().trim()
   const isCashLikeHtml =
@@ -806,7 +675,7 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
       ? Number(data.amountTendered)
       : null
   if (atHtml !== null && atHtml > 0 && (pmHtml === "cash" || payLines)) {
-    html += `      <div>Amount tendered (cash): ${data.currencyCode} ${atHtml.toFixed(2)}</div>\n`
+    html += `      <div class="payment-line">Amount tendered (cash): ${data.currencyCode} ${atHtml.toFixed(2)}</div>\n`
   }
   const cgHtml =
     data.changeGiven !== undefined && data.changeGiven !== null
@@ -814,19 +683,19 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
       : null
   if (atHtml !== null && atHtml > 0 && pmHtml === "cash") {
     if (cgHtml !== null) {
-      html += `      <div>Change: ${data.currencyCode} ${cgHtml.toFixed(2)}</div>\n`
+      html += `      <div class="payment-line">Change: ${data.currencyCode} ${cgHtml.toFixed(2)}</div>\n`
     }
   } else if (
     cgHtml !== null &&
     (cgHtml > 0 || (isCashLikeHtml && cgHtml >= 0))
   ) {
-    html += `      <div>Change: ${data.currencyCode} ${cgHtml.toFixed(2)}</div>\n`
+      html += `      <div class="payment-line">Change: ${data.currencyCode} ${cgHtml.toFixed(2)}</div>\n`
   }
   html += `    </div>\n`
 
   if (data.paymentReferenceLines && data.paymentReferenceLines.length > 0) {
     html += `    <div class="separator"></div>\n`
-    html += `    <div style="text-align:left;font-size:${is58mm ? "8px" : "10px"};margin-top:6px;">`
+    html += `    <div class="meta">`
     data.paymentReferenceLines.forEach((line) => {
       html += `${escapeHtml(line)}<br/>`
     })
@@ -842,7 +711,7 @@ export function generateReceiptHTML(data: ReceiptData, settings: {
     if (settings.qrImageDataUrl) {
       html += `      <img class="receipt-qr-img" src="${settings.qrImageDataUrl}" width="${qrPx}" height="${qrPx}" alt="" />\n`
     } else {
-      html += `      <p style="font-size:9px;color:#666;margin:8px 0;">QR loading…</p>\n`
+      html += `      <p class="qr-loading">QR loading…</p>\n`
     }
     html += `    </div>\n`
   }

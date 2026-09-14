@@ -235,7 +235,9 @@ export default function ReceiptSettingsPage() {
               </label>
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              ESC/POS requires WebUSB/Web Serial API support
+              Browser Print uses the Windows printer driver (for example XP-80 USB). ESC/POS sends raw commands
+              over Web Serial in Chrome/Edge — only if the printer appears as a COM port. The XP-80 USB driver
+              does not receive ESC/POS from the browser.
             </p>
           </div>
 
@@ -315,10 +317,31 @@ export default function ReceiptSettingsPage() {
                   <span className="text-sm font-medium text-gray-700">Auto Open Cash Drawer</span>
                 </label>
                 <p className="text-xs text-gray-500 mt-1 ml-6">
-                  Automatically open cash drawer after printing (ESC/POS command)
+                  Automatically open the cash drawer after printing a completed cash sale (including split
+                  payments that include cash). Reprints and card/mobile-money-only sales do not send the pulse.
+                  Drawer failure never reverses the sale.
                 </p>
               </div>
             </>
+          )}
+
+          {settings.printer_type === "browser_print" && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+              <p className="font-semibold text-slate-900 dark:text-slate-100">Cash drawer (XP-80 USB driver)</p>
+              <p className="mt-1">
+                Chrome cannot send ESC/POS drawer commands through the Windows printer driver. On the POS terminal:
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-4">
+                <li>Open Settings → Bluetooth &amp; devices → Printers &amp; scanners → XP-80 (or BillPoint T80E).</li>
+                <li>Printer properties → Device Settings (or Cash Drawer / Peripheral).</li>
+                <li>Set cash drawer to open after printing, usually Pin 2 (or Pin 5 if the kick cable uses that pin).</li>
+                <li>Apply, then print a receipt. The driver opens the drawer on print jobs; it cannot tell cash from card.</li>
+              </ol>
+              <p className="mt-2">
+                Customer display: on the POS screen use <span className="font-semibold">Display off / Connect customer display</span>.
+                Select the pole display COM port (not the printer). That is a 2-line VFD, not a second monitor.
+              </p>
+            </div>
           )}
 
           {/* Logo */}

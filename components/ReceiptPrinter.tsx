@@ -39,7 +39,7 @@ export default function ReceiptPrinter({
           printer_width: settings.printer_width,
           receipt_mode: settings.receipt_mode,
           auto_cut: settings.auto_cut,
-          drawer_kick: settings.drawer_kick,
+          drawer_kick: false,
           show_logo: settings.show_logo,
           show_qr_code: settings.show_qr_code,
           qr_code_content: settings.qr_code_content,

@@ -3,8 +3,10 @@
  *
  * Routing (matches `ReceiptPrinter`):
  * - `receipt_settings.printer_type === "escpos"` → Web Serial + ESC/POS bytes (thermal printer).
- *   When `drawer_kick` is true, drawer-open pulses are included after the receipt payload.
+ *   Drawer-open pulses are included only when `allowDrawerKick` is true, `drawer_kick` is enabled,
+ *   and the sale includes a cash tender (including split payments that contain cash).
  * - Otherwise (`browser_print` or unset) → HTML receipt + browser print dialog.
+ *   Browser print cannot send raw ESC/POS drawer commands.
  */
 "use client"
 
@@ -16,6 +18,7 @@ import { generateReceiptHTML, type PrinterWidth, type ReceiptMode, type ReceiptD
 import { retailReceiptQrDataUrl } from "@/lib/receipt/retailReceiptQrDataUrl"
 import { printRetailReceiptEscposSerial } from "@/lib/receipt/printRetailReceiptEscposSerial"
 import { mapRetailReceiptApiToEscpos, type RetailReceiptApiBody } from "@/app/retail/lib/mapRetailReceiptApiToEscpos"
+import { saleIncludesCashTender } from "@/lib/retail/hardware/customerDisplayProtocol"
 
 export type PrintRetailReceiptResult = { ok: true } | { ok: false; message: string }
 
@@ -48,9 +51,17 @@ function buildPrintWindow(html: string): PrintRetailReceiptResult {
 async function printRetailReceiptFromPayload(
   receiptData: ReceiptData,
   rs: Record<string, unknown> | null | undefined,
-  footerText: string
+  footerText: string,
+  allowDrawerKick: boolean
 ): Promise<PrintRetailReceiptResult> {
   const printerType = String((rs?.printer_type as string) || "browser_print").trim()
+  const drawerKick =
+    allowDrawerKick &&
+    !!rs?.drawer_kick &&
+    saleIncludesCashTender({
+      paymentMethod: receiptData.paymentMethod,
+      paymentBreakdown: receiptData.paymentBreakdown,
+    })
 
   if (printerType === "escpos") {
     try {
@@ -58,7 +69,7 @@ async function printRetailReceiptFromPayload(
         printer_width: ((rs?.printer_width as PrinterWidth) || "58mm") as PrinterWidth,
         receipt_mode: ((rs?.receipt_mode as ReceiptMode) || "full") as ReceiptMode,
         auto_cut: !!rs?.auto_cut,
-        drawer_kick: !!rs?.drawer_kick,
+        drawer_kick: drawerKick,
         show_logo: rs?.show_logo !== false,
         show_qr_code: !!rs?.show_qr_code,
         qr_code_content: typeof rs?.qr_code_content === "string" ? rs.qr_code_content : "",
@@ -103,7 +114,10 @@ async function printRetailReceiptFromPayload(
   return buildPrintWindow(html)
 }
 
-export async function printRetailSaleReceiptInBrowser(saleId: string): Promise<PrintRetailReceiptResult> {
+export async function printRetailSaleReceiptInBrowser(
+  saleId: string,
+  options?: { allowDrawerKick?: boolean }
+): Promise<PrintRetailReceiptResult> {
   const posToken = getCashierPosToken()
   const {
     data: { user },
@@ -144,7 +158,12 @@ export async function printRetailSaleReceiptInBrowser(saleId: string): Promise<P
     }
 
     const receiptData = mapRetailReceiptApiToEscpos(payload as RetailReceiptApiBody, currencyCode, currencySymbol)
-    return printRetailReceiptFromPayload(receiptData, rs as Record<string, unknown> | null | undefined, footerText)
+    return printRetailReceiptFromPayload(
+      receiptData,
+      rs as Record<string, unknown> | null | undefined,
+      footerText,
+      !!options?.allowDrawerKick
+    )
   }
 
   if (posToken) {
@@ -179,7 +198,8 @@ export async function printRetailSaleReceiptInBrowser(saleId: string): Promise<P
     return printRetailReceiptFromPayload(
       receiptData,
       (rs && typeof rs === "object" ? (rs as Record<string, unknown>) : null) ?? null,
-      footerText
+      footerText,
+      !!options?.allowDrawerKick
     )
   }
 

@@ -30,6 +30,8 @@ import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { printRetailSaleReceiptInBrowser } from "@/app/retail/lib/printRetailSaleReceiptBrowser"
 import BarcodeMatchSelector from "@/components/BarcodeMatchSelector"
 import RetailPosCameraBarcodeModal from "@/components/retail/pos/RetailPosCameraBarcodeModal"
+import { RetailPosHardwareBar } from "@/components/retail/pos/RetailPosHardwareBar"
+import { useRetailPosHardware } from "@/components/retail/pos/useRetailPosHardware"
 import LoadingSpinner from "@/components/LoadingSpinner"
 import ErrorAlert from "@/components/ErrorAlert"
 import { debounce } from "@/lib/debounce"
@@ -221,6 +223,8 @@ export default function RetailPosPage() {
     total: number
     paymentMethodLabel: string
     customerName: string | null
+    cashReceived?: number | null
+    changeGiven?: number | null
   } | null>(null)
   const [printingReceipt, setPrintingReceipt] = useState(false)
   const [cashierDisplayName, setCashierDisplayName] = useState<string | null>(null)
@@ -2322,6 +2326,19 @@ export default function RetailPosPage() {
     }
   }, [cart, businessCountry, cartDiscountType, cartDiscountValue])
 
+  const posHardware = useRetailPosHardware({
+    cartItems: cart.map((item) => ({
+      id: item.id,
+      name: item.variantName ? `${item.product.name} ${item.variantName}` : item.product.name,
+      quantity: item.quantity,
+    })),
+    runningTotal: cartTotals.total,
+    currencyCode,
+    checkoutOpen: showPaymentModal,
+    saleSuccess,
+    cashierName: cashierDisplayName,
+  })
+
   const retailMomoCartSnapshot = useMemo((): RetailMomoCartSnapshot => {
     const items = cart.map((item) => {
       const modifierTotal = item.modifiers
@@ -2562,6 +2579,21 @@ export default function RetailPosPage() {
                       <span className="inline-flex max-w-[5.5rem] shrink-0 items-center truncate whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 min-[400px]:max-w-none">
                         {cashierDisplayName || "—"}
                       </span>
+                      <RetailPosHardwareBar
+                        hardware={posHardware}
+                        onDrawerResult={(result) => {
+                          if (result.ok) {
+                            setToast({ message: "Cash drawer pulse sent", type: "success" })
+                          } else {
+                            setToast({
+                              message:
+                                result.message ||
+                                "Drawer did not open. Configure the XP-80 driver or select the printer COM port.",
+                              type: "error",
+                            })
+                          }
+                        }}
+                      />
                       {catalogSnapshotSyncing ? (
                         <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-blue-50 px-1.5 py-0.5 font-bold text-blue-900 ring-1 ring-blue-300/70">
                           Syncing catalog…
@@ -3756,7 +3788,9 @@ export default function RetailPosPage() {
                   onClick={async () => {
                     setPrintingReceipt(true)
                     try {
-                      const r = await printRetailSaleReceiptInBrowser(saleSuccess.saleId)
+                      const r = await printRetailSaleReceiptInBrowser(saleSuccess.saleId, {
+                        allowDrawerKick: true,
+                      })
                       if (!r.ok) {
                         setToast({ message: r.message, type: "error" })
                       }
@@ -4429,6 +4463,8 @@ export default function RetailPosPage() {
           total: cartTotals.total,
           paymentMethodLabel: pmLabel,
           customerName: selectedCustomer?.name?.trim() || null,
+          cashReceived: cash_received ?? null,
+          changeGiven: change_given ?? null,
         })
 
         setCart([])
