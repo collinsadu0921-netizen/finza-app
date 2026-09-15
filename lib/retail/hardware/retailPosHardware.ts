@@ -42,6 +42,12 @@ let displaySession: DisplaySession | null = null
 let writeQueue: Promise<void> = Promise.resolve()
 /** Counts controlled diagnostic writes only (one per button press). */
 let diagnosticWriteCount = 0
+/**
+ * Diagnostic preference survives without an open COM session so admins can
+ * Enter diagnostic → choose 2400 → Connect. Session.diagnosticMode mirrors this
+ * while connected.
+ */
+let diagnosticModeEnabled = false
 
 export function getCustomerDisplayStatus(): RetailHardwareStatus {
   return displaySession?.status ?? "disconnected"
@@ -56,7 +62,7 @@ export function getCustomerDisplayBaudRate(): number | null {
 }
 
 export function isCustomerDisplayDiagnosticMode(): boolean {
-  return displaySession?.diagnosticMode === true
+  return diagnosticModeEnabled === true
 }
 
 export function getCustomerDisplayDiagnosticWriteCount(): number {
@@ -68,13 +74,14 @@ export function __resetCustomerDisplaySessionForTests(): void {
   displaySession = null
   writeQueue = Promise.resolve()
   diagnosticWriteCount = 0
+  diagnosticModeEnabled = false
 }
 
 async function enqueueWrite(bytes: Uint8Array, opts?: { allowWhileDiagnostic?: boolean }): Promise<void> {
   const run = async () => {
     const session = displaySession
     if (!session || !shouldWriteCustomerDisplay(session.status)) return
-    if (session.diagnosticMode && !opts?.allowWhileDiagnostic) return
+    if ((diagnosticModeEnabled || session.diagnosticMode) && !opts?.allowWhileDiagnostic) return
     try {
       await writeSerialBytes(session.port, bytes)
     } catch (e: unknown) {
@@ -126,18 +133,22 @@ export async function connectCustomerDisplay(opts?: {
   if (displaySession?.port && displaySession.port !== port) {
     await closeSerialPort(displaySession.port)
   }
+  const diagnosticMode = opts?.diagnosticMode === true || diagnosticModeEnabled
+  diagnosticModeEnabled = diagnosticMode
   displaySession = {
     port,
     status: "connected",
     lastError: "",
     baudRate: openOpts.baudRate,
-    diagnosticMode: opts?.diagnosticMode === true,
+    diagnosticMode,
   }
 }
 
 export async function setCustomerDisplayDiagnosticMode(enabled: boolean): Promise<void> {
-  if (!displaySession) return
-  displaySession = { ...displaySession, diagnosticMode: enabled }
+  diagnosticModeEnabled = enabled === true
+  if (displaySession) {
+    displaySession = { ...displaySession, diagnosticMode: diagnosticModeEnabled }
+  }
 }
 
 export async function reconnectCustomerDisplayWithProfile(
@@ -145,7 +156,9 @@ export async function reconnectCustomerDisplayWithProfile(
   opts?: { diagnosticMode?: boolean }
 ): Promise<void> {
   const previousPort = displaySession?.port ?? null
-  const diagnosticMode = opts?.diagnosticMode === true || displaySession?.diagnosticMode === true
+  const diagnosticMode =
+    opts?.diagnosticMode === true || diagnosticModeEnabled || displaySession?.diagnosticMode === true
+  diagnosticModeEnabled = diagnosticMode
   if (previousPort) {
     try {
       await closeSerialPort(previousPort)
@@ -168,6 +181,7 @@ export async function reconnectCustomerDisplayWithProfile(
 export async function disconnectCustomerDisplay(): Promise<void> {
   const session = displaySession
   displaySession = null
+  // Keep diagnosticModeEnabled so Enter diagnostic stays active after Disconnect.
   if (!session) return
   // Do not send bytes on disconnect during diagnostics; normal mode also skips
   // so we never race a competing write while troubleshooting.
@@ -178,7 +192,7 @@ export async function disconnectCustomerDisplay(): Promise<void> {
 export async function writeCustomerDisplayAmount(amount: number): Promise<void> {
   try {
     if (!displaySession || !shouldWriteCustomerDisplay(displaySession.status)) return
-    if (displaySession.diagnosticMode) return
+    if (diagnosticModeEnabled || displaySession.diagnosticMode) return
     await enqueueWrite(buildSegmentedAmountBytes(amount))
   } catch {
     /* ignore */

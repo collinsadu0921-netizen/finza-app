@@ -124,6 +124,26 @@ describe("customer display diagnostic write behaviour", () => {
     expect(getCustomerDisplayDiagnosticWriteCount()).toBe(0)
   })
 
+  it("enters diagnostic mode while disconnected (Enter diagnostic must not no-op)", async () => {
+    expect(isCustomerDisplayDiagnosticMode()).toBe(false)
+    await setCustomerDisplayDiagnosticMode(true)
+    expect(isCustomerDisplayDiagnosticMode()).toBe(true)
+    // refresh()-style read must keep the preference without an open COM session
+    expect(isCustomerDisplayDiagnosticMode()).toBe(true)
+    await setCustomerDisplayDiagnosticMode(false)
+    expect(isCustomerDisplayDiagnosticMode()).toBe(false)
+  })
+
+  it("keeps diagnostic mode across connect after Enter diagnostic while off", async () => {
+    await setCustomerDisplayDiagnosticMode(true)
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: true,
+    })
+    expect(isCustomerDisplayDiagnosticMode()).toBe(true)
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+  })
+
   it("performs exactly one write per diagnostic button press", async () => {
     await connectCustomerDisplay({
       profile: getCustomerDisplaySerialProfile("2400"),
