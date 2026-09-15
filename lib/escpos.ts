@@ -56,6 +56,10 @@ export interface ReceiptData {
   getfund?: number
   covid?: number
   vat?: number
+  /** Optional stored rate (decimal, e.g. 0.025) from tax_lines — display only */
+  nhilRate?: number
+  getfundRate?: number
+  vatRate?: number
   /** Sum of line + cart discounts for this sale (when > 0, shown on receipt) */
   totalDiscount?: number
   /** Cart-level discount component (optional detail line) */
@@ -67,6 +71,24 @@ export interface ReceiptData {
   // Currency information (required for print templates)
   currencyCode: string
   currencySymbol: string
+}
+
+/** Display-only tax line: `NHIL (2.5%): GHS 0.15` or amount-only when rate missing. */
+export function formatReceiptTaxAmountLine(
+  label: string,
+  amount: number,
+  currencyCode: string,
+  rate?: number | null
+): string {
+  const pct =
+    rate != null && Number.isFinite(rate) && rate >= 0
+      ? (() => {
+          const raw = (rate * 100).toFixed(4).replace(/\.?0+$/, "")
+          return raw && raw !== "-0" ? raw : null
+        })()
+      : null
+  const head = pct ? `${label} (${pct}%)` : label
+  return `${head}: ${currencyCode} ${amount.toFixed(2)}`
 }
 
 function receiptPaymentMethodLabel(method: string): string {
@@ -331,14 +353,18 @@ export class ESCPOSGenerator {
         output += this.bold(false)
         
         if (data.nhil && data.nhil > 0) {
-          output += `NHIL: ${data.currencyCode} ${data.nhil.toFixed(2)}` + this.LF
+          output +=
+            formatReceiptTaxAmountLine("NHIL", data.nhil, data.currencyCode, data.nhilRate) + this.LF
         }
         if (data.getfund && data.getfund > 0) {
-          output += `GETFund: ${data.currencyCode} ${data.getfund.toFixed(2)}` + this.LF
+          output +=
+            formatReceiptTaxAmountLine("GETFund", data.getfund, data.currencyCode, data.getfundRate) +
+            this.LF
         }
         // COVID levy never shown in UI (display-only policy)
         if (data.vat && data.vat > 0) {
-          output += `VAT: ${data.currencyCode} ${data.vat.toFixed(2)}` + this.LF
+          output +=
+            formatReceiptTaxAmountLine("VAT", data.vat, data.currencyCode, data.vatRate) + this.LF
         }
         
         output += (data.vatInclusive ? `Total Tax (included): ${data.currencyCode} ${totalTax.toFixed(2)}` : `TOTAL TAX: ${data.currencyCode} ${totalTax.toFixed(2)}`) + this.LF
@@ -634,14 +660,14 @@ ${retailReceiptDocumentCss(is58mm)}
       html += `    <div class="tax-block">
       <div class="item-name">${data.vatInclusive ? 'Tax Breakdown (included in price)' : 'Tax Breakdown'}</div>\n`
       if (data.nhil && data.nhil > 0) {
-        html += `      <div class="tax-line">NHIL: ${data.currencyCode} ${data.nhil.toFixed(2)}</div>\n`
+        html += `      <div class="tax-line">${formatReceiptTaxAmountLine("NHIL", data.nhil, data.currencyCode, data.nhilRate)}</div>\n`
       }
       if (data.getfund && data.getfund > 0) {
-        html += `      <div class="tax-line">GETFund: ${data.currencyCode} ${data.getfund.toFixed(2)}</div>\n`
+        html += `      <div class="tax-line">${formatReceiptTaxAmountLine("GETFund", data.getfund, data.currencyCode, data.getfundRate)}</div>\n`
       }
       // RETAIL: COVID Levy removed
       if (data.vat && data.vat > 0) {
-        html += `      <div class="tax-line">VAT: ${data.currencyCode} ${data.vat.toFixed(2)}</div>\n`
+        html += `      <div class="tax-line">${formatReceiptTaxAmountLine("VAT", data.vat, data.currencyCode, data.vatRate)}</div>\n`
       }
       html += `      <div class="tax-line">${data.vatInclusive ? 'Total Tax (included)' : 'TOTAL TAX'}: ${data.currencyCode} ${totalTax.toFixed(2)}</div>\n`
       html += `    </div>\n`

@@ -6,6 +6,9 @@
 const UUID_STANDARD =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+/** Debounce for ordinary Sales History typing; full UUID scans flush immediately. */
+export const SALE_HISTORY_SEARCH_DEBOUNCE_MS = 300
+
 /** Normalize full UUID with or without hyphens; returns lowercase canonical UUID or null. */
 export function normalizeSaleUuidFromLookupInput(raw: string): string | null {
   const t = raw.trim()
@@ -15,6 +18,40 @@ export function normalizeSaleUuidFromLookupInput(raw: string): string | null {
     return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`.toLowerCase()
   }
   return null
+}
+
+/**
+ * True when input is a complete sale UUID (hyphenated or compact).
+ * Keyboard-wedge QR scans should flush the API search immediately in this case.
+ */
+export function shouldFlushSaleHistorySearchImmediately(raw: string): boolean {
+  return normalizeSaleUuidFromLookupInput(raw) != null
+}
+
+/**
+ * Partial hyphenated hex that looks like a mid-scan UUID.
+ * Must NOT be applied as `id.ilike` — `sales.id` is UUID-typed.
+ */
+export function isPartialHyphenatedUuidLookup(raw: string): boolean {
+  const s = raw.trim().toLowerCase()
+  if (normalizeSaleUuidFromLookupInput(s)) return false
+  return /^[0-9a-f-]+$/.test(s) && s.includes("-") && s.length >= 8 && s.length < 36
+}
+
+/**
+ * Text/ilike OR fragments for non-UUID Sales History search.
+ * Never includes `id.ilike` (UUID column). Exact UUID lookup is handled separately via `.eq("id", …)`.
+ */
+export function buildSalesHistoryTextSearchOrParts(search: string): string[] {
+  const pat = saleLookupIlikePattern(search)
+  if (pat.length === 0) return []
+  const safe = pat.replace(/,/g, "")
+  const like = `%${safe}%`
+  return [
+    `momo_transaction_id.ilike.${like}`,
+    `hubtel_transaction_id.ilike.${like}`,
+    `description.ilike.${like}`,
+  ]
 }
 
 /** YYYY-MM-DD calendar date (UTC day bounds for DB filter). */

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import {
+  buildSalesHistoryTextSearchOrParts,
   normalizeSaleUuidFromLookupInput,
   parseSaleAmountSearch,
   parseSaleHistoryDateSearch,
-  saleLookupIlikePattern,
 } from "@/lib/retail/saleLookupSearchParse"
 
 const supabase = createClient(
@@ -190,18 +190,10 @@ export async function GET(request: NextRequest) {
           const hi = amt + 0.02
           salesQuery = salesQuery.gte("amount", lo).lte("amount", hi)
         } else {
-          const pat = saleLookupIlikePattern(search)
-          const orParts: string[] = []
-          if (pat.length > 0) {
-            const safe = pat.replace(/,/g, "")
-            const like = `%${safe}%`
-            orParts.push(`momo_transaction_id.ilike.${like}`)
-            orParts.push(`hubtel_transaction_id.ilike.${like}`)
-            orParts.push(`description.ilike.${like}`)
-            const s = search.trim().toLowerCase()
-            if (/^[0-9a-f-]+$/.test(s) && s.includes("-") && s.length >= 8 && s.length < 36) {
-              orParts.push(`id.ilike.${like}`)
-            }
+          const orParts: string[] = [...buildSalesHistoryTextSearchOrParts(search)]
+          const likeSeed = search.trim().replace(/%/g, "").replace(/_/g, "").trim().replace(/,/g, "")
+          if (likeSeed.length > 0) {
+            const like = `%${likeSeed}%`
             const { data: custHits } = await supabase
               .from("customers")
               .select("id")

@@ -1,5 +1,5 @@
 import type { ReceiptData } from "@/lib/escpos"
-import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
+import { getGhanaLegacyRates, getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
 
 /** JSON from GET /api/sales-history/[id]/receipt */
 export type RetailReceiptApiBody = {
@@ -167,6 +167,7 @@ export function mapRetailReceiptApiToEscpos(
     rawPm === "mixed"
 
   const taxFromLines = getGhanaLegacyView(sale.tax_lines)
+  const taxRates = getGhanaLegacyRates(sale.tax_lines)
   const totalTaxFromLines =
     sale.total_tax != null
       ? Number(sale.total_tax)
@@ -282,6 +283,9 @@ export function mapRetailReceiptApiToEscpos(
     nhil: nhilDisplay,
     getfund: getfundDisplay,
     vat: vatDisplay,
+    nhilRate: taxRates.nhil ?? undefined,
+    getfundRate: taxRates.getfund ?? undefined,
+    vatRate: taxRates.vat ?? undefined,
     covid: 0,
     vatInclusive: totalTaxFromLines > 0,
     currencyCode: currencyCode.trim(),

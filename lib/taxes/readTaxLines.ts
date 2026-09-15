@@ -152,3 +152,54 @@ export function getGhanaLegacyView(tax_lines: any): {
     covid: breakdown.COVID || breakdown.Covid || breakdown.covid || 0,
   }
 }
+
+function extractTaxLinesArray(tax_lines: any): any[] {
+  if (!tax_lines || typeof tax_lines !== "object") return []
+  if (Array.isArray(tax_lines.lines)) return tax_lines.lines
+  if (Array.isArray(tax_lines)) return tax_lines
+  if (tax_lines.tax_lines && Array.isArray(tax_lines.tax_lines)) return tax_lines.tax_lines
+  return []
+}
+
+function normalizeTaxCode(code: string): string {
+  return code.trim().toUpperCase()
+}
+
+/**
+ * Stored rates from persisted tax_lines, matched by line `code` (not array position).
+ * Returns null per component when that line has no finite `rate` (historical / legacy).
+ * Does not invent schedule rates or recalculate tax.
+ */
+export function getGhanaLegacyRates(tax_lines: any): {
+  vat: number | null
+  nhil: number | null
+  getfund: number | null
+} {
+  const rates: { vat: number | null; nhil: number | null; getfund: number | null } = {
+    vat: null,
+    nhil: null,
+    getfund: null,
+  }
+  for (const line of extractTaxLinesArray(tax_lines)) {
+    if (!line || typeof line !== "object" || typeof line.code !== "string") continue
+    if (typeof line.rate !== "number" || !Number.isFinite(line.rate)) continue
+    const code = normalizeTaxCode(line.code)
+    if (code === "VAT" && rates.vat == null) rates.vat = line.rate
+    else if (code === "NHIL" && rates.nhil == null) rates.nhil = line.rate
+    else if (code === "GETFUND" && rates.getfund == null) rates.getfund = line.rate
+  }
+  return rates
+}
+
+/**
+ * Format a stored decimal rate (e.g. 0.025 → "2.5%") without inventing schedule values.
+ * Trims trailing zeros; returns null when rate is unusable.
+ */
+export function formatStoredTaxPercentLabel(rate: number | null | undefined): string | null {
+  if (rate == null || !Number.isFinite(rate) || rate < 0) return null
+  const pct = rate * 100
+  // Up to 4 fractional digits of the percentage, then strip trailing zeros (0.15 → 15, 0.025 → 2.5).
+  const raw = pct.toFixed(4).replace(/\.?0+$/, "")
+  if (raw === "" || raw === "-0") return null
+  return `${raw}%`
+}

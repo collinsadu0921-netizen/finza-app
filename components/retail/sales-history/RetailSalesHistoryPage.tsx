@@ -10,6 +10,10 @@ import { getActiveStoreId } from "@/lib/storeSession"
 import { getEffectiveStoreIdClient } from "@/lib/storeContext"
 import { useRefund } from "@/lib/hooks/useRefund"
 import { formatMoney } from "@/lib/money"
+import {
+  SALE_HISTORY_SEARCH_DEBOUNCE_MS,
+  shouldFlushSaleHistorySearchImmediately,
+} from "@/lib/retail/saleLookupSearchParse"
 import RefundModalWrapper from "@/components/RefundModalWrapper"
 import {
   RetailBackofficeAlert,
@@ -96,6 +100,7 @@ export default function RetailSalesHistoryPage() {
   const [cashierId, setCashierId] = useState("")
   const [registerId, setRegisterId] = useState("")
   const [saleSearch, setSaleSearch] = useState("")
+  const [debouncedSaleSearch, setDebouncedSaleSearch] = useState("")
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -190,9 +195,21 @@ export default function RetailSalesHistoryPage() {
     if (dt) setDateTo(dt)
     if (lookup != null && lookup !== "") {
       setSaleSearch(lookup)
+      setDebouncedSaleSearch(lookup)
       setPage(1)
     }
   }, [searchParams])
+
+  useEffect(() => {
+    if (shouldFlushSaleHistorySearchImmediately(saleSearch)) {
+      setDebouncedSaleSearch(saleSearch.trim())
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setDebouncedSaleSearch(saleSearch)
+    }, SALE_HISTORY_SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [saleSearch])
 
   const lastRefundUrlSaleId = useRef<string | null>(null)
   useEffect(() => {
@@ -213,7 +230,7 @@ export default function RetailSalesHistoryPage() {
       loadCashiers()
       loadRegisters()
     }
-  }, [businessId, page, dateFrom, dateTo, paymentMethod, status, cashierId, registerId, sortField, sortDirection, saleSearch])
+  }, [businessId, page, dateFrom, dateTo, paymentMethod, status, cashierId, registerId, sortField, sortDirection, debouncedSaleSearch])
 
   const loadData = async () => {
     try {
@@ -396,7 +413,7 @@ export default function RetailSalesHistoryPage() {
       if (status) params.append("status", status)
       if (cashierId) params.append("cashier_id", cashierId)
       if (registerId) params.append("register_id", registerId)
-      const trimmedSearch = saleSearch.trim()
+      const trimmedSearch = debouncedSaleSearch.trim()
       if (trimmedSearch) params.append("search", trimmedSearch)
       params.append("sort_field", sortField)
       params.append("sort_direction", sortDirection)
@@ -450,6 +467,7 @@ export default function RetailSalesHistoryPage() {
     setCashierId("")
     setRegisterId("")
     setSaleSearch("")
+    setDebouncedSaleSearch("")
     setPage(1)
   }
 
