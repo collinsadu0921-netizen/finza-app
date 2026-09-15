@@ -1,5 +1,10 @@
 import type { ReceiptData } from "@/lib/escpos"
 import { getGhanaLegacyRates, getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
+import {
+  formatRetailReceiptAddressBlock,
+  pickRetailReceiptBusinessEmail,
+  pickRetailReceiptBusinessPhone,
+} from "@/lib/retail/receipts/retailReceiptBusinessIdentity"
 
 /** JSON from GET /api/sales-history/[id]/receipt */
 export type RetailReceiptApiBody = {
@@ -48,8 +53,21 @@ export type RetailReceiptApiBody = {
     trading_name?: string | null
     /** Business profile logo; used on receipt when store has no logo */
     logo_url?: string | null
+    address_street?: string | null
+    address_city?: string | null
+    address_region?: string | null
+    address_country?: string | null
+    phone?: string | null
+    whatsapp_phone?: string | null
+    email?: string | null
   }
-  store?: { name: string | null; logo_url?: string | null } | null
+  store?: {
+    name: string | null
+    logo_url?: string | null
+    location?: string | null
+    phone?: string | null
+    email?: string | null
+  } | null
   customer?: {
     name?: string | null
     phone?: string | null
@@ -211,6 +229,15 @@ export function mapRetailReceiptApiToEscpos(
   const businessLogo = business.logo_url?.trim()
   const headerLogoUrl = storeLogo || businessLogo || undefined
 
+  const addressFromBusiness = formatRetailReceiptAddressBlock(business)
+  const storeLocation = body.store?.location?.trim() || undefined
+  // Prefer business profile address; otherwise store location when present (no invented text).
+  const businessLocation = addressFromBusiness || storeLocation || undefined
+  const businessPhone =
+    pickRetailReceiptBusinessPhone(business) || body.store?.phone?.trim() || undefined
+  const businessEmail =
+    pickRetailReceiptBusinessEmail(business) || body.store?.email?.trim() || undefined
+
   const lookupId = (sale.receipt_lookup_id || sale.id).trim().toLowerCase()
   const receiptNumber = retailReceiptDisplayRef(lookupId)
 
@@ -262,6 +289,9 @@ export function mapRetailReceiptApiToEscpos(
     storeName,
     /** Public URL or data URL; shown only when receipt settings enable logo. Store logo wins over business logo. */
     logo: headerLogoUrl,
+    businessLocation,
+    businessPhone,
+    businessEmail,
     /** Short display (e.g. 8AC66619…94400); scan uses full UUID in `qrCodeContent`. */
     receiptNumber,
     /** Full canonical sale UUID for QR and exact lookup */

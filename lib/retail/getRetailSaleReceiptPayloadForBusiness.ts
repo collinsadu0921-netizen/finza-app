@@ -30,7 +30,9 @@ export async function getRetailSaleReceiptPayloadForBusiness(
 ): Promise<RetailSaleReceiptPayloadResult> {
   const { data: business, error: businessError } = await supabase
     .from("businesses")
-    .select("name, legal_name, trading_name, default_currency, logo_url")
+    .select(
+      "name, legal_name, trading_name, default_currency, logo_url, address_street, address_city, address_region, address_country, phone, whatsapp_phone, email"
+    )
     .eq("id", businessId)
     .single()
 
@@ -51,11 +53,32 @@ export async function getRetailSaleReceiptPayloadForBusiness(
 
   const receipt_settings = rs && typeof rs === "object" ? (rs as Record<string, unknown>) : null
 
+  const biz = business as {
+    name: string
+    legal_name?: string | null
+    trading_name?: string | null
+    logo_url?: string | null
+    address_street?: string | null
+    address_city?: string | null
+    address_region?: string | null
+    address_country?: string | null
+    phone?: string | null
+    whatsapp_phone?: string | null
+    email?: string | null
+  }
+
   const businessPayload = {
-    name: business.name as string,
-    legal_name: (business as { legal_name?: string | null }).legal_name ?? null,
-    trading_name: (business as { trading_name?: string | null }).trading_name ?? null,
-    logo_url: (business as { logo_url?: string | null }).logo_url ?? null,
+    name: biz.name,
+    legal_name: biz.legal_name ?? null,
+    trading_name: biz.trading_name ?? null,
+    logo_url: biz.logo_url ?? null,
+    address_street: biz.address_street ?? null,
+    address_city: biz.address_city ?? null,
+    address_region: biz.address_region ?? null,
+    address_country: biz.address_country ?? null,
+    phone: biz.phone ?? null,
+    whatsapp_phone: biz.whatsapp_phone ?? null,
+    email: biz.email ?? null,
   }
 
   const { data: parkedSale } = await supabase
@@ -101,7 +124,10 @@ export async function getRetailSaleReceiptPayloadForBusiness(
         ),
         stores:store_id (
           name,
-          logo_url
+          logo_url,
+          location,
+          phone,
+          email
         ),
         customers:customer_id (
           name,
@@ -216,15 +242,30 @@ export async function getRetailSaleReceiptPayloadForBusiness(
   }
 
   const rawStore = saleData.stores as
-    | { name?: string | null; logo_url?: string | null }
-    | { name?: string | null; logo_url?: string | null }[]
+    | {
+        name?: string | null
+        logo_url?: string | null
+        location?: string | null
+        phone?: string | null
+        email?: string | null
+      }
+    | {
+        name?: string | null
+        logo_url?: string | null
+        location?: string | null
+        phone?: string | null
+        email?: string | null
+      }[]
     | null
   const storeRow = Array.isArray(rawStore) ? rawStore[0] : rawStore
   const storePayload =
-    storeRow && (storeRow.name || storeRow.logo_url)
+    storeRow && (storeRow.name || storeRow.logo_url || storeRow.location || storeRow.phone || storeRow.email)
       ? {
           name: storeRow.name != null ? String(storeRow.name) : null,
           logo_url: storeRow.logo_url ?? null,
+          location: storeRow.location ?? null,
+          phone: storeRow.phone ?? null,
+          email: storeRow.email ?? null,
         }
       : null
 

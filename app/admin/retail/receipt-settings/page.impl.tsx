@@ -45,6 +45,8 @@ export default function ReceiptSettingsPage() {
   const [success, setSuccess] = useState(false)
   const [tableMissing, setTableMissing] = useState(false)
   const [canEditReceipt, setCanEditReceipt] = useState(true)
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null)
+  const [businessDisplayName, setBusinessDisplayName] = useState("")
 
   useEffect(() => {
     loadSettings()
@@ -104,6 +106,28 @@ export default function ReceiptSettingsPage() {
           show_qr_code: Boolean(data.show_qr_code),
           qr_code_content: String(data.qr_code_content || ""),
         })
+      }
+
+      // Business-scoped logo/name for preview (same tenant as receipt_settings).
+      try {
+        const profileRes = await fetch("/api/business/profile", { credentials: "include" })
+        const profileJson = (await profileRes.json().catch(() => ({}))) as {
+          business?: {
+            name?: string | null
+            trading_name?: string | null
+            legal_name?: string | null
+            logo_url?: string | null
+          }
+        }
+        const b = profileJson.business
+        if (b) {
+          setBusinessDisplayName(
+            (b.trading_name || b.legal_name || b.name || "").trim()
+          )
+          setLogoPreviewUrl(b.logo_url?.trim() || null)
+        }
+      } catch {
+        /* preview is optional */
       }
     } catch (err: any) {
       const message =
@@ -168,7 +192,18 @@ export default function ReceiptSettingsPage() {
             ← Back to Dashboard
           </button>
           <h1 className={RS.title}>Receipts & printer</h1>
-          <p className={RS.subtitle}>Thermal or browser printing, receipt layout, and footer text for POS receipts.</p>
+          <p className={RS.subtitle}>
+            Configure how this business’s customer receipts look: printer path, logo, layout, and your own footer.
+            Company name, address, and contact come from{" "}
+            <button
+              type="button"
+              onClick={() => router.push(retailPaths.settingsBusinessProfile)}
+              className={RS.linkInline}
+            >
+              Business Profile
+            </button>
+            .
+          </p>
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
             Manage tills in{" "}
             <button type="button" onClick={() => router.push(retailPaths.adminRegisters)} className={RS.linkInline}>
@@ -338,11 +373,39 @@ export default function ReceiptSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, show_logo: e.target.checked })}
                 className="mr-2"
               />
-              <span className="text-sm font-medium text-gray-700">Show Business Logo</span>
+              <span className="text-sm font-medium text-gray-700">Show business logo</span>
             </label>
             <p className="text-xs text-gray-500 mt-1 ml-6">
-              Show logo on receipt when a URL is set: store logo (Store settings) takes priority, otherwise the business logo from Business Profile.
+              Uses this business’s logo from Business Profile (store logo wins when set). Finza never substitutes its
+              own logo.{" "}
+              <button
+                type="button"
+                onClick={() => router.push(retailPaths.settingsBusinessProfile)}
+                className="font-semibold text-blue-700 underline"
+              >
+                Edit logo &amp; contact details
+              </button>
             </p>
+            <div className="ml-6 mt-3 rounded-lg border border-dashed border-slate-300 bg-white p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Logo preview</p>
+              {settings.show_logo && logoPreviewUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={logoPreviewUrl}
+                  alt=""
+                  className="mt-2 max-h-16 max-w-[180px] object-contain"
+                />
+              ) : (
+                <p className="mt-2 text-sm font-bold text-slate-900">
+                  {businessDisplayName || "Business name"}
+                </p>
+              )}
+              <p className="mt-2 text-xs text-slate-600">
+                {settings.printer_type === "escpos"
+                  ? "ESC/POS serial path: logo image is not printed — receipt shows the business name in text only."
+                  : "Windows / browser print: logo prints when a URL is available and this option is on."}
+              </p>
+            </div>
           </div>
 
           {/* QR Code */}
@@ -356,16 +419,20 @@ export default function ReceiptSettingsPage() {
               />
               <span className="text-sm font-medium text-gray-700">Show QR Code on Receipt</span>
             </label>
+            <p className="text-xs text-gray-500 ml-6 mb-2">
+              Sale receipts encode the sale id for Sales History lookup. Optional override below is only used when a
+              sale id is unavailable.
+            </p>
             {settings.show_qr_code && (
               <div className="ml-6 mt-2">
                 <label className="block text-xs text-gray-600 mb-1">
-                  QR Code Content (URL, phone number, WhatsApp link, etc.)
+                  Optional QR fallback content (advanced)
                 </label>
                 <input
                   type="text"
                   value={settings.qr_code_content}
                   onChange={(e) => setSettings({ ...settings, qr_code_content: e.target.value })}
-                  placeholder="https://example.com or 0551234567"
+                  placeholder="Leave blank for normal sale QR"
                   className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
                 />
               </div>
@@ -375,18 +442,29 @@ export default function ReceiptSettingsPage() {
           {/* Footer Text */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Custom Footer Text
+              Receipt footer (optional)
             </label>
             <textarea
               value={settings.footer_text}
               onChange={(e) => setSettings({ ...settings, footer_text: e.target.value })}
-              placeholder="Thank you for shopping with us!&#10;No refunds after 48 hours.&#10;Call: 055 XXXX XXX"
+              placeholder="Write your own footer — e.g. keep this receipt, or your returns wording. Leave blank for no footer."
               rows={4}
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Multi-line text displayed at bottom of receipt. Use line breaks to separate lines.
+              Tenant-authored only. Finza does not prefill returns policy, phone numbers, or a signature. Empty =
+              no footer line on the receipt.
             </p>
+            {settings.footer_text.trim() ? (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Footer preview ({settings.printer_width})
+                </p>
+                <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-800">
+                  {settings.footer_text.trim()}
+                </pre>
+              </div>
+            ) : null}
           </div>
         </fieldset>
 

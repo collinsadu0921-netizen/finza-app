@@ -144,13 +144,11 @@ export function RetailSaleReceiptView() {
     if (saleId) load()
   }, [saleId, load])
 
-  /** Retail default when receipt_settings.footer_text is empty */
+  /** Tenant footer only when authored in receipt settings — no Finza soft default. */
   const printerSettingsEffective = useMemo(
     () => ({
       ...printerSettings,
-      footer_text:
-        (printerSettings.footer_text || "").trim() ||
-        "Thank you for your purchase.",
+      footer_text: (printerSettings.footer_text || "").trim(),
     }),
     [printerSettings]
   )

@@ -132,7 +132,7 @@ export async function printRetailSaleReceiptInBrowser(
       .maybeSingle()
 
     const footerText =
-      (rs?.footer_text && String(rs.footer_text).trim()) || "Thank you for your purchase."
+      rs?.footer_text && String(rs.footer_text).trim() ? String(rs.footer_text).trim() : ""
 
     const res = await fetch(
       `/api/sales-history/${encodeURIComponent(saleId)}/receipt?user_id=${encodeURIComponent(user.id)}&business_id=${encodeURIComponent(business.id)}`
@@ -184,7 +184,7 @@ export async function printRetailSaleReceiptInBrowser(
     const footerText =
       rs && typeof rs.footer_text === "string" && rs.footer_text.trim()
         ? rs.footer_text.trim()
-        : "Thank you for your purchase."
+        : ""
 
     const receiptData = mapRetailReceiptApiToEscpos(payload as RetailReceiptApiBody, currencyCode, currencySymbol)
     return printRetailReceiptFromPayload(

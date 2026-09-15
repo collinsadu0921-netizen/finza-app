@@ -4,6 +4,7 @@
  */
 
 import { retailReceiptDocumentCss } from "@/lib/retail/receipts/retailReceiptPrintCss"
+import { wrapRetailReceiptMultiline } from "@/lib/retail/receipts/retailReceiptBusinessIdentity"
 
 export type PrinterWidth = "58mm" | "80mm"
 export type ReceiptMode = "compact" | "full"
@@ -12,6 +13,12 @@ export interface ReceiptData {
   businessName: string
   /** Physical store / outlet name (retail); rendered as `Store: …` when set */
   storeName?: string
+  /** Multi-line tenant address from business profile (or store location fallback) */
+  businessLocation?: string
+  /** Tenant phone from business profile (or store) — never invented */
+  businessPhone?: string
+  /** Tenant email from business profile (or store) — never invented */
+  businessEmail?: string
   /** Human-friendly receipt reference line (short code); QR uses `qrCodeContent` (full canonical id). */
   receiptNumber?: string
   /** Customer display name when attached to sale */
@@ -24,7 +31,6 @@ export interface ReceiptData {
   customerEmail?: string
   /** Prominent label for voided / refunded receipts */
   saleStatusBanner?: string
-  businessLocation?: string
   dateTime: string
   registerSessionId?: string
   cashierName: string
@@ -237,10 +243,21 @@ export class ESCPOSGenerator {
       output += this.bold(false)
     }
 
-    // Business location (if provided)
+    // Tenant address / contact (only when provided)
+    output += this.align("center")
     if (data.businessLocation) {
-      output += this.align("center")
-      output += data.businessLocation + this.LF
+      for (const line of wrapRetailReceiptMultiline(
+        data.businessLocation,
+        this.width === "58mm" ? 32 : 48
+      )) {
+        output += line + this.LF
+      }
+    }
+    if (data.businessPhone) {
+      output += `Tel: ${data.businessPhone}` + this.LF
+    }
+    if (data.businessEmail) {
+      output += data.businessEmail + this.LF
     }
 
     output += this.feed(1)
@@ -454,14 +471,14 @@ export class ESCPOSGenerator {
       output += this.feed(2)
     }
 
-    // Footer text
+    // Footer text (tenant-authored only; wrap for narrow paper)
     if (data.footerText) {
       output += this.align("center")
       output += this.feed(1)
-      const footerLines = data.footerText.split("\n")
-      footerLines.forEach((line) => {
-        output += line.trim() + this.LF
-      })
+      const col = this.width === "58mm" ? 32 : 48
+      for (const line of wrapRetailReceiptMultiline(data.footerText, col)) {
+        output += line + this.LF
+      }
       output += this.feed(1)
     }
 
@@ -566,7 +583,15 @@ ${retailReceiptDocumentCss(is58mm)}
     html += `    <div class="store-line">Store: ${escapeHtml(data.storeName)}</div>\n`
   }
   if (data.businessLocation) {
-    html += `    <div class="business-location">${escapeHtml(data.businessLocation)}</div>\n`
+    for (const line of data.businessLocation.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      html += `    <div class="business-location">${escapeHtml(line)}</div>\n`
+    }
+  }
+  if (data.businessPhone) {
+    html += `    <div class="business-contact">Tel: ${escapeHtml(data.businessPhone)}</div>\n`
+  }
+  if (data.businessEmail) {
+    html += `    <div class="business-contact">${escapeHtml(data.businessEmail)}</div>\n`
   }
 
   html += `    <div class="separator"></div>\n`
