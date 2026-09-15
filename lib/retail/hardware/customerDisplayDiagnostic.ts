@@ -1,6 +1,8 @@
 /**
  * Customer Display Diagnostic helpers (Retail POS pole LED).
- * Plain ASCII payloads only — no ESC/POS, CR, LF, or VFD commands.
+ * Default probes are plain ASCII digits/spaces only.
+ * One optional candidate-clear probe (`0C`) exists for look-alike LED8 research —
+ * it is unverified for any specific till and is not a protocol fix.
  */
 
 export type CustomerDisplaySerialProfile = {
@@ -61,12 +63,20 @@ export type CustomerDisplayDiagnosticTestId =
   | "ascii_1234_56"
   | "spaces8_then_0_00"
   | "ascii_eight_zeroes"
+  | "candidate_clear_0c"
 
 export type CustomerDisplayDiagnosticTest = {
   id: CustomerDisplayDiagnosticTestId
   name: string
-  /** Exact ASCII payload that will be written (shown to the tester). */
+  /**
+   * Human-readable payload description for the UI.
+   * For ASCII probes this is the exact string encoded; for raw probes it is descriptive only.
+   */
   ascii: string
+  /** When set, these exact bytes are written instead of encoding `ascii`. */
+  rawBytes?: readonly number[]
+  /** UI warning shown near the button (candidate / unverified probes). */
+  warning?: string
 }
 
 export const CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS: readonly CustomerDisplayDiagnosticTest[] = [
@@ -78,7 +88,20 @@ export const CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS: readonly CustomerDisplayDiagnost
     ascii: "        0.00",
   },
   { id: "ascii_eight_zeroes", name: "Eight ASCII zeroes", ascii: "00000000" },
+  {
+    id: "candidate_clear_0c",
+    name: "Test candidate clear (0C)",
+    ascii: "(single byte 0C)",
+    rawBytes: [0x0c],
+    warning:
+      "Unverified for this display. Sends one byte once; the panel may not clear and may show an unexpected character.",
+  },
 ] as const
+
+/** ASCII-only probes (excludes the unverified candidate-clear byte). */
+export const CUSTOMER_DISPLAY_DIAGNOSTIC_ASCII_TESTS = CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS.filter(
+  (t) => t.id !== "candidate_clear_0c"
+)
 
 export const CUSTOMER_DISPLAY_DIAGNOSTIC_POWER_CYCLE_HINT =
   "Power-cycle the terminal customer display between baud-rate profiles if the panel looks wrong or stays blank."
@@ -122,6 +145,9 @@ export function buildCustomerDisplayDiagnosticBytes(
   const test = CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS.find((t) => t.id === testId)
   if (!test) {
     return asciiToDiagnosticBytes("0.00")
+  }
+  if (test.rawBytes && test.rawBytes.length > 0) {
+    return new Uint8Array(test.rawBytes)
   }
   return asciiToDiagnosticBytes(test.ascii)
 }

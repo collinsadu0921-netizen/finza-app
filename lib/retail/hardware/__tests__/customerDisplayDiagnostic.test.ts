@@ -86,10 +86,23 @@ describe("customer display diagnostic payloads", () => {
     expect(Array.from(buildCustomerDisplayDiagnosticBytes("ascii_eight_zeroes"))).toEqual([
       0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
     ])
-    expect(CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS).toHaveLength(4)
+    expect(CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS.filter((t) => t.id !== "candidate_clear_0c")).toHaveLength(4)
   })
 
-  it("shows hex preview of outgoing bytes without adding CR/LF/ESC", () => {
+  it("builds exactly one candidate-clear byte 0C with no companions", () => {
+    const bytes = buildCustomerDisplayDiagnosticBytes("candidate_clear_0c")
+    expect(Array.from(bytes)).toEqual([0x0c])
+    expect(bytesToHexPreview(bytes)).toBe("0C")
+    expect(bytes.length).toBe(1)
+    expect(Array.from(bytes)).not.toContain(0x1b)
+    expect(Array.from(bytes)).not.toContain(0x0d)
+    expect(Array.from(bytes)).not.toContain(0x0a)
+    const probe = CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS.find((t) => t.id === "candidate_clear_0c")
+    expect(probe?.name).toBe("Test candidate clear (0C)")
+    expect(probe?.warning).toMatch(/Unverified for this display/)
+  })
+
+  it("shows hex preview of ASCII outgoing bytes without adding CR/LF/ESC/0C", () => {
     expect(bytesToHexPreview(asciiToDiagnosticBytes("0.00"))).toBe("30 2E 30 30")
     const bytes = buildCustomerDisplayDiagnosticBytes("ascii_0_00")
     expect(Array.from(bytes)).not.toContain(0x1b)
@@ -156,6 +169,58 @@ describe("customer display diagnostic write behaviour", () => {
     expect(writeSerialBytesMock).toHaveBeenCalledTimes(2)
     expect(getCustomerDisplayDiagnosticWriteCount()).toBe(2)
     expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x30, 0x2e, 0x30, 0x30])
+  })
+
+  it("sends exactly one 0C byte on one candidate-clear press when connected in diagnostic mode", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: true,
+    })
+    const storage = memoryStorage()
+    const result = await writeCustomerDisplayDiagnosticTest("candidate_clear_0c", { storage })
+    expect(result.ok).toBe(true)
+    expect(result.bytesHex).toBe("0C")
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(1)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x0c])
+    expect(getCustomerDisplayDiagnosticWriteCount()).toBe(1)
+    const parsed = JSON.parse(storage.getItem("finza.retail.customerDisplay.diagnosticLog") || "[]")
+    expect(parsed[0]).toMatchObject({
+      baudRate: 2400,
+      testName: "Test candidate clear (0C)",
+      testId: "candidate_clear_0c",
+      bytesHex: "0C",
+      ok: true,
+      error: null,
+    })
+  })
+
+  it("does not send candidate clear when the display is disconnected", async () => {
+    const storage = memoryStorage()
+    const result = await writeCustomerDisplayDiagnosticTest("candidate_clear_0c", { storage })
+    expect(result.ok).toBe(false)
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+    expect(getCustomerDisplayDiagnosticWriteCount()).toBe(0)
+  })
+
+  it("does not add 0C to connect or sale auto-write paths", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+    setAutomaticCustomerDisplaySaleWritesEnabled(false)
+    await writeCustomerDisplayAmount(12)
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+    expect(
+      resolveCustomerDisplayIntent({
+        status: "connected",
+        cartCount: 1,
+        runningTotal: 12,
+        checkoutOpen: true,
+        saleSuccess: null,
+        autoUpdatesAllowed: false,
+      })
+    ).toEqual({ action: "none" })
   })
 
   it("suppresses automatic basket writes while diagnostic mode is on", async () => {
@@ -250,7 +315,9 @@ describe("customer display diagnostic does not touch cash drawer", () => {
       expect(src).not.toMatch(/drawer_kick|openDrawer|pulseCashDrawer|buildCashDrawerKickBytes/i)
       expect(src).not.toMatch(/0x1b\s*,\s*0x70|\\x1b\\x70/)
     }
-    expect(diagnostic).toMatch(/no ESC\/POS/)
+    expect(diagnostic).toMatch(/not a protocol fix/)
+    expect(bar).toMatch(/Test candidate clear \(0C\)/)
+    expect(bar).toMatch(/Unverified for this display/)
     expect(readRepo("app/retail/lib/printRetailSaleReceiptBrowser.ts")).toContain(
       "export const RETAIL_FINZA_DRAWER_KICK_ENABLED = false"
     )

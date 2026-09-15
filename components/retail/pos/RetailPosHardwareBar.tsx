@@ -222,13 +222,27 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                               {hardware.lastHexPreview || "—"}
                             </code>
                             <p className="mt-1 text-[10px] text-slate-500">
-                              Pending: {hardware.pendingTest.name} → ASCII{" "}
-                              <span className="font-mono">{JSON.stringify(hardware.pendingTest.ascii)}</span>
+                              Pending: {hardware.pendingTest.name}
+                              {hardware.pendingTest.rawBytes ? (
+                                <>
+                                  {" "}
+                                  → raw{" "}
+                                  <span className="font-mono">{hardware.lastHexPreview || "—"}</span>
+                                </>
+                              ) : (
+                                <>
+                                  {" "}
+                                  → ASCII{" "}
+                                  <span className="font-mono">{JSON.stringify(hardware.pendingTest.ascii)}</span>
+                                </>
+                              )}
                             </p>
                           </div>
 
                           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            {hardware.tests.map((t) => (
+                            {hardware.tests
+                              .filter((t) => t.id !== "candidate_clear_0c")
+                              .map((t) => (
                               <button
                                 key={t.id}
                                 type="button"
@@ -244,6 +258,30 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                                 </span>
                               </button>
                             ))}
+                          </div>
+
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                            <p className="text-[11px] font-semibold text-amber-950">
+                              Unverified for this display. Sends one byte once; the panel may not clear and may show an
+                              unexpected character.
+                            </p>
+                            <p className="mt-1 text-[10px] text-amber-900/80">
+                              Look-alike LED8 docs list <span className="font-mono">0C</span> as clear — not confirmed for
+                              this till. Not a protocol fix. Log “OK” only means the write completed.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={hardware.busy || hardware.status !== "connected" || !hardware.diagnosticMode}
+                              onMouseEnter={() => hardware.previewDiagnosticTest("candidate_clear_0c")}
+                              onFocus={() => hardware.previewDiagnosticTest("candidate_clear_0c")}
+                              onClick={() => void hardware.runDiagnosticTest("candidate_clear_0c")}
+                              className="mt-2 min-h-[52px] w-full rounded-xl border border-amber-400 bg-white px-3 text-left text-xs font-bold text-amber-950 disabled:opacity-50"
+                            >
+                              Test candidate clear (0C)
+                              <span className="mt-0.5 block font-mono text-[10px] font-normal text-slate-600">
+                                hex preview → 0C
+                              </span>
+                            </button>
                           </div>
 
                           {hardware.diagnosticLog.length > 0 ? (
