@@ -78,7 +78,12 @@ export function resolveCustomerDisplayIntent(input: {
   runningTotal: number
   checkoutOpen: boolean
   saleSuccess: CustomerDisplaySaleSuccess
+  /** When true, automatic basket/total/change writes are paused for hardware diagnostics. */
+  diagnosticMode?: boolean
 }): CustomerDisplayIntent {
+  if (input.diagnosticMode) {
+    return { action: "none" }
+  }
   if (!shouldWriteCustomerDisplay(input.status)) {
     return { action: "none" }
   }

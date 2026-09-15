@@ -2331,6 +2331,7 @@ export default function RetailPosPage() {
     runningTotal: cartTotals.total,
     checkoutOpen: showPaymentModal,
     saleSuccess,
+    canUseDiagnostics: userRole === "owner" || userRole === "admin",
   })
 
   const retailMomoCartSnapshot = useMemo((): RetailMomoCartSnapshot => {

@@ -1,18 +1,20 @@
 /**
  * Web Serial helpers for the Retail customer amount display.
- * Serial settings match the physically verified COM port: 9600 8N1, no flow control.
+ * Baud/profile is chosen by the cashier/admin — never hardcode a COM port name.
  */
 
 import { SEGMENTED_AMOUNT_SERIAL } from "@/lib/retail/hardware/customerDisplayProtocol"
 
+export type SerialPortOpenOptions = {
+  baudRate: number
+  dataBits?: 7 | 8
+  stopBits?: 1 | 2
+  parity?: "none" | "even" | "odd"
+  flowControl?: "none" | "hardware"
+}
+
 export type BrowserSerialPortLike = {
-  open: (opts: {
-    baudRate: number
-    dataBits?: 7 | 8
-    stopBits?: 1 | 2
-    parity?: "none" | "even" | "odd"
-    flowControl?: "none" | "hardware"
-  }) => Promise<void>
+  open: (opts: SerialPortOpenOptions) => Promise<void>
   writable: WritableStream<Uint8Array> | null
   close: () => Promise<void>
   getInfo?: () => { usbVendorId?: number; usbProductId?: number }
@@ -54,12 +56,21 @@ export async function listGrantedSerialPorts(): Promise<BrowserSerialPortLike[]>
 }
 
 /**
- * Open a serial port with the segmented-amount 9600 8N1 profile.
+ * Open a serial port with the given 8N1 profile (default: sales profile 9600).
  * Chrome does not expose the Windows COM number; the cashier selects the port in the picker.
  */
-export async function openSerialPort(port: BrowserSerialPortLike): Promise<void> {
+export async function openSerialPort(
+  port: BrowserSerialPortLike,
+  options: SerialPortOpenOptions = SEGMENTED_AMOUNT_SERIAL
+): Promise<void> {
   try {
-    await port.open({ ...SEGMENTED_AMOUNT_SERIAL })
+    await port.open({
+      baudRate: options.baudRate,
+      dataBits: options.dataBits ?? 8,
+      stopBits: options.stopBits ?? 1,
+      parity: options.parity ?? "none",
+      flowControl: options.flowControl ?? "none",
+    })
   } catch (e: unknown) {
     const err = e as { name?: string }
     if (err?.name === "InvalidStateError") {

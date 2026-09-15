@@ -52,7 +52,7 @@ function sampleReceipt(): ReceiptData {
 }
 
 describe("segmented numeric customer display", () => {
-  it("uses the physically verified serial settings", () => {
+  it("uses the sales-default serial settings (9600 8N1) while diagnostics offer other baud rates", () => {
     expect(SEGMENTED_AMOUNT_SERIAL).toEqual({
       baudRate: 9600,
       dataBits: 8,
