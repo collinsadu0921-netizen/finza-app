@@ -1,10 +1,14 @@
 import {
+  CLEAR_THEN_AMOUNT_REQUIRED_PROFILE_ID,
+  canSelectClearThenAmountWriteMode,
   configsAreIsolatedByTerminal,
   customerDisplayTerminalConfigKey,
   defaultCustomerDisplayTerminalConfig,
+  formatVerifiedDisplayNote,
   parseCustomerDisplayTerminalConfig,
   readCustomerDisplayTerminalConfig,
   resolveConnectSerialProfile,
+  resolveCustomerDisplayAmountWriteMode,
   shouldAllowAutomaticCustomerDisplayUpdates,
   writeCustomerDisplayTerminalConfig,
   type CustomerDisplayTerminalIdentity,
@@ -68,6 +72,53 @@ describe("customer display per-terminal config", () => {
     ).toBe(true)
   })
 
+  it("defaults amount write mode to ascii_only and isolates clear-then-amount per till", () => {
+    expect(defaultCustomerDisplayTerminalConfig().amountWriteMode).toBe("ascii_only")
+    expect(CLEAR_THEN_AMOUNT_REQUIRED_PROFILE_ID).toBe("2400")
+    expect(canSelectClearThenAmountWriteMode("2400")).toBe(true)
+    expect(canSelectClearThenAmountWriteMode("9600")).toBe(false)
+
+    const storage = memoryStorage()
+    writeCustomerDisplayTerminalConfig(
+      tillA,
+      {
+        ...defaultCustomerDisplayTerminalConfig(),
+        profileId: "2400",
+        amountWriteMode: "clear_then_amount",
+        physicallyVerified: false,
+        updatedAt: "2026-09-15T12:00:00.000Z",
+      },
+      storage
+    )
+    writeCustomerDisplayTerminalConfig(
+      tillB,
+      {
+        ...defaultCustomerDisplayTerminalConfig(),
+        profileId: "9600",
+        amountWriteMode: "ascii_only",
+        physicallyVerified: true,
+        verifiedAt: "2026-09-15T12:00:00.000Z",
+        verifiedNote: "other till",
+        updatedAt: "2026-09-15T12:00:00.000Z",
+      },
+      storage
+    )
+    expect(resolveCustomerDisplayAmountWriteMode(readCustomerDisplayTerminalConfig(tillA, storage))).toBe(
+      "clear_then_amount"
+    )
+    expect(readCustomerDisplayTerminalConfig(tillA, storage)?.physicallyVerified).toBe(false)
+    expect(resolveCustomerDisplayAmountWriteMode(readCustomerDisplayTerminalConfig(tillB, storage))).toBe(
+      "ascii_only"
+    )
+    expect(
+      resolveCustomerDisplayAmountWriteMode({
+        ...defaultCustomerDisplayTerminalConfig(),
+        profileId: "9600",
+        amountWriteMode: "clear_then_amount",
+      })
+    ).toBe("ascii_only")
+  })
+
   it("persists candidate baud per terminal without sharing across tills", () => {
     const storage = memoryStorage()
     writeCustomerDisplayTerminalConfig(
@@ -77,6 +128,7 @@ describe("customer display per-terminal config", () => {
         physicallyVerified: false,
         verifiedAt: null,
         verifiedNote: null,
+        amountWriteMode: "ascii_only",
         updatedAt: "2026-09-15T12:00:00.000Z",
       },
       storage
@@ -88,6 +140,7 @@ describe("customer display per-terminal config", () => {
         physicallyVerified: true,
         verifiedAt: "2026-09-15T12:00:00.000Z",
         verifiedNote: "other till",
+        amountWriteMode: "ascii_only",
         updatedAt: "2026-09-15T12:00:00.000Z",
       },
       storage
@@ -104,15 +157,23 @@ describe("customer display per-terminal config", () => {
       physicallyVerified: false,
       verifiedAt: null,
       verifiedNote: null,
+      amountWriteMode: "ascii_only",
       updatedAt: "2026-09-15T12:00:00.000Z",
     })
     expect(profile?.baudRate).toBe(2400)
     expect(resolveConnectSerialProfile(null)).toBeNull()
   })
 
-  it("rejects invalid stored payloads", () => {
+  it("rejects invalid stored payloads and defaults missing write mode", () => {
     expect(parseCustomerDisplayTerminalConfig({ profileId: "9999" })).toBeNull()
     expect(parseCustomerDisplayTerminalConfig(null)).toBeNull()
+    expect(parseCustomerDisplayTerminalConfig({ profileId: "2400" })?.amountWriteMode).toBe("ascii_only")
+  })
+
+  it("formats verification notes from write mode without claiming customer-ready", () => {
+    expect(formatVerifiedDisplayNote("2400", "clear_then_amount")).toMatch(/clear\(0C\) then ASCII/)
+    expect(formatVerifiedDisplayNote("2400", "ascii_only")).toMatch(/plain ASCII/)
+    expect(formatVerifiedDisplayNote("9600", "clear_then_amount")).toMatch(/plain ASCII/)
   })
 })
 
@@ -155,6 +216,29 @@ describe("automatic updates gate + diagnostics", () => {
       })
     ).toEqual({ action: "none" })
   })
+
+  it("resets to 0.00 intent after empty cart / non-cash sale when allowed", () => {
+    expect(
+      resolveCustomerDisplayIntent({
+        status: "connected",
+        cartCount: 0,
+        runningTotal: 0,
+        checkoutOpen: false,
+        saleSuccess: null,
+        autoUpdatesAllowed: true,
+      })
+    ).toEqual({ action: "write", amount: 0 })
+    expect(
+      resolveCustomerDisplayIntent({
+        status: "connected",
+        cartCount: 0,
+        runningTotal: 0,
+        checkoutOpen: false,
+        saleSuccess: { cashReceived: 0, changeGiven: 0 },
+        autoUpdatesAllowed: true,
+      })
+    ).toEqual({ action: "write", amount: 0 })
+  })
 })
 
 describe("admin-only diagnostics remain gated in POS wiring", () => {
@@ -165,7 +249,10 @@ describe("admin-only diagnostics remain gated in POS wiring", () => {
     const bar = readFileSync(join(repoRoot, "components/retail/pos/RetailPosHardwareBar.tsx"), "utf8")
     expect(bar).toMatch(/Advanced diagnostics/)
     expect(bar).toMatch(/Mark physically verified/)
+    expect(bar).toMatch(/Staging candidate amount write/)
+    expect(bar).toMatch(/Clear then amount \(0C\)/)
     expect(bar).not.toMatch(/Open drawer/i)
     expect(bar).not.toMatch(/pulseCashDrawer/)
+    expect(bar).not.toMatch(/COM2/i)
   })
 })

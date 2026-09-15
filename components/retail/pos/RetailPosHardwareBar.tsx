@@ -124,6 +124,36 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                     </select>
                   </label>
 
+                  <label className="mt-3 block text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                    Staging candidate amount write (this till)
+                    <select
+                      className="mt-1 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm font-semibold text-slate-900"
+                      value={hardware.amountWriteMode}
+                      disabled={hardware.busy || !hardware.hasTerminalBinding}
+                      onChange={(e) =>
+                        hardware.saveAmountWriteMode(
+                          e.target.value as "ascii_only" | "clear_then_amount"
+                        )
+                      }
+                    >
+                      <option value="ascii_only">Plain ASCII overwrite (default)</option>
+                      <option
+                        value="clear_then_amount"
+                        disabled={!hardware.canSelectClearThenAmount}
+                      >
+                        Clear then amount (0C) — 2400 only
+                      </option>
+                    </select>
+                  </label>
+                  <p className="mt-2 text-[11px] text-slate-600 dark:text-slate-400">
+                    {hardware.amountWriteModeWarning}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
+                    Saving a write mode does not mark verified and does not turn on automatic totals. Use{" "}
+                    <strong>Trial live totals</strong> to exercise 0C→ASCII without verification. Required profile:{" "}
+                    {hardware.clearThenAmountRequiredProfileId}.
+                  </p>
+
                   <p className="mt-2 text-[11px] text-slate-700 dark:text-slate-300">
                     Verification:{" "}
                     {hardware.terminalConfig.physicallyVerified ? (

@@ -9,7 +9,7 @@ import type { CustomerDisplayConnectionStatus } from "@/lib/retail/hardware/cust
 export const LIVE_TRIAL_REQUIRED_PROFILE_ID: CustomerDisplaySerialProfile["id"] = "2400"
 
 export const LIVE_TRIAL_UI_WARNING =
-  "Staging trial only — not customer-ready. While on, each basket/checkout total change sends one unverified 0C clear then one ASCII amount on this till. Off by default; turns off on reload, disconnect, or write failure. Separate from Mark physically verified."
+  "Staging trial only — not customer-ready. While on, each basket/checkout total change sends one unverified 0C clear then one ASCII amount on this till (same sequence as the per-till clear-then-amount candidate). Off by default; turns off on reload, disconnect, or write failure. Separate from Mark physically verified. Does not enable the verified auto-sale gate."
 
 export type LiveTrialStartGateInput = {
   canUseDiagnostics: boolean

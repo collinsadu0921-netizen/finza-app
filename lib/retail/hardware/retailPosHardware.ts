@@ -31,6 +31,7 @@ import {
   type BrowserSerialPortLike,
   type SerialPortOpenOptions,
 } from "@/lib/retail/hardware/webSerialPort"
+import type { CustomerDisplayAmountWriteMode } from "@/lib/retail/hardware/customerDisplayTerminalConfig"
 
 export type RetailHardwareStatus = CustomerDisplayConnectionStatus
 
@@ -61,8 +62,14 @@ let automaticSaleWritesEnabled = false
  * Session-only staging live trial (0C then amount). Not persisted; not verification.
  */
 let liveTrialWritesEnabled = false
-let liveTrialSequence = 0
-let liveTrialQueue: Promise<void> = Promise.resolve()
+/**
+ * How automatic sale writes encode amounts. Defaults ascii_only; hook syncs from per-till config.
+ * clear_then_amount matches the staging live-trial sequence verified on one Windows 7 till.
+ */
+let amountWriteMode: CustomerDisplayAmountWriteMode = "ascii_only"
+/** Shared sequence for clear-then-amount writes (sale path + live trial). */
+let clearThenAmountSequence = 0
+let clearThenAmountQueue: Promise<void> = Promise.resolve()
 
 export function getCustomerDisplayStatus(): RetailHardwareStatus {
   return displaySession?.status ?? "disconnected"
@@ -94,16 +101,30 @@ export function isCustomerDisplayLiveTrialWritesEnabled(): boolean {
 
 export function setCustomerDisplayLiveTrialWritesEnabled(enabled: boolean): void {
   liveTrialWritesEnabled = enabled === true
-  // Invalidate in-flight trial sequences when turning off so stale amounts cannot land later.
-  liveTrialSequence += 1
+  // Invalidate in-flight clear-then-amount sequences when turning off.
+  clearThenAmountSequence += 1
+}
+
+export function getCustomerDisplayAmountWriteMode(): CustomerDisplayAmountWriteMode {
+  return amountWriteMode
+}
+
+export function setCustomerDisplayAmountWriteMode(mode: CustomerDisplayAmountWriteMode): void {
+  amountWriteMode = mode === "clear_then_amount" ? "clear_then_amount" : "ascii_only"
+  clearThenAmountSequence += 1
 }
 
 export function getCustomerDisplayDiagnosticWriteCount(): number {
   return diagnosticWriteCount
 }
 
+export function getCustomerDisplayClearThenAmountSequenceForTests(): number {
+  return clearThenAmountSequence
+}
+
+/** @deprecated Use getCustomerDisplayClearThenAmountSequenceForTests */
 export function getCustomerDisplayLiveTrialSequenceForTests(): number {
-  return liveTrialSequence
+  return clearThenAmountSequence
 }
 
 /** Test helper — resets module session between unit tests. */
@@ -114,8 +135,9 @@ export function __resetCustomerDisplaySessionForTests(): void {
   diagnosticModeEnabled = false
   automaticSaleWritesEnabled = false
   liveTrialWritesEnabled = false
-  liveTrialSequence = 0
-  liveTrialQueue = Promise.resolve()
+  amountWriteMode = "ascii_only"
+  clearThenAmountSequence = 0
+  clearThenAmountQueue = Promise.resolve()
 }
 
 async function enqueueWrite(bytes: Uint8Array, opts?: { allowWhileDiagnostic?: boolean }): Promise<void> {
@@ -236,6 +258,10 @@ export async function writeCustomerDisplayAmount(amount: number): Promise<void> 
     if (diagnosticModeEnabled || displaySession.diagnosticMode) return
     // Second gate: even if a caller skips intent resolution, unverified tills must not write.
     if (!automaticSaleWritesEnabled) return
+    if (amountWriteMode === "clear_then_amount") {
+      await writeClearThenAmountSequenced(amount, { gate: "sale" })
+      return
+    }
     await enqueueWrite(buildSegmentedAmountBytes(amount))
   } catch {
     /* ignore */
@@ -243,27 +269,32 @@ export async function writeCustomerDisplayAmount(amount: number): Promise<void> 
 }
 
 /**
- * Staging live-trial write: one 0C then one ASCII amount (validated formatter).
+ * Shared clear-then-amount writer used by:
+ * - verified / candidate auto-sale path (gate: sale + automaticSaleWritesEnabled)
+ * - staging live trial (gate: liveTrial + liveTrialWritesEnabled)
  * Serialized by sequence so rapid basket changes only leave the latest amount.
- * Does not enable the verified auto-sale latch. Never throws into the sale path.
  */
-export async function writeCustomerDisplayLiveTrialAmount(
-  amount: number
+async function writeClearThenAmountSequenced(
+  amount: number,
+  opts: { gate: "sale" | "liveTrial" }
 ): Promise<{ ok: boolean; error: string | null; superseded?: boolean }> {
-  const seq = ++liveTrialSequence
+  const seq = ++clearThenAmountSequence
   const ascii = formatSegmentedAmount(amount)
   const clearBytes = new Uint8Array([CANDIDATE_CLEAR_BYTE])
   const amountBytes = asciiToDiagnosticBytes(ascii)
 
   const run = async (): Promise<{ ok: boolean; error: string | null; superseded?: boolean }> => {
     try {
-      if (!liveTrialWritesEnabled) {
+      if (opts.gate === "liveTrial" && !liveTrialWritesEnabled) {
+        return { ok: true, error: null, superseded: true }
+      }
+      if (opts.gate === "sale" && !automaticSaleWritesEnabled) {
         return { ok: true, error: null, superseded: true }
       }
       if (diagnosticModeEnabled || displaySession?.diagnosticMode) {
         return { ok: true, error: null, superseded: true }
       }
-      if (seq !== liveTrialSequence) {
+      if (seq !== clearThenAmountSequence) {
         return { ok: true, error: null, superseded: true }
       }
       if (!displaySession || !shouldWriteCustomerDisplay(displaySession.status)) {
@@ -271,7 +302,7 @@ export async function writeCustomerDisplayLiveTrialAmount(
       }
 
       await enqueueWrite(clearBytes)
-      if (seq !== liveTrialSequence) {
+      if (seq !== clearThenAmountSequence) {
         return { ok: true, error: null, superseded: true }
       }
       const afterClear = displaySession
@@ -283,7 +314,7 @@ export async function writeCustomerDisplayLiveTrialAmount(
       }
 
       await enqueueWrite(amountBytes)
-      if (seq !== liveTrialSequence) {
+      if (seq !== clearThenAmountSequence) {
         return { ok: true, error: null, superseded: true }
       }
       const afterAmount = displaySession
@@ -297,17 +328,35 @@ export async function writeCustomerDisplayLiveTrialAmount(
     } catch (e: unknown) {
       return {
         ok: false,
-        error: e instanceof Error ? e.message : "Customer display live-trial write failed.",
+        error: e instanceof Error ? e.message : "Customer display clear-then-amount write failed.",
       }
     }
   }
 
-  const resultPromise = liveTrialQueue.then(run, run)
-  liveTrialQueue = resultPromise.then(
+  const resultPromise = clearThenAmountQueue.then(run, run)
+  clearThenAmountQueue = resultPromise.then(
     () => undefined,
     () => undefined
   )
   return resultPromise
+}
+
+/**
+ * Staging live-trial write: one 0C then one ASCII amount (validated formatter).
+ * Shares the candidate clear-then-amount sequence with the normal sale path.
+ * Does not enable the verified auto-sale latch. Never throws into the sale path.
+ */
+export async function writeCustomerDisplayLiveTrialAmount(
+  amount: number
+): Promise<{ ok: boolean; error: string | null; superseded?: boolean }> {
+  try {
+    return await writeClearThenAmountSequenced(amount, { gate: "liveTrial" })
+  } catch (e: unknown) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Customer display live-trial write failed.",
+    }
+  }
 }
 
 /**

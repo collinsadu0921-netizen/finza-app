@@ -21,11 +21,17 @@ import {
   type CustomerDisplaySaleSuccess,
 } from "@/lib/retail/hardware/customerDisplayProtocol"
 import {
+  CLEAR_THEN_AMOUNT_CANDIDATE_WARNING,
+  CLEAR_THEN_AMOUNT_REQUIRED_PROFILE_ID,
+  canSelectClearThenAmountWriteMode,
   defaultCustomerDisplayTerminalConfig,
+  formatVerifiedDisplayNote,
   readCustomerDisplayTerminalConfig,
   resolveConnectSerialProfile,
+  resolveCustomerDisplayAmountWriteMode,
   shouldAllowAutomaticCustomerDisplayUpdates,
   writeCustomerDisplayTerminalConfig,
+  type CustomerDisplayAmountWriteMode,
   type CustomerDisplayTerminalConfig,
   type CustomerDisplayTerminalIdentity,
 } from "@/lib/retail/hardware/customerDisplayTerminalConfig"
@@ -44,6 +50,7 @@ import {
   listCustomerDisplayDiagnosticLog,
   reconnectCustomerDisplayWithProfile,
   setAutomaticCustomerDisplaySaleWritesEnabled,
+  setCustomerDisplayAmountWriteMode,
   setCustomerDisplayDiagnosticMode,
   setCustomerDisplayLiveTrialWritesEnabled,
   writeCustomerDisplayAmount,
@@ -124,6 +131,7 @@ export function useRetailPosHardware(opts: {
   }, [])
 
   const autoUpdatesAllowed = shouldAllowAutomaticCustomerDisplayUpdates(terminalConfig)
+  const amountWriteMode = resolveCustomerDisplayAmountWriteMode(terminalConfig)
 
   useEffect(() => {
     setAutomaticCustomerDisplaySaleWritesEnabled(autoUpdatesAllowed)
@@ -131,6 +139,13 @@ export function useRetailPosHardware(opts: {
       setAutomaticCustomerDisplaySaleWritesEnabled(false)
     }
   }, [autoUpdatesAllowed])
+
+  useEffect(() => {
+    setCustomerDisplayAmountWriteMode(amountWriteMode)
+    return () => {
+      setCustomerDisplayAmountWriteMode("ascii_only")
+    }
+  }, [amountWriteMode])
 
   useEffect(() => {
     setCustomerDisplayLiveTrialWritesEnabled(liveTrialActive)
@@ -311,9 +326,15 @@ export function useRetailPosHardware(opts: {
   const saveCandidateProfile = useCallback(
     (nextId: CustomerDisplaySerialProfile["id"]) => {
       if (!canUseDiagnostics) return
+      const nextMode: CustomerDisplayAmountWriteMode = canSelectClearThenAmountWriteMode(nextId)
+        ? terminalConfig.amountWriteMode === "clear_then_amount"
+          ? "clear_then_amount"
+          : "ascii_only"
+        : "ascii_only"
       const next: CustomerDisplayTerminalConfig = {
         ...terminalConfig,
         profileId: nextId,
+        amountWriteMode: nextMode,
         // Changing baud clears physical verification — other tills / profiles must re-verify.
         physicallyVerified: false,
         verifiedAt: null,
@@ -326,14 +347,49 @@ export function useRetailPosHardware(opts: {
     [canUseDiagnostics, terminalConfig, persistConfig]
   )
 
+  const saveAmountWriteMode = useCallback(
+    (mode: CustomerDisplayAmountWriteMode) => {
+      if (!canUseDiagnostics) return
+      if (mode === "clear_then_amount" && !canSelectClearThenAmountWriteMode(profileId)) {
+        setConfigMessage("Clear-then-amount candidate requires the 2400 baud profile on this till.")
+        return
+      }
+      const next: CustomerDisplayTerminalConfig = {
+        ...terminalConfig,
+        profileId,
+        amountWriteMode: mode,
+        // Changing write sequence clears verification — must re-verify the new path.
+        physicallyVerified: false,
+        verifiedAt: null,
+        verifiedNote: null,
+        updatedAt: new Date().toISOString(),
+      }
+      if (persistConfig(next)) {
+        setConfigMessage(
+          mode === "clear_then_amount"
+            ? "Saved staging candidate: clear then amount (0C). Automatic totals stay off until this till is verified."
+            : "Saved plain ASCII amount writes for this till. Automatic totals stay off until verified."
+        )
+      }
+    },
+    [canUseDiagnostics, terminalConfig, profileId, persistConfig]
+  )
+
   const markPhysicallyVerified = useCallback(() => {
     if (!canUseDiagnostics) return
     const next: CustomerDisplayTerminalConfig = {
       ...terminalConfig,
       profileId,
+      amountWriteMode: resolveCustomerDisplayAmountWriteMode({
+        ...terminalConfig,
+        profileId,
+      }),
       physicallyVerified: true,
       verifiedAt: new Date().toISOString(),
-      verifiedNote: `${getCustomerDisplaySerialProfile(profileId).baudRate} baud · 8N1 · plain ASCII amounts (this till only)`,
+      verifiedNote: formatVerifiedDisplayNote(
+        profileId,
+        resolveCustomerDisplayAmountWriteMode({ ...terminalConfig, profileId })
+      ),
       updatedAt: new Date().toISOString(),
     }
     if (persistConfig(next)) {
@@ -550,6 +606,11 @@ export function useRetailPosHardware(opts: {
     baudRate,
     terminalConfig,
     autoUpdatesAllowed,
+    amountWriteMode,
+    amountWriteModeWarning: CLEAR_THEN_AMOUNT_CANDIDATE_WARNING,
+    clearThenAmountRequiredProfileId: CLEAR_THEN_AMOUNT_REQUIRED_PROFILE_ID,
+    canSelectClearThenAmount: canSelectClearThenAmountWriteMode(profileId),
+    saveAmountWriteMode,
     hasTerminalBinding,
     markPhysicallyVerified,
     clearPhysicalVerification,

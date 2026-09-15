@@ -23,6 +23,7 @@ import {
   disconnectCustomerDisplay,
   isCustomerDisplayLiveTrialWritesEnabled,
   setAutomaticCustomerDisplaySaleWritesEnabled,
+  setCustomerDisplayAmountWriteMode,
   setCustomerDisplayDiagnosticMode,
   setCustomerDisplayLiveTrialWritesEnabled,
   writeCustomerDisplayAmount,
@@ -230,5 +231,124 @@ describe("customer display live trial writes", () => {
     const result = await writeCustomerDisplayLiveTrialAmount(12)
     expect(result.superseded).toBe(true)
     expect(writeSerialBytesMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("candidate normal path clear-then-amount (verified latch)", () => {
+  beforeEach(() => {
+    __resetCustomerDisplaySessionForTests()
+    listGrantedSerialPortsMock.mockReset()
+    openSerialPortMock.mockReset()
+    writeSerialBytesMock.mockReset()
+    closeSerialPortMock.mockReset()
+    listGrantedSerialPortsMock.mockResolvedValue([fakePort() as never])
+    openSerialPortMock.mockResolvedValue(undefined)
+    writeSerialBytesMock.mockResolvedValue(undefined)
+    closeSerialPortMock.mockResolvedValue(undefined)
+  })
+
+  it("sends exact 0C then ASCII when sale latch is on and write mode is clear_then_amount", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setCustomerDisplayAmountWriteMode("clear_then_amount")
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+    await writeCustomerDisplayAmount(8)
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(2)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x0c])
+    expect(Array.from(writeSerialBytesMock.mock.calls[1][1])).toEqual([0x38, 0x2e, 0x30, 0x30])
+  })
+
+  it("keeps unverified gate closed even when clear_then_amount mode is selected", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setCustomerDisplayAmountWriteMode("clear_then_amount")
+    setAutomaticCustomerDisplaySaleWritesEnabled(false)
+    await writeCustomerDisplayAmount(24)
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+  })
+
+  it("uses plain ASCII only when write mode is ascii_only", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setCustomerDisplayAmountWriteMode("ascii_only")
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+    await writeCustomerDisplayAmount(16)
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(1)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x31, 0x36, 0x2e, 0x30, 0x30])
+  })
+
+  it("suppresses candidate sale writes in diagnostic mode", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: true,
+    })
+    setCustomerDisplayAmountWriteMode("clear_then_amount")
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+    await writeCustomerDisplayAmount(8)
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+  })
+
+  it("resets with 0C then 0.00 when writing amount 0 on the candidate path", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setCustomerDisplayAmountWriteMode("clear_then_amount")
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+    await writeCustomerDisplayAmount(0)
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(2)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x0c])
+    expect(Array.from(writeSerialBytesMock.mock.calls[1][1])).toEqual([0x30, 0x2e, 0x30, 0x30])
+  })
+
+  it("never throws into the sale path on write failure or reconnect-needed error", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setCustomerDisplayAmountWriteMode("clear_then_amount")
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+    writeSerialBytesMock.mockRejectedValueOnce(new Error("disconnect"))
+    await expect(writeCustomerDisplayAmount(12)).resolves.toBeUndefined()
+    await disconnectCustomerDisplay()
+    await expect(writeCustomerDisplayAmount(12)).resolves.toBeUndefined()
+  })
+
+  it("orders rapid candidate sale writes so the latest amount lands last", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setCustomerDisplayAmountWriteMode("clear_then_amount")
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+
+    let releaseFirstClear: (() => void) | undefined
+    const firstClearGate = new Promise<void>((resolve) => {
+      releaseFirstClear = resolve
+    })
+    let clearCount = 0
+    writeSerialBytesMock.mockImplementation(async (_port, bytes) => {
+      const list = Array.from(bytes)
+      if (list.length === 1 && list[0] === 0x0c) {
+        clearCount += 1
+        if (clearCount === 1) await firstClearGate
+      }
+    })
+
+    const first = writeCustomerDisplayAmount(8)
+    const second = writeCustomerDisplayAmount(24)
+    releaseFirstClear?.()
+    await Promise.all([first, second])
+
+    const amountWrites = writeSerialBytesMock.mock.calls
+      .map((call) => Array.from(call[1] as Uint8Array))
+      .filter((bytes) => !(bytes.length === 1 && bytes[0] === 0x0c))
+    expect(amountWrites[amountWrites.length - 1]).toEqual([0x32, 0x34, 0x2e, 0x30, 0x30])
   })
 })
