@@ -36,6 +36,7 @@ import {
   isCustomerDisplayDiagnosticMode,
   listCustomerDisplayDiagnosticLog,
   reconnectCustomerDisplayWithProfile,
+  setAutomaticCustomerDisplaySaleWritesEnabled,
   setCustomerDisplayDiagnosticMode,
   writeCustomerDisplayAmount,
   writeCustomerDisplayDiagnosticTest,
@@ -108,6 +109,13 @@ export function useRetailPosHardware(opts: {
   }, [])
 
   const autoUpdatesAllowed = shouldAllowAutomaticCustomerDisplayUpdates(terminalConfig)
+
+  useEffect(() => {
+    setAutomaticCustomerDisplaySaleWritesEnabled(autoUpdatesAllowed)
+    return () => {
+      setAutomaticCustomerDisplaySaleWritesEnabled(false)
+    }
+  }, [autoUpdatesAllowed])
 
   useEffect(() => {
     const intent = resolveCustomerDisplayIntent({

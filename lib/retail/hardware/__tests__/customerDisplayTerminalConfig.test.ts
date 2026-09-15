@@ -130,6 +130,18 @@ describe("automatic updates gate + diagnostics", () => {
     ).toEqual({ action: "none" })
   })
 
+  it("fails closed when autoUpdatesAllowed is omitted", () => {
+    expect(
+      resolveCustomerDisplayIntent({
+        status: "connected",
+        cartCount: 2,
+        runningTotal: 12,
+        checkoutOpen: true,
+        saleSuccess: null,
+      })
+    ).toEqual({ action: "none" })
+  })
+
   it("still suppresses in diagnostic mode even if verified", () => {
     expect(
       resolveCustomerDisplayIntent({

@@ -106,6 +106,7 @@ describe("segmented numeric customer display", () => {
         runningTotal: 12,
         checkoutOpen: false,
         saleSuccess: null,
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "write", amount: 12 })
     expect(
@@ -115,6 +116,7 @@ describe("segmented numeric customer display", () => {
         runningTotal: 435,
         checkoutOpen: true,
         saleSuccess: null,
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "write", amount: 435 })
   })
@@ -127,6 +129,7 @@ describe("segmented numeric customer display", () => {
         runningTotal: 0,
         checkoutOpen: false,
         saleSuccess: null,
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "write", amount: 0 })
     expect(
@@ -136,6 +139,7 @@ describe("segmented numeric customer display", () => {
         runningTotal: 0,
         checkoutOpen: false,
         saleSuccess: { cashReceived: 0, changeGiven: 0 },
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "write", amount: 0 })
   })
@@ -148,8 +152,26 @@ describe("segmented numeric customer display", () => {
         runningTotal: 0,
         checkoutOpen: false,
         saleSuccess: { cashReceived: 20, changeGiven: 8.25 },
+        autoUpdatesAllowed: true,
       })
     ).toMatchObject({ action: "writeThenIdle", amount: 8.25 })
+  })
+
+  it("fails closed: omits automatic writes unless autoUpdatesAllowed is explicitly true", () => {
+    const base = {
+      status: "connected" as const,
+      cartCount: 2,
+      runningTotal: 12,
+      checkoutOpen: true,
+      saleSuccess: null,
+    }
+    expect(resolveCustomerDisplayIntent(base)).toEqual({ action: "none" })
+    expect(resolveCustomerDisplayIntent({ ...base, autoUpdatesAllowed: false })).toEqual({
+      action: "none",
+    })
+    expect(resolveCustomerDisplayIntent({ ...base, autoUpdatesAllowed: undefined })).toEqual({
+      action: "none",
+    })
   })
 
   it("does not write when the display is disconnected or in error", () => {
@@ -163,6 +185,7 @@ describe("segmented numeric customer display", () => {
         runningTotal: 12,
         checkoutOpen: true,
         saleSuccess: { cashReceived: 20, changeGiven: 8 },
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "none" })
     expect(
@@ -172,6 +195,7 @@ describe("segmented numeric customer display", () => {
         runningTotal: 12,
         checkoutOpen: true,
         saleSuccess: null,
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "none" })
   })

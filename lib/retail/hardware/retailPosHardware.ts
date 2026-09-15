@@ -48,6 +48,11 @@ let diagnosticWriteCount = 0
  * while connected.
  */
 let diagnosticModeEnabled = false
+/**
+ * Fail-closed latch for automatic sale amounts. Defaults off; the POS hook enables
+ * it only after this till’s profile is physicallyVerified.
+ */
+let automaticSaleWritesEnabled = false
 
 export function getCustomerDisplayStatus(): RetailHardwareStatus {
   return displaySession?.status ?? "disconnected"
@@ -65,6 +70,14 @@ export function isCustomerDisplayDiagnosticMode(): boolean {
   return diagnosticModeEnabled === true
 }
 
+export function areAutomaticCustomerDisplaySaleWritesEnabled(): boolean {
+  return automaticSaleWritesEnabled === true
+}
+
+export function setAutomaticCustomerDisplaySaleWritesEnabled(enabled: boolean): void {
+  automaticSaleWritesEnabled = enabled === true
+}
+
 export function getCustomerDisplayDiagnosticWriteCount(): number {
   return diagnosticWriteCount
 }
@@ -75,6 +88,7 @@ export function __resetCustomerDisplaySessionForTests(): void {
   writeQueue = Promise.resolve()
   diagnosticWriteCount = 0
   diagnosticModeEnabled = false
+  automaticSaleWritesEnabled = false
 }
 
 async function enqueueWrite(bytes: Uint8Array, opts?: { allowWhileDiagnostic?: boolean }): Promise<void> {
@@ -193,6 +207,8 @@ export async function writeCustomerDisplayAmount(amount: number): Promise<void> 
   try {
     if (!displaySession || !shouldWriteCustomerDisplay(displaySession.status)) return
     if (diagnosticModeEnabled || displaySession.diagnosticMode) return
+    // Second gate: even if a caller skips intent resolution, unverified tills must not write.
+    if (!automaticSaleWritesEnabled) return
     await enqueueWrite(buildSegmentedAmountBytes(amount))
   } catch {
     /* ignore */

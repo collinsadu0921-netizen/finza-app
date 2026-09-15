@@ -81,15 +81,15 @@ export function resolveCustomerDisplayIntent(input: {
   /** When true, automatic basket/total/change writes are paused for hardware diagnostics. */
   diagnosticMode?: boolean
   /**
-   * When false, automatic sale writes are suppressed because this terminal’s display
-   * profile has not been physically verified. Connect/Disconnect and diagnostics still work.
+   * Automatic sale writes require an explicit allow. Omitted/undefined must fail closed
+   * so an unverified till never streams basket totals to the rear display.
    */
   autoUpdatesAllowed?: boolean
 }): CustomerDisplayIntent {
   if (input.diagnosticMode) {
     return { action: "none" }
   }
-  if (input.autoUpdatesAllowed === false) {
+  if (input.autoUpdatesAllowed !== true) {
     return { action: "none" }
   }
   if (!shouldWriteCustomerDisplay(input.status)) {

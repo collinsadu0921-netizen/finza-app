@@ -27,6 +27,7 @@ import {
   connectCustomerDisplay,
   getCustomerDisplayDiagnosticWriteCount,
   isCustomerDisplayDiagnosticMode,
+  setAutomaticCustomerDisplaySaleWritesEnabled,
   setCustomerDisplayDiagnosticMode,
   writeCustomerDisplayAmount,
   writeCustomerDisplayDiagnosticTest,
@@ -168,6 +169,7 @@ describe("customer display diagnostic write behaviour", () => {
         checkoutOpen: true,
         saleSuccess: null,
         diagnosticMode: true,
+        autoUpdatesAllowed: true,
       })
     ).toEqual({ action: "none" })
 
@@ -176,11 +178,26 @@ describe("customer display diagnostic write behaviour", () => {
       diagnosticMode: true,
     })
     expect(isCustomerDisplayDiagnosticMode()).toBe(true)
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
     await writeCustomerDisplayAmount(99.5)
     expect(writeSerialBytesMock).not.toHaveBeenCalled()
     await setCustomerDisplayDiagnosticMode(false)
     await writeCustomerDisplayAmount(12)
     expect(writeSerialBytesMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("blocks sale amount writes on unverified tills even when connected", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: false,
+    })
+    setAutomaticCustomerDisplaySaleWritesEnabled(false)
+    await writeCustomerDisplayAmount(12)
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+    setAutomaticCustomerDisplaySaleWritesEnabled(true)
+    await writeCustomerDisplayAmount(12)
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(1)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x31, 0x32, 0x2e, 0x30, 0x30])
   })
 
   it("never blocks sales when the display fails", async () => {
