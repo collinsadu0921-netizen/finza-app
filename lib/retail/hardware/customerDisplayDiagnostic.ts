@@ -1,9 +1,11 @@
 /**
  * Customer Display Diagnostic helpers (Retail POS pole LED).
  * Default probes are plain ASCII digits/spaces only.
- * One optional candidate-clear probe (`0C`) exists for look-alike LED8 research —
- * it is unverified for any specific till and is not a protocol fix.
+ * Optional unverified candidate probes (`0C` clear; clear-then-amount) exist for look-alike
+ * LED8 research on specific tills — they are not a protocol fix and must not drive sale writes.
  */
+
+import { SEGMENTED_AMOUNT_MAX_CHARS } from "@/lib/retail/hardware/customerDisplayProtocol"
 
 export type CustomerDisplaySerialProfile = {
   id: "2400" | "4800" | "9600" | "19200"
@@ -64,6 +66,74 @@ export type CustomerDisplayDiagnosticTestId =
   | "spaces8_then_0_00"
   | "ascii_eight_zeroes"
   | "candidate_clear_0c"
+  /** Logged for the amount half of clear-then-amount only — not a standalone button payload. */
+  | "candidate_amount_ascii"
+
+export const CANDIDATE_CLEAR_BYTE = 0x0c as const
+
+export const CANDIDATE_CLEAR_THEN_AMOUNT_WARNING =
+  "Unverified candidate for this till. Sends 0C once, then the amount ASCII once. Not a protocol fix; may fail or misalign on other displays."
+
+/**
+ * Accept digits and at most one `.`, max 8 characters (segment width).
+ * Does not pad, round, or invent decimals — tester supplies the exact ASCII to send.
+ */
+export function parseDiagnosticAmountAscii(
+  input: string
+): { ok: true; ascii: string } | { ok: false; error: string } {
+  const ascii = input.trim()
+  if (!ascii) {
+    return { ok: false, error: "Enter a numeric amount (digits and optional decimal point)." }
+  }
+  if (ascii.length > SEGMENTED_AMOUNT_MAX_CHARS) {
+    return { ok: false, error: `Amount must be at most ${SEGMENTED_AMOUNT_MAX_CHARS} characters.` }
+  }
+  if (!/^[0-9.]+$/.test(ascii)) {
+    return { ok: false, error: "Only digits and a single decimal point are allowed." }
+  }
+  if ((ascii.match(/\./g) ?? []).length > 1) {
+    return { ok: false, error: "Only one decimal point is allowed." }
+  }
+  if (!/[0-9]/.test(ascii)) {
+    return { ok: false, error: "Amount must include at least one digit." }
+  }
+  return { ok: true, ascii }
+}
+
+export function buildCandidateClearThenAmountPreview(amountInput: string): {
+  valid: boolean
+  error: string | null
+  ascii: string | null
+  clearHex: string
+  amountHex: string | null
+  clearBytes: Uint8Array
+  amountBytes: Uint8Array | null
+} {
+  const clearBytes = new Uint8Array([CANDIDATE_CLEAR_BYTE])
+  const clearHex = bytesToHexPreview(clearBytes)
+  const parsed = parseDiagnosticAmountAscii(amountInput)
+  if (!parsed.ok) {
+    return {
+      valid: false,
+      error: parsed.error,
+      ascii: null,
+      clearHex,
+      amountHex: null,
+      clearBytes,
+      amountBytes: null,
+    }
+  }
+  const amountBytes = asciiToDiagnosticBytes(parsed.ascii)
+  return {
+    valid: true,
+    error: null,
+    ascii: parsed.ascii,
+    clearHex,
+    amountHex: bytesToHexPreview(amountBytes),
+    clearBytes,
+    amountBytes,
+  }
+}
 
 export type CustomerDisplayDiagnosticTest = {
   id: CustomerDisplayDiagnosticTestId

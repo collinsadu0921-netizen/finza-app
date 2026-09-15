@@ -8,10 +8,12 @@ import {
 } from "@/lib/retail/hardware/customerDisplayProtocol"
 import {
   appendCustomerDisplayDiagnosticLog,
+  buildCandidateClearThenAmountPreview,
   buildCustomerDisplayDiagnosticBytes,
   bytesToHexPreview,
   getCustomerDisplayDiagnosticTest,
   getCustomerDisplaySerialProfile,
+  parseDiagnosticAmountAscii,
   readCustomerDisplayDiagnosticLogFromStorage,
   writeCustomerDisplayDiagnosticLogToStorage,
   type CustomerDisplayDiagnosticLogEntry,
@@ -225,16 +227,71 @@ export async function writeCustomerDisplayDiagnosticTest(
 ): Promise<{ ok: boolean; bytesHex: string; error: string | null }> {
   const test = getCustomerDisplayDiagnosticTest(testId)
   const bytes = buildCustomerDisplayDiagnosticBytes(testId)
-  const bytesHex = bytesToHexPreview(bytes)
+  return writeDiagnosticBytesLogged({
+    testId,
+    testName: test.name,
+    bytes,
+    storage: opts?.storage,
+  })
+}
+
+/**
+ * Unverified candidate sequence for tills where a prior 0C blanked the panel:
+ * write 0C once, log it; if that write fails, stop; otherwise write amount ASCII once and log it.
+ * Not used by connect, disconnect, basket, checkout, or sale flows.
+ */
+export async function writeCustomerDisplayDiagnosticClearThenAmount(
+  amountInput: string,
+  opts?: { storage?: Pick<Storage, "getItem" | "setItem"> | null }
+): Promise<{
+  clear: { ok: boolean; bytesHex: string; error: string | null }
+  amount: { ok: boolean; bytesHex: string; error: string | null } | null
+}> {
+  const preview = buildCandidateClearThenAmountPreview(amountInput)
+  if (!preview.valid || !preview.ascii || !preview.amountBytes) {
+    const clear = {
+      ok: false,
+      bytesHex: preview.clearHex,
+      error: preview.error || "Invalid amount.",
+    }
+    return { clear, amount: null }
+  }
+
+  const clear = await writeDiagnosticBytesLogged({
+    testId: "candidate_clear_0c",
+    testName: "Test candidate clear (0C)",
+    bytes: preview.clearBytes,
+    storage: opts?.storage,
+  })
+  if (!clear.ok) {
+    return { clear, amount: null }
+  }
+
+  const amount = await writeDiagnosticBytesLogged({
+    testId: "candidate_amount_ascii",
+    testName: `Candidate clear-then-amount ASCII ${preview.ascii}`,
+    bytes: preview.amountBytes,
+    storage: opts?.storage,
+  })
+  return { clear, amount }
+}
+
+async function writeDiagnosticBytesLogged(opts: {
+  testId: CustomerDisplayDiagnosticTestId
+  testName: string
+  bytes: Uint8Array
+  storage?: Pick<Storage, "getItem" | "setItem"> | null
+}): Promise<{ ok: boolean; bytesHex: string; error: string | null }> {
+  const bytesHex = bytesToHexPreview(opts.bytes)
   const baudRate = displaySession?.baudRate ?? getCustomerDisplaySerialProfile("2400").baudRate
   const storage =
-    opts?.storage ?? (typeof localStorage !== "undefined" ? localStorage : null)
+    opts.storage ?? (typeof localStorage !== "undefined" ? localStorage : null)
 
   const record = (ok: boolean, error: string | null) => {
     const entry: CustomerDisplayDiagnosticLogEntry = {
       baudRate,
-      testName: test.name,
-      testId,
+      testName: opts.testName,
+      testId: opts.testId,
       bytesHex,
       timestamp: new Date().toISOString(),
       ok,
@@ -253,7 +310,7 @@ export async function writeCustomerDisplayDiagnosticTest(
       return record(false, "Customer display is not connected.")
     }
     diagnosticWriteCount += 1
-    await enqueueWrite(bytes, { allowWhileDiagnostic: true })
+    await enqueueWrite(opts.bytes, { allowWhileDiagnostic: true })
     if (displaySession?.status === "error") {
       return record(false, displaySession.lastError || "Customer display write failed.")
     }

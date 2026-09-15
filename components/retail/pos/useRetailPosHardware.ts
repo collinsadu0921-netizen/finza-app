@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  CANDIDATE_CLEAR_THEN_AMOUNT_WARNING,
   CUSTOMER_DISPLAY_DIAGNOSTIC_DEFAULT_PROFILE_ID,
   CUSTOMER_DISPLAY_DIAGNOSTIC_POWER_CYCLE_HINT,
   CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS,
   CUSTOMER_DISPLAY_SERIAL_PROFILES,
   bytesToHexPreview,
+  buildCandidateClearThenAmountPreview,
   buildCustomerDisplayDiagnosticBytes,
   getCustomerDisplayDiagnosticTest,
   getCustomerDisplaySerialProfile,
@@ -39,6 +41,7 @@ import {
   setAutomaticCustomerDisplaySaleWritesEnabled,
   setCustomerDisplayDiagnosticMode,
   writeCustomerDisplayAmount,
+  writeCustomerDisplayDiagnosticClearThenAmount,
   writeCustomerDisplayDiagnosticTest,
   type RetailHardwareStatus,
 } from "@/lib/retail/hardware/retailPosHardware"
@@ -70,6 +73,8 @@ export function useRetailPosHardware(opts: {
   )
   const [pendingTestId, setPendingTestId] = useState<CustomerDisplayDiagnosticTestId>("ascii_0_00")
   const [lastHexPreview, setLastHexPreview] = useState("")
+  const [sequenceAmountInput, setSequenceAmountInput] = useState("1234.56")
+  const [sequenceMessage, setSequenceMessage] = useState("")
   const [diagnosticLog, setDiagnosticLog] = useState<CustomerDisplayDiagnosticLogEntry[]>([])
   const [baudRate, setBaudRate] = useState<number | null>(null)
   const [configMessage, setConfigMessage] = useState("")
@@ -327,6 +332,46 @@ export function useRetailPosHardware(opts: {
     [canUseDiagnostics, diagnosticMode, previewDiagnosticTest, refresh]
   )
 
+  const clearThenAmountPreview = useMemo(
+    () => buildCandidateClearThenAmountPreview(sequenceAmountInput),
+    [sequenceAmountInput]
+  )
+
+  const runClearThenAmount = useCallback(async () => {
+    if (!canUseDiagnostics || !diagnosticMode) return
+    if (getCustomerDisplayStatus() !== "connected") {
+      setSequenceMessage("Connect the customer display before running this sequence.")
+      return
+    }
+    const preview = buildCandidateClearThenAmountPreview(sequenceAmountInput)
+    if (!preview.valid) {
+      setSequenceMessage(preview.error || "Invalid amount.")
+      return
+    }
+    setLastHexPreview(`${preview.clearHex} → ${preview.amountHex}`)
+    setSequenceMessage("")
+    setBusy(true)
+    try {
+      const result = await writeCustomerDisplayDiagnosticClearThenAmount(preview.ascii!)
+      if (!result.clear.ok) {
+        setSequenceMessage(
+          `Clear write failed (${result.clear.error || "unknown"}). Amount was not sent. Log “OK” means write completed only.`
+        )
+      } else if (!result.amount?.ok) {
+        setSequenceMessage(
+          `Clear wrote OK; amount write failed (${result.amount?.error || "unknown"}). Log “OK” means write completed only.`
+        )
+      } else {
+        setSequenceMessage(
+          `Sequence wrote clear ${result.clear.bytesHex} then amount ${result.amount.bytesHex}. “OK” means writes completed — not that the panel rendered correctly.`
+        )
+      }
+    } finally {
+      refresh()
+      setBusy(false)
+    }
+  }, [canUseDiagnostics, diagnosticMode, sequenceAmountInput, refresh])
+
   const cashierStatusLabel = useMemo(() => {
     if (status === "connected") return "Customer display: Connected"
     if (status === "error") return "Customer display: Error"
@@ -376,6 +421,12 @@ export function useRetailPosHardware(opts: {
     lastHexPreview,
     previewDiagnosticTest,
     runDiagnosticTest,
+    sequenceAmountInput,
+    setSequenceAmountInput,
+    clearThenAmountPreview,
+    runClearThenAmount,
+    sequenceMessage,
+    clearThenAmountWarning: CANDIDATE_CLEAR_THEN_AMOUNT_WARNING,
     diagnosticLog,
     baudRate,
     terminalConfig,

@@ -284,6 +284,54 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                             </button>
                           </div>
 
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                            <p className="text-[11px] font-extrabold text-amber-950">
+                              Candidate: clear once, then amount once
+                            </p>
+                            <p className="mt-1 text-[11px] font-semibold text-amber-950">
+                              {hardware.clearThenAmountWarning}
+                            </p>
+                            <label className="mt-2 block text-[11px] font-bold text-amber-950">
+                              Amount ASCII (max 8; digits and optional .)
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={hardware.sequenceAmountInput}
+                                disabled={hardware.busy}
+                                onChange={(e) => hardware.setSequenceAmountInput(e.target.value)}
+                                className="mt-1 min-h-[44px] w-full rounded-lg border border-amber-300 bg-white px-2 py-2 font-mono text-sm text-slate-900"
+                                placeholder="1234.56"
+                                maxLength={8}
+                              />
+                            </label>
+                            <p className="mt-2 text-[10px] font-bold text-amber-950">Outgoing sequence (hex) before send</p>
+                            <code className="mt-0.5 block break-all rounded-lg border border-amber-200 bg-white px-2 py-2 font-mono text-[11px] text-slate-800">
+                              {hardware.clearThenAmountPreview.clearHex}
+                              {hardware.clearThenAmountPreview.amountHex
+                                ? ` → ${hardware.clearThenAmountPreview.amountHex}`
+                                : " → (enter a valid amount)"}
+                            </code>
+                            {!hardware.clearThenAmountPreview.valid && hardware.sequenceAmountInput.trim() ? (
+                              <p className="mt-1 text-[10px] text-red-700">{hardware.clearThenAmountPreview.error}</p>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={
+                                hardware.busy ||
+                                hardware.status !== "connected" ||
+                                !hardware.diagnosticMode ||
+                                !hardware.clearThenAmountPreview.valid
+                              }
+                              onClick={() => void hardware.runClearThenAmount()}
+                              className="mt-2 min-h-[52px] w-full rounded-xl border border-amber-400 bg-white px-3 text-sm font-bold text-amber-950 disabled:opacity-50"
+                            >
+                              Send clear then amount (once each)
+                            </button>
+                            {hardware.sequenceMessage ? (
+                              <p className="mt-2 text-[10px] font-semibold text-slate-700">{hardware.sequenceMessage}</p>
+                            ) : null}
+                          </div>
+
                           {hardware.diagnosticLog.length > 0 ? (
                             <div>
                               <p className="mb-1 text-[11px] font-bold text-slate-800">Local diagnostic log</p>

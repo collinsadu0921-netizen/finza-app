@@ -16,9 +16,11 @@ import {
   CUSTOMER_DISPLAY_SERIAL_PROFILES,
   appendCustomerDisplayDiagnosticLog,
   asciiToDiagnosticBytes,
+  buildCandidateClearThenAmountPreview,
   buildCustomerDisplayDiagnosticBytes,
   bytesToHexPreview,
   getCustomerDisplaySerialProfile,
+  parseDiagnosticAmountAscii,
   shouldSuppressAutoCustomerDisplayWrites,
 } from "@/lib/retail/hardware/customerDisplayDiagnostic"
 import { resolveCustomerDisplayIntent } from "@/lib/retail/hardware/customerDisplayProtocol"
@@ -30,6 +32,7 @@ import {
   setAutomaticCustomerDisplaySaleWritesEnabled,
   setCustomerDisplayDiagnosticMode,
   writeCustomerDisplayAmount,
+  writeCustomerDisplayDiagnosticClearThenAmount,
   writeCustomerDisplayDiagnosticTest,
 } from "@/lib/retail/hardware/retailPosHardware"
 import {
@@ -100,6 +103,20 @@ describe("customer display diagnostic payloads", () => {
     const probe = CUSTOMER_DISPLAY_DIAGNOSTIC_TESTS.find((t) => t.id === "candidate_clear_0c")
     expect(probe?.name).toBe("Test candidate clear (0C)")
     expect(probe?.warning).toMatch(/Unverified for this display/)
+  })
+
+  it("validates clear-then-amount ASCII and previews 0C then amount bytes", () => {
+    expect(parseDiagnosticAmountAscii("1234.56")).toEqual({ ok: true, ascii: "1234.56" })
+    expect(parseDiagnosticAmountAscii("0.00")).toEqual({ ok: true, ascii: "0.00" })
+    expect(parseDiagnosticAmountAscii("12.3.4").ok).toBe(false)
+    expect(parseDiagnosticAmountAscii("abc").ok).toBe(false)
+    expect(parseDiagnosticAmountAscii("123456789").ok).toBe(false)
+    const preview = buildCandidateClearThenAmountPreview("1234.56")
+    expect(preview.valid).toBe(true)
+    expect(preview.clearHex).toBe("0C")
+    expect(preview.amountHex).toBe("31 32 33 34 2E 35 36")
+    expect(Array.from(preview.clearBytes)).toEqual([0x0c])
+    expect(Array.from(preview.amountBytes!)).toEqual([0x31, 0x32, 0x33, 0x34, 0x2e, 0x35, 0x36])
   })
 
   it("shows hex preview of ASCII outgoing bytes without adding CR/LF/ESC/0C", () => {
@@ -192,6 +209,67 @@ describe("customer display diagnostic write behaviour", () => {
       ok: true,
       error: null,
     })
+  })
+
+  it("runs clear-then-amount as 0C then amount ASCII, logging both writes", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: true,
+    })
+    const storage = memoryStorage()
+    const result = await writeCustomerDisplayDiagnosticClearThenAmount("1234.56", { storage })
+    expect(result.clear.ok).toBe(true)
+    expect(result.clear.bytesHex).toBe("0C")
+    expect(result.amount?.ok).toBe(true)
+    expect(result.amount?.bytesHex).toBe("31 32 33 34 2E 35 36")
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(2)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x0c])
+    expect(Array.from(writeSerialBytesMock.mock.calls[1][1])).toEqual([
+      0x31, 0x32, 0x33, 0x34, 0x2e, 0x35, 0x36,
+    ])
+    expect(getCustomerDisplayDiagnosticWriteCount()).toBe(2)
+    const parsed = JSON.parse(storage.getItem("finza.retail.customerDisplay.diagnosticLog") || "[]")
+    expect(parsed[0]).toMatchObject({
+      testId: "candidate_amount_ascii",
+      bytesHex: "31 32 33 34 2E 35 36",
+      ok: true,
+    })
+    expect(parsed[1]).toMatchObject({
+      testId: "candidate_clear_0c",
+      bytesHex: "0C",
+      ok: true,
+    })
+  })
+
+  it("stops clear-then-amount if the clear write fails", async () => {
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: true,
+    })
+    writeSerialBytesMock.mockRejectedValueOnce(new Error("port closed"))
+    const storage = memoryStorage()
+    const result = await writeCustomerDisplayDiagnosticClearThenAmount("12.00", { storage })
+    expect(result.clear.ok).toBe(false)
+    expect(result.amount).toBeNull()
+    expect(writeSerialBytesMock).toHaveBeenCalledTimes(1)
+    expect(Array.from(writeSerialBytesMock.mock.calls[0][1])).toEqual([0x0c])
+  })
+
+  it("rejects clear-then-amount without a connected port or valid amount", async () => {
+    const storage = memoryStorage()
+    const disconnected = await writeCustomerDisplayDiagnosticClearThenAmount("12.00", { storage })
+    expect(disconnected.clear.ok).toBe(false)
+    expect(disconnected.amount).toBeNull()
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
+
+    await connectCustomerDisplay({
+      profile: getCustomerDisplaySerialProfile("2400"),
+      diagnosticMode: true,
+    })
+    const invalid = await writeCustomerDisplayDiagnosticClearThenAmount("12.3.4", { storage })
+    expect(invalid.clear.ok).toBe(false)
+    expect(invalid.amount).toBeNull()
+    expect(writeSerialBytesMock).not.toHaveBeenCalled()
   })
 
   it("does not send candidate clear when the display is disconnected", async () => {
@@ -316,7 +394,10 @@ describe("customer display diagnostic does not touch cash drawer", () => {
       expect(src).not.toMatch(/0x1b\s*,\s*0x70|\\x1b\\x70/)
     }
     expect(diagnostic).toMatch(/not a protocol fix/)
+    expect(diagnostic).toMatch(/Unverified candidate for this till/)
     expect(bar).toMatch(/Test candidate clear \(0C\)/)
+    expect(bar).toMatch(/Send clear then amount/)
+    expect(bar).toMatch(/clearThenAmountWarning/)
     expect(bar).toMatch(/Unverified for this display/)
     expect(readRepo("app/retail/lib/printRetailSaleReceiptBrowser.ts")).toContain(
       "export const RETAIL_FINZA_DRAWER_KICK_ENABLED = false"
