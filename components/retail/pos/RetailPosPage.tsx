@@ -2332,6 +2332,14 @@ export default function RetailPosPage() {
     checkoutOpen: showPaymentModal,
     saleSuccess,
     canUseDiagnostics: userRole === "owner" || userRole === "admin",
+    terminalIdentity:
+      businessId && currentStoreId && terminalBoundRegisterId
+        ? {
+            businessId,
+            storeId: currentStoreId,
+            registerId: terminalBoundRegisterId,
+          }
+        : null,
   })
 
   const retailMomoCartSnapshot = useMemo((): RetailMomoCartSnapshot => {

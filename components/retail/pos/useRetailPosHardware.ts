@@ -19,6 +19,15 @@ import {
   type CustomerDisplaySaleSuccess,
 } from "@/lib/retail/hardware/customerDisplayProtocol"
 import {
+  defaultCustomerDisplayTerminalConfig,
+  readCustomerDisplayTerminalConfig,
+  resolveConnectSerialProfile,
+  shouldAllowAutomaticCustomerDisplayUpdates,
+  writeCustomerDisplayTerminalConfig,
+  type CustomerDisplayTerminalConfig,
+  type CustomerDisplayTerminalIdentity,
+} from "@/lib/retail/hardware/customerDisplayTerminalConfig"
+import {
   connectCustomerDisplay,
   disconnectCustomerDisplay,
   getCustomerDisplayBaudRate,
@@ -38,15 +47,23 @@ export function useRetailPosHardware(opts: {
   runningTotal: number
   checkoutOpen: boolean
   saleSuccess: CustomerDisplaySaleSuccess
-  /** Owner/admin only — enables the Customer Display Diagnostic panel. */
+  /** Owner/admin only — setup + advanced diagnostics. */
   canUseDiagnostics?: boolean
+  /** Bound till identity — display config is per physical terminal. */
+  terminalIdentity?: CustomerDisplayTerminalIdentity | null
 }) {
   const canUseDiagnostics = opts.canUseDiagnostics === true
+  const terminalIdentity = opts.terminalIdentity ?? null
+
   const [status, setStatus] = useState<RetailHardwareStatus>("disconnected")
   const [lastError, setLastError] = useState("")
   const [busy, setBusy] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [diagnosticMode, setDiagnosticMode] = useState(false)
+  const [terminalConfig, setTerminalConfig] = useState<CustomerDisplayTerminalConfig>(
+    defaultCustomerDisplayTerminalConfig()
+  )
   const [profileId, setProfileId] = useState<CustomerDisplaySerialProfile["id"]>(
     CUSTOMER_DISPLAY_DIAGNOSTIC_DEFAULT_PROFILE_ID
   )
@@ -54,7 +71,16 @@ export function useRetailPosHardware(opts: {
   const [lastHexPreview, setLastHexPreview] = useState("")
   const [diagnosticLog, setDiagnosticLog] = useState<CustomerDisplayDiagnosticLogEntry[]>([])
   const [baudRate, setBaudRate] = useState<number | null>(null)
+  const [configMessage, setConfigMessage] = useState("")
   const idleTimerRef = useRef<number | null>(null)
+
+  const reloadTerminalConfig = useCallback(() => {
+    const stored = readCustomerDisplayTerminalConfig(terminalIdentity)
+    const next = stored ?? defaultCustomerDisplayTerminalConfig()
+    setTerminalConfig(next)
+    setProfileId(next.profileId)
+    return next
+  }, [terminalIdentity])
 
   const refresh = useCallback(() => {
     setStatus(getCustomerDisplayStatus())
@@ -65,8 +91,9 @@ export function useRetailPosHardware(opts: {
   }, [])
 
   useEffect(() => {
+    reloadTerminalConfig()
     refresh()
-  }, [refresh])
+  }, [reloadTerminalConfig, refresh])
 
   useEffect(() => {
     const bytes = buildCustomerDisplayDiagnosticBytes(pendingTestId)
@@ -80,6 +107,8 @@ export function useRetailPosHardware(opts: {
     }
   }, [])
 
+  const autoUpdatesAllowed = shouldAllowAutomaticCustomerDisplayUpdates(terminalConfig)
+
   useEffect(() => {
     const intent = resolveCustomerDisplayIntent({
       status,
@@ -88,6 +117,7 @@ export function useRetailPosHardware(opts: {
       checkoutOpen: opts.checkoutOpen,
       saleSuccess: opts.saleSuccess,
       diagnosticMode,
+      autoUpdatesAllowed,
     })
 
     const run = async () => {
@@ -117,6 +147,7 @@ export function useRetailPosHardware(opts: {
   }, [
     status,
     diagnosticMode,
+    autoUpdatesAllowed,
     opts.cartCount,
     opts.runningTotal,
     opts.checkoutOpen,
@@ -130,9 +161,14 @@ export function useRetailPosHardware(opts: {
 
   const connect = useCallback(async () => {
     setBusy(true)
+    setConfigMessage("")
     try {
+      const profile = resolveConnectSerialProfile(terminalConfig, {
+        diagnosticMode: canUseDiagnostics && diagnosticMode,
+        diagnosticProfileId: profileId,
+      })
       await connectCustomerDisplay({
-        profile: canUseDiagnostics && diagnosticMode ? selectedProfile : null,
+        profile,
         diagnosticMode: canUseDiagnostics && diagnosticMode,
       })
     } catch (e: unknown) {
@@ -141,7 +177,13 @@ export function useRetailPosHardware(opts: {
       refresh()
       setBusy(false)
     }
-  }, [canUseDiagnostics, diagnosticMode, selectedProfile, refresh])
+  }, [
+    canUseDiagnostics,
+    diagnosticMode,
+    profileId,
+    terminalConfig,
+    refresh,
+  ])
 
   const disconnect = useCallback(async () => {
     setBusy(true)
@@ -153,9 +195,76 @@ export function useRetailPosHardware(opts: {
     }
   }, [refresh])
 
+  const persistConfig = useCallback(
+    (next: CustomerDisplayTerminalConfig) => {
+      const ok = writeCustomerDisplayTerminalConfig(terminalIdentity, next)
+      setTerminalConfig(next)
+      setProfileId(next.profileId)
+      if (!ok) {
+        setConfigMessage(
+          terminalIdentity
+            ? "Could not save on this browser (storage blocked)."
+            : "Bind this till to a register before saving a display profile."
+        )
+        return false
+      }
+      setConfigMessage("")
+      return true
+    },
+    [terminalIdentity]
+  )
+
+  const saveCandidateProfile = useCallback(
+    (nextId: CustomerDisplaySerialProfile["id"]) => {
+      if (!canUseDiagnostics) return
+      const next: CustomerDisplayTerminalConfig = {
+        ...terminalConfig,
+        profileId: nextId,
+        // Changing baud clears physical verification — other tills / profiles must re-verify.
+        physicallyVerified: false,
+        verifiedAt: null,
+        verifiedNote: null,
+        updatedAt: new Date().toISOString(),
+      }
+      persistConfig(next)
+      setProfileId(nextId)
+    },
+    [canUseDiagnostics, terminalConfig, persistConfig]
+  )
+
+  const markPhysicallyVerified = useCallback(() => {
+    if (!canUseDiagnostics) return
+    const next: CustomerDisplayTerminalConfig = {
+      ...terminalConfig,
+      profileId,
+      physicallyVerified: true,
+      verifiedAt: new Date().toISOString(),
+      verifiedNote: `${getCustomerDisplaySerialProfile(profileId).baudRate} baud · 8N1 · plain ASCII amounts (this till only)`,
+      updatedAt: new Date().toISOString(),
+    }
+    if (persistConfig(next)) {
+      setConfigMessage("Saved as physically verified for this till. Automatic basket totals may resume when connected.")
+    }
+  }, [canUseDiagnostics, terminalConfig, profileId, persistConfig])
+
+  const clearPhysicalVerification = useCallback(() => {
+    if (!canUseDiagnostics) return
+    const next: CustomerDisplayTerminalConfig = {
+      ...terminalConfig,
+      physicallyVerified: false,
+      verifiedAt: null,
+      verifiedNote: null,
+      updatedAt: new Date().toISOString(),
+    }
+    if (persistConfig(next)) {
+      setConfigMessage("Automatic basket totals disabled until this till is re-verified.")
+    }
+  }, [canUseDiagnostics, terminalConfig, persistConfig])
+
   const enableDiagnostics = useCallback(async () => {
     if (!canUseDiagnostics) return
     setDiagnosticMode(true)
+    setAdvancedOpen(true)
     await setCustomerDisplayDiagnosticMode(true)
     clearIdleTimer()
     refresh()
@@ -170,7 +279,7 @@ export function useRetailPosHardware(opts: {
   const applyProfile = useCallback(
     async (nextId: CustomerDisplaySerialProfile["id"]) => {
       if (!canUseDiagnostics) return
-      setProfileId(nextId)
+      saveCandidateProfile(nextId)
       const profile = getCustomerDisplaySerialProfile(nextId)
       if (getCustomerDisplayStatus() !== "connected" && getCustomerDisplayStatus() !== "error") {
         return
@@ -187,7 +296,7 @@ export function useRetailPosHardware(opts: {
         setBusy(false)
       }
     },
-    [canUseDiagnostics, refresh]
+    [canUseDiagnostics, saveCandidateProfile, refresh]
   )
 
   const previewDiagnosticTest = useCallback((testId: CustomerDisplayDiagnosticTestId) => {
@@ -210,20 +319,32 @@ export function useRetailPosHardware(opts: {
     [canUseDiagnostics, diagnosticMode, previewDiagnosticTest, refresh]
   )
 
+  const cashierStatusLabel = useMemo(() => {
+    if (status === "connected") return "Customer display: Connected"
+    if (status === "error") return "Customer display: Error"
+    return "Customer display: Off"
+  }, [status])
+
   const statusLabel = useMemo(() => {
     if (status === "connected") {
-      return diagnosticMode
-        ? `Display connected · diagnostic · ${baudRate ?? "—"} baud`
-        : "Display connected"
+      if (diagnosticMode) {
+        return `Customer display: Connected · diagnostic · ${baudRate ?? "—"} baud`
+      }
+      if (!autoUpdatesAllowed) {
+        return `Customer display: Connected · setup · ${baudRate ?? "—"} baud`
+      }
+      return "Customer display: Connected"
     }
-    if (status === "error") return "Display error"
-    return "Display off"
-  }, [status, diagnosticMode, baudRate])
+    if (status === "error") return "Customer display: Error"
+    return "Customer display: Off"
+  }, [status, diagnosticMode, baudRate, autoUpdatesAllowed])
 
   const pendingTest = useMemo(() => getCustomerDisplayDiagnosticTest(pendingTestId), [pendingTestId])
+  const hasTerminalBinding = Boolean(terminalIdentity?.registerId)
 
   return {
     status,
+    cashierStatusLabel,
     statusLabel,
     lastError,
     busy,
@@ -235,6 +356,8 @@ export function useRetailPosHardware(opts: {
     diagnosticMode,
     enableDiagnostics,
     disableDiagnostics,
+    advancedOpen,
+    setAdvancedOpen,
     profiles: CUSTOMER_DISPLAY_SERIAL_PROFILES,
     profileId,
     applyProfile,
@@ -247,5 +370,12 @@ export function useRetailPosHardware(opts: {
     runDiagnosticTest,
     diagnosticLog,
     baudRate,
+    terminalConfig,
+    autoUpdatesAllowed,
+    hasTerminalBinding,
+    markPhysicallyVerified,
+    clearPhysicalVerification,
+    configMessage,
+    selectedProfile,
   }
 }

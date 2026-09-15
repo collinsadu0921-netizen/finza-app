@@ -228,7 +228,8 @@ describe("customer display diagnostic does not touch cash drawer", () => {
     const diagnostic = readRepo("lib/retail/hardware/customerDisplayDiagnostic.ts")
     const hardware = readRepo("lib/retail/hardware/retailPosHardware.ts")
     const bar = readRepo("components/retail/pos/RetailPosHardwareBar.tsx")
-    for (const src of [diagnostic, hardware, bar]) {
+    const terminalConfig = readRepo("lib/retail/hardware/customerDisplayTerminalConfig.ts")
+    for (const src of [diagnostic, hardware, bar, terminalConfig]) {
       expect(src).not.toMatch(/drawer_kick|openDrawer|pulseCashDrawer|buildCashDrawerKickBytes/i)
       expect(src).not.toMatch(/0x1b\s*,\s*0x70|\\x1b\\x70/)
     }
