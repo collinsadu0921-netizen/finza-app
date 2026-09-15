@@ -51,9 +51,11 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                   ? "error"
                   : "off"}
               {hardware.baudRate != null ? ` · ${hardware.baudRate} baud` : ""}
-              {hardware.status === "connected" && !hardware.autoUpdatesAllowed && !hardware.diagnosticMode
-                ? " · automatic totals off (not verified)"
-                : ""}
+              {hardware.liveTrialActive
+                ? " · live trial on (this till)"
+                : hardware.status === "connected" && !hardware.autoUpdatesAllowed && !hardware.diagnosticMode
+                  ? " · automatic totals off (not verified)"
+                  : ""}
             </p>
             {hardware.lastError ? (
               <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
@@ -157,6 +159,55 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                   </div>
                   {hardware.configMessage ? (
                     <p className="mt-2 text-[11px] font-semibold text-slate-700">{hardware.configMessage}</p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
+                  <h3 className="text-sm font-extrabold text-amber-950 dark:text-amber-100">
+                    Trial live totals on this till
+                  </h3>
+                  <p className="mt-1 text-[11px] font-semibold text-amber-950 dark:text-amber-100">
+                    Owner/admin only · staging physical test · separate from Mark physically verified
+                  </p>
+                  <p className="mt-2 text-[11px] text-amber-900 dark:text-amber-200">{hardware.liveTrialWarning}</p>
+                  <p className="mt-2 text-[11px] text-amber-900 dark:text-amber-200">
+                    Requires: bound till · connected display · selected {hardware.liveTrialRequiredProfileId} profile ·
+                    diagnostic mode off. Defaults off; stops on reload, disconnect, or write failure. Does not use a
+                    saved verification flag.
+                  </p>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    {hardware.liveTrialActive ? (
+                      <button
+                        type="button"
+                        disabled={hardware.busy}
+                        onClick={() => hardware.stopLiveTrial()}
+                        className="min-h-[48px] flex-1 rounded-xl border border-amber-700 bg-white px-3 text-sm font-bold text-amber-950 disabled:opacity-50"
+                      >
+                        Stop live trial
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={hardware.busy || !hardware.liveTrialStartGate.ok}
+                        onClick={() => hardware.startLiveTrial()}
+                        className="min-h-[48px] flex-1 rounded-xl bg-amber-800 px-3 text-sm font-bold text-white disabled:opacity-50"
+                      >
+                        Start trial live totals
+                      </button>
+                    )}
+                  </div>
+                  {!hardware.liveTrialActive && hardware.liveTrialStartGate.reason ? (
+                    <p className="mt-2 text-[11px] font-semibold text-amber-900">
+                      Cannot start: {hardware.liveTrialStartGate.reason}
+                    </p>
+                  ) : null}
+                  {hardware.liveTrialMessage ? (
+                    <p className="mt-2 text-[11px] font-semibold text-amber-950">{hardware.liveTrialMessage}</p>
+                  ) : null}
+                  {hardware.liveTrialActive ? (
+                    <p className="mt-2 text-[11px] font-bold text-amber-950">
+                      Live trial ON — basket/checkout totals send 0C then ASCII on this till only.
+                    </p>
                   ) : null}
                 </div>
 

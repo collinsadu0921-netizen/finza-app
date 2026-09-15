@@ -1,25 +1,27 @@
 "use client"
 
 import {
-  buildSegmentedAmountBytes,
-  shouldWriteCustomerDisplay,
-  SEGMENTED_AMOUNT_SERIAL,
-  type CustomerDisplayConnectionStatus,
-} from "@/lib/retail/hardware/customerDisplayProtocol"
-import {
+  asciiToDiagnosticBytes,
   appendCustomerDisplayDiagnosticLog,
   buildCandidateClearThenAmountPreview,
   buildCustomerDisplayDiagnosticBytes,
   bytesToHexPreview,
+  CANDIDATE_CLEAR_BYTE,
   getCustomerDisplayDiagnosticTest,
   getCustomerDisplaySerialProfile,
-  parseDiagnosticAmountAscii,
   readCustomerDisplayDiagnosticLogFromStorage,
   writeCustomerDisplayDiagnosticLogToStorage,
   type CustomerDisplayDiagnosticLogEntry,
   type CustomerDisplayDiagnosticTestId,
   type CustomerDisplaySerialProfile,
 } from "@/lib/retail/hardware/customerDisplayDiagnostic"
+import {
+  buildSegmentedAmountBytes,
+  formatSegmentedAmount,
+  shouldWriteCustomerDisplay,
+  SEGMENTED_AMOUNT_SERIAL,
+  type CustomerDisplayConnectionStatus,
+} from "@/lib/retail/hardware/customerDisplayProtocol"
 import {
   closeSerialPort,
   listGrantedSerialPorts,
@@ -55,6 +57,12 @@ let diagnosticModeEnabled = false
  * it only after this till’s profile is physicallyVerified.
  */
 let automaticSaleWritesEnabled = false
+/**
+ * Session-only staging live trial (0C then amount). Not persisted; not verification.
+ */
+let liveTrialWritesEnabled = false
+let liveTrialSequence = 0
+let liveTrialQueue: Promise<void> = Promise.resolve()
 
 export function getCustomerDisplayStatus(): RetailHardwareStatus {
   return displaySession?.status ?? "disconnected"
@@ -80,8 +88,22 @@ export function setAutomaticCustomerDisplaySaleWritesEnabled(enabled: boolean): 
   automaticSaleWritesEnabled = enabled === true
 }
 
+export function isCustomerDisplayLiveTrialWritesEnabled(): boolean {
+  return liveTrialWritesEnabled === true
+}
+
+export function setCustomerDisplayLiveTrialWritesEnabled(enabled: boolean): void {
+  liveTrialWritesEnabled = enabled === true
+  // Invalidate in-flight trial sequences when turning off so stale amounts cannot land later.
+  liveTrialSequence += 1
+}
+
 export function getCustomerDisplayDiagnosticWriteCount(): number {
   return diagnosticWriteCount
+}
+
+export function getCustomerDisplayLiveTrialSequenceForTests(): number {
+  return liveTrialSequence
 }
 
 /** Test helper — resets module session between unit tests. */
@@ -91,6 +113,9 @@ export function __resetCustomerDisplaySessionForTests(): void {
   diagnosticWriteCount = 0
   diagnosticModeEnabled = false
   automaticSaleWritesEnabled = false
+  liveTrialWritesEnabled = false
+  liveTrialSequence = 0
+  liveTrialQueue = Promise.resolve()
 }
 
 async function enqueueWrite(bytes: Uint8Array, opts?: { allowWhileDiagnostic?: boolean }): Promise<void> {
@@ -215,6 +240,74 @@ export async function writeCustomerDisplayAmount(amount: number): Promise<void> 
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Staging live-trial write: one 0C then one ASCII amount (validated formatter).
+ * Serialized by sequence so rapid basket changes only leave the latest amount.
+ * Does not enable the verified auto-sale latch. Never throws into the sale path.
+ */
+export async function writeCustomerDisplayLiveTrialAmount(
+  amount: number
+): Promise<{ ok: boolean; error: string | null; superseded?: boolean }> {
+  const seq = ++liveTrialSequence
+  const ascii = formatSegmentedAmount(amount)
+  const clearBytes = new Uint8Array([CANDIDATE_CLEAR_BYTE])
+  const amountBytes = asciiToDiagnosticBytes(ascii)
+
+  const run = async (): Promise<{ ok: boolean; error: string | null; superseded?: boolean }> => {
+    try {
+      if (!liveTrialWritesEnabled) {
+        return { ok: true, error: null, superseded: true }
+      }
+      if (diagnosticModeEnabled || displaySession?.diagnosticMode) {
+        return { ok: true, error: null, superseded: true }
+      }
+      if (seq !== liveTrialSequence) {
+        return { ok: true, error: null, superseded: true }
+      }
+      if (!displaySession || !shouldWriteCustomerDisplay(displaySession.status)) {
+        return { ok: false, error: "Customer display is not connected." }
+      }
+
+      await enqueueWrite(clearBytes)
+      if (seq !== liveTrialSequence) {
+        return { ok: true, error: null, superseded: true }
+      }
+      const afterClear = displaySession
+      if (!afterClear || afterClear.status === "error") {
+        return {
+          ok: false,
+          error: afterClear?.lastError || "Customer display clear write failed.",
+        }
+      }
+
+      await enqueueWrite(amountBytes)
+      if (seq !== liveTrialSequence) {
+        return { ok: true, error: null, superseded: true }
+      }
+      const afterAmount = displaySession
+      if (!afterAmount || afterAmount.status === "error") {
+        return {
+          ok: false,
+          error: afterAmount?.lastError || "Customer display amount write failed.",
+        }
+      }
+      return { ok: true, error: null }
+    } catch (e: unknown) {
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "Customer display live-trial write failed.",
+      }
+    }
+  }
+
+  const resultPromise = liveTrialQueue.then(run, run)
+  liveTrialQueue = resultPromise.then(
+    () => undefined,
+    () => undefined
+  )
+  return resultPromise
 }
 
 /**

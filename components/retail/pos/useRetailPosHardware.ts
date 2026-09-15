@@ -30,6 +30,11 @@ import {
   type CustomerDisplayTerminalIdentity,
 } from "@/lib/retail/hardware/customerDisplayTerminalConfig"
 import {
+  LIVE_TRIAL_REQUIRED_PROFILE_ID,
+  LIVE_TRIAL_UI_WARNING,
+  canStartCustomerDisplayLiveTrial,
+} from "@/lib/retail/hardware/customerDisplayLiveTrial"
+import {
   connectCustomerDisplay,
   disconnectCustomerDisplay,
   getCustomerDisplayBaudRate,
@@ -40,9 +45,11 @@ import {
   reconnectCustomerDisplayWithProfile,
   setAutomaticCustomerDisplaySaleWritesEnabled,
   setCustomerDisplayDiagnosticMode,
+  setCustomerDisplayLiveTrialWritesEnabled,
   writeCustomerDisplayAmount,
   writeCustomerDisplayDiagnosticClearThenAmount,
   writeCustomerDisplayDiagnosticTest,
+  writeCustomerDisplayLiveTrialAmount,
   type RetailHardwareStatus,
 } from "@/lib/retail/hardware/retailPosHardware"
 
@@ -78,6 +85,9 @@ export function useRetailPosHardware(opts: {
   const [diagnosticLog, setDiagnosticLog] = useState<CustomerDisplayDiagnosticLogEntry[]>([])
   const [baudRate, setBaudRate] = useState<number | null>(null)
   const [configMessage, setConfigMessage] = useState("")
+  /** Session-only; defaults off and is never restored from localStorage / physicallyVerified. */
+  const [liveTrialActive, setLiveTrialActive] = useState(false)
+  const [liveTrialMessage, setLiveTrialMessage] = useState("")
   const idleTimerRef = useRef<number | null>(null)
 
   const reloadTerminalConfig = useCallback(() => {
@@ -123,6 +133,19 @@ export function useRetailPosHardware(opts: {
   }, [autoUpdatesAllowed])
 
   useEffect(() => {
+    setCustomerDisplayLiveTrialWritesEnabled(liveTrialActive)
+    return () => {
+      setCustomerDisplayLiveTrialWritesEnabled(false)
+    }
+  }, [liveTrialActive])
+
+  const stopLiveTrial = useCallback((message?: string) => {
+    setLiveTrialActive(false)
+    setCustomerDisplayLiveTrialWritesEnabled(false)
+    if (message) setLiveTrialMessage(message)
+  }, [])
+
+  useEffect(() => {
     const intent = resolveCustomerDisplayIntent({
       status,
       cartCount: opts.cartCount,
@@ -130,12 +153,14 @@ export function useRetailPosHardware(opts: {
       checkoutOpen: opts.checkoutOpen,
       saleSuccess: opts.saleSuccess,
       diagnosticMode,
-      autoUpdatesAllowed,
+      // Verified auto-sale gate stays fail-closed; live trial uses a separate path below.
+      autoUpdatesAllowed: liveTrialActive ? false : autoUpdatesAllowed,
     })
 
-    const run = async () => {
+    const runVerifiedAuto = async () => {
       try {
         clearIdleTimer()
+        if (liveTrialActive) return
         if (intent.action === "none") return
         await writeCustomerDisplayAmount(intent.amount)
         if (intent.action === "writeThenIdle") {
@@ -153,7 +178,58 @@ export function useRetailPosHardware(opts: {
         setLastError(getCustomerDisplayLastError())
       }
     }
-    void run()
+
+    const runLiveTrial = async () => {
+      try {
+        clearIdleTimer()
+        if (!liveTrialActive || diagnosticMode) return
+        const trialIntent = resolveCustomerDisplayIntent({
+          status,
+          cartCount: opts.cartCount,
+          runningTotal: opts.runningTotal,
+          checkoutOpen: opts.checkoutOpen,
+          saleSuccess: opts.saleSuccess,
+          diagnosticMode: false,
+          autoUpdatesAllowed: true,
+        })
+        if (trialIntent.action === "none") return
+
+        const writeOnce = async (amount: number) => {
+          const result = await writeCustomerDisplayLiveTrialAmount(amount)
+          if (result.superseded) return true
+          if (!result.ok) {
+            stopLiveTrial(
+              `Live trial stopped: display write failed (${result.error || "unknown"}). Sale continues.`
+            )
+            setLastError(result.error || "Customer display write failed.")
+            return false
+          }
+          return true
+        }
+
+        const ok = await writeOnce(trialIntent.amount)
+        if (!ok) return
+        if (trialIntent.action === "writeThenIdle") {
+          idleTimerRef.current = window.setTimeout(() => {
+            void writeOnce(0).then(() => {
+              setStatus(getCustomerDisplayStatus())
+              setLastError(getCustomerDisplayLastError())
+            })
+          }, trialIntent.idleAfterMs)
+        }
+      } catch {
+        /* Display must never block the sale */
+      } finally {
+        setStatus(getCustomerDisplayStatus())
+        setLastError(getCustomerDisplayLastError())
+      }
+    }
+
+    if (liveTrialActive) {
+      void runLiveTrial()
+    } else {
+      void runVerifiedAuto()
+    }
     return () => {
       clearIdleTimer()
     }
@@ -161,6 +237,7 @@ export function useRetailPosHardware(opts: {
     status,
     diagnosticMode,
     autoUpdatesAllowed,
+    liveTrialActive,
     opts.cartCount,
     opts.runningTotal,
     opts.checkoutOpen,
@@ -168,6 +245,7 @@ export function useRetailPosHardware(opts: {
     opts.saleSuccess?.cashReceived,
     opts.saleSuccess?.changeGiven,
     clearIdleTimer,
+    stopLiveTrial,
   ])
 
   const selectedProfile = useMemo(() => getCustomerDisplaySerialProfile(profileId), [profileId])
@@ -201,12 +279,15 @@ export function useRetailPosHardware(opts: {
   const disconnect = useCallback(async () => {
     setBusy(true)
     try {
+      stopLiveTrial(
+        "Live trial stopped on disconnect. Digits already on the panel are not cleared by Disconnect."
+      )
       await disconnectCustomerDisplay()
     } finally {
       refresh()
       setBusy(false)
     }
-  }, [refresh])
+  }, [refresh, stopLiveTrial])
 
   const persistConfig = useCallback(
     (next: CustomerDisplayTerminalConfig) => {
@@ -276,12 +357,13 @@ export function useRetailPosHardware(opts: {
 
   const enableDiagnostics = useCallback(async () => {
     if (!canUseDiagnostics) return
+    stopLiveTrial("Live trial stopped while entering diagnostic mode.")
     setDiagnosticMode(true)
     setAdvancedOpen(true)
     await setCustomerDisplayDiagnosticMode(true)
     clearIdleTimer()
     refresh()
-  }, [canUseDiagnostics, clearIdleTimer, refresh])
+  }, [canUseDiagnostics, clearIdleTimer, refresh, stopLiveTrial])
 
   const disableDiagnostics = useCallback(async () => {
     setDiagnosticMode(false)
@@ -378,10 +460,48 @@ export function useRetailPosHardware(opts: {
     return "Customer display: Off"
   }, [status])
 
+  const hasTerminalBinding = Boolean(terminalIdentity?.registerId)
+
+  const liveTrialStartGate = useMemo(
+    () =>
+      canStartCustomerDisplayLiveTrial({
+        canUseDiagnostics,
+        hasTerminalBinding,
+        status,
+        profileId,
+        connectedBaudRate: baudRate,
+        diagnosticMode,
+      }),
+    [canUseDiagnostics, hasTerminalBinding, status, profileId, baudRate, diagnosticMode]
+  )
+
+  const startLiveTrial = useCallback(() => {
+    if (!canUseDiagnostics) return
+    const gate = canStartCustomerDisplayLiveTrial({
+      canUseDiagnostics,
+      hasTerminalBinding,
+      status: getCustomerDisplayStatus(),
+      profileId,
+      connectedBaudRate: getCustomerDisplayBaudRate(),
+      diagnosticMode: isCustomerDisplayDiagnosticMode(),
+    })
+    if (!gate.ok) {
+      setLiveTrialMessage(gate.reason || "Cannot start live trial.")
+      return
+    }
+    setLiveTrialMessage(
+      "Live trial on for this till only. Basket/checkout totals send 0C then ASCII. Not verified / not customer-ready."
+    )
+    setLiveTrialActive(true)
+  }, [canUseDiagnostics, hasTerminalBinding, profileId])
+
   const statusLabel = useMemo(() => {
     if (status === "connected") {
       if (diagnosticMode) {
         return `Customer display: Connected · diagnostic · ${baudRate ?? "—"} baud`
+      }
+      if (liveTrialActive) {
+        return `Customer display: Connected · live trial · ${baudRate ?? "—"} baud`
       }
       if (!autoUpdatesAllowed) {
         return `Customer display: Connected · setup · ${baudRate ?? "—"} baud`
@@ -390,10 +510,9 @@ export function useRetailPosHardware(opts: {
     }
     if (status === "error") return "Customer display: Error"
     return "Customer display: Off"
-  }, [status, diagnosticMode, baudRate, autoUpdatesAllowed])
+  }, [status, diagnosticMode, baudRate, autoUpdatesAllowed, liveTrialActive])
 
   const pendingTest = useMemo(() => getCustomerDisplayDiagnosticTest(pendingTestId), [pendingTestId])
-  const hasTerminalBinding = Boolean(terminalIdentity?.registerId)
 
   return {
     status,
@@ -436,5 +555,13 @@ export function useRetailPosHardware(opts: {
     clearPhysicalVerification,
     configMessage,
     selectedProfile,
+    liveTrialActive,
+    liveTrialMessage,
+    liveTrialWarning: LIVE_TRIAL_UI_WARNING,
+    liveTrialRequiredProfileId: LIVE_TRIAL_REQUIRED_PROFILE_ID,
+    liveTrialStartGate,
+    startLiveTrial,
+    stopLiveTrial: () =>
+      stopLiveTrial("Live trial stopped. Further automatic writes will not be sent."),
   }
 }

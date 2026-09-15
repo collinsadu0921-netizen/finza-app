@@ -399,6 +399,8 @@ describe("customer display diagnostic does not touch cash drawer", () => {
     expect(bar).toMatch(/Send clear then amount/)
     expect(bar).toMatch(/clearThenAmountWarning/)
     expect(bar).toMatch(/Unverified for this display/)
+    expect(bar).toMatch(/Trial live totals on this till/)
+    expect(bar).toMatch(/Start trial live totals/)
     expect(readRepo("app/retail/lib/printRetailSaleReceiptBrowser.ts")).toContain(
       "export const RETAIL_FINZA_DRAWER_KICK_ENABLED = false"
     )
