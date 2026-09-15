@@ -1,10 +1,18 @@
 /**
- * Retail POS hardware helpers that talk to Web Serial (Chrome/Edge).
- * Used by the customer-facing VFD and optional ESC/POS cash-drawer pulse.
+ * Web Serial helpers for the Retail customer amount display.
+ * Serial settings match the physically verified COM port: 9600 8N1, no flow control.
  */
 
+import { SEGMENTED_AMOUNT_SERIAL } from "@/lib/retail/hardware/customerDisplayProtocol"
+
 export type BrowserSerialPortLike = {
-  open: (opts: { baudRate: number }) => Promise<void>
+  open: (opts: {
+    baudRate: number
+    dataBits?: 7 | 8
+    stopBits?: 1 | 2
+    parity?: "none" | "even" | "odd"
+    flowControl?: "none" | "hardware"
+  }) => Promise<void>
   writable: WritableStream<Uint8Array> | null
   close: () => Promise<void>
   getInfo?: () => { usbVendorId?: number; usbProductId?: number }
@@ -24,7 +32,7 @@ export function getWebSerial(): NavigatorWithWebSerial["serial"] | null {
 }
 
 export function webSerialUnsupportedMessage(): string {
-  return "This browser cannot talk to the pole display or cash drawer over serial. Use Chrome or Edge on the Windows POS terminal, then connect from the POS hardware panel."
+  return "This browser cannot talk to the customer amount display over serial. Use Chrome or Edge on the Windows POS terminal, then tap Connect customer display and choose the display COM port."
 }
 
 export async function requestSerialPort(): Promise<BrowserSerialPortLike> {
@@ -45,14 +53,15 @@ export async function listGrantedSerialPorts(): Promise<BrowserSerialPortLike[]>
   }
 }
 
-export async function openSerialPort(
-  port: BrowserSerialPortLike,
-  baudRate: number
-): Promise<void> {
+/**
+ * Open a serial port with the segmented-amount 9600 8N1 profile.
+ * Chrome does not expose the Windows COM number; the cashier selects the port in the picker.
+ */
+export async function openSerialPort(port: BrowserSerialPortLike): Promise<void> {
   try {
-    await port.open({ baudRate })
+    await port.open({ ...SEGMENTED_AMOUNT_SERIAL })
   } catch (e: unknown) {
-    const err = e as { name?: string; message?: string }
+    const err = e as { name?: string }
     if (err?.name === "InvalidStateError") {
       return
     }

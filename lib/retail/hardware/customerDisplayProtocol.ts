@@ -1,106 +1,108 @@
-/** Standard 20-column VFD / pole display line width. */
-export const CUSTOMER_DISPLAY_COLUMNS = 20
-
-export type CustomerDisplayView =
-  | { kind: "idle"; idleMessage?: string }
-  | { kind: "item"; itemName: string; runningTotal: number; currencyCode: string }
-  | { kind: "due"; amountDue: number; currencyCode: string }
-  | { kind: "tendered"; tendered: number; change: number; currencyCode: string }
-
-function asciiSafe(text: string): string {
-  return text.replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim()
-}
-
-export function padDisplayLine(text: string, width = CUSTOMER_DISPLAY_COLUMNS): string {
-  const t = asciiSafe(text).slice(0, width)
-  if (t.length >= width) return t
-  return t + " ".repeat(width - t.length)
-}
-
-export function formatDisplayMoney(amount: number, currencyCode?: string): string {
-  const n = Number.isFinite(amount) ? amount : 0
-  const body = n.toFixed(2)
-  const code = (currencyCode || "").trim()
-  if (!code) return body
-  const withCode = `${code} ${body}`
-  return withCode.length <= CUSTOMER_DISPLAY_COLUMNS ? withCode : body
-}
-
-export function formatCustomerDisplayLines(view: CustomerDisplayView): { line1: string; line2: string } {
-  switch (view.kind) {
-    case "idle": {
-      const msg = asciiSafe(view.idleMessage || "")
-      return {
-        line1: padDisplayLine(msg || "THANK YOU"),
-        line2: padDisplayLine(formatDisplayMoney(0)),
-      }
-    }
-    case "item": {
-      return {
-        line1: padDisplayLine(view.itemName),
-        line2: padDisplayLine(`TOTAL ${formatDisplayMoney(view.runningTotal, view.currencyCode)}`),
-      }
-    }
-    case "due": {
-      return {
-        line1: padDisplayLine("AMOUNT DUE"),
-        line2: padDisplayLine(formatDisplayMoney(view.amountDue, view.currencyCode)),
-      }
-    }
-    case "tendered": {
-      return {
-        line1: padDisplayLine(`PAID ${formatDisplayMoney(view.tendered, view.currencyCode)}`),
-        line2: padDisplayLine(`CHANGE ${formatDisplayMoney(view.change, view.currencyCode)}`),
-      }
-    }
-  }
-}
-
-function encodeAscii(text: string): number[] {
-  const out: number[] = []
-  for (let i = 0; i < text.length; i++) {
-    out.push(text.charCodeAt(i) & 0x7f)
-  }
-  return out
-}
-
 /**
- * Xprinter / BillPoint compatible 2-line VFD commands (ESC Q A / ESC Q B).
- * This is a text pole display, not a graphical second screen.
+ * Segmented numeric customer-facing amount display (POS pole LED).
+ * Not a two-line alphanumeric VFD and not a second monitor.
+ *
+ * Conservative first physical-test candidate: ASCII digits and '.' only.
+ * No ESC/POS init, line-select, CR, or LF.
  */
-export function buildCustomerDisplayBytes(line1: string, line2: string): Uint8Array {
-  const l1 = padDisplayLine(line1)
-  const l2 = padDisplayLine(line2)
-  const bytes = [
-    0x1b, 0x40, // ESC @ initialize
-    0x0c, // FF clear
-    0x1b, 0x51, 0x41, // ESC Q A — upper line
-    ...encodeAscii(l1),
-    0x0d,
-    0x1b, 0x51, 0x42, // ESC Q B — lower line
-    ...encodeAscii(l2),
-    0x0d,
-  ]
-  return Uint8Array.from(bytes)
-}
 
-/** ESC p pin2 / pin5 drawer-kick pulses (same command as ESCPOSGenerator). */
-export function buildCashDrawerKickBytes(): Uint8Array {
-  return Uint8Array.from([
-    0x1b, 0x70, 0x00, 0x19, 0xfa, // pin 2
-    0x1b, 0x70, 0x01, 0x19, 0xfa, // pin 5 (some T80E jumpers)
-  ])
-}
+export const SEGMENTED_AMOUNT_MAX_CHARS = 8
 
-export function saleIncludesCashTender(input: {
-  paymentMethod?: string | null
-  paymentBreakdown?: Array<{ method: string; amount: number }> | null
-}): boolean {
-  const lines = (input.paymentBreakdown || []).filter((row) => Number(row.amount) > 0)
-  if (lines.some((row) => row.method.trim().toLowerCase().includes("cash"))) {
-    return true
+export const SEGMENTED_AMOUNT_SERIAL = {
+  baudRate: 9600,
+  dataBits: 8,
+  stopBits: 1,
+  parity: "none",
+  flowControl: "none",
+} as const
+
+export type SegmentedAmountSerialOptions = typeof SEGMENTED_AMOUNT_SERIAL
+
+export const CUSTOMER_DISPLAY_CHANGE_HOLD_MS = 4000
+
+export type CustomerDisplayConnectionStatus = "disconnected" | "connected" | "error"
+
+export type CustomerDisplaySaleSuccess = {
+  cashReceived?: number | null
+  changeGiven?: number | null
+} | null
+
+export type CustomerDisplayIntent =
+  | { action: "none" }
+  | { action: "write"; amount: number }
+  | { action: "writeThenIdle"; amount: number; idleAfterMs: number }
+
+const AMOUNT_CHARS = /^[0-9.]+$/
+
+/** Format a money amount as digits + decimal point only, within 8 characters. */
+export function formatSegmentedAmount(amount: number): string {
+  const n = Number.isFinite(amount) ? Math.max(0, amount) : 0
+  let body = n.toFixed(2)
+  if (body.length > SEGMENTED_AMOUNT_MAX_CHARS) {
+    body = Math.min(n, 99999.99).toFixed(2)
   }
-  if (lines.length > 0) return false
-  const pm = (input.paymentMethod || "").trim().toLowerCase()
-  return pm === "cash" || pm.includes("cash")
+  if (body.length > SEGMENTED_AMOUNT_MAX_CHARS) {
+    body = "99999.99"
+  }
+  if (!AMOUNT_CHARS.test(body)) {
+    return "0.00"
+  }
+  return body
+}
+
+export function amountFitsSegmentedDisplay(amount: number): boolean {
+  const n = Number.isFinite(amount) ? Math.max(0, amount) : 0
+  return n.toFixed(2).length <= SEGMENTED_AMOUNT_MAX_CHARS
+}
+
+export function buildSegmentedAmountBytes(amount: number): Uint8Array {
+  const text = formatSegmentedAmount(amount)
+  const bytes = new Uint8Array(text.length)
+  for (let i = 0; i < text.length; i++) {
+    bytes[i] = text.charCodeAt(i) & 0x7f
+  }
+  return bytes
+}
+
+export function segmentedAmountBytesToAscii(bytes: Uint8Array): string {
+  return String.fromCharCode(...Array.from(bytes))
+}
+
+export function shouldWriteCustomerDisplay(status: CustomerDisplayConnectionStatus): boolean {
+  return status === "connected"
+}
+
+export function resolveCustomerDisplayIntent(input: {
+  status: CustomerDisplayConnectionStatus
+  cartCount: number
+  runningTotal: number
+  checkoutOpen: boolean
+  saleSuccess: CustomerDisplaySaleSuccess
+}): CustomerDisplayIntent {
+  if (!shouldWriteCustomerDisplay(input.status)) {
+    return { action: "none" }
+  }
+
+  if (input.saleSuccess) {
+    const tendered = Number(input.saleSuccess.cashReceived ?? 0)
+    const change = Number(input.saleSuccess.changeGiven ?? 0)
+    if (tendered > 0 && Number.isFinite(change) && change >= 0 && amountFitsSegmentedDisplay(change)) {
+      return {
+        action: "writeThenIdle",
+        amount: change,
+        idleAfterMs: CUSTOMER_DISPLAY_CHANGE_HOLD_MS,
+      }
+    }
+    return { action: "write", amount: 0 }
+  }
+
+  if (input.checkoutOpen) {
+    return { action: "write", amount: input.runningTotal }
+  }
+
+  if (input.cartCount <= 0) {
+    return { action: "write", amount: 0 }
+  }
+
+  return { action: "write", amount: input.runningTotal }
 }

@@ -97,7 +97,7 @@ export default function ReceiptSettingsPage() {
           printer_type: (data.printer_type as ReceiptSettings["printer_type"]) || "browser_print",
           printer_width: (data.printer_width as ReceiptSettings["printer_width"]) || "58mm",
           auto_cut: Boolean(data.auto_cut),
-          drawer_kick: Boolean(data.drawer_kick),
+          drawer_kick: false,
           show_logo: data.show_logo !== undefined ? Boolean(data.show_logo) : true,
           receipt_mode: (data.receipt_mode as ReceiptSettings["receipt_mode"]) || "full",
           footer_text: String(data.footer_text || ""),
@@ -134,7 +134,7 @@ export default function ReceiptSettingsPage() {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings }),
+        body: JSON.stringify({ settings: { ...settings, drawer_kick: false } }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -306,43 +306,28 @@ export default function ReceiptSettingsPage() {
                 </p>
               </div>
 
-              <div>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={settings.drawer_kick}
-                    onChange={(e) => setSettings({ ...settings, drawer_kick: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Auto Open Cash Drawer</span>
-                </label>
-                <p className="text-xs text-gray-500 mt-1 ml-6">
-                  Automatically open the cash drawer after printing a completed cash sale (including split
-                  payments that include cash). Reprints and card/mobile-money-only sales do not send the pulse.
-                  Drawer failure never reverses the sale.
-                </p>
-              </div>
             </>
           )}
 
-          {settings.printer_type === "browser_print" && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-              <p className="font-semibold text-slate-900 dark:text-slate-100">Cash drawer (XP-80 USB driver)</p>
-              <p className="mt-1">
-                Chrome cannot send ESC/POS drawer commands through the Windows printer driver. On the POS terminal:
-              </p>
-              <ol className="mt-2 list-decimal space-y-1 pl-4">
-                <li>Open Settings → Bluetooth &amp; devices → Printers &amp; scanners → XP-80 (or BillPoint T80E).</li>
-                <li>Printer properties → Device Settings (or Cash Drawer / Peripheral).</li>
-                <li>Set cash drawer to open after printing, usually Pin 2 (or Pin 5 if the kick cable uses that pin).</li>
-                <li>Apply, then print a receipt. The driver opens the drawer on print jobs; it cannot tell cash from card.</li>
-              </ol>
-              <p className="mt-2">
-                Customer display: on the POS screen use <span className="font-semibold">Display off / Connect customer display</span>.
-                Select the pole display COM port (not the printer). That is a 2-line VFD, not a second monitor.
-              </p>
-            </div>
-          )}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+            <p className="font-semibold text-slate-900 dark:text-slate-100">Cash drawer (Windows printer driver)</p>
+            <p className="mt-1">
+              Finza does not connect to or pulse the cash drawer. The XP-80 / BillPoint T80E Windows driver opens
+              the drawer after a receipt prints. On the POS terminal:
+            </p>
+            <ol className="mt-2 list-decimal space-y-1 pl-4">
+              <li>Open Settings → Bluetooth &amp; devices → Printers &amp; scanners → XP-80 (or BillPoint T80E).</li>
+              <li>Printer properties → Device Settings (or Cash Drawer / Peripheral).</li>
+              <li>Set cash drawer to open after printing, usually Pin 2 (or Pin 5 if the kick cable uses that pin).</li>
+              <li>Apply, then print a receipt. The driver may open the drawer for cash, card, MoMo, or reprints.</li>
+            </ol>
+            <p className="mt-2">
+              Customer amount display: on the POS screen tap <span className="font-semibold">Display off</span> then
+              <span className="font-semibold"> Connect customer display</span> and choose this terminal’s display COM
+              port (often COM2 here; other tills may differ). It is an 8-digit numeric amount display, not a second
+              monitor. Serial settings: 9600, 8 data bits, no parity, 1 stop bit, no flow control.
+            </p>
+          </div>
 
           {/* Logo */}
           <div>

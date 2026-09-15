@@ -1,103 +1,69 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  resolveCustomerDisplayIntent,
+  type CustomerDisplaySaleSuccess,
+} from "@/lib/retail/hardware/customerDisplayProtocol"
 import {
   connectCustomerDisplay,
   disconnectCustomerDisplay,
-  getCustomerDisplayIdleMessage,
   getCustomerDisplayLastError,
   getCustomerDisplayStatus,
-  pulseCashDrawer,
-  readCashDrawerOpenLog,
-  setCustomerDisplayIdleMessage,
-  writeCustomerDisplayView,
-  type CashDrawerOpenLogEntry,
+  writeCustomerDisplayAmount,
   type RetailHardwareStatus,
 } from "@/lib/retail/hardware/retailPosHardware"
 
-export type RetailPosHardwareCartItem = {
-  id: string
-  name: string
-  quantity: number
-}
-
-type SaleSuccessDisplay = {
-  cashReceived?: number | null
-  changeGiven?: number | null
-} | null
-
 export function useRetailPosHardware(opts: {
-  cartItems: RetailPosHardwareCartItem[]
+  cartCount: number
   runningTotal: number
-  currencyCode: string | null
   checkoutOpen: boolean
-  saleSuccess: SaleSuccessDisplay
-  cashierName: string | null
+  saleSuccess: CustomerDisplaySaleSuccess
 }) {
   const [status, setStatus] = useState<RetailHardwareStatus>("disconnected")
   const [lastError, setLastError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [idleMessage, setIdleMessage] = useState("")
-  const [drawerLog, setDrawerLog] = useState<CashDrawerOpenLogEntry[]>([])
   const [panelOpen, setPanelOpen] = useState(false)
+  const idleTimerRef = useRef<number | null>(null)
 
   const refresh = useCallback(() => {
     setStatus(getCustomerDisplayStatus())
     setLastError(getCustomerDisplayLastError())
-    setIdleMessage(getCustomerDisplayIdleMessage())
-    setDrawerLog(readCashDrawerOpenLog())
   }, [])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  const latestItem = opts.cartItems[opts.cartItems.length - 1]
+  const clearIdleTimer = useCallback(() => {
+    if (idleTimerRef.current != null) {
+      window.clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
-    if (status !== "connected") return
-    const currency = opts.currencyCode || ""
+    const intent = resolveCustomerDisplayIntent({
+      status,
+      cartCount: opts.cartCount,
+      runningTotal: opts.runningTotal,
+      checkoutOpen: opts.checkoutOpen,
+      saleSuccess: opts.saleSuccess,
+    })
+
     const run = async () => {
       try {
-        if (opts.saleSuccess) {
-          const tendered = Number(opts.saleSuccess.cashReceived ?? 0)
-          const change = Number(opts.saleSuccess.changeGiven ?? 0)
-          if (tendered > 0) {
-            await writeCustomerDisplayView({
-              kind: "tendered",
-              tendered,
-              change,
-              currencyCode: currency,
+        clearIdleTimer()
+        if (intent.action === "none") return
+        await writeCustomerDisplayAmount(intent.amount)
+        if (intent.action === "writeThenIdle") {
+          idleTimerRef.current = window.setTimeout(() => {
+            void writeCustomerDisplayAmount(0).then(() => {
+              setStatus(getCustomerDisplayStatus())
+              setLastError(getCustomerDisplayLastError())
             })
-            return
-          }
-          await writeCustomerDisplayView({
-            kind: "idle",
-            idleMessage: getCustomerDisplayIdleMessage(),
-          })
-          return
+          }, intent.idleAfterMs)
         }
-        if (opts.checkoutOpen) {
-          await writeCustomerDisplayView({
-            kind: "due",
-            amountDue: opts.runningTotal,
-            currencyCode: currency,
-          })
-          return
-        }
-        if (!latestItem) {
-          await writeCustomerDisplayView({
-            kind: "idle",
-            idleMessage: getCustomerDisplayIdleMessage(),
-          })
-          return
-        }
-        await writeCustomerDisplayView({
-          kind: "item",
-          itemName: latestItem.name,
-          runningTotal: opts.runningTotal,
-          currencyCode: currency,
-        })
       } catch {
         /* Display must never block the sale */
       } finally {
@@ -106,17 +72,18 @@ export function useRetailPosHardware(opts: {
       }
     }
     void run()
+    return () => {
+      clearIdleTimer()
+    }
   }, [
     status,
-    latestItem,
-    latestItem?.id,
-    latestItem?.name,
+    opts.cartCount,
     opts.runningTotal,
     opts.checkoutOpen,
     opts.saleSuccess,
     opts.saleSuccess?.cashReceived,
     opts.saleSuccess?.changeGiven,
-    opts.currencyCode,
+    clearIdleTimer,
   ])
 
   const connect = useCallback(async () => {
@@ -141,31 +108,6 @@ export function useRetailPosHardware(opts: {
     }
   }, [refresh])
 
-  const saveIdle = useCallback(
-    (message: string) => {
-      setCustomerDisplayIdleMessage(message)
-      setIdleMessage(message)
-      if (getCustomerDisplayStatus() === "connected" && opts.cartItems.length === 0 && !opts.checkoutOpen) {
-        void writeCustomerDisplayView({ kind: "idle", idleMessage: message })
-      }
-    },
-    [opts.cartItems.length, opts.checkoutOpen]
-  )
-
-  const openDrawer = useCallback(async () => {
-    setBusy(true)
-    try {
-      const result = await pulseCashDrawer({
-        cashier: opts.cashierName || "cashier",
-        source: "manual",
-      })
-      refresh()
-      return result
-    } finally {
-      setBusy(false)
-    }
-  }, [opts.cashierName, refresh])
-
   const statusLabel = useMemo(() => {
     if (status === "connected") return "Display connected"
     if (status === "error") return "Display error"
@@ -177,13 +119,9 @@ export function useRetailPosHardware(opts: {
     statusLabel,
     lastError,
     busy,
-    idleMessage,
-    drawerLog,
     panelOpen,
     setPanelOpen,
     connect,
     disconnect,
-    saveIdle,
-    openDrawer,
   }
 }

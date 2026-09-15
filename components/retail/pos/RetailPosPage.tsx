@@ -2327,16 +2327,10 @@ export default function RetailPosPage() {
   }, [cart, businessCountry, cartDiscountType, cartDiscountValue])
 
   const posHardware = useRetailPosHardware({
-    cartItems: cart.map((item) => ({
-      id: item.id,
-      name: item.variantName ? `${item.product.name} ${item.variantName}` : item.product.name,
-      quantity: item.quantity,
-    })),
+    cartCount: cart.length,
     runningTotal: cartTotals.total,
-    currencyCode,
     checkoutOpen: showPaymentModal,
     saleSuccess,
-    cashierName: cashierDisplayName,
   })
 
   const retailMomoCartSnapshot = useMemo((): RetailMomoCartSnapshot => {
@@ -2579,21 +2573,7 @@ export default function RetailPosPage() {
                       <span className="inline-flex max-w-[5.5rem] shrink-0 items-center truncate whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 min-[400px]:max-w-none">
                         {cashierDisplayName || "—"}
                       </span>
-                      <RetailPosHardwareBar
-                        hardware={posHardware}
-                        onDrawerResult={(result) => {
-                          if (result.ok) {
-                            setToast({ message: "Cash drawer pulse sent", type: "success" })
-                          } else {
-                            setToast({
-                              message:
-                                result.message ||
-                                "Drawer did not open. Configure the XP-80 driver or select the printer COM port.",
-                              type: "error",
-                            })
-                          }
-                        }}
-                      />
+                      <RetailPosHardwareBar hardware={posHardware} />
                       {catalogSnapshotSyncing ? (
                         <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-blue-50 px-1.5 py-0.5 font-bold text-blue-900 ring-1 ring-blue-300/70">
                           Syncing catalog…
@@ -3788,9 +3768,7 @@ export default function RetailPosPage() {
                   onClick={async () => {
                     setPrintingReceipt(true)
                     try {
-                      const r = await printRetailSaleReceiptInBrowser(saleSuccess.saleId, {
-                        allowDrawerKick: true,
-                      })
+                      const r = await printRetailSaleReceiptInBrowser(saleSuccess.saleId)
                       if (!r.ok) {
                         setToast({ message: r.message, type: "error" })
                       }
