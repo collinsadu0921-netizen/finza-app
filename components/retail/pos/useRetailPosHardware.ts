@@ -29,7 +29,6 @@ import {
   readCustomerDisplayTerminalConfig,
   resolveConnectSerialProfile,
   resolveCustomerDisplayAmountWriteMode,
-  shouldAllowAutomaticCustomerDisplayUpdates,
   writeCustomerDisplayTerminalConfig,
   type CustomerDisplayAmountWriteMode,
   type CustomerDisplayTerminalConfig,
@@ -40,6 +39,13 @@ import {
   LIVE_TRIAL_UI_WARNING,
   canStartCustomerDisplayLiveTrial,
 } from "@/lib/retail/hardware/customerDisplayLiveTrial"
+import {
+  resolveCashierReadyLabel,
+  shouldAllowAutomaticUpdatesFromRegisterConfig,
+  type CashierRegisterCustomerDisplayView,
+  type RegisterCustomerDisplayConfig,
+} from "@/lib/retail/hardware/registerCustomerDisplayConfig"
+import { getCashierPosToken } from "@/lib/cashierSession"
 import {
   connectCustomerDisplay,
   disconnectCustomerDisplay,
@@ -95,15 +101,115 @@ export function useRetailPosHardware(opts: {
   /** Session-only; defaults off and is never restored from localStorage / physicallyVerified. */
   const [liveTrialActive, setLiveTrialActive] = useState(false)
   const [liveTrialMessage, setLiveTrialMessage] = useState("")
+  const [serverConfig, setServerConfig] = useState<RegisterCustomerDisplayConfig | null>(null)
+  const [serverView, setServerView] = useState<CashierRegisterCustomerDisplayView | null>(null)
+  const [configLoadState, setConfigLoadState] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle"
+  )
+  const [everConnectedThisSession, setEverConnectedThisSession] = useState(false)
+  const [needsPortPermissionHint, setNeedsPortPermissionHint] = useState(false)
+  const [localImportCandidate, setLocalImportCandidate] =
+    useState<CustomerDisplayTerminalConfig | null>(null)
   const idleTimerRef = useRef<number | null>(null)
 
+  const authHeaders = useCallback((): HeadersInit => {
+    const posToken = getCashierPosToken()
+    if (posToken) return { Authorization: `Bearer ${posToken}` }
+    return {}
+  }, [])
+
+  const applyServerPayload = useCallback(
+    (payload: {
+      config?: RegisterCustomerDisplayConfig
+      view?: CashierRegisterCustomerDisplayView
+    }) => {
+      if (payload.config) {
+        setServerConfig(payload.config)
+        setTerminalConfig({
+          profileId: payload.config.profileId ?? CUSTOMER_DISPLAY_DIAGNOSTIC_DEFAULT_PROFILE_ID,
+          physicallyVerified: payload.config.physicallyVerified,
+          verifiedAt: payload.config.verifiedAt,
+          verifiedNote: payload.config.verifiedNote,
+          amountWriteMode: payload.config.amountWriteMode ?? "ascii_only",
+          updatedAt: payload.config.updatedAt ?? new Date(0).toISOString(),
+        })
+        if (payload.config.profileId) setProfileId(payload.config.profileId)
+      }
+      if (payload.view) setServerView(payload.view)
+    },
+    []
+  )
+
+  const reloadServerConfig = useCallback(async () => {
+    if (!terminalIdentity?.registerId) {
+      setServerConfig(null)
+      setServerView(null)
+      setConfigLoadState("idle")
+      setLocalImportCandidate(null)
+      return null
+    }
+    setConfigLoadState("loading")
+    try {
+      const res = await fetch(
+        `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
+        { headers: authHeaders(), cache: "no-store" }
+      )
+      if (!res.ok) {
+        setConfigLoadState("error")
+        setConfigMessage("Could not load customer display settings for this register.")
+        return null
+      }
+      const payload = (await res.json()) as {
+        config?: RegisterCustomerDisplayConfig
+        view?: CashierRegisterCustomerDisplayView
+      }
+      applyServerPayload(payload)
+      setConfigLoadState("ready")
+
+      // Local browser profile is only a migration candidate — never trusted as server truth.
+      const local = readCustomerDisplayTerminalConfig(terminalIdentity)
+      if (
+        canUseDiagnostics &&
+        local?.physicallyVerified === true &&
+        (!payload.config?.physicallyVerified || !payload.config?.configured)
+      ) {
+        setLocalImportCandidate(local)
+      } else {
+        setLocalImportCandidate(null)
+      }
+      return payload
+    } catch {
+      setConfigLoadState("error")
+      return null
+    }
+  }, [terminalIdentity, authHeaders, applyServerPayload, canUseDiagnostics])
+
   const reloadTerminalConfig = useCallback(() => {
+    // Prefer server; localStorage only seeds owner diagnostic draft / import candidate.
     const stored = readCustomerDisplayTerminalConfig(terminalIdentity)
-    const next = stored ?? defaultCustomerDisplayTerminalConfig()
+    if (stored && canUseDiagnostics && !serverConfig?.configured) {
+      setTerminalConfig(stored)
+      setProfileId(stored.profileId)
+      return stored
+    }
+    if (serverConfig?.profileId) {
+      const mapped: CustomerDisplayTerminalConfig = {
+        profileId: serverConfig.profileId,
+        physicallyVerified: serverConfig.physicallyVerified,
+        verifiedAt: serverConfig.verifiedAt,
+        verifiedNote: serverConfig.verifiedNote,
+        amountWriteMode: serverConfig.amountWriteMode ?? "ascii_only",
+        updatedAt: serverConfig.updatedAt ?? new Date(0).toISOString(),
+      }
+      setTerminalConfig(mapped)
+      setProfileId(mapped.profileId)
+      return mapped
+    }
+    const next = defaultCustomerDisplayTerminalConfig()
     setTerminalConfig(next)
     setProfileId(next.profileId)
     return next
-  }, [terminalIdentity])
+  }, [terminalIdentity, canUseDiagnostics, serverConfig])
 
   const refresh = useCallback(() => {
     setStatus(getCustomerDisplayStatus())
@@ -112,6 +218,10 @@ export function useRetailPosHardware(opts: {
     setDiagnosticMode(isCustomerDisplayDiagnosticMode())
     setDiagnosticLog(listCustomerDisplayDiagnosticLog())
   }, [])
+
+  useEffect(() => {
+    void reloadServerConfig()
+  }, [reloadServerConfig])
 
   useEffect(() => {
     reloadTerminalConfig()
@@ -130,8 +240,19 @@ export function useRetailPosHardware(opts: {
     }
   }, [])
 
-  const autoUpdatesAllowed = shouldAllowAutomaticCustomerDisplayUpdates(terminalConfig)
-  const amountWriteMode = resolveCustomerDisplayAmountWriteMode(terminalConfig)
+  const autoUpdatesAllowed = shouldAllowAutomaticUpdatesFromRegisterConfig(serverConfig)
+  const amountWriteMode = resolveCustomerDisplayAmountWriteMode(
+    serverConfig?.amountWriteMode
+      ? {
+          profileId: serverConfig.profileId ?? profileId,
+          physicallyVerified: serverConfig.physicallyVerified,
+          verifiedAt: serverConfig.verifiedAt,
+          verifiedNote: serverConfig.verifiedNote,
+          amountWriteMode: serverConfig.amountWriteMode,
+          updatedAt: serverConfig.updatedAt ?? new Date(0).toISOString(),
+        }
+      : terminalConfig
+  )
 
   useEffect(() => {
     setAutomaticCustomerDisplaySaleWritesEnabled(autoUpdatesAllowed)
@@ -265,31 +386,67 @@ export function useRetailPosHardware(opts: {
 
   const selectedProfile = useMemo(() => getCustomerDisplaySerialProfile(profileId), [profileId])
 
-  const connect = useCallback(async () => {
-    setBusy(true)
-    setConfigMessage("")
-    try {
-      const profile = resolveConnectSerialProfile(terminalConfig, {
-        diagnosticMode: canUseDiagnostics && diagnosticMode,
-        diagnosticProfileId: profileId,
-      })
-      await connectCustomerDisplay({
-        profile,
-        diagnosticMode: canUseDiagnostics && diagnosticMode,
-      })
-    } catch (e: unknown) {
-      setLastError(e instanceof Error ? e.message : "Could not connect customer display.")
-    } finally {
-      refresh()
-      setBusy(false)
-    }
-  }, [
-    canUseDiagnostics,
-    diagnosticMode,
-    profileId,
-    terminalConfig,
-    refresh,
-  ])
+  const connect = useCallback(
+    async (opts?: { forcePortPicker?: boolean }) => {
+      setBusy(true)
+      setConfigMessage("")
+      try {
+        const diagnostic = canUseDiagnostics && diagnosticMode
+        const profile = diagnostic
+          ? resolveConnectSerialProfile(terminalConfig, {
+              diagnosticMode: true,
+              diagnosticProfileId: profileId,
+            })
+          : serverView?.setupStatus === "ready" && serverView.connectProfile
+            ? resolveConnectSerialProfile({
+                profileId: serverView.connectProfile.profileId,
+                physicallyVerified: true,
+                verifiedAt: null,
+                verifiedNote: null,
+                amountWriteMode: serverView.connectProfile.amountWriteMode,
+                updatedAt: new Date(0).toISOString(),
+              })
+            : null
+
+        if (!profile) {
+          setLastError(
+            "Customer display requires owner/admin setup. Sales can continue without it."
+          )
+          setNeedsPortPermissionHint(false)
+          return
+        }
+
+        await connectCustomerDisplay({
+          profile,
+          diagnosticMode: diagnostic,
+          forcePortPicker: opts?.forcePortPicker === true,
+        })
+        setEverConnectedThisSession(true)
+        setNeedsPortPermissionHint(false)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Could not connect customer display."
+        setLastError(msg)
+        if (/permission|select|serial|NotFound|Security/i.test(msg)) {
+          setNeedsPortPermissionHint(true)
+        }
+      } finally {
+        refresh()
+        setBusy(false)
+      }
+    },
+    [
+      canUseDiagnostics,
+      diagnosticMode,
+      profileId,
+      terminalConfig,
+      serverView,
+      refresh,
+    ]
+  )
+
+  const chooseSerialDevice = useCallback(async () => {
+    await connect({ forcePortPicker: true })
+  }, [connect])
 
   const disconnect = useCallback(async () => {
     setBusy(true)
@@ -304,20 +461,75 @@ export function useRetailPosHardware(opts: {
     }
   }, [refresh, stopLiveTrial])
 
-  const persistConfig = useCallback(
-    (next: CustomerDisplayTerminalConfig) => {
-      const ok = writeCustomerDisplayTerminalConfig(terminalIdentity, next)
-      setTerminalConfig(next)
-      setProfileId(next.profileId)
-      if (!ok) {
+  const persistConfigToServer = useCallback(
+    async (input: {
+      profileId: CustomerDisplaySerialProfile["id"]
+      amountWriteMode: CustomerDisplayAmountWriteMode
+      markVerified?: boolean
+      clearVerification?: boolean
+      verifiedNote?: string | null
+    }) => {
+      if (!canUseDiagnostics || !terminalIdentity?.registerId) {
         setConfigMessage(
           terminalIdentity
-            ? "Could not save on this browser (storage blocked)."
+            ? "Only owner/admin can save register display settings."
             : "Bind this till to a register before saving a display profile."
         )
         return false
       }
-      setConfigMessage("")
+      try {
+        const res = await fetch(
+          `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({
+              profileId: input.profileId,
+              amountWriteMode: input.amountWriteMode,
+              markVerified: input.markVerified === true,
+              clearVerification: input.clearVerification === true,
+              verifiedNote: input.verifiedNote ?? null,
+              storeId: terminalIdentity.storeId,
+              enabled: true,
+            }),
+          }
+        )
+        const payload = (await res.json()) as {
+          error?: string
+          config?: RegisterCustomerDisplayConfig
+          view?: CashierRegisterCustomerDisplayView
+        }
+        if (!res.ok) {
+          setConfigMessage(payload.error || "Could not save register display settings.")
+          return false
+        }
+        applyServerPayload(payload)
+        // Keep a local mirror for this till’s diagnostic draft / migration history only.
+        if (payload.config?.profileId) {
+          writeCustomerDisplayTerminalConfig(terminalIdentity, {
+            profileId: payload.config.profileId,
+            physicallyVerified: payload.config.physicallyVerified,
+            verifiedAt: payload.config.verifiedAt,
+            verifiedNote: payload.config.verifiedNote,
+            amountWriteMode: payload.config.amountWriteMode ?? "ascii_only",
+            updatedAt: payload.config.updatedAt ?? new Date().toISOString(),
+          })
+        }
+        return true
+      } catch {
+        setConfigMessage("Could not save register display settings.")
+        return false
+      }
+    },
+    [canUseDiagnostics, terminalIdentity, authHeaders, applyServerPayload]
+  )
+
+  const persistConfig = useCallback(
+    (next: CustomerDisplayTerminalConfig) => {
+      // Local draft only — automatic totals follow server verification.
+      writeCustomerDisplayTerminalConfig(terminalIdentity, next)
+      setTerminalConfig(next)
+      setProfileId(next.profileId)
       return true
     },
     [terminalIdentity]
@@ -335,7 +547,6 @@ export function useRetailPosHardware(opts: {
         ...terminalConfig,
         profileId: nextId,
         amountWriteMode: nextMode,
-        // Changing baud clears physical verification — other tills / profiles must re-verify.
         physicallyVerified: false,
         verifiedAt: null,
         verifiedNote: null,
@@ -343,8 +554,19 @@ export function useRetailPosHardware(opts: {
       }
       persistConfig(next)
       setProfileId(nextId)
+      void persistConfigToServer({
+        profileId: nextId,
+        amountWriteMode: nextMode,
+        clearVerification: true,
+      }).then((ok) => {
+        if (ok) {
+          setConfigMessage(
+            "Saved serial profile on this register. Physical verification cleared — automatic totals stay off."
+          )
+        }
+      })
     },
-    [canUseDiagnostics, terminalConfig, persistConfig]
+    [canUseDiagnostics, terminalConfig, persistConfig, persistConfigToServer]
   )
 
   const saveAmountWriteMode = useCallback(
@@ -358,44 +580,60 @@ export function useRetailPosHardware(opts: {
         ...terminalConfig,
         profileId,
         amountWriteMode: mode,
-        // Changing write sequence clears verification — must re-verify the new path.
         physicallyVerified: false,
         verifiedAt: null,
         verifiedNote: null,
         updatedAt: new Date().toISOString(),
       }
-      if (persistConfig(next)) {
-        setConfigMessage(
-          mode === "clear_then_amount"
-            ? "Saved staging candidate: clear then amount (0C). Automatic totals stay off until this till is verified."
-            : "Saved plain ASCII amount writes for this till. Automatic totals stay off until verified."
-        )
-      }
+      persistConfig(next)
+      void persistConfigToServer({
+        profileId,
+        amountWriteMode: mode,
+        clearVerification: true,
+      }).then((ok) => {
+        if (ok) {
+          setConfigMessage(
+            mode === "clear_then_amount"
+              ? "Saved staging candidate on this register: clear then amount (0C). Automatic totals stay off until verified."
+              : "Saved plain ASCII amount writes on this register. Automatic totals stay off until verified."
+          )
+        }
+      })
     },
-    [canUseDiagnostics, terminalConfig, profileId, persistConfig]
+    [canUseDiagnostics, terminalConfig, profileId, persistConfig, persistConfigToServer]
   )
 
   const markPhysicallyVerified = useCallback(() => {
     if (!canUseDiagnostics) return
+    const mode = resolveCustomerDisplayAmountWriteMode({
+      ...terminalConfig,
+      profileId,
+    })
+    const note = formatVerifiedDisplayNote(profileId, mode)
     const next: CustomerDisplayTerminalConfig = {
       ...terminalConfig,
       profileId,
-      amountWriteMode: resolveCustomerDisplayAmountWriteMode({
-        ...terminalConfig,
-        profileId,
-      }),
+      amountWriteMode: mode,
       physicallyVerified: true,
       verifiedAt: new Date().toISOString(),
-      verifiedNote: formatVerifiedDisplayNote(
-        profileId,
-        resolveCustomerDisplayAmountWriteMode({ ...terminalConfig, profileId })
-      ),
+      verifiedNote: note,
       updatedAt: new Date().toISOString(),
     }
-    if (persistConfig(next)) {
-      setConfigMessage("Saved as physically verified for this till. Automatic basket totals may resume when connected.")
-    }
-  }, [canUseDiagnostics, terminalConfig, profileId, persistConfig])
+    persistConfig(next)
+    void persistConfigToServer({
+      profileId,
+      amountWriteMode: mode,
+      markVerified: true,
+      verifiedNote: note,
+    }).then((ok) => {
+      if (ok) {
+        setLocalImportCandidate(null)
+        setConfigMessage(
+          "Saved as physically verified on this register. Automatic basket totals may resume when connected."
+        )
+      }
+    })
+  }, [canUseDiagnostics, terminalConfig, profileId, persistConfig, persistConfigToServer])
 
   const clearPhysicalVerification = useCallback(() => {
     if (!canUseDiagnostics) return
@@ -406,10 +644,61 @@ export function useRetailPosHardware(opts: {
       verifiedNote: null,
       updatedAt: new Date().toISOString(),
     }
-    if (persistConfig(next)) {
-      setConfigMessage("Automatic basket totals disabled until this till is re-verified.")
+    persistConfig(next)
+    void persistConfigToServer({
+      profileId,
+      amountWriteMode: resolveCustomerDisplayAmountWriteMode({ ...terminalConfig, profileId }),
+      clearVerification: true,
+    }).then((ok) => {
+      if (ok) {
+        setConfigMessage("Automatic basket totals disabled until this register is re-verified.")
+      }
+    })
+  }, [canUseDiagnostics, terminalConfig, profileId, persistConfig, persistConfigToServer])
+
+  const confirmLocalImport = useCallback(async () => {
+    if (!canUseDiagnostics || !terminalIdentity?.registerId || !localImportCandidate) return
+    try {
+      const res = await fetch(
+        `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({
+            confirmLocalImport: true,
+            storeId: terminalIdentity.storeId,
+            local: {
+              profileId: localImportCandidate.profileId,
+              amountWriteMode: localImportCandidate.amountWriteMode,
+              verifiedNote: localImportCandidate.verifiedNote,
+            },
+          }),
+        }
+      )
+      const payload = (await res.json()) as {
+        error?: string
+        config?: RegisterCustomerDisplayConfig
+        view?: CashierRegisterCustomerDisplayView
+      }
+      if (!res.ok) {
+        setConfigMessage(payload.error || "Could not confirm local profile.")
+        return
+      }
+      applyServerPayload(payload)
+      setLocalImportCandidate(null)
+      setConfigMessage(
+        "Confirmed this till’s browser profile on the register. Cashiers can connect using the server settings."
+      )
+    } catch {
+      setConfigMessage("Could not confirm local profile.")
     }
-  }, [canUseDiagnostics, terminalConfig, persistConfig])
+  }, [
+    canUseDiagnostics,
+    terminalIdentity,
+    localImportCandidate,
+    authHeaders,
+    applyServerPayload,
+  ])
 
   const enableDiagnostics = useCallback(async () => {
     if (!canUseDiagnostics) return
@@ -510,13 +799,32 @@ export function useRetailPosHardware(opts: {
     }
   }, [canUseDiagnostics, diagnosticMode, sequenceAmountInput, refresh])
 
+  const setupStatus =
+    configLoadState === "loading"
+      ? ("not_configured" as const)
+      : serverView?.setupStatus ?? ("not_configured" as const)
+
   const cashierStatusLabel = useMemo(() => {
+    if (configLoadState === "loading") return "Customer display: …"
+    if (setupStatus === "not_configured" || setupStatus === "unverified") {
+      return "Customer display: Not configured"
+    }
     if (status === "connected") return "Customer display: Connected"
     if (status === "error") return "Customer display: Error"
-    return "Customer display: Off"
-  }, [status])
+    if (everConnectedThisSession) return "Customer display: Disconnected"
+    return resolveCashierReadyLabel({
+      setupStatus: "ready",
+      connectionStatus: "disconnected",
+    })
+  }, [configLoadState, setupStatus, status, everConnectedThisSession])
 
   const hasTerminalBinding = Boolean(terminalIdentity?.registerId)
+  const cashierSetupMessage =
+    setupStatus === "not_configured" || setupStatus === "unverified"
+      ? serverView?.message ||
+        "Customer display requires owner/admin setup. Sales can continue without it."
+      : null
+  const canCashierConnect = setupStatus === "ready" || (canUseDiagnostics && diagnosticMode)
 
   const liveTrialStartGate = useMemo(
     () =>
@@ -578,7 +886,8 @@ export function useRetailPosHardware(opts: {
     busy,
     panelOpen,
     setPanelOpen,
-    connect,
+    connect: () => void connect(),
+    chooseSerialDevice: () => void chooseSerialDevice(),
     disconnect,
     canUseDiagnostics,
     diagnosticMode,
@@ -624,5 +933,14 @@ export function useRetailPosHardware(opts: {
     startLiveTrial,
     stopLiveTrial: () =>
       stopLiveTrial("Live trial stopped. Further automatic writes will not be sent."),
+    serverConfig,
+    serverView,
+    setupStatus,
+    cashierSetupMessage,
+    canCashierConnect,
+    needsPortPermissionHint,
+    localImportCandidate,
+    confirmLocalImport: () => void confirmLocalImport(),
+    reloadServerConfig: () => void reloadServerConfig(),
   }
 }

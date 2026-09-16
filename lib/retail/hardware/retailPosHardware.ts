@@ -19,7 +19,6 @@ import {
   buildSegmentedAmountBytes,
   formatSegmentedAmount,
   shouldWriteCustomerDisplay,
-  SEGMENTED_AMOUNT_SERIAL,
   type CustomerDisplayConnectionStatus,
 } from "@/lib/retail/hardware/customerDisplayProtocol"
 import {
@@ -162,7 +161,10 @@ async function enqueueWrite(bytes: Uint8Array, opts?: { allowWhileDiagnostic?: b
   await writeQueue
 }
 
-async function pickDisplayPort(): Promise<BrowserSerialPortLike> {
+async function pickDisplayPort(forcePortPicker?: boolean): Promise<BrowserSerialPortLike> {
+  if (forcePortPicker === true) {
+    return requestSerialPort()
+  }
   const granted = await listGrantedSerialPorts()
   if (granted.length === 1) {
     return granted[0]
@@ -170,8 +172,7 @@ async function pickDisplayPort(): Promise<BrowserSerialPortLike> {
   return requestSerialPort()
 }
 
-function resolveOpenOptions(profile?: CustomerDisplaySerialProfile | null): SerialPortOpenOptions {
-  if (!profile) return { ...SEGMENTED_AMOUNT_SERIAL }
+function resolveOpenOptions(profile: CustomerDisplaySerialProfile): SerialPortOpenOptions {
   return {
     baudRate: profile.baudRate,
     dataBits: profile.dataBits,
@@ -182,16 +183,23 @@ function resolveOpenOptions(profile?: CustomerDisplaySerialProfile | null): Seri
 }
 
 /**
- * Connect to the cashier-selected COM port.
+ * Connect to the cashier-selected COM port using an explicit serial profile.
  * Does not write any bytes on connect — sales auto-updates or diagnostic buttons write later.
+ * Never invents baud/protocol: callers must supply a register-verified or diagnostic profile.
  */
-export async function connectCustomerDisplay(opts?: {
-  profile?: CustomerDisplaySerialProfile | null
+export async function connectCustomerDisplay(opts: {
+  profile: CustomerDisplaySerialProfile
   diagnosticMode?: boolean
+  /** Force Chrome’s serial picker (e.g. “Choose customer display” on a new PC). */
+  forcePortPicker?: boolean
 }): Promise<void> {
-  const profile = opts?.profile ?? null
-  const openOpts = resolveOpenOptions(profile)
-  const port = await pickDisplayPort()
+  if (!opts?.profile) {
+    throw new Error(
+      "Customer display requires owner/admin setup. Sales can continue without it."
+    )
+  }
+  const openOpts = resolveOpenOptions(opts.profile)
+  const port = await pickDisplayPort(opts.forcePortPicker === true)
   await openSerialPort(port, openOpts)
   if (displaySession?.port && displaySession.port !== port) {
     await closeSerialPort(displaySession.port)

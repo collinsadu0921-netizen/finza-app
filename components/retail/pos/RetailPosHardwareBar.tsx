@@ -54,9 +54,14 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
               {hardware.liveTrialActive
                 ? " · live trial on (this till)"
                 : hardware.status === "connected" && !hardware.autoUpdatesAllowed && !hardware.diagnosticMode
-                  ? " · automatic totals off (not verified)"
+                  ? " · automatic totals off (not verified on register)"
                   : ""}
             </p>
+            {hardware.cashierSetupMessage && !hardware.canUseDiagnostics ? (
+              <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                {hardware.cashierSetupMessage}
+              </p>
+            ) : null}
             {hardware.lastError ? (
               <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
                 {hardware.lastError}
@@ -74,28 +79,64 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                   Disconnect
                 </button>
               ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={hardware.busy || !hardware.canCashierConnect}
+                    onClick={() => hardware.connect()}
+                    className="min-h-[48px] rounded-xl bg-blue-600 px-3 text-sm font-bold text-white disabled:opacity-50"
+                  >
+                    {hardware.busy
+                      ? "Connecting…"
+                      : hardware.status === "error"
+                        ? "Reconnect"
+                        : "Connect"}
+                  </button>
+                  {(hardware.needsPortPermissionHint || hardware.canCashierConnect) && (
+                    <button
+                      type="button"
+                      disabled={hardware.busy || !hardware.canCashierConnect}
+                      onClick={() => hardware.chooseSerialDevice()}
+                      className="min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 disabled:opacity-50"
+                    >
+                      Choose customer display
+                    </button>
+                  )}
+                </>
+              )}
+              <p className="text-[11px] text-slate-500">
+                Register settings come from the server. Chrome still asks for serial permission on this computer —
+                installing the app or using another browser profile does not transfer that permission. Connecting never
+                sends bytes by itself.
+              </p>
+            </div>
+
+            {hardware.canUseDiagnostics && hardware.localImportCandidate ? (
+              <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3">
+                <h3 className="text-sm font-extrabold text-amber-950">Confirm browser profile on this register</h3>
+                <p className="mt-1 text-[11px] text-amber-950">
+                  This browser has a previously verified local profile ({hardware.localImportCandidate.profileId} baud
+                  · {hardware.localImportCandidate.amountWriteMode}). It is not uploaded automatically. Confirm as
+                  owner/admin to save it on this register so cashiers can connect.
+                </p>
                 <button
                   type="button"
                   disabled={hardware.busy}
-                  onClick={() => void hardware.connect()}
-                  className="min-h-[48px] rounded-xl bg-blue-600 px-3 text-sm font-bold text-white disabled:opacity-50"
+                  onClick={() => hardware.confirmLocalImport()}
+                  className="mt-2 min-h-[44px] w-full rounded-xl bg-amber-800 px-3 text-sm font-bold text-white disabled:opacity-50"
                 >
-                  {hardware.busy ? "Connecting…" : "Connect customer display"}
+                  Confirm and save to this register
                 </button>
-              )}
-              <p className="text-[11px] text-slate-500">
-                Connecting never sends bytes by itself. Any amount already on the rear display after Connect is leftover
-                hardware state, not a Finza write.
-              </p>
-            </div>
+              </div>
+            ) : null}
 
             {hardware.canUseDiagnostics ? (
               <div className="mt-4 space-y-3">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
-                  <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">This till’s display setup</h3>
+                  <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">This register’s display setup</h3>
                   <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
-                    Profile is saved for this bound register only. Other tills keep their own settings. Do not mark
-                    verified until amounts look correct on the physical rear display.
+                    Settings are stored on this register online (not as a COM port). Other registers keep their own
+                    profiles. Do not mark verified until amounts look correct on the physical rear display.
                   </p>
 
                   {!hardware.hasTerminalBinding ? (

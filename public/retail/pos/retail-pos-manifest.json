@@ -1,12 +1,14 @@
 {
-  "name": "Finza Retail POS",
-  "short_name": "Finza POS",
-  "description": "Finza Retail point of sale (scoped PWA shell).",
+  "name": "Finza Retail",
+  "short_name": "Finza Retail",
+  "description": "Finza Retail point of sale. Install for a standalone window; sales still require network access.",
   "start_url": "/retail/pos",
   "scope": "/retail/pos",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#f8fafc",
   "theme_color": "#0f172a",
+  "categories": ["business", "finance"],
   "icons": [
     {
       "src": "/brand/icon-192.png",
@@ -19,6 +21,18 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
