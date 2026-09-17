@@ -230,6 +230,54 @@ export function shouldAllowAutomaticUpdatesFromRegisterConfig(
   return view.setupStatus === "ready"
 }
 
+/**
+ * Cashier PIN sessions receive the read-safe `view` only (no full `config`).
+ * Automatic basket writes must key off that verified connect profile — not an
+ * owner-only local/serverConfig latch that cashiers never receive.
+ */
+export function shouldAllowAutomaticUpdatesFromServerSources(opts: {
+  serverConfig: RegisterCustomerDisplayConfig | null | undefined
+  serverView: CashierRegisterCustomerDisplayView | null | undefined
+}): boolean {
+  if (
+    opts.serverView?.setupStatus === "ready" &&
+    opts.serverView.connectProfile != null &&
+    opts.serverView.connectProfile.amountWriteMode != null
+  ) {
+    return true
+  }
+  return shouldAllowAutomaticUpdatesFromRegisterConfig(opts.serverConfig)
+}
+
+export function resolveAmountWriteModeFromServerSources(opts: {
+  serverConfig: RegisterCustomerDisplayConfig | null | undefined
+  serverView: CashierRegisterCustomerDisplayView | null | undefined
+  fallbackProfileId: RegisterCustomerDisplayProfileId
+  fallbackMode: CustomerDisplayAmountWriteMode
+}): CustomerDisplayAmountWriteMode {
+  if (opts.serverView?.setupStatus === "ready" && opts.serverView.connectProfile) {
+    return opts.serverView.connectProfile.amountWriteMode
+  }
+  if (opts.serverConfig?.amountWriteMode && opts.serverConfig.profileId) {
+    return resolveCustomerDisplayAmountWriteMode({
+      profileId: opts.serverConfig.profileId,
+      physicallyVerified: opts.serverConfig.physicallyVerified,
+      verifiedAt: opts.serverConfig.verifiedAt,
+      verifiedNote: opts.serverConfig.verifiedNote,
+      amountWriteMode: opts.serverConfig.amountWriteMode,
+      updatedAt: opts.serverConfig.updatedAt ?? new Date(0).toISOString(),
+    })
+  }
+  return resolveCustomerDisplayAmountWriteMode({
+    profileId: opts.fallbackProfileId,
+    physicallyVerified: false,
+    verifiedAt: null,
+    verifiedNote: null,
+    amountWriteMode: opts.fallbackMode,
+    updatedAt: new Date(0).toISOString(),
+  })
+}
+
 export function serialProfileFromRegisterConfig(
   config: RegisterCustomerDisplayConfig | CashierRegisterCustomerDisplayView["connectProfile"]
 ): CustomerDisplaySerialProfile | null {

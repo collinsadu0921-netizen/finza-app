@@ -42,10 +42,11 @@ import {
 import {
   customerDisplayIdentityKey,
   nextCustomerDisplayLoadState,
+  resolveAmountWriteModeFromServerSources,
   resolveCashierReadyLabel,
   resolveCustomerDisplayConnectAvailability,
   resolveOwnerTerminalDraft,
-  shouldAllowAutomaticUpdatesFromRegisterConfig,
+  shouldAllowAutomaticUpdatesFromServerSources,
   shouldFetchRegisterCustomerDisplayConfig,
   type CashierRegisterCustomerDisplayView,
   type RegisterCustomerDisplayConfig,
@@ -118,10 +119,31 @@ export function useRetailPosHardware(opts: {
   const [needsPortPermissionHint, setNeedsPortPermissionHint] = useState(false)
   const [localImportCandidate, setLocalImportCandidate] =
     useState<CustomerDisplayTerminalConfig | null>(null)
+  /** Stop auto writes after a serial failure until the cashier reconnects. */
+  const [autoWritesPausedAfterError, setAutoWritesPausedAfterError] = useState(false)
   const idleTimerRef = useRef<number | null>(null)
   const fetchedIdentityKeyRef = useRef<string | null>(null)
   const configLoadStateRef = useRef(configLoadState)
   configLoadStateRef.current = configLoadState
+  /** After Connect, skip auto-writes until cart/checkout/sale state actually changes. */
+  const skipAutoWriteUntilChangeRef = useRef<{
+    cartCount: number
+    runningTotal: number
+    checkoutOpen: boolean
+    saleSuccess: CustomerDisplaySaleSuccess
+  } | null>(null)
+  const cartSnapshotRef = useRef({
+    cartCount: opts.cartCount,
+    runningTotal: opts.runningTotal,
+    checkoutOpen: opts.checkoutOpen,
+    saleSuccess: opts.saleSuccess,
+  })
+  cartSnapshotRef.current = {
+    cartCount: opts.cartCount,
+    runningTotal: opts.runningTotal,
+    checkoutOpen: opts.checkoutOpen,
+    saleSuccess: opts.saleSuccess,
+  }
 
   const applyServerPayload = useCallback(
     (payload: {
@@ -234,9 +256,15 @@ export function useRetailPosHardware(opts: {
     void reloadServerConfig()
   }, [identityKey, reloadServerConfig])
 
+  // Owner ↔ cashier (or register rebind) must not keep a prior serial session / write latch.
   useEffect(() => {
-    refresh()
-  }, [identityKey, refresh])
+    skipAutoWriteUntilChangeRef.current = null
+    setAutoWritesPausedAfterError(false)
+    setEverConnectedThisSession(false)
+    void disconnectCustomerDisplay().finally(() => {
+      refresh()
+    })
+  }, [identityKey, canUseDiagnostics, refresh])
 
   useEffect(() => {
     const bytes = buildCustomerDisplayDiagnosticBytes(pendingTestId)
@@ -250,19 +278,17 @@ export function useRetailPosHardware(opts: {
     }
   }, [])
 
-  const autoUpdatesAllowed = shouldAllowAutomaticUpdatesFromRegisterConfig(serverConfig)
-  const amountWriteMode = resolveCustomerDisplayAmountWriteMode(
-    serverConfig?.amountWriteMode
-      ? {
-          profileId: serverConfig.profileId ?? profileId,
-          physicallyVerified: serverConfig.physicallyVerified,
-          verifiedAt: serverConfig.verifiedAt,
-          verifiedNote: serverConfig.verifiedNote,
-          amountWriteMode: serverConfig.amountWriteMode,
-          updatedAt: serverConfig.updatedAt ?? new Date(0).toISOString(),
-        }
-      : terminalConfig
-  )
+  const autoUpdatesAllowed =
+    shouldAllowAutomaticUpdatesFromServerSources({
+      serverConfig,
+      serverView,
+    }) && !autoWritesPausedAfterError
+  const amountWriteMode = resolveAmountWriteModeFromServerSources({
+    serverConfig,
+    serverView,
+    fallbackProfileId: profileId,
+    fallbackMode: terminalConfig.amountWriteMode,
+  })
 
   useEffect(() => {
     setAutomaticCustomerDisplaySaleWritesEnabled(autoUpdatesAllowed)
@@ -292,6 +318,19 @@ export function useRetailPosHardware(opts: {
   }, [])
 
   useEffect(() => {
+    const baseline = skipAutoWriteUntilChangeRef.current
+    if (baseline) {
+      const unchanged =
+        baseline.cartCount === opts.cartCount &&
+        baseline.runningTotal === opts.runningTotal &&
+        baseline.checkoutOpen === opts.checkoutOpen &&
+        baseline.saleSuccess === opts.saleSuccess
+      if (unchanged) {
+        return
+      }
+      skipAutoWriteUntilChangeRef.current = null
+    }
+
     const intent = resolveCustomerDisplayIntent({
       status,
       cartCount: opts.cartCount,
@@ -308,10 +347,24 @@ export function useRetailPosHardware(opts: {
         clearIdleTimer()
         if (liveTrialActive) return
         if (intent.action === "none") return
-        await writeCustomerDisplayAmount(intent.amount)
+        const result = await writeCustomerDisplayAmount(intent.amount)
+        if (result && result.ok === false) {
+          setAutoWritesPausedAfterError(true)
+          setAutomaticCustomerDisplaySaleWritesEnabled(false)
+          setLastError(result.error || "Customer display write failed.")
+          setStatus("error")
+          return
+        }
         if (intent.action === "writeThenIdle") {
           idleTimerRef.current = window.setTimeout(() => {
-            void writeCustomerDisplayAmount(0).then(() => {
+            void writeCustomerDisplayAmount(0).then((idleResult) => {
+              if (idleResult && idleResult.ok === false) {
+                setAutoWritesPausedAfterError(true)
+                setAutomaticCustomerDisplaySaleWritesEnabled(false)
+                setLastError(idleResult.error || "Customer display write failed.")
+                setStatus("error")
+                return
+              }
               setStatus(getCustomerDisplayStatus())
               setLastError(getCustomerDisplayLastError())
             })
@@ -433,6 +486,9 @@ export function useRetailPosHardware(opts: {
         })
         setEverConnectedThisSession(true)
         setNeedsPortPermissionHint(false)
+        setAutoWritesPausedAfterError(false)
+        // Connect itself must not send bytes — wait for a genuine basket/checkout change.
+        skipAutoWriteUntilChangeRef.current = { ...cartSnapshotRef.current }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Could not connect customer display."
         setLastError(msg)
@@ -464,6 +520,7 @@ export function useRetailPosHardware(opts: {
       stopLiveTrial(
         "Live trial stopped on disconnect. Digits already on the panel are not cleared by Disconnect."
       )
+      skipAutoWriteUntilChangeRef.current = null
       await disconnectCustomerDisplay()
     } finally {
       refresh()

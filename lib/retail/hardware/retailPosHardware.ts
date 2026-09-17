@@ -260,19 +260,59 @@ export async function disconnectCustomerDisplay(): Promise<void> {
 }
 
 /** Never throws — sale flow must continue if the display is off or fails. */
-export async function writeCustomerDisplayAmount(amount: number): Promise<void> {
+export async function writeCustomerDisplayAmount(
+  amount: number
+): Promise<{ ok: boolean; error: string | null; skipped?: boolean }> {
   try {
-    if (!displaySession || !shouldWriteCustomerDisplay(displaySession.status)) return
-    if (diagnosticModeEnabled || displaySession.diagnosticMode) return
-    // Second gate: even if a caller skips intent resolution, unverified tills must not write.
-    if (!automaticSaleWritesEnabled) return
-    if (amountWriteMode === "clear_then_amount") {
-      await writeClearThenAmountSequenced(amount, { gate: "sale" })
-      return
+    if (!displaySession || !shouldWriteCustomerDisplay(displaySession.status)) {
+      return { ok: true, error: null, skipped: true }
     }
+    if (diagnosticModeEnabled || displaySession.diagnosticMode) {
+      return { ok: true, error: null, skipped: true }
+    }
+    // Second gate: even if a caller skips intent resolution, unverified tills must not write.
+    if (!automaticSaleWritesEnabled) {
+      return { ok: true, error: null, skipped: true }
+    }
+    if (amountWriteMode === "clear_then_amount") {
+      const result = await writeClearThenAmountSequenced(amount, { gate: "sale" })
+      if (result.superseded) {
+        return { ok: true, error: null, skipped: true }
+      }
+      if (!result.ok) {
+        automaticSaleWritesEnabled = false
+        if (displaySession) {
+          displaySession = {
+            ...displaySession,
+            status: "error",
+            lastError: result.error || "Customer display write failed.",
+          }
+        }
+        return { ok: false, error: result.error }
+      }
+      return { ok: true, error: null }
+    }
+    const before = displaySession
     await enqueueWrite(buildSegmentedAmountBytes(amount))
-  } catch {
-    /* ignore */
+    if (getCustomerDisplayStatus() === "error") {
+      automaticSaleWritesEnabled = false
+      return {
+        ok: false,
+        error: getCustomerDisplayLastError() || "Customer display write failed.",
+      }
+    }
+    if (!displaySession && before) {
+      automaticSaleWritesEnabled = false
+      return { ok: false, error: before.lastError || "Customer display write failed." }
+    }
+    return { ok: true, error: null }
+  } catch (e: unknown) {
+    automaticSaleWritesEnabled = false
+    const error = e instanceof Error ? e.message : "Customer display write failed."
+    if (displaySession) {
+      displaySession = { ...displaySession, status: "error", lastError: error }
+    }
+    return { ok: false, error }
   }
 }
 

@@ -344,7 +344,7 @@ describe("customer display diagnostic write behaviour", () => {
   })
 
   it("never blocks sales when the display fails", async () => {
-    await expect(writeCustomerDisplayAmount(12)).resolves.toBeUndefined()
+    await expect(writeCustomerDisplayAmount(12)).resolves.toMatchObject({ ok: true, skipped: true })
     await expect(
       writeCustomerDisplayDiagnosticTest("ascii_0_00", { storage: memoryStorage() })
     ).resolves.toMatchObject({ ok: false })

@@ -148,7 +148,7 @@ describe("customer display live trial writes", () => {
     const trial = await writeCustomerDisplayLiveTrialAmount(12)
     expect(trial.ok).toBe(false)
     expect(trial.error).toMatch(/port gone|failed/i)
-    await expect(writeCustomerDisplayAmount(99)).resolves.toBeUndefined()
+    await expect(writeCustomerDisplayAmount(99)).resolves.toMatchObject({ ok: true, skipped: true })
     // Verified latch still off — sale path must not auto-write.
     expect(writeSerialBytesMock.mock.calls.length).toBe(1)
   })
@@ -315,9 +315,9 @@ describe("candidate normal path clear-then-amount (verified latch)", () => {
     setCustomerDisplayAmountWriteMode("clear_then_amount")
     setAutomaticCustomerDisplaySaleWritesEnabled(true)
     writeSerialBytesMock.mockRejectedValueOnce(new Error("disconnect"))
-    await expect(writeCustomerDisplayAmount(12)).resolves.toBeUndefined()
+    await expect(writeCustomerDisplayAmount(12)).resolves.toMatchObject({ ok: false })
     await disconnectCustomerDisplay()
-    await expect(writeCustomerDisplayAmount(12)).resolves.toBeUndefined()
+    await expect(writeCustomerDisplayAmount(12)).resolves.toMatchObject({ ok: true, skipped: true })
   })
 
   it("orders rapid candidate sale writes so the latest amount lands last", async () => {

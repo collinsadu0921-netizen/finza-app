@@ -11,6 +11,7 @@ import {
   resolveCustomerDisplayConnectAvailability,
   resolveOwnerTerminalDraft,
   shouldAllowAutomaticUpdatesFromRegisterConfig,
+  shouldAllowAutomaticUpdatesFromServerSources,
   shouldFetchRegisterCustomerDisplayConfig,
   toCashierCustomerDisplayView,
   type RegisterCustomerDisplayConfig,
@@ -289,6 +290,29 @@ describe("register customer display server config", () => {
     // Same resolved ready state must keep Connect enabled (no loading flicker).
     expect(backgroundReady.canConnect).toBe(true)
     expect(nextCustomerDisplayLoadState({ previous: "ready", phase: "start" })).toBe("ready")
+  })
+
+  it("allows automatic updates from cashier-ready view without requiring full config", () => {
+    const config = mapRegisterRowToCustomerDisplayConfig(
+      emptyRow({
+        customer_display_enabled: true,
+        customer_display_profile_id: "2400",
+        customer_display_baud_rate: 2400,
+        customer_display_data_bits: 8,
+        customer_display_stop_bits: 1,
+        customer_display_parity: "none",
+        customer_display_flow_control: "none",
+        customer_display_amount_write_mode: "clear_then_amount",
+        customer_display_physically_verified: true,
+      })
+    )
+    const view = toCashierCustomerDisplayView(config)
+    expect(
+      shouldAllowAutomaticUpdatesFromServerSources({ serverConfig: null, serverView: view })
+    ).toBe(true)
+    expect(
+      shouldAllowAutomaticUpdatesFromServerSources({ serverConfig: null, serverView: null })
+    ).toBe(false)
   })
 
   it("does not hardcode COM2 in register display sources", () => {

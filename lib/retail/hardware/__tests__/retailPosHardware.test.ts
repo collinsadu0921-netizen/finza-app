@@ -201,8 +201,8 @@ describe("segmented numeric customer display", () => {
   })
 
   it("never throws when writing while disconnected", async () => {
-    await expect(writeCustomerDisplayAmount(12)).resolves.toBeUndefined()
-    await expect(writeCustomerDisplayAmount(0)).resolves.toBeUndefined()
+    await expect(writeCustomerDisplayAmount(12)).resolves.toMatchObject({ ok: true, skipped: true })
+    await expect(writeCustomerDisplayAmount(0)).resolves.toMatchObject({ ok: true, skipped: true })
   })
 })
 
