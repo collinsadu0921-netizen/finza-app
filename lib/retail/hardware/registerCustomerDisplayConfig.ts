@@ -454,6 +454,47 @@ export function cashierStatusLabelFromState(opts: {
   return "Customer display: Ready to connect"
 }
 
+/**
+ * Serial session lifecycle for the physical till.
+ * Role changes (owner/admin ↔ cashier) must RETAIN the open port.
+ * Only a bound-register identity change closes the shared session.
+ */
+export function shouldCloseCustomerDisplayOnLifecycleChange(opts: {
+  previousIdentityKey: string | null
+  nextIdentityKey: string | null
+}): "retain" | "close_identity_changed" | "clear_unbound" {
+  if (opts.nextIdentityKey == null) {
+    return opts.previousIdentityKey != null ? "clear_unbound" : "retain"
+  }
+  if (opts.previousIdentityKey != null && opts.previousIdentityKey !== opts.nextIdentityKey) {
+    return "close_identity_changed"
+  }
+  return "retain"
+}
+
+/**
+ * Map Web Serial open failures to stable, operator-safe messages.
+ * Never includes COM port names invented by Finza.
+ */
+export function formatCustomerDisplayOpenError(error: unknown): string {
+  const err = error as { name?: string; message?: string }
+  const name = err?.name || ""
+  const message = typeof err?.message === "string" ? err.message : ""
+  if (name === "NotFoundError") return "No serial device selected."
+  if (name === "SecurityError") return "Serial permission was not granted."
+  if (name === "NetworkError" || /already|in use|access denied|failed to open/i.test(message)) {
+    return "This serial port is already in use."
+  }
+  if (name === "InvalidStateError") return "The selected port could not be opened."
+  if (message.trim()) {
+    if (/permission/i.test(message)) return "Serial permission was not granted."
+    if (/already|in use/i.test(message)) return "This serial port is already in use."
+    if (/not found|select/i.test(message)) return "No serial device selected."
+    return "The selected port could not be opened."
+  }
+  return "The selected port could not be opened."
+}
+
 export function resolveCashierReadyLabel(opts: {
   setupStatus: CashierRegisterCustomerDisplayView["setupStatus"]
   connectionStatus: "disconnected" | "connected" | "error"

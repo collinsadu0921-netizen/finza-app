@@ -41,12 +41,14 @@ import {
 } from "@/lib/retail/hardware/customerDisplayLiveTrial"
 import {
   customerDisplayIdentityKey,
+  formatCustomerDisplayOpenError,
   nextCustomerDisplayLoadState,
   resolveAmountWriteModeFromServerSources,
   resolveCashierReadyLabel,
   resolveCustomerDisplayConnectAvailability,
   resolveOwnerTerminalDraft,
   shouldAllowAutomaticUpdatesFromServerSources,
+  shouldCloseCustomerDisplayOnLifecycleChange,
   shouldFetchRegisterCustomerDisplayConfig,
   type CashierRegisterCustomerDisplayView,
   type RegisterCustomerDisplayConfig,
@@ -60,6 +62,7 @@ import {
   getCustomerDisplayLastError,
   getCustomerDisplayStatus,
   isCustomerDisplayDiagnosticMode,
+  isCustomerDisplaySessionConnected,
   listCustomerDisplayDiagnosticLog,
   reconnectCustomerDisplayWithProfile,
   setAutomaticCustomerDisplaySaleWritesEnabled,
@@ -123,8 +126,12 @@ export function useRetailPosHardware(opts: {
   const [autoWritesPausedAfterError, setAutoWritesPausedAfterError] = useState(false)
   const idleTimerRef = useRef<number | null>(null)
   const fetchedIdentityKeyRef = useRef<string | null>(null)
+  const prevIdentityKeyRef = useRef<string | null>(null)
   const configLoadStateRef = useRef(configLoadState)
   configLoadStateRef.current = configLoadState
+  const [connectionPhase, setConnectionPhase] = useState<
+    "idle" | "connecting" | "disconnecting"
+  >("idle")
   /** After Connect, skip auto-writes until cart/checkout/sale state actually changes. */
   const skipAutoWriteUntilChangeRef = useRef<{
     cartCount: number
@@ -256,15 +263,47 @@ export function useRetailPosHardware(opts: {
     void reloadServerConfig()
   }, [identityKey, reloadServerConfig])
 
-  // Owner ↔ cashier (or register rebind) must not keep a prior serial session / write latch.
+  /**
+   * Shared serial session lives in retailPosHardware module (tab-scoped).
+   * Close only when the bound register identity changes — never on owner↔cashier role flips.
+   */
   useEffect(() => {
-    skipAutoWriteUntilChangeRef.current = null
-    setAutoWritesPausedAfterError(false)
-    setEverConnectedThisSession(false)
-    void disconnectCustomerDisplay().finally(() => {
-      refresh()
+    const previous = prevIdentityKeyRef.current
+    const action = shouldCloseCustomerDisplayOnLifecycleChange({
+      previousIdentityKey: previous,
+      nextIdentityKey: identityKey,
     })
-  }, [identityKey, canUseDiagnostics, refresh])
+    prevIdentityKeyRef.current = identityKey
+
+    if (action === "close_identity_changed" || action === "clear_unbound") {
+      skipAutoWriteUntilChangeRef.current = null
+      setAutoWritesPausedAfterError(false)
+      setEverConnectedThisSession(false)
+      setConnectionPhase("disconnecting")
+      void disconnectCustomerDisplay().finally(() => {
+        setConnectionPhase("idle")
+        refresh()
+      })
+      return
+    }
+
+    // Role change or first mount with same register: retain module session and sync UI.
+    if (isCustomerDisplaySessionConnected()) {
+      setEverConnectedThisSession(true)
+      skipAutoWriteUntilChangeRef.current = { ...cartSnapshotRef.current }
+      setAutoWritesPausedAfterError(false)
+    }
+    refresh()
+  }, [identityKey, refresh])
+
+  // Permissions/UI only — never close the shared serial port when role changes.
+  useEffect(() => {
+    if (isCustomerDisplaySessionConnected()) {
+      setEverConnectedThisSession(true)
+      skipAutoWriteUntilChangeRef.current = { ...cartSnapshotRef.current }
+    }
+    refresh()
+  }, [canUseDiagnostics, refresh])
 
   useEffect(() => {
     const bytes = buildCustomerDisplayDiagnosticBytes(pendingTestId)
@@ -452,8 +491,19 @@ export function useRetailPosHardware(opts: {
   const connect = useCallback(
     async (opts?: { forcePortPicker?: boolean }) => {
       setBusy(true)
+      setConnectionPhase("connecting")
       setConfigMessage("")
+      let connectError: string | null = null
       try {
+        // Already connected for this till — reuse; do not reopen or pick another port.
+        if (isCustomerDisplaySessionConnected() && opts?.forcePortPicker !== true) {
+          setEverConnectedThisSession(true)
+          setAutoWritesPausedAfterError(false)
+          skipAutoWriteUntilChangeRef.current = { ...cartSnapshotRef.current }
+          setLastError("")
+          return
+        }
+
         const diagnostic = canUseDiagnostics && diagnosticMode
         const profile = canUseDiagnostics
           ? resolveConnectSerialProfile(terminalConfig, {
@@ -472,9 +522,8 @@ export function useRetailPosHardware(opts: {
             : null
 
         if (!profile) {
-          setLastError(
+          connectError =
             "Customer display requires owner/admin setup. Sales can continue without it."
-          )
           setNeedsPortPermissionHint(false)
           return
         }
@@ -483,20 +532,33 @@ export function useRetailPosHardware(opts: {
           profile,
           diagnosticMode: diagnostic,
           forcePortPicker: opts?.forcePortPicker === true,
+          identityKey,
         })
         setEverConnectedThisSession(true)
         setNeedsPortPermissionHint(false)
         setAutoWritesPausedAfterError(false)
         // Connect itself must not send bytes — wait for a genuine basket/checkout change.
         skipAutoWriteUntilChangeRef.current = { ...cartSnapshotRef.current }
+        setLastError("")
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Could not connect customer display."
-        setLastError(msg)
-        if (/permission|select|serial|NotFound|Security/i.test(msg)) {
+        connectError = formatCustomerDisplayOpenError(e)
+        if (/permission|select|serial|NotFound|Security|already in use/i.test(connectError)) {
           setNeedsPortPermissionHint(true)
         }
       } finally {
-        refresh()
+        setStatus(getCustomerDisplayStatus())
+        setBaudRate(getCustomerDisplayBaudRate())
+        setDiagnosticMode(isCustomerDisplayDiagnosticMode())
+        setDiagnosticLog(listCustomerDisplayDiagnosticLog())
+        if (connectError) {
+          setLastError(connectError)
+          if (getCustomerDisplayStatus() !== "connected") {
+            setStatus("error")
+          }
+        } else if (!connectError) {
+          setLastError(getCustomerDisplayLastError())
+        }
+        setConnectionPhase("idle")
         setBusy(false)
       }
     },
@@ -506,7 +568,7 @@ export function useRetailPosHardware(opts: {
       profileId,
       terminalConfig,
       serverView,
-      refresh,
+      identityKey,
     ]
   )
 
@@ -516,6 +578,7 @@ export function useRetailPosHardware(opts: {
 
   const disconnect = useCallback(async () => {
     setBusy(true)
+    setConnectionPhase("disconnecting")
     try {
       stopLiveTrial(
         "Live trial stopped on disconnect. Digits already on the panel are not cleared by Disconnect."
@@ -524,6 +587,7 @@ export function useRetailPosHardware(opts: {
       await disconnectCustomerDisplay()
     } finally {
       refresh()
+      setConnectionPhase("idle")
       setBusy(false)
     }
   }, [refresh, stopLiveTrial])
@@ -881,6 +945,8 @@ export function useRetailPosHardware(opts: {
   const setupStatus = serverView?.setupStatus ?? ("not_configured" as const)
 
   const cashierStatusLabel = useMemo(() => {
+    if (connectionPhase === "connecting") return "Customer display: Connecting"
+    if (connectionPhase === "disconnecting") return "Customer display: Disconnecting"
     if (configLoadState === "loading") return "Customer display: …"
     if (setupStatus === "not_configured" || setupStatus === "unverified") {
       return "Customer display: Not configured"
@@ -892,7 +958,7 @@ export function useRetailPosHardware(opts: {
       setupStatus: "ready",
       connectionStatus: "disconnected",
     })
-  }, [configLoadState, setupStatus, status, everConnectedThisSession])
+  }, [connectionPhase, configLoadState, setupStatus, status, everConnectedThisSession])
 
   const hasTerminalBinding = Boolean(identityKey)
   const webSerialSupported = typeof window === "undefined" ? true : Boolean(getWebSerial())
@@ -945,6 +1011,8 @@ export function useRetailPosHardware(opts: {
   }, [canUseDiagnostics, hasTerminalBinding, profileId])
 
   const statusLabel = useMemo(() => {
+    if (connectionPhase === "connecting") return "Customer display: Connecting"
+    if (connectionPhase === "disconnecting") return "Customer display: Disconnecting"
     if (status === "connected") {
       if (diagnosticMode) {
         return `Customer display: Connected · diagnostic · ${baudRate ?? "—"} baud`
@@ -958,8 +1026,17 @@ export function useRetailPosHardware(opts: {
       return "Customer display: Connected"
     }
     if (status === "error") return "Customer display: Error"
-    return "Customer display: Off"
-  }, [status, diagnosticMode, baudRate, autoUpdatesAllowed, liveTrialActive])
+    if (everConnectedThisSession) return "Customer display: Disconnected"
+    return "Customer display: Ready to connect"
+  }, [
+    connectionPhase,
+    status,
+    diagnosticMode,
+    baudRate,
+    autoUpdatesAllowed,
+    liveTrialActive,
+    everConnectedThisSession,
+  ])
 
   const pendingTest = useMemo(() => getCustomerDisplayDiagnosticTest(pendingTestId), [pendingTestId])
 
@@ -969,6 +1046,7 @@ export function useRetailPosHardware(opts: {
     statusLabel,
     lastError,
     busy,
+    connectionPhase,
     panelOpen,
     setPanelOpen,
     connect: () => void connect(),

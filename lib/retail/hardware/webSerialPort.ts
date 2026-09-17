@@ -72,17 +72,21 @@ export async function openSerialPort(
       flowControl: options.flowControl ?? "none",
     })
   } catch (e: unknown) {
-    const err = e as { name?: string }
+    const err = e as { name?: string; message?: string }
     if (err?.name === "InvalidStateError") {
+      // Port already open in this page — treat as success for reuse.
       return
     }
     if (err?.name === "NotFoundError") {
       throw new Error("No serial device selected.")
     }
     if (err?.name === "SecurityError") {
-      throw new Error("Permission denied. Allow access to the serial device when Chrome prompts.")
+      throw new Error("Serial permission was not granted.")
     }
-    throw e instanceof Error ? e : new Error("Could not open the serial port.")
+    if (err?.name === "NetworkError" || /already|in use|failed to open/i.test(err?.message || "")) {
+      throw new Error("This serial port is already in use.")
+    }
+    throw e instanceof Error ? e : new Error("The selected port could not be opened.")
   }
 }
 

@@ -40,6 +40,8 @@ type DisplaySession = {
   lastError: string
   baudRate: number
   diagnosticMode: boolean
+  /** Bound register identity key for this open port (tab-scoped). */
+  identityKey: string | null
 }
 
 let displaySession: DisplaySession | null = null
@@ -69,6 +71,8 @@ let amountWriteMode: CustomerDisplayAmountWriteMode = "ascii_only"
 /** Shared sequence for clear-then-amount writes (sale path + live trial). */
 let clearThenAmountSequence = 0
 let clearThenAmountQueue: Promise<void> = Promise.resolve()
+/** Last connect attempt outcome for tests / UI (reused vs opened). */
+let lastConnectOutcome: "opened" | "reused" | "none" = "none"
 
 export function getCustomerDisplayStatus(): RetailHardwareStatus {
   return displaySession?.status ?? "disconnected"
@@ -80,6 +84,18 @@ export function getCustomerDisplayLastError(): string {
 
 export function getCustomerDisplayBaudRate(): number | null {
   return displaySession?.baudRate ?? null
+}
+
+export function getCustomerDisplaySessionIdentityKey(): string | null {
+  return displaySession?.identityKey ?? null
+}
+
+export function isCustomerDisplaySessionConnected(): boolean {
+  return displaySession?.status === "connected"
+}
+
+export function getCustomerDisplayLastConnectOutcomeForTests(): "opened" | "reused" | "none" {
+  return lastConnectOutcome
 }
 
 export function isCustomerDisplayDiagnosticMode(): boolean {
@@ -137,6 +153,7 @@ export function __resetCustomerDisplaySessionForTests(): void {
   amountWriteMode = "ascii_only"
   clearThenAmountSequence = 0
   clearThenAmountQueue = Promise.resolve()
+  lastConnectOutcome = "none"
 }
 
 async function enqueueWrite(bytes: Uint8Array, opts?: { allowWhileDiagnostic?: boolean }): Promise<void> {
@@ -186,25 +203,51 @@ function resolveOpenOptions(profile: CustomerDisplaySerialProfile): SerialPortOp
  * Connect to the cashier-selected COM port using an explicit serial profile.
  * Does not write any bytes on connect — sales auto-updates or diagnostic buttons write later.
  * Never invents baud/protocol: callers must supply a register-verified or diagnostic profile.
+ *
+ * Tab-scoped: if a session is already connected for this register, reuse it (no close/reopen).
+ * Owner↔cashier role changes must call this with the same identity and get reuse.
  */
 export async function connectCustomerDisplay(opts: {
   profile: CustomerDisplaySerialProfile
   diagnosticMode?: boolean
   /** Force Chrome’s serial picker (e.g. “Choose customer display” on a new PC). */
   forcePortPicker?: boolean
-}): Promise<void> {
+  /** Bound register identity key — retained on the shared session. */
+  identityKey?: string | null
+}): Promise<{ reused: boolean }> {
   if (!opts?.profile) {
     throw new Error(
       "Customer display requires owner/admin setup. Sales can continue without it."
     )
   }
+  const identityKey = opts.identityKey ?? null
+  const diagnosticMode = opts?.diagnosticMode === true || diagnosticModeEnabled
+
+  // Reuse the live tab session — do not close/reopen across owner↔cashier.
+  if (
+    displaySession?.status === "connected" &&
+    opts.forcePortPicker !== true &&
+    (identityKey == null ||
+      displaySession.identityKey == null ||
+      displaySession.identityKey === identityKey)
+  ) {
+    diagnosticModeEnabled = diagnosticMode
+    displaySession = {
+      ...displaySession,
+      diagnosticMode,
+      identityKey: identityKey ?? displaySession.identityKey,
+      lastError: "",
+    }
+    lastConnectOutcome = "reused"
+    return { reused: true }
+  }
+
   const openOpts = resolveOpenOptions(opts.profile)
   const port = await pickDisplayPort(opts.forcePortPicker === true)
   await openSerialPort(port, openOpts)
   if (displaySession?.port && displaySession.port !== port) {
     await closeSerialPort(displaySession.port)
   }
-  const diagnosticMode = opts?.diagnosticMode === true || diagnosticModeEnabled
   diagnosticModeEnabled = diagnosticMode
   displaySession = {
     port,
@@ -212,7 +255,10 @@ export async function connectCustomerDisplay(opts: {
     lastError: "",
     baudRate: openOpts.baudRate,
     diagnosticMode,
+    identityKey,
   }
+  lastConnectOutcome = "opened"
+  return { reused: false }
 }
 
 export async function setCustomerDisplayDiagnosticMode(enabled: boolean): Promise<void> {
@@ -227,6 +273,7 @@ export async function reconnectCustomerDisplayWithProfile(
   opts?: { diagnosticMode?: boolean }
 ): Promise<void> {
   const previousPort = displaySession?.port ?? null
+  const previousIdentityKey = displaySession?.identityKey ?? null
   const diagnosticMode =
     opts?.diagnosticMode === true || diagnosticModeEnabled || displaySession?.diagnosticMode === true
   diagnosticModeEnabled = diagnosticMode
@@ -246,7 +293,9 @@ export async function reconnectCustomerDisplayWithProfile(
     lastError: "",
     baudRate: profile.baudRate,
     diagnosticMode,
+    identityKey: previousIdentityKey,
   }
+  lastConnectOutcome = "opened"
 }
 
 export async function disconnectCustomerDisplay(): Promise<void> {

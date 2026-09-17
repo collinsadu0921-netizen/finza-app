@@ -4,6 +4,7 @@ import {
   buildRegisterCustomerDisplayWritePatch,
   cashierStatusLabelFromState,
   customerDisplayIdentityKey,
+  formatCustomerDisplayOpenError,
   isRegisterCustomerDisplayConfigured,
   mapRegisterRowToCustomerDisplayConfig,
   nextCustomerDisplayLoadState,
@@ -12,6 +13,7 @@ import {
   resolveOwnerTerminalDraft,
   shouldAllowAutomaticUpdatesFromRegisterConfig,
   shouldAllowAutomaticUpdatesFromServerSources,
+  shouldCloseCustomerDisplayOnLifecycleChange,
   shouldFetchRegisterCustomerDisplayConfig,
   toCashierCustomerDisplayView,
   type RegisterCustomerDisplayConfig,
@@ -290,6 +292,16 @@ describe("register customer display server config", () => {
     // Same resolved ready state must keep Connect enabled (no loading flicker).
     expect(backgroundReady.canConnect).toBe(true)
     expect(nextCustomerDisplayLoadState({ previous: "ready", phase: "start" })).toBe("ready")
+  })
+
+  it("does not close the shared serial session on role-only changes", () => {
+    expect(
+      shouldCloseCustomerDisplayOnLifecycleChange({
+        previousIdentityKey: "biz:store:reg",
+        nextIdentityKey: "biz:store:reg",
+      })
+    ).toBe("retain")
+    expect(formatCustomerDisplayOpenError({ name: "NetworkError" })).toMatch(/already in use/i)
   })
 
   it("allows automatic updates from cashier-ready view without requiring full config", () => {

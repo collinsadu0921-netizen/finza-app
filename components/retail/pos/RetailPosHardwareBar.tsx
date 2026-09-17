@@ -76,7 +76,7 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                   onClick={() => void hardware.disconnect()}
                   className="min-h-[48px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 disabled:opacity-50"
                 >
-                  Disconnect
+                  {hardware.connectionPhase === "disconnecting" ? "Disconnecting…" : "Disconnect"}
                 </button>
               ) : (
                 <>
@@ -86,7 +86,7 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                     onClick={() => hardware.connect()}
                     className="min-h-[48px] rounded-xl bg-blue-600 px-3 text-sm font-bold text-white disabled:opacity-50"
                   >
-                    {hardware.busy
+                    {hardware.connectionPhase === "connecting" || hardware.busy
                       ? "Connecting…"
                       : hardware.status === "error"
                         ? "Reconnect"
@@ -96,6 +96,9 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                     <p className="text-[11px] font-semibold text-amber-800">
                       {hardware.connectDisabledReason}
                     </p>
+                  ) : null}
+                  {hardware.status === "error" && hardware.lastError ? (
+                    <p className="text-[11px] font-semibold text-red-800">{hardware.lastError}</p>
                   ) : null}
                   {(hardware.needsPortPermissionHint || hardware.canCashierConnect) && (
                     <button
@@ -110,9 +113,9 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                 </>
               )}
               <p className="text-[11px] text-slate-500">
-                Register settings come from the server. Chrome still asks for serial permission on this computer —
-                installing the app or using another browser profile does not transfer that permission. Connecting never
-                sends bytes by itself.
+                One connection per till. Switching between owner and cashier keeps the same serial
+                session. Opening a port does not prove which physical display was selected — verify
+                amounts on the rear panel. Connecting never sends bytes by itself.
               </p>
             </div>
 
