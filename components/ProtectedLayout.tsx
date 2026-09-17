@@ -24,6 +24,7 @@ import {
 } from "@/components/sidebar/SidebarLayoutContext"
 import { isCashierAuthenticated } from "@/lib/cashierSession"
 import { resolveAccess, isPosSurfacePath } from "@/lib/accessControl"
+import { isRetailPosPinUrlIsolationActive } from "@/lib/retail/posPinUrlIsolation"
 import { getUserRole } from "@/lib/userRoles"
 import { autoBindSingleStore } from "@/lib/autoBindStore"
 import { useExportMode } from "@/lib/hooks/useExportMode"
@@ -113,9 +114,12 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const pathNoTrailing = rawPath.replace(/\/$/, "") || "/"
   const isRetailCashierPinScreen =
     pathNoTrailing === "/retail/pos/pin" || pathNoTrailing === "/pos/pin"
-  /** Hide sidebar + top bar: active PIN session, DB cashier role, or cashier PIN login route */
+  /** Hide sidebar + top bar: active PIN session, DB cashier role, PIN login route, or terminal cashier lock */
   const hideRetailOwnerChrome =
-    cashierAuth || restrictRetailCashierChrome || isRetailCashierPinScreen
+    cashierAuth ||
+    restrictRetailCashierChrome ||
+    isRetailCashierPinScreen ||
+    isRetailPosPinUrlIsolationActive()
   /** Hide floating assistant on POS paths and whenever retail cashier / PIN session uses the restricted shell */
   const hideFloatingAssistant =
     pathname?.startsWith("/retail/pos") ||

@@ -408,33 +408,44 @@ describe("accessControl", () => {
       expect(res.allowed).toBe(true)
     })
 
-    it("allows owner to /retail/admin when PIN URL lock is active (back-office bypasses kiosk lock)", async () => {
+    it("blocks owner from /retail/admin when PIN URL lock is active (no back-office bypass)", async () => {
       activateRetailPosPinUrlIsolation()
       const supabase = createMockSupabase()
       const res = await resolveAccess(supabase, "owner-1", "/retail/admin/registers")
-      expect(res.allowed).toBe(true)
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos/pin")
     })
 
-    it("allows owner to /retail/settings and /retail/reports when PIN URL lock is active", async () => {
+    it("blocks owner from /retail/settings and /retail/reports when PIN URL lock is active", async () => {
       activateRetailPosPinUrlIsolation()
       const supabase = createMockSupabase()
       const settings = await resolveAccess(supabase, "owner-1", "/retail/settings/receipt")
       const reports = await resolveAccess(supabase, "owner-1", "/retail/reports/sales")
-      expect(settings.allowed).toBe(true)
-      expect(reports.allowed).toBe(true)
+      expect(settings.allowed).toBe(false)
+      expect(settings.redirectTo).toBe("/retail/pos/pin")
+      expect(reports.allowed).toBe(false)
+      expect(reports.redirectTo).toBe("/retail/pos/pin")
     })
 
-    it("allows owner to /retail/admin/staff when PIN URL lock is active", async () => {
+    it("blocks owner from /retail/admin/staff when PIN URL lock is active", async () => {
       activateRetailPosPinUrlIsolation()
       const supabase = createMockSupabase()
       const res = await resolveAccess(supabase, "owner-1", "/retail/admin/staff")
-      expect(res.allowed).toBe(true)
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/pos/pin")
     })
 
     it("allows owner to /retail/pos/pin when PIN URL lock is active", async () => {
       activateRetailPosPinUrlIsolation()
       const supabase = createMockSupabase()
       const res = await resolveAccess(supabase, "owner-1", "/retail/pos/pin")
+      expect(res.allowed).toBe(true)
+    })
+
+    it("allows owner to /retail/pos when PIN URL lock is active (POS surface)", async () => {
+      activateRetailPosPinUrlIsolation()
+      const supabase = createMockSupabase()
+      const res = await resolveAccess(supabase, "owner-1", "/retail/pos")
       expect(res.allowed).toBe(true)
     })
   })

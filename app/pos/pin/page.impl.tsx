@@ -10,11 +10,13 @@ import {
 } from "@/lib/cashierSession"
 import { setActiveStoreId } from "@/lib/storeSession"
 import { supabase } from "@/lib/supabaseClient"
-import { retailPaths } from "@/lib/retail/routes"
 import {
   activateRetailPosPinUrlIsolation,
-  clearRetailPosPinUrlIsolation,
 } from "@/lib/retail/posPinUrlIsolation"
+import {
+  afterCashierPinSuccessSecureTerminal,
+  exitCashierLockForAdminReauth,
+} from "@/lib/retail/cashierTerminalLock"
 import { PosTerminalSetupHint } from "@/components/retail/pos/PosTerminalSetupHint"
 
 export default function PinLoginPage() {
@@ -100,7 +102,9 @@ export default function PinLoginPage() {
           setActiveStoreId(data.cashier.store_id, null)
         }
 
-        clearRetailPosPinUrlIsolation()
+        await afterCashierPinSuccessSecureTerminal({
+          signOut: () => supabase.auth.signOut(),
+        })
         // Redirect to POS (canonical retail URL)
         router.push("/retail/pos")
       } else {
@@ -187,30 +191,21 @@ export default function PinLoginPage() {
 
         <div className="mt-6 space-y-4 text-center">
           <p className="text-sm text-gray-600">
+            Owner or manager on this device?{" "}
             <button
               type="button"
               onClick={() => {
-                clearRetailPosPinUrlIsolation()
-                router.push(retailPaths.dashboard)
-              }}
-              className="text-gray-700 font-medium hover:text-gray-900 underline-offset-2 hover:underline"
-            >
-              Exit cashier screen — open retail dashboard
-            </button>
-          </p>
-          <p className="text-sm text-gray-600">
-            Admin or Manager?{" "}
-            <button
-              type="button"
-              onClick={() => {
-                clearRetailPosPinUrlIsolation()
-                router.push("/login")
+                void exitCashierLockForAdminReauth({
+                  signOut: () => supabase.auth.signOut(),
+                  navigateToLogin: () => router.replace("/login"),
+                })
               }}
               className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
             >
-              Sign in with email
+              Admin access
             </button>
           </p>
+          <p className="text-xs text-gray-500">Requires email sign-in. Does not unlock from the cashier PIN alone.</p>
         </div>
 
         <PosTerminalSetupHint />

@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { clearCashierSession } from "@/lib/cashierSession"
 import { getRetailPosIdleLogoutMs, isRetailPosIdleWatchPath } from "@/lib/retailPosIdleLogout"
+import {
+  activateRetailPosPinUrlIsolation,
+  clearRetailPosPinUrlIsolation,
+} from "@/lib/retail/posPinUrlIsolation"
 
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
   "mousedown",
@@ -51,14 +55,18 @@ export default function RetailPosIdleSessionWatcher({
             data: { session },
           } = await supabase.auth.getSession()
           clearCashierSession()
-          await supabase.auth.signOut()
           if (session?.user) {
+            await supabase.auth.signOut()
+            clearRetailPosPinUrlIsolation()
             router.replace("/login")
           } else {
+            activateRetailPosPinUrlIsolation()
+            await supabase.auth.signOut().catch(() => {})
             router.replace("/retail/pos/pin")
           }
         } catch {
           clearCashierSession()
+          activateRetailPosPinUrlIsolation()
           await supabase.auth.signOut().catch(() => {})
           router.replace("/retail/pos/pin")
         }

@@ -12,7 +12,11 @@ import { getUserStore, getStoreFilter, getStores } from "@/lib/stores"
 import { getActiveStoreId, getActiveStoreName, setActiveStoreId } from "@/lib/storeSession"
 import { getUserRole } from "@/lib/userRoles"
 import { getEffectiveStoreIdClient } from "@/lib/storeContext"
-import { getCashierSession, clearCashierSession, getCashierPosToken } from "@/lib/cashierSession"
+import { getCashierSession, getCashierPosToken } from "@/lib/cashierSession"
+import {
+  canSwitchCashier,
+  switchToCashierPinLock,
+} from "@/lib/retail/cashierTerminalLock"
 import { getAllOpenRegisterSessions, type OpenRegisterSession } from "@/lib/registerStatus"
 import {
   getTerminalRegisterId,
@@ -338,8 +342,19 @@ export default function RetailPosPage() {
   }, [])
 
   const handleEndCashierPinSession = () => {
-    clearCashierSession()
-    router.replace(retailPaths.posPin)
+    const guard = canSwitchCashier({
+      cartItemCount: cart.length,
+      processingPayment,
+      checkoutOpen: showPaymentModal,
+    })
+    if (!guard.ok) {
+      setError(guard.message)
+      return
+    }
+    void switchToCashierPinLock({
+      signOut: () => supabase.auth.signOut(),
+      navigateToPin: () => router.replace(retailPaths.posPin),
+    })
   }
 
   useEffect(() => {

@@ -1,7 +1,8 @@
 /**
- * While the cashier PIN screen is shown, Supabase users (e.g. owner on a shared register)
- * must not be able to jump to /retail/admin/* via the address bar. Cleared after successful
- * PIN login, explicit exit, or TTL.
+ * Terminal cashier/kiosk navigation lock for the Retail POS tab.
+ * While active, Supabase users (including owner/admin/manager) must not reach
+ * /retail/admin/* or other back-office routes via the address bar or history.
+ * Cleared only after explicit Admin access (email reauth) or TTL — not on PIN success.
  */
 const STORAGE_KEY = "finza_retail_pos_pin_nav_lock_until"
 const TTL_MS = 4 * 60 * 60 * 1000

@@ -3,18 +3,21 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import {
-  getCashierSession,
   setCashierSession,
   setCashierPosToken,
   isCashierAuthenticated,
 } from "@/lib/cashierSession"
-import { setActiveStoreId } from "@/lib/storeSession"
+import { setActiveStoreId, getActiveStoreId, getActiveStoreName } from "@/lib/storeSession"
 import { supabase } from "@/lib/supabaseClient"
 import { retailPaths } from "@/lib/retail/routes"
 import {
   activateRetailPosPinUrlIsolation,
-  clearRetailPosPinUrlIsolation,
 } from "@/lib/retail/posPinUrlIsolation"
+import {
+  afterCashierPinSuccessSecureTerminal,
+  exitCashierLockForAdminReauth,
+} from "@/lib/retail/cashierTerminalLock"
+import { getTerminalRegisterId } from "@/lib/retail/terminalRegisterBinding"
 import { PosTerminalSetupHint } from "@/components/retail/pos/PosTerminalSetupHint"
 
 const KEYS = [
@@ -30,6 +33,7 @@ export default function RetailPosPinPage() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [, setRemainingTime] = useState<number | null>(null)
+  const [terminalContextLabel, setTerminalContextLabel] = useState<string | null>(null)
 
   useEffect(() => {
     if (isCashierAuthenticated()) {
@@ -37,6 +41,34 @@ export default function RetailPosPinPage() {
       return
     }
     activateRetailPosPinUrlIsolation()
+    try {
+      const storeId = getActiveStoreId()
+      const storeName = getActiveStoreName()
+      const parts: string[] = []
+      if (storeName?.trim()) parts.push(storeName.trim())
+      else if (storeId) parts.push(`Store ${storeId.slice(0, 8)}…`)
+      if (storeId && typeof window !== "undefined") {
+        const prefix = "finza_retail_terminal_register:"
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (!key?.startsWith(prefix)) continue
+          if (key.endsWith(":staff") || key.endsWith(":cashier")) continue
+          const rest = key.slice(prefix.length)
+          const segments = rest.split(":")
+          if (segments.length !== 2) continue
+          const [biz, store] = segments
+          if (!biz || store !== storeId) continue
+          const regId = getTerminalRegisterId(biz, storeId)
+          if (regId) {
+            parts.push(`Register ${regId.slice(0, 8)}…`)
+            break
+          }
+        }
+      }
+      setTerminalContextLabel(parts.length > 0 ? parts.join(" · ") : null)
+    } catch {
+      setTerminalContextLabel(null)
+    }
   }, [router])
 
   const appendDigit = (d: string) => {
@@ -118,7 +150,9 @@ export default function RetailPosPinPage() {
           setActiveStoreId(data.cashier.store_id, null)
         }
 
-        clearRetailPosPinUrlIsolation()
+        await afterCashierPinSuccessSecureTerminal({
+          signOut: () => supabase.auth.signOut(),
+        })
         router.push(retailPaths.pos)
       } else {
         setError("Invalid PIN")
@@ -146,6 +180,11 @@ export default function RetailPosPinPage() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-500">Finza terminal</p>
             <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">Cashier sign-in</h1>
             <p className="mt-2 text-sm text-slate-400">Enter your PIN to sign in to this till</p>
+            {terminalContextLabel && (
+              <p className="mt-2 text-xs font-semibold text-emerald-400/90" data-testid="pos-pin-terminal-context">
+                {terminalContextLabel}
+              </p>
+            )}
             <p className="mt-2 text-xs font-medium text-slate-500">
               PIN is <span className="text-slate-300">4–6 digits</span> — first four positions are the minimum length.
             </p>
@@ -276,30 +315,22 @@ export default function RetailPosPinPage() {
 
           <div className="mt-8 space-y-3 text-center text-sm text-slate-400">
             <p>
+              Owner or manager on this device?{" "}
               <button
                 type="button"
+                data-testid="pos-pin-admin-access"
                 onClick={() => {
-                  clearRetailPosPinUrlIsolation()
-                  router.push(retailPaths.dashboard)
-                }}
-                className="font-semibold text-slate-200 underline decoration-slate-600 underline-offset-4 hover:text-white"
-              >
-                Exit to retail dashboard
-              </button>
-            </p>
-            <p>
-              Manager on this device?{" "}
-              <button
-                type="button"
-                onClick={() => {
-                  clearRetailPosPinUrlIsolation()
-                  router.push("/login")
+                  void exitCashierLockForAdminReauth({
+                    signOut: () => supabase.auth.signOut(),
+                    navigateToLogin: () => router.replace("/login"),
+                  })
                 }}
                 className="font-bold text-emerald-400 underline decoration-emerald-700 underline-offset-4 hover:text-emerald-300"
               >
-                Sign in with email
+                Admin access
               </button>
             </p>
+            <p className="text-xs text-slate-500">Requires email sign-in. Does not unlock from the cashier PIN alone.</p>
           </div>
 
           <div className="mt-8">

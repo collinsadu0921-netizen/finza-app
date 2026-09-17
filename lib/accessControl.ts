@@ -232,7 +232,7 @@ export async function resolveAccess(
   }
 
   // Retail PIN URL isolation (kiosk lock) is applied AFTER role resolution — see STEP 8.5 below.
-  // Applying it here would block owners/admins/managers from /retail/admin/* before we know their role.
+  // Lock applies to all roles including owner/admin/manager while the terminal is in cashier mode.
 
   // STEP 2: Get user metadata (for signup intent check)
   let signupIntent: "business_owner" | "accounting_firm" = "business_owner"
@@ -621,18 +621,17 @@ export async function resolveAccess(
     }
   }
 
-  // STEP 8.5: Retail PIN URL isolation (sessionStorage kiosk lock from PIN screen — see posPinUrlIsolation.ts).
-  // Only constrain users who are NOT retail back-office roles. Owners/admins/managers may use /retail/admin,
-  // settings, reports, and dashboard even while the lock flag is set (e.g. after visiting PIN once in the tab).
+  // STEP 8.5: Retail PIN URL isolation (sessionStorage kiosk lock — see posPinUrlIsolation.ts).
+  // While the terminal cashier lock is active, ALL roles (including owner/admin/manager) stay on
+  // PIN/POS-adjacent paths. Clearing the cashier token must not reveal back-office UI; leave via
+  // explicit Admin access (email reauthentication), not by privileged bypass.
   if (
     userId &&
     !isCashierAuthenticated() &&
     isRetailPosPinUrlIsolationActive() &&
     workspace === "retail"
   ) {
-    const privilegedRetailBackoffice =
-      role === "owner" || role === "admin" || role === "manager"
-    if (!isPinCashierRetailAllowedPath(pathname) && !privilegedRetailBackoffice) {
+    if (!isPinCashierRetailAllowedPath(pathname)) {
       return debugDecision({
         allowed: false,
         redirectTo: "/retail/pos/pin",

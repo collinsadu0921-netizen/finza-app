@@ -10,7 +10,11 @@ import { normalizeCountry, UNSUPPORTED_COUNTRY_MARKER } from "@/lib/payments/eli
 import { getUserStore, getStoreFilter, getStores } from "@/lib/stores"
 import { getActiveStoreId, getActiveStoreName, setActiveStoreId } from "@/lib/storeSession"
 import { getUserRole } from "@/lib/userRoles"
-import { getCashierSession, clearCashierSession } from "@/lib/cashierSession"
+import { getCashierSession } from "@/lib/cashierSession"
+import {
+  canSwitchCashier,
+  switchToCashierPinLock,
+} from "@/lib/retail/cashierTerminalLock"
 import { getOpenRegisterSession, getAllOpenRegisterSessions, getCurrentUserOpenSession, type OpenRegisterSession } from "@/lib/registerStatus"
 import PaymentModal, { PaymentLine, PaymentResult } from "@/components/PaymentModal"
 import type { RetailMomoCartSnapshot } from "@/lib/retail/pos/retailMomoCartFingerprint"
@@ -287,8 +291,19 @@ export default function POSPage() {
   }, [])
 
   const handleEndCashierPinSession = () => {
-    clearCashierSession()
-    router.replace("/retail/pos/pin")
+    const guard = canSwitchCashier({
+      cartItemCount: cart.length,
+      processingPayment,
+      checkoutOpen: showPaymentModal,
+    })
+    if (!guard.ok) {
+      setError(guard.message)
+      return
+    }
+    void switchToCashierPinLock({
+      signOut: () => supabase.auth.signOut(),
+      navigateToPin: () => router.replace("/retail/pos/pin"),
+    })
   }
 
   useEffect(() => {
