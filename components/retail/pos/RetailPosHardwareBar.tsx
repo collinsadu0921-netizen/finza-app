@@ -92,6 +92,11 @@ export function RetailPosHardwareBar({ hardware }: { hardware: Hardware }) {
                         ? "Reconnect"
                         : "Connect"}
                   </button>
+                  {!hardware.canCashierConnect && hardware.connectDisabledReason ? (
+                    <p className="text-[11px] font-semibold text-amber-800">
+                      {hardware.connectDisabledReason}
+                    </p>
+                  ) : null}
                   {(hardware.needsPortPermissionHint || hardware.canCashierConnect) && (
                     <button
                       type="button"

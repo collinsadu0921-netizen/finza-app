@@ -2326,13 +2326,8 @@ export default function RetailPosPage() {
     }
   }, [cart, businessCountry, cartDiscountType, cartDiscountValue])
 
-  const posHardware = useRetailPosHardware({
-    cartCount: cart.length,
-    runningTotal: cartTotals.total,
-    checkoutOpen: showPaymentModal,
-    saleSuccess,
-    canUseDiagnostics: userRole === "owner" || userRole === "admin",
-    terminalIdentity:
+  const terminalIdentity = useMemo(
+    () =>
       businessId && currentStoreId && terminalBoundRegisterId
         ? {
             businessId,
@@ -2340,6 +2335,16 @@ export default function RetailPosPage() {
             registerId: terminalBoundRegisterId,
           }
         : null,
+    [businessId, currentStoreId, terminalBoundRegisterId]
+  )
+
+  const posHardware = useRetailPosHardware({
+    cartCount: cart.length,
+    runningTotal: cartTotals.total,
+    checkoutOpen: showPaymentModal,
+    saleSuccess,
+    canUseDiagnostics: userRole === "owner" || userRole === "admin",
+    terminalIdentity,
   })
 
   const retailMomoCartSnapshot = useMemo((): RetailMomoCartSnapshot => {

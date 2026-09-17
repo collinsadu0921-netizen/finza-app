@@ -3,10 +3,15 @@ import {
   buildConfirmLocalImportPatch,
   buildRegisterCustomerDisplayWritePatch,
   cashierStatusLabelFromState,
+  customerDisplayIdentityKey,
   isRegisterCustomerDisplayConfigured,
   mapRegisterRowToCustomerDisplayConfig,
+  nextCustomerDisplayLoadState,
   resolveCashierReadyLabel,
+  resolveCustomerDisplayConnectAvailability,
+  resolveOwnerTerminalDraft,
   shouldAllowAutomaticUpdatesFromRegisterConfig,
+  shouldFetchRegisterCustomerDisplayConfig,
   toCashierCustomerDisplayView,
   type RegisterCustomerDisplayConfig,
   type RegisterCustomerDisplayRow,
@@ -173,6 +178,119 @@ describe("register customer display server config", () => {
     ).toBe("Customer display: Connected")
   })
 
+  it("does not refetch when terminalIdentity object is recreated with the same ids", () => {
+    const keyA = customerDisplayIdentityKey({
+      businessId: "biz-1",
+      storeId: "store-1",
+      registerId: "reg-1",
+    })
+    const keyB = customerDisplayIdentityKey({
+      businessId: "biz-1",
+      storeId: "store-1",
+      registerId: "reg-1",
+    })
+    expect(keyA).toBe(keyB)
+    expect(shouldFetchRegisterCustomerDisplayConfig(keyA, keyB)).toBe(false)
+    expect(shouldFetchRegisterCustomerDisplayConfig(null, keyA)).toBe(true)
+    expect(shouldFetchRegisterCustomerDisplayConfig(keyA, null)).toBe(false)
+  })
+
+  it("keeps load state stable during background revalidation", () => {
+    expect(nextCustomerDisplayLoadState({ previous: "ready", phase: "start" })).toBe("ready")
+    expect(nextCustomerDisplayLoadState({ previous: "idle", phase: "start" })).toBe("loading")
+    expect(nextCustomerDisplayLoadState({ previous: "ready", phase: "success" })).toBe("ready")
+  })
+
+  it("does not alternate terminal draft between local and server once server is ready with a profile", () => {
+    const server = mapRegisterRowToCustomerDisplayConfig(
+      emptyRow({
+        customer_display_enabled: true,
+        customer_display_profile_id: "9600",
+        customer_display_baud_rate: 9600,
+        customer_display_data_bits: 8,
+        customer_display_stop_bits: 1,
+        customer_display_parity: "none",
+        customer_display_flow_control: "none",
+        customer_display_amount_write_mode: "ascii_only",
+        customer_display_physically_verified: false,
+      })
+    )
+    const local = {
+      profileId: "2400" as const,
+      physicallyVerified: true,
+      verifiedAt: "2026-09-15T12:00:00.000Z",
+      verifiedNote: "local",
+      amountWriteMode: "clear_then_amount" as const,
+      updatedAt: "2026-09-15T12:00:00.000Z",
+    }
+    const a = resolveOwnerTerminalDraft({
+      serverConfig: server,
+      local,
+      serverLoadState: "ready",
+    })
+    const b = resolveOwnerTerminalDraft({
+      serverConfig: server,
+      local,
+      serverLoadState: "ready",
+    })
+    expect(a.source).toBe("server")
+    expect(a.terminalConfig.profileId).toBe("9600")
+    expect(b.terminalConfig.profileId).toBe(a.terminalConfig.profileId)
+    expect(a.terminalConfig.physicallyVerified).toBe(false)
+  })
+
+  it("enables Connect for owner after load without requiring verification; cashiers stay fail-closed", () => {
+    const owner = resolveCustomerDisplayConnectAvailability({
+      canUseDiagnostics: true,
+      hasTerminalBinding: true,
+      configLoadState: "ready",
+      setupStatus: "unverified",
+      webSerialSupported: true,
+    })
+    expect(owner.canConnect).toBe(true)
+    expect(owner.reason).toBeNull()
+
+    const cashier = resolveCustomerDisplayConnectAvailability({
+      canUseDiagnostics: false,
+      hasTerminalBinding: true,
+      configLoadState: "ready",
+      setupStatus: "unverified",
+      webSerialSupported: true,
+    })
+    expect(cashier.canConnect).toBe(false)
+    expect(cashier.reason).toMatch(/not been configured/i)
+
+    const loading = resolveCustomerDisplayConnectAvailability({
+      canUseDiagnostics: true,
+      hasTerminalBinding: true,
+      configLoadState: "loading",
+      setupStatus: null,
+      webSerialSupported: true,
+    })
+    expect(loading.canConnect).toBe(false)
+    expect(loading.reason).toMatch(/still loading/i)
+
+    const verifiedCashier = resolveCustomerDisplayConnectAvailability({
+      canUseDiagnostics: false,
+      hasTerminalBinding: true,
+      configLoadState: "ready",
+      setupStatus: "ready",
+      webSerialSupported: true,
+    })
+    expect(verifiedCashier.canConnect).toBe(true)
+
+    const backgroundReady = resolveCustomerDisplayConnectAvailability({
+      canUseDiagnostics: false,
+      hasTerminalBinding: true,
+      configLoadState: "ready",
+      setupStatus: "ready",
+      webSerialSupported: true,
+    })
+    // Same resolved ready state must keep Connect enabled (no loading flicker).
+    expect(backgroundReady.canConnect).toBe(true)
+    expect(nextCustomerDisplayLoadState({ previous: "ready", phase: "start" })).toBe("ready")
+  })
+
   it("does not hardcode COM2 in register display sources", () => {
     const root = join(__dirname, "../../../..")
     const sources = [
@@ -212,5 +330,24 @@ describe("retail POS PWA assets", () => {
     expect(sw).toMatch(/customer-display/)
     expect(sw).toMatch(/skipWaiting/)
     expect(sw).not.toMatch(/cache\.put\(.*api/i)
+  })
+
+  it("API route sets no-store intent and HardwareBar separates owner vs cashier controls", () => {
+    const api = readFileSync(
+      join(root, "app/api/retail/registers/[registerId]/customer-display/route.ts"),
+      "utf8"
+    )
+    expect(api).toMatch(/canEditBusinessWideSensitiveSettings/)
+    expect(api).toMatch(/cashiers cannot change/i)
+
+    const bar = readFileSync(join(root, "components/retail/pos/RetailPosHardwareBar.tsx"), "utf8")
+    expect(bar).toMatch(/connectDisabledReason/)
+    expect(bar).toMatch(/canUseDiagnostics/)
+    expect(bar).toMatch(/Confirm and save to this register/)
+    // Cashier path must not expose baud/protocol editors outside canUseDiagnostics block.
+    const cashierOnlySection = bar.slice(0, bar.indexOf("{hardware.canUseDiagnostics ? ("))
+    expect(cashierOnlySection).not.toMatch(/Serial profile/)
+    expect(cashierOnlySection).not.toMatch(/markPhysicallyVerified/)
+    expect(cashierOnlySection).not.toMatch(/Enter diagnostic/)
   })
 })

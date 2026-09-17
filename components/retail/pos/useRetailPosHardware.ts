@@ -40,12 +40,18 @@ import {
   canStartCustomerDisplayLiveTrial,
 } from "@/lib/retail/hardware/customerDisplayLiveTrial"
 import {
+  customerDisplayIdentityKey,
+  nextCustomerDisplayLoadState,
   resolveCashierReadyLabel,
+  resolveCustomerDisplayConnectAvailability,
+  resolveOwnerTerminalDraft,
   shouldAllowAutomaticUpdatesFromRegisterConfig,
+  shouldFetchRegisterCustomerDisplayConfig,
   type CashierRegisterCustomerDisplayView,
   type RegisterCustomerDisplayConfig,
 } from "@/lib/retail/hardware/registerCustomerDisplayConfig"
 import { getCashierPosToken } from "@/lib/cashierSession"
+import { getWebSerial } from "@/lib/retail/hardware/webSerialPort"
 import {
   connectCustomerDisplay,
   disconnectCustomerDisplay,
@@ -78,6 +84,8 @@ export function useRetailPosHardware(opts: {
 }) {
   const canUseDiagnostics = opts.canUseDiagnostics === true
   const terminalIdentity = opts.terminalIdentity ?? null
+  /** Primitive key — do not put the identity object itself in effect deps. */
+  const identityKey = customerDisplayIdentityKey(terminalIdentity)
 
   const [status, setStatus] = useState<RetailHardwareStatus>("disconnected")
   const [lastError, setLastError] = useState("")
@@ -111,12 +119,9 @@ export function useRetailPosHardware(opts: {
   const [localImportCandidate, setLocalImportCandidate] =
     useState<CustomerDisplayTerminalConfig | null>(null)
   const idleTimerRef = useRef<number | null>(null)
-
-  const authHeaders = useCallback((): HeadersInit => {
-    const posToken = getCashierPosToken()
-    if (posToken) return { Authorization: `Bearer ${posToken}` }
-    return {}
-  }, [])
+  const fetchedIdentityKeyRef = useRef<string | null>(null)
+  const configLoadStateRef = useRef(configLoadState)
+  configLoadStateRef.current = configLoadState
 
   const applyServerPayload = useCallback(
     (payload: {
@@ -125,91 +130,96 @@ export function useRetailPosHardware(opts: {
     }) => {
       if (payload.config) {
         setServerConfig(payload.config)
-        setTerminalConfig({
-          profileId: payload.config.profileId ?? CUSTOMER_DISPLAY_DIAGNOSTIC_DEFAULT_PROFILE_ID,
-          physicallyVerified: payload.config.physicallyVerified,
-          verifiedAt: payload.config.verifiedAt,
-          verifiedNote: payload.config.verifiedNote,
-          amountWriteMode: payload.config.amountWriteMode ?? "ascii_only",
-          updatedAt: payload.config.updatedAt ?? new Date(0).toISOString(),
-        })
-        if (payload.config.profileId) setProfileId(payload.config.profileId)
       }
       if (payload.view) setServerView(payload.view)
     },
     []
   )
 
-  const reloadServerConfig = useCallback(async () => {
-    if (!terminalIdentity?.registerId) {
-      setServerConfig(null)
-      setServerView(null)
-      setConfigLoadState("idle")
-      setLocalImportCandidate(null)
-      return null
-    }
-    setConfigLoadState("loading")
-    try {
-      const res = await fetch(
-        `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
-        { headers: authHeaders(), cache: "no-store" }
-      )
-      if (!res.ok) {
-        setConfigLoadState("error")
-        setConfigMessage("Could not load customer display settings for this register.")
-        return null
-      }
-      const payload = (await res.json()) as {
-        config?: RegisterCustomerDisplayConfig
-        view?: CashierRegisterCustomerDisplayView
-      }
-      applyServerPayload(payload)
-      setConfigLoadState("ready")
-
-      // Local browser profile is only a migration candidate — never trusted as server truth.
+  const syncOwnerDraftFromSources = useCallback(
+    (
+      nextServer: RegisterCustomerDisplayConfig | null,
+      loadState: "idle" | "loading" | "ready" | "error"
+    ) => {
       const local = readCustomerDisplayTerminalConfig(terminalIdentity)
+      const resolved = resolveOwnerTerminalDraft({
+        serverConfig: nextServer,
+        local,
+        serverLoadState: loadState,
+      })
+      setTerminalConfig(resolved.terminalConfig)
+      setProfileId(resolved.terminalConfig.profileId)
+
       if (
         canUseDiagnostics &&
         local?.physicallyVerified === true &&
-        (!payload.config?.physicallyVerified || !payload.config?.configured)
+        (!nextServer?.physicallyVerified || !nextServer?.configured)
       ) {
         setLocalImportCandidate(local)
       } else {
         setLocalImportCandidate(null)
       }
-      return payload
-    } catch {
-      setConfigLoadState("error")
-      return null
-    }
-  }, [terminalIdentity, authHeaders, applyServerPayload, canUseDiagnostics])
+    },
+    [terminalIdentity, canUseDiagnostics]
+  )
 
-  const reloadTerminalConfig = useCallback(() => {
-    // Prefer server; localStorage only seeds owner diagnostic draft / import candidate.
-    const stored = readCustomerDisplayTerminalConfig(terminalIdentity)
-    if (stored && canUseDiagnostics && !serverConfig?.configured) {
-      setTerminalConfig(stored)
-      setProfileId(stored.profileId)
-      return stored
-    }
-    if (serverConfig?.profileId) {
-      const mapped: CustomerDisplayTerminalConfig = {
-        profileId: serverConfig.profileId,
-        physicallyVerified: serverConfig.physicallyVerified,
-        verifiedAt: serverConfig.verifiedAt,
-        verifiedNote: serverConfig.verifiedNote,
-        amountWriteMode: serverConfig.amountWriteMode ?? "ascii_only",
-        updatedAt: serverConfig.updatedAt ?? new Date(0).toISOString(),
+  const reloadServerConfig = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!identityKey || !terminalIdentity?.registerId) {
+        fetchedIdentityKeyRef.current = null
+        setServerConfig(null)
+        setServerView(null)
+        setConfigLoadState("idle")
+        setLocalImportCandidate(null)
+        return null
       }
-      setTerminalConfig(mapped)
-      setProfileId(mapped.profileId)
-      return mapped
-    }
-    const next = defaultCustomerDisplayTerminalConfig()
-    setTerminalConfig(next)
-    setProfileId(next.profileId)
-    return next
-  }, [terminalIdentity, canUseDiagnostics, serverConfig])
+
+      if (
+        !opts?.force &&
+        !shouldFetchRegisterCustomerDisplayConfig(fetchedIdentityKeyRef.current, identityKey)
+      ) {
+        return null
+      }
+
+      const previousLoad = configLoadStateRef.current
+      setConfigLoadState(nextCustomerDisplayLoadState({ previous: previousLoad, phase: "start" }))
+
+      try {
+        const posToken = getCashierPosToken()
+        const headers: HeadersInit = posToken ? { Authorization: `Bearer ${posToken}` } : {}
+        const res = await fetch(
+          `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
+          { headers, cache: "no-store" }
+        )
+        if (!res.ok) {
+          setConfigLoadState(
+            nextCustomerDisplayLoadState({ previous: previousLoad, phase: "failure" })
+          )
+          setConfigMessage("Could not load customer display settings for this register.")
+          return null
+        }
+        const payload = (await res.json()) as {
+          config?: RegisterCustomerDisplayConfig
+          view?: CashierRegisterCustomerDisplayView
+        }
+        applyServerPayload(payload)
+        fetchedIdentityKeyRef.current = identityKey
+        const readyState = nextCustomerDisplayLoadState({
+          previous: previousLoad,
+          phase: "success",
+        })
+        setConfigLoadState(readyState)
+        syncOwnerDraftFromSources(payload.config ?? null, readyState)
+        return payload
+      } catch {
+        setConfigLoadState(
+          nextCustomerDisplayLoadState({ previous: previousLoad, phase: "failure" })
+        )
+        return null
+      }
+    },
+    [identityKey, terminalIdentity?.registerId, applyServerPayload, syncOwnerDraftFromSources]
+  )
 
   const refresh = useCallback(() => {
     setStatus(getCustomerDisplayStatus())
@@ -219,14 +229,14 @@ export function useRetailPosHardware(opts: {
     setDiagnosticLog(listCustomerDisplayDiagnosticLog())
   }, [])
 
+  // Fetch once per bound register identity key — not when parent recreates the identity object.
   useEffect(() => {
     void reloadServerConfig()
-  }, [reloadServerConfig])
+  }, [identityKey, reloadServerConfig])
 
   useEffect(() => {
-    reloadTerminalConfig()
     refresh()
-  }, [reloadTerminalConfig, refresh])
+  }, [identityKey, refresh])
 
   useEffect(() => {
     const bytes = buildCustomerDisplayDiagnosticBytes(pendingTestId)
@@ -392,11 +402,11 @@ export function useRetailPosHardware(opts: {
       setConfigMessage("")
       try {
         const diagnostic = canUseDiagnostics && diagnosticMode
-        const profile = diagnostic
+        const profile = canUseDiagnostics
           ? resolveConnectSerialProfile(terminalConfig, {
-              diagnosticMode: true,
+              diagnosticMode: diagnostic,
               diagnosticProfileId: profileId,
-            })
+            }) ?? getCustomerDisplaySerialProfile(profileId)
           : serverView?.setupStatus === "ready" && serverView.connectProfile
             ? resolveConnectSerialProfile({
                 profileId: serverView.connectProfile.profileId,
@@ -478,11 +488,15 @@ export function useRetailPosHardware(opts: {
         return false
       }
       try {
+        const posToken = getCashierPosToken()
         const res = await fetch(
           `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
           {
             method: "PUT",
-            headers: { "Content-Type": "application/json", ...authHeaders() },
+            headers: {
+              "Content-Type": "application/json",
+              ...(posToken ? { Authorization: `Bearer ${posToken}` } : {}),
+            },
             body: JSON.stringify({
               profileId: input.profileId,
               amountWriteMode: input.amountWriteMode,
@@ -504,6 +518,8 @@ export function useRetailPosHardware(opts: {
           return false
         }
         applyServerPayload(payload)
+        syncOwnerDraftFromSources(payload.config ?? null, "ready")
+        setConfigLoadState("ready")
         // Keep a local mirror for this till’s diagnostic draft / migration history only.
         if (payload.config?.profileId) {
           writeCustomerDisplayTerminalConfig(terminalIdentity, {
@@ -521,7 +537,7 @@ export function useRetailPosHardware(opts: {
         return false
       }
     },
-    [canUseDiagnostics, terminalIdentity, authHeaders, applyServerPayload]
+    [canUseDiagnostics, terminalIdentity, applyServerPayload, syncOwnerDraftFromSources]
   )
 
   const persistConfig = useCallback(
@@ -659,11 +675,15 @@ export function useRetailPosHardware(opts: {
   const confirmLocalImport = useCallback(async () => {
     if (!canUseDiagnostics || !terminalIdentity?.registerId || !localImportCandidate) return
     try {
+      const posToken = getCashierPosToken()
       const res = await fetch(
         `/api/retail/registers/${encodeURIComponent(terminalIdentity.registerId)}/customer-display`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
+          headers: {
+            "Content-Type": "application/json",
+            ...(posToken ? { Authorization: `Bearer ${posToken}` } : {}),
+          },
           body: JSON.stringify({
             confirmLocalImport: true,
             storeId: terminalIdentity.storeId,
@@ -685,6 +705,8 @@ export function useRetailPosHardware(opts: {
         return
       }
       applyServerPayload(payload)
+      syncOwnerDraftFromSources(payload.config ?? null, "ready")
+      setConfigLoadState("ready")
       setLocalImportCandidate(null)
       setConfigMessage(
         "Confirmed this till’s browser profile on the register. Cashiers can connect using the server settings."
@@ -696,8 +718,8 @@ export function useRetailPosHardware(opts: {
     canUseDiagnostics,
     terminalIdentity,
     localImportCandidate,
-    authHeaders,
     applyServerPayload,
+    syncOwnerDraftFromSources,
   ])
 
   const enableDiagnostics = useCallback(async () => {
@@ -799,10 +821,7 @@ export function useRetailPosHardware(opts: {
     }
   }, [canUseDiagnostics, diagnosticMode, sequenceAmountInput, refresh])
 
-  const setupStatus =
-    configLoadState === "loading"
-      ? ("not_configured" as const)
-      : serverView?.setupStatus ?? ("not_configured" as const)
+  const setupStatus = serverView?.setupStatus ?? ("not_configured" as const)
 
   const cashierStatusLabel = useMemo(() => {
     if (configLoadState === "loading") return "Customer display: …"
@@ -818,13 +837,22 @@ export function useRetailPosHardware(opts: {
     })
   }, [configLoadState, setupStatus, status, everConnectedThisSession])
 
-  const hasTerminalBinding = Boolean(terminalIdentity?.registerId)
+  const hasTerminalBinding = Boolean(identityKey)
+  const webSerialSupported = typeof window === "undefined" ? true : Boolean(getWebSerial())
+  const connectAvailability = resolveCustomerDisplayConnectAvailability({
+    canUseDiagnostics,
+    hasTerminalBinding,
+    configLoadState,
+    setupStatus: configLoadState === "ready" || configLoadState === "error" ? setupStatus : null,
+    webSerialSupported,
+  })
+  const canCashierConnect = connectAvailability.canConnect
+  const connectDisabledReason = connectAvailability.reason
   const cashierSetupMessage =
-    setupStatus === "not_configured" || setupStatus === "unverified"
+    !canUseDiagnostics && (setupStatus === "not_configured" || setupStatus === "unverified")
       ? serverView?.message ||
         "Customer display requires owner/admin setup. Sales can continue without it."
       : null
-  const canCashierConnect = setupStatus === "ready" || (canUseDiagnostics && diagnosticMode)
 
   const liveTrialStartGate = useMemo(
     () =>
@@ -938,9 +966,10 @@ export function useRetailPosHardware(opts: {
     setupStatus,
     cashierSetupMessage,
     canCashierConnect,
+    connectDisabledReason,
     needsPortPermissionHint,
     localImportCandidate,
     confirmLocalImport: () => void confirmLocalImport(),
-    reloadServerConfig: () => void reloadServerConfig(),
+    reloadServerConfig: () => void reloadServerConfig({ force: true }),
   }
 }

@@ -423,3 +423,145 @@ export function resolveCashierReadyLabel(opts: {
     ? "Customer display: Ready to connect"
     : "Customer display: Ready to connect"
 }
+
+/** Stable string key — never depend on object identity for fetch effects. */
+export function customerDisplayIdentityKey(
+  identity: { businessId: string; storeId: string; registerId: string } | null | undefined
+): string | null {
+  if (!identity?.businessId || !identity.storeId || !identity.registerId) return null
+  return `${identity.businessId}:${identity.storeId}:${identity.registerId}`
+}
+
+/**
+ * Config GET should run only when the bound register identity key changes (or first bind).
+ * Prevents refetch loops when parents recreate terminalIdentity objects each render.
+ */
+export function shouldFetchRegisterCustomerDisplayConfig(
+  previousKey: string | null,
+  nextKey: string | null
+): boolean {
+  if (nextKey == null) return false
+  return previousKey !== nextKey
+}
+
+/**
+ * After the first successful load, background reloads must not flip UI into a loading/disabled state.
+ */
+export function nextCustomerDisplayLoadState(opts: {
+  previous: "idle" | "loading" | "ready" | "error"
+  phase: "start" | "success" | "failure"
+}): "idle" | "loading" | "ready" | "error" {
+  if (opts.phase === "start") {
+    // Keep prior resolved UI stable during silent refresh.
+    if (opts.previous === "ready" || opts.previous === "error") return opts.previous
+    return "loading"
+  }
+  if (opts.phase === "success") return "ready"
+  return "error"
+}
+
+/**
+ * Prefer server row once loaded. Local storage is only an import candidate — never alternate
+ * terminalConfig between local and server on every effect tick.
+ */
+export function resolveOwnerTerminalDraft(opts: {
+  serverConfig: RegisterCustomerDisplayConfig | null
+  local: {
+    profileId: RegisterCustomerDisplayProfileId
+    physicallyVerified: boolean
+    verifiedAt: string | null
+    verifiedNote: string | null
+    amountWriteMode: CustomerDisplayAmountWriteMode
+    updatedAt: string
+  } | null
+  serverLoadState: "idle" | "loading" | "ready" | "error"
+}): {
+  terminalConfig: {
+    profileId: RegisterCustomerDisplayProfileId
+    physicallyVerified: boolean
+    verifiedAt: string | null
+    verifiedNote: string | null
+    amountWriteMode: CustomerDisplayAmountWriteMode
+    updatedAt: string
+  }
+  source: "server" | "local_draft" | "default"
+} {
+  if (opts.serverLoadState === "ready" && opts.serverConfig) {
+    if (opts.serverConfig.profileId) {
+      return {
+        source: "server",
+        terminalConfig: {
+          profileId: opts.serverConfig.profileId,
+          physicallyVerified: opts.serverConfig.physicallyVerified,
+          verifiedAt: opts.serverConfig.verifiedAt,
+          verifiedNote: opts.serverConfig.verifiedNote,
+          amountWriteMode: opts.serverConfig.amountWriteMode ?? "ascii_only",
+          updatedAt: opts.serverConfig.updatedAt ?? new Date(0).toISOString(),
+        },
+      }
+    }
+    // Server loaded but unconfigured: keep local as draft only (does not enable auto writes).
+    if (opts.local) {
+      return { source: "local_draft", terminalConfig: opts.local }
+    }
+  }
+  if (opts.local) {
+    return { source: "local_draft", terminalConfig: opts.local }
+  }
+  return {
+    source: "default",
+    terminalConfig: {
+      profileId: "2400",
+      physicallyVerified: false,
+      verifiedAt: null,
+      verifiedNote: null,
+      amountWriteMode: "ascii_only",
+      updatedAt: new Date(0).toISOString(),
+    },
+  }
+}
+
+export type ConnectAvailability = {
+  canConnect: boolean
+  reason: string | null
+}
+
+/**
+ * Connect enablement. Background config revalidation must not disable Connect once resolved.
+ * Cashiers require verified server profile; owners/admins may connect for setup/diagnostics.
+ */
+export function resolveCustomerDisplayConnectAvailability(opts: {
+  canUseDiagnostics: boolean
+  hasTerminalBinding: boolean
+  configLoadState: "idle" | "loading" | "ready" | "error"
+  setupStatus: CashierRegisterCustomerDisplayView["setupStatus"] | null
+  webSerialSupported: boolean
+}): ConnectAvailability {
+  if (!opts.webSerialSupported) {
+    return { canConnect: false, reason: "This browser does not support Web Serial." }
+  }
+  if (!opts.hasTerminalBinding) {
+    return { canConnect: false, reason: "No register is bound to this terminal." }
+  }
+  if (opts.configLoadState === "loading" || opts.configLoadState === "idle") {
+    return { canConnect: false, reason: "Configuration is still loading." }
+  }
+  if (opts.canUseDiagnostics) {
+    // Owner/admin: may connect to test even when unverified (auto writes stay fail-closed).
+    return { canConnect: true, reason: null }
+  }
+  if (opts.setupStatus === "not_configured" || opts.setupStatus == null) {
+    return {
+      canConnect: false,
+      reason: "Customer display has not been configured for this register.",
+    }
+  }
+  if (opts.setupStatus === "unverified") {
+    return {
+      canConnect: false,
+      reason: "Customer display has not been configured for this register.",
+    }
+  }
+  return { canConnect: true, reason: null }
+}
+
