@@ -4,6 +4,11 @@ import { createServerClient } from "@supabase/ssr"
 import {
   resolveAuthenticatedApiUser,
 } from "@/lib/server/resolveAuthenticatedApiUser"
+import {
+  isApiBlockedByPosTerminalLock,
+  isPageAllowedWithPosTerminalLock,
+  readPosTerminalLockClaimsFromRequest,
+} from "@/lib/retail/posTerminalLockToken"
 
 /**
  * Accounting workspace middleware.
@@ -98,6 +103,28 @@ function isServiceOrRetailPath(pathname: string): boolean {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // ── POS terminal lock (HttpOnly cookie) — pages + privileged APIs ───────────
+  // While active, owner/admin session cookies must not open back-office UI/APIs.
+  const terminalLock = await readPosTerminalLockClaimsFromRequest(request)
+  if (terminalLock) {
+    if (pathname.startsWith("/api/")) {
+      if (isApiBlockedByPosTerminalLock(pathname, request.method)) {
+        return NextResponse.json(
+          {
+            error: "Terminal is in cashier mode. Admin access requires reauthentication.",
+            code: "pos_terminal_locked",
+          },
+          { status: 403 }
+        )
+      }
+    } else if (
+      (pathname.startsWith("/retail") || pathname.startsWith("/pos")) &&
+      !isPageAllowedWithPosTerminalLock(pathname)
+    ) {
+      return NextResponse.redirect(new URL("/retail/pos/pin", request.url))
+    }
+  }
 
   // ── Accounting path handling ────────────────────────────────────────────────
   if (isAccountingPath(pathname)) {
@@ -208,7 +235,16 @@ export const config = {
     "/service/:path*",
     "/retail",
     "/retail/:path*",
+    "/pos",
+    "/pos/:path*",
     "/api/service/:path*",
     "/api/retail/:path*",
+    "/api/customers",
+    "/api/customers/:path*",
+    "/api/sales",
+    "/api/sales/:path*",
+    "/api/sales-history",
+    "/api/sales-history/:path*",
+    "/api/auth/pin-login",
   ],
 }

@@ -352,8 +352,15 @@ export default function RetailPosPage() {
       return
     }
     void switchToCashierPinLock({
-      signOut: () => supabase.auth.signOut(),
       navigateToPin: () => router.replace(retailPaths.posPin),
+      refreshLock:
+        businessId && currentStoreId
+          ? {
+              businessId,
+              storeId: currentStoreId,
+              registerId: terminalBoundRegisterId ?? registerSession?.register_id ?? null,
+            }
+          : null,
     })
   }
 
@@ -749,10 +756,11 @@ export default function RetailPosPage() {
 
       // If cashier session exists, use it
       if (cashierSession) {
-        setParkSaleClientAvailable(!!user)
-        const posToken = user ? null : getCashierPosToken()
+        // Park uses manager cookies — disable while PIN cashier is active (Option B).
+        setParkSaleClientAvailable(false)
+        const posToken = getCashierPosToken()
 
-        if (!user && posToken) {
+        if (posToken) {
           setRegisterStatusLoading(true)
           try {
             const res = await fetch("/api/retail/pos/bootstrap", {
@@ -4057,12 +4065,11 @@ export default function RetailPosPage() {
         return
       }
 
-      const {
-        data: { user: supabaseUserAtCheckout },
-      } = await supabase.auth.getUser()
       const cashierPosTokenAtCheckout = getCashierPosToken()
+      // Prefer scoped cashier token whenever a PIN session is active — even if a
+      // manager Supabase session remains underneath (Option B terminal lock).
       const pinOnlyTokenCheckout =
-        Boolean(cashierPosTokenAtCheckout) && !supabaseUserAtCheckout && Boolean(cashierSession)
+        Boolean(cashierPosTokenAtCheckout) && Boolean(cashierSession)
 
       // PIN + bearer token: browser Supabase is anon — RLS blocks cashier_sessions reads.
       // Server still validates session on create; trust bootstrap-selected session here.

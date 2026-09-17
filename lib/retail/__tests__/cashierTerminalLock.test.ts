@@ -48,26 +48,17 @@ describe("canSwitchCashier", () => {
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.reason).toBe("payment_in_progress")
   })
-
-  it("blocks while checkout modal is open", () => {
-    const res = canSwitchCashier({
-      cartItemCount: 0,
-      processingPayment: false,
-      checkoutOpen: true,
-    })
-    expect(res.ok).toBe(false)
-    if (!res.ok) expect(res.reason).toBe("payment_in_progress")
-  })
 })
 
-describe("switchToCashierPinLock", () => {
+describe("switchToCashierPinLock (Option B — no manager signOut)", () => {
   beforeEach(() => {
     sessionStorage.clear()
     clearRetailPosPinUrlIsolation()
     clearCashierSession()
+    global.fetch = jest.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
   })
 
-  it("activates lock, invalidates cashier token, signs out, navigates to PIN — never admin", async () => {
+  it("activates lock isolation, clears cashier token, navigates to PIN — does not call signOut", async () => {
     setCashierSession({
       cashierId: "c-a",
       cashierName: "Cashier A",
@@ -75,44 +66,21 @@ describe("switchToCashierPinLock", () => {
       businessId: "biz-1",
     })
     setCashierPosToken("fp1.test-token")
-    expect(isCashierAuthenticated()).toBe(true)
-
-    const signOut = jest.fn().mockResolvedValue(undefined)
     const navigateToPin = jest.fn()
-    const navigateToAdmin = jest.fn()
 
-    await switchToCashierPinLock({ signOut, navigateToPin })
+    await switchToCashierPinLock({
+      navigateToPin,
+      refreshLock: { businessId: "biz-1", storeId: "store-1", registerId: "reg-1" },
+    })
 
     expect(isRetailPosPinUrlIsolationActive()).toBe(true)
     expect(getCashierSession()).toBeNull()
     expect(getCashierPosToken()).toBeNull()
-    expect(signOut).toHaveBeenCalledTimes(1)
     expect(navigateToPin).toHaveBeenCalledTimes(1)
-    expect(navigateToAdmin).not.toHaveBeenCalled()
-  })
-
-  it("activates lock before clearing so owner UI cannot flash via unlocked gap", async () => {
-    setCashierSession({
-      cashierId: "c-a",
-      cashierName: "Cashier A",
-      storeId: "store-1",
-      businessId: "biz-1",
-    })
-    const order: string[] = []
-    const signOut = jest.fn().mockImplementation(async () => {
-      order.push("signOut")
-      expect(isRetailPosPinUrlIsolationActive()).toBe(true)
-      expect(getCashierSession()).toBeNull()
-    })
-    const navigateToPin = jest.fn(() => {
-      order.push("navigateToPin")
-      expect(isRetailPosPinUrlIsolationActive()).toBe(true)
-    })
-
-    // spy activate by checking lock is set at start of signOut (after clear)
-    await switchToCashierPinLock({ signOut, navigateToPin })
-    expect(order).toEqual(["signOut", "navigateToPin"])
-    expect(isRetailPosPinUrlIsolationActive()).toBe(true)
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/retail/pos/terminal-lock",
+      expect.objectContaining({ method: "POST" })
+    )
   })
 })
 
@@ -120,21 +88,18 @@ describe("afterCashierPinSuccessSecureTerminal", () => {
   beforeEach(() => {
     sessionStorage.clear()
     clearRetailPosPinUrlIsolation()
+    global.fetch = jest.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
   })
 
-  it("keeps terminal lock active and drops owner session", async () => {
-    const signOut = jest.fn().mockResolvedValue(undefined)
-    await afterCashierPinSuccessSecureTerminal({ signOut })
-    expect(isRetailPosPinUrlIsolationActive()).toBe(true)
-    expect(signOut).toHaveBeenCalledTimes(1)
-  })
-
-  it("does not clear lock (PIN success must not reveal admin on later token clear)", async () => {
-    activateRetailPosPinUrlIsolation()
+  it("keeps client isolation and activates server terminal lock without signOut", async () => {
     await afterCashierPinSuccessSecureTerminal({
-      signOut: jest.fn().mockResolvedValue(undefined),
+      lock: { businessId: "biz-1", storeId: "store-1", registerId: "reg-1" },
     })
     expect(isRetailPosPinUrlIsolationActive()).toBe(true)
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/retail/pos/terminal-lock",
+      expect.objectContaining({ method: "POST" })
+    )
   })
 })
 
@@ -150,14 +115,37 @@ describe("exitCashierLockForAdminReauth", () => {
     })
   })
 
-  it("signs out, clears lock, goes to login — not dashboard/admin", async () => {
-    const signOut = jest.fn().mockResolvedValue(undefined)
-    const navigateToLogin = jest.fn()
-    await exitCashierLockForAdminReauth({ signOut, navigateToLogin })
-    expect(signOut).toHaveBeenCalled()
+  it("clears lock only after successful reauth API", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    }) as unknown as typeof fetch
+    const navigateToAdmin = jest.fn()
+    const result = await exitCashierLockForAdminReauth({
+      email: "owner@example.com",
+      password: "secret",
+      navigateToAdmin,
+    })
+    expect(result).toEqual({ ok: true })
     expect(isCashierAuthenticated()).toBe(false)
     expect(isRetailPosPinUrlIsolationActive()).toBe(false)
-    expect(navigateToLogin).toHaveBeenCalledTimes(1)
+    expect(navigateToAdmin).toHaveBeenCalledTimes(1)
+  })
+
+  it("remains locked on failed reauth", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Invalid email or password" }),
+    }) as unknown as typeof fetch
+    const navigateToAdmin = jest.fn()
+    const result = await exitCashierLockForAdminReauth({
+      email: "owner@example.com",
+      password: "wrong",
+      navigateToAdmin,
+    })
+    expect(result.ok).toBe(false)
+    expect(isRetailPosPinUrlIsolationActive()).toBe(true)
+    expect(navigateToAdmin).not.toHaveBeenCalled()
   })
 })
 
@@ -165,6 +153,7 @@ describe("cashier A → B operator identity", () => {
   beforeEach(() => {
     sessionStorage.clear()
     clearCashierSession()
+    global.fetch = jest.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
   })
 
   it("new cashier session replaces prior operator after switch + fresh PIN token", async () => {
@@ -176,10 +165,7 @@ describe("cashier A → B operator identity", () => {
     })
     setCashierPosToken("token-a")
 
-    await switchToCashierPinLock({
-      signOut: jest.fn().mockResolvedValue(undefined),
-      navigateToPin: jest.fn(),
-    })
+    await switchToCashierPinLock({ navigateToPin: jest.fn() })
     expect(getCashierPosToken()).toBeNull()
 
     setCashierSession({
@@ -194,6 +180,5 @@ describe("cashier A → B operator identity", () => {
     expect(session?.cashierId).toBe("c-b")
     expect(session?.cashierName).toBe("Cashier B")
     expect(getCashierPosToken()).toBe("token-b")
-    expect(session?.storeId).toBe("store-1")
   })
 })

@@ -1,10 +1,10 @@
 /**
- * Retail POS terminal cashier/kiosk lock helpers.
+ * Retail POS terminal cashier/kiosk lock helpers (Option B).
  *
- * Entering cashier mode (or switching cashiers) must not reveal the owner/admin
- * UI merely because a Supabase session cookie may still exist. Navigation lock
- * (sessionStorage) plus signing out the owner session closes that gap for the
- * Switch-cashier path. Admin return requires email reauthentication.
+ * Manager Supabase session may remain underneath. Security boundary is the
+ * HttpOnly terminal-lock cookie + client PIN isolation + cashier token scope.
+ * Do NOT sign out the manager until every cashier dependency has an independent
+ * credential (that is not true today).
  */
 
 import { clearCashierSession } from "@/lib/cashierSession"
@@ -43,54 +43,83 @@ export function canSwitchCashier(params: {
   return { ok: true }
 }
 
+export type TerminalLockActivateBody = {
+  businessId: string
+  storeId: string
+  registerId?: string | null
+}
+
+/** Best-effort: set/refresh HttpOnly terminal lock while manager session exists. */
+export async function activatePosTerminalLockCookie(
+  body: TerminalLockActivateBody
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/retail/pos/terminal-lock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(body),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 /**
  * End the current cashier PIN session and return to the lock screen.
- * Activates URL isolation before clearing the token so owner chrome cannot flash.
- * Signs out any underlying Supabase session so admin APIs are not callable.
+ * Keeps manager session and terminal-lock cookie. Never navigates to admin.
  */
 export async function switchToCashierPinLock(params: {
-  signOut: () => Promise<unknown>
   navigateToPin: () => void
+  /** Optional refresh of server lock while manager session still present */
+  refreshLock?: TerminalLockActivateBody | null
 }): Promise<void> {
   activateRetailPosPinUrlIsolation()
   clearCashierSession()
-  try {
-    await params.signOut()
-  } catch {
-    /* still navigate to PIN lock */
+  if (params.refreshLock?.businessId && params.refreshLock.storeId) {
+    await activatePosTerminalLockCookie(params.refreshLock)
   }
   params.navigateToPin()
 }
 
 /**
- * After a successful PIN login: keep terminal lock active and drop any owner
- * Supabase session so privileged APIs are not available under cashier mode.
+ * After successful PIN: keep client isolation + activate server terminal lock.
+ * Does not sign out the manager session (cashier APIs still need it for several flows;
+ * privileged APIs are blocked by the lock cookie).
  */
 export async function afterCashierPinSuccessSecureTerminal(params: {
-  signOut: () => Promise<unknown>
+  lock: TerminalLockActivateBody
 }): Promise<void> {
   activateRetailPosPinUrlIsolation()
-  try {
-    await params.signOut()
-  } catch {
-    /* cashier token already issued; continue to POS */
-  }
+  await activatePosTerminalLockCookie(params.lock)
 }
 
 /**
- * Explicit Admin access from the PIN lock screen: require email reauth.
- * Sign out first, then clear the kiosk lock, then send to login.
+ * Explicit Admin access: reauthenticate via email/password, then clear lock cookie
+ * and client isolation. On failure, remain locked.
  */
 export async function exitCashierLockForAdminReauth(params: {
-  signOut: () => Promise<unknown>
-  navigateToLogin: () => void
-}): Promise<void> {
-  clearCashierSession()
+  email: string
+  password: string
+  navigateToAdmin: () => void
+}): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    await params.signOut()
+    const res = await fetch("/api/retail/pos/terminal-lock", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ email: params.email, password: params.password }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    if (!res.ok) {
+      return { ok: false, error: data.error || "Could not unlock terminal" }
+    }
+    clearCashierSession()
+    clearRetailPosPinUrlIsolation()
+    params.navigateToAdmin()
+    return { ok: true }
   } catch {
-    /* proceed to login */
+    return { ok: false, error: "Could not unlock terminal" }
   }
-  clearRetailPosPinUrlIsolation()
-  params.navigateToLogin()
 }

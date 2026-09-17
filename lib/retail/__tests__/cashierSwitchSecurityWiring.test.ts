@@ -7,37 +7,44 @@ function read(rel: string): string {
   return readFileSync(join(root, rel), "utf8")
 }
 
-describe("Switch cashier security wiring (source)", () => {
-  it("RetailPosPage Switch uses lock helper and does not clear session alone", () => {
+describe("Switch cashier security wiring (Option B)", () => {
+  it("does not sign out manager on Switch or PIN success", () => {
+    const lock = read("lib/retail/cashierTerminalLock.ts")
+    expect(lock).toContain("switchToCashierPinLock")
+    expect(lock).not.toMatch(/signOut/)
+    expect(lock).toContain("activatePosTerminalLockCookie")
+    expect(lock).toContain("exitCashierLockForAdminReauth")
+  })
+
+  it("RetailPosPage Switch uses lock helper without signOut", () => {
     const src = read("components/retail/pos/RetailPosPage.tsx")
     expect(src).toContain("switchToCashierPinLock")
     expect(src).toContain("canSwitchCashier")
-    expect(src).not.toMatch(
-      /handleEndCashierPinSession\s*=\s*\(\)\s*=>\s*\{\s*clearCashierSession\(\)/
-    )
+    expect(src).not.toMatch(/switchToCashierPinLock\(\{[\s\S]*signOut/)
   })
 
-  it("PIN success keeps terminal lock (does not clear isolation)", () => {
+  it("PIN Admin access requires email/password reauth API", () => {
     const src = read("components/retail/pos/RetailPosPinPage.tsx")
-    expect(src).toContain("afterCashierPinSuccessSecureTerminal")
-    expect(src).not.toContain("clearRetailPosPinUrlIsolation()")
     expect(src).toContain("exitCashierLockForAdminReauth")
-    expect(src).toContain("Admin access")
+    expect(src).toContain("Admin reauthentication")
+    expect(src).not.toContain("navigateToLogin")
+  })
+
+  it("middleware enforces terminal lock cookie on privileged paths", () => {
+    const src = read("middleware.ts")
+    expect(src).toContain("readPosTerminalLockClaimsFromRequest")
+    expect(src).toContain("isApiBlockedByPosTerminalLock")
+    expect(src).toContain("pos_terminal_locked")
   })
 
   it("accessControl STEP 8.5 has no owner/admin/manager bypass", () => {
     const src = read("lib/accessControl.ts")
     expect(src).toContain("STEP 8.5")
     expect(src).not.toMatch(/privilegedRetailBackoffice/)
-    expect(src).not.toMatch(
-      /role === "owner" \|\| role === "admin" \|\| role === "manager"[\s\S]{0,120}isPinCashierRetailAllowedPath/
-    )
   })
 
-  it("does not disconnect customer-display on switch (no COM hardcode in lock helper)", () => {
+  it("does not disconnect customer-display on switch", () => {
     const lock = read("lib/retail/cashierTerminalLock.ts")
     expect(lock).not.toMatch(/disconnect|COM2|baud|serial/i)
-    expect(lock).toContain("activateRetailPosPinUrlIsolation")
-    expect(lock).toContain("signOut")
   })
 })

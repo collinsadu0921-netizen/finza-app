@@ -3,20 +3,19 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import {
-  getCashierSession,
   setCashierSession,
   setCashierPosToken,
   isCashierAuthenticated,
 } from "@/lib/cashierSession"
 import { setActiveStoreId } from "@/lib/storeSession"
 import { supabase } from "@/lib/supabaseClient"
-import {
-  activateRetailPosPinUrlIsolation,
-} from "@/lib/retail/posPinUrlIsolation"
+import { retailPaths } from "@/lib/retail/routes"
+import { activateRetailPosPinUrlIsolation } from "@/lib/retail/posPinUrlIsolation"
 import {
   afterCashierPinSuccessSecureTerminal,
   exitCashierLockForAdminReauth,
 } from "@/lib/retail/cashierTerminalLock"
+import { getTerminalRegisterId } from "@/lib/retail/terminalRegisterBinding"
 import { PosTerminalSetupHint } from "@/components/retail/pos/PosTerminalSetupHint"
 
 export default function PinLoginPage() {
@@ -25,18 +24,17 @@ export default function PinLoginPage() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [remainingTime, setRemainingTime] = useState<number | null>(null)
+  const [showAdminUnlock, setShowAdminUnlock] = useState(false)
+  const [adminEmail, setAdminEmail] = useState("")
+  const [adminPassword, setAdminPassword] = useState("")
+  const [adminUnlockLoading, setAdminUnlockLoading] = useState(false)
 
   useEffect(() => {
-    // If already authenticated as cashier, redirect to POS
     if (isCashierAuthenticated()) {
       router.push("/retail/pos")
       return
     }
-
     activateRetailPosPinUrlIsolation()
-
-    // Don't redirect if admin/manager is logged in - allow cashier PIN login
-    // Cashiers can log in even when admin session exists (different auth systems)
   }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,7 +75,6 @@ export default function PinLoginPage() {
       }
 
       if (data.success && data.cashier) {
-        // Store cashier session
         setCashierSession({
           cashierId: data.cashier.id,
           cashierName: data.cashier.name,
@@ -88,8 +85,6 @@ export default function PinLoginPage() {
           typeof data.cashier_pos_token === "string" ? data.cashier_pos_token : null
         )
 
-        // Set active store for store context
-        // Get store name from database
         const { data: storeData } = await supabase
           .from("stores")
           .select("name")
@@ -103,15 +98,18 @@ export default function PinLoginPage() {
         }
 
         await afterCashierPinSuccessSecureTerminal({
-          signOut: () => supabase.auth.signOut(),
+          lock: {
+            businessId: data.cashier.business_id,
+            storeId: data.cashier.store_id,
+            registerId: getTerminalRegisterId(data.cashier.business_id, data.cashier.store_id),
+          },
         })
-        // Redirect to POS (canonical retail URL)
         router.push("/retail/pos")
       } else {
         setError("Invalid PIN")
         setLoading(false)
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("PIN login error:", err)
       setError("An error occurred. Please try again.")
       setLoading(false)
@@ -123,19 +121,15 @@ export default function PinLoginPage() {
       <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Cashier Login</h1>
-          <p className="text-gray-600 text-sm">
-            Enter your PIN to access the POS system
-          </p>
+          <p className="text-gray-600 text-sm">Enter your PIN to access the POS system</p>
+          {remainingTime != null && remainingTime > 0 && (
+            <p className="mt-2 text-sm text-amber-700">Try again in {remainingTime} minutes.</p>
+          )}
         </div>
 
         {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 text-red-700 px-4 py-3 rounded-r mb-6 animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <span className="text-sm font-medium">{error}</span>
-            </div>
+          <div className="bg-red-50 border-l-4 border-red-400 text-red-700 px-4 py-3 rounded-r mb-6">
+            <span className="text-sm font-medium">{error}</span>
           </div>
         )}
 
@@ -151,61 +145,95 @@ export default function PinLoginPage() {
               pattern="[0-9]*"
               value={pin}
               onChange={(e) => {
-                const value = e.target.value.replace(/\D/g, "")
-                if (value.length <= 6) {
-                  setPin(value)
-                  setError("")
-                }
+                const value = e.target.value.replace(/\D/g, "").slice(0, 6)
+                setPin(value)
+                setError("")
               }}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 outline-none disabled:bg-gray-50 disabled:cursor-not-allowed text-center text-2xl tracking-widest font-mono"
-              placeholder="••••"
-              required
-              disabled={loading}
-              autoFocus
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-center text-2xl tracking-widest"
               maxLength={6}
-              minLength={4}
+              autoFocus
             />
-            <p className="text-xs text-gray-500 mt-2 text-center">
-              4-6 digits
-            </p>
           </div>
-
           <button
             type="submit"
-            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
             disabled={loading || pin.length < 4}
+            className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold disabled:opacity-50"
           >
-            {loading ? (
-              <span className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Verifying...
-              </span>
-            ) : (
-              "Enter POS"
-            )}
+            {loading ? "Verifying..." : "Enter POS"}
           </button>
         </form>
 
         <div className="mt-6 space-y-4 text-center">
-          <p className="text-sm text-gray-600">
-            Owner or manager on this device?{" "}
-            <button
-              type="button"
-              onClick={() => {
+          {!showAdminUnlock ? (
+            <p className="text-sm text-gray-600">
+              Owner or manager?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdminUnlock(true)
+                  void supabase.auth.getUser().then(({ data }) => {
+                    const em = data.user?.email?.trim()
+                    if (em) setAdminEmail(em)
+                  })
+                }}
+                className="text-blue-600 font-semibold"
+              >
+                Admin access
+              </button>
+            </p>
+          ) : (
+            <form
+              className="text-left space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault()
+                setAdminUnlockLoading(true)
                 void exitCashierLockForAdminReauth({
-                  signOut: () => supabase.auth.signOut(),
-                  navigateToLogin: () => router.replace("/login"),
+                  email: adminEmail,
+                  password: adminPassword,
+                  navigateToAdmin: () => router.replace(retailPaths.dashboard),
+                }).then((result) => {
+                  setAdminUnlockLoading(false)
+                  if (!result.ok) {
+                    setError(result.error)
+                    setAdminPassword("")
+                  }
                 })
               }}
-              className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
             >
-              Admin access
-            </button>
-          </p>
-          <p className="text-xs text-gray-500">Requires email sign-in. Does not unlock from the cashier PIN alone.</p>
+              <input
+                type="email"
+                placeholder="Email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                required
+              />
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={adminUnlockLoading}
+                  className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold"
+                >
+                  {adminUnlockLoading ? "Verifying…" : "Unlock admin"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAdminUnlock(false)}
+                  className="px-3 border rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         <PosTerminalSetupHint />

@@ -34,6 +34,10 @@ export default function RetailPosPinPage() {
   const [loading, setLoading] = useState(false)
   const [, setRemainingTime] = useState<number | null>(null)
   const [terminalContextLabel, setTerminalContextLabel] = useState<string | null>(null)
+  const [showAdminUnlock, setShowAdminUnlock] = useState(false)
+  const [adminEmail, setAdminEmail] = useState("")
+  const [adminPassword, setAdminPassword] = useState("")
+  const [adminUnlockLoading, setAdminUnlockLoading] = useState(false)
 
   useEffect(() => {
     if (isCashierAuthenticated()) {
@@ -150,8 +154,16 @@ export default function RetailPosPinPage() {
           setActiveStoreId(data.cashier.store_id, null)
         }
 
+        const registerId = getTerminalRegisterId(
+          data.cashier.business_id,
+          data.cashier.store_id
+        )
         await afterCashierPinSuccessSecureTerminal({
-          signOut: () => supabase.auth.signOut(),
+          lock: {
+            businessId: data.cashier.business_id,
+            storeId: data.cashier.store_id,
+            registerId,
+          },
         })
         router.push(retailPaths.pos)
       } else {
@@ -314,23 +326,99 @@ export default function RetailPosPinPage() {
           </form>
 
           <div className="mt-8 space-y-3 text-center text-sm text-slate-400">
-            <p>
-              Owner or manager on this device?{" "}
-              <button
-                type="button"
-                data-testid="pos-pin-admin-access"
-                onClick={() => {
+            {!showAdminUnlock ? (
+              <>
+                <p>
+                  Owner or manager on this device?{" "}
+                  <button
+                    type="button"
+                    data-testid="pos-pin-admin-access"
+                    onClick={() => {
+                      setError("")
+                      setShowAdminUnlock(true)
+                      void supabase.auth.getUser().then(({ data }) => {
+                        const em = data.user?.email?.trim()
+                        if (em) setAdminEmail(em)
+                      })
+                    }}
+                    className="font-bold text-emerald-400 underline decoration-emerald-700 underline-offset-4 hover:text-emerald-300"
+                  >
+                    Admin access
+                  </button>
+                </p>
+                <p className="text-xs text-slate-500">
+                  Requires owner/admin/manager email and password. Failed attempts leave the terminal locked.
+                </p>
+              </>
+            ) : (
+              <form
+                className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 text-left"
+                data-testid="pos-pin-admin-unlock-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  setAdminUnlockLoading(true)
+                  setError("")
                   void exitCashierLockForAdminReauth({
-                    signOut: () => supabase.auth.signOut(),
-                    navigateToLogin: () => router.replace("/login"),
+                    email: adminEmail,
+                    password: adminPassword,
+                    navigateToAdmin: () => router.replace(retailPaths.dashboard),
+                  }).then((result) => {
+                    setAdminUnlockLoading(false)
+                    if (!result.ok) {
+                      setError(result.error)
+                      setAdminPassword("")
+                    }
                   })
                 }}
-                className="font-bold text-emerald-400 underline decoration-emerald-700 underline-offset-4 hover:text-emerald-300"
               >
-                Admin access
-              </button>
-            </p>
-            <p className="text-xs text-slate-500">Requires email sign-in. Does not unlock from the cashier PIN alone.</p>
+                <p className="mb-3 text-sm font-semibold text-slate-200">Admin reauthentication</p>
+                <label className="mb-1 block text-xs text-slate-400" htmlFor="admin-unlock-email">
+                  Email
+                </label>
+                <input
+                  id="admin-unlock-email"
+                  type="email"
+                  autoComplete="username"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                  required
+                />
+                <label className="mb-1 block text-xs text-slate-400" htmlFor="admin-unlock-password">
+                  Password
+                </label>
+                <input
+                  id="admin-unlock-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                  required
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={adminUnlockLoading || !adminEmail || !adminPassword}
+                    className="min-h-[44px] flex-1 rounded-xl bg-emerald-500 text-sm font-bold text-emerald-950 disabled:opacity-40"
+                  >
+                    {adminUnlockLoading ? "Verifying…" : "Unlock admin"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={adminUnlockLoading}
+                    onClick={() => {
+                      setShowAdminUnlock(false)
+                      setAdminPassword("")
+                      setError("")
+                    }}
+                    className="min-h-[44px] rounded-xl border border-slate-600 px-3 text-sm font-semibold text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
 
           <div className="mt-8">

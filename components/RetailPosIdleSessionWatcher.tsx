@@ -2,13 +2,9 @@
 
 import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabaseClient"
 import { clearCashierSession } from "@/lib/cashierSession"
 import { getRetailPosIdleLogoutMs, isRetailPosIdleWatchPath } from "@/lib/retailPosIdleLogout"
-import {
-  activateRetailPosPinUrlIsolation,
-  clearRetailPosPinUrlIsolation,
-} from "@/lib/retail/posPinUrlIsolation"
+import { activateRetailPosPinUrlIsolation } from "@/lib/retail/posPinUrlIsolation"
 
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
   "mousedown",
@@ -19,7 +15,8 @@ const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
 ]
 
 /**
- * When NEXT_PUBLIC_RETAIL_POS_IDLE_LOGOUT_MINUTES > 0, signs out after idle on /pos and /retail/pos.
+ * When NEXT_PUBLIC_RETAIL_POS_IDLE_LOGOUT_MINUTES > 0, ends the cashier PIN session
+ * after idle on /pos and /retail/pos (returns to PIN lock; keeps manager session).
  */
 export default function RetailPosIdleSessionWatcher({
   pathname,
@@ -51,23 +48,14 @@ export default function RetailPosIdleSessionWatcher({
       clearTimer()
       timerRef.current = setTimeout(async () => {
         try {
-          const {
-            data: { session },
-          } = await supabase.auth.getSession()
+          // Clear cashier identity only — keep manager session + terminal lock cookie.
+          // Signing out the manager recreates the login loop and breaks PIN-adjacent deps.
           clearCashierSession()
-          if (session?.user) {
-            await supabase.auth.signOut()
-            clearRetailPosPinUrlIsolation()
-            router.replace("/login")
-          } else {
-            activateRetailPosPinUrlIsolation()
-            await supabase.auth.signOut().catch(() => {})
-            router.replace("/retail/pos/pin")
-          }
+          activateRetailPosPinUrlIsolation()
+          router.replace("/retail/pos/pin")
         } catch {
           clearCashierSession()
           activateRetailPosPinUrlIsolation()
-          await supabase.auth.signOut().catch(() => {})
           router.replace("/retail/pos/pin")
         }
       }, idleMs)

@@ -301,7 +301,6 @@ export default function POSPage() {
       return
     }
     void switchToCashierPinLock({
-      signOut: () => supabase.auth.signOut(),
       navigateToPin: () => router.replace("/retail/pos/pin"),
     })
   }
