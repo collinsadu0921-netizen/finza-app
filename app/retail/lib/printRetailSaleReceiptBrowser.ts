@@ -18,6 +18,7 @@ import { generateReceiptHTML, type PrinterWidth, type ReceiptMode, type ReceiptD
 import { retailReceiptQrDataUrl } from "@/lib/receipt/retailReceiptQrDataUrl"
 import { printRetailReceiptEscposSerial } from "@/lib/receipt/printRetailReceiptEscposSerial"
 import { mapRetailReceiptApiToEscpos, type RetailReceiptApiBody } from "@/app/retail/lib/mapRetailReceiptApiToEscpos"
+import { printReceiptHtmlInBrowser } from "@/lib/retail/receipts/printReceiptHtmlInBrowser"
 
 /** Finza never sends Web Serial drawer-kick commands. */
 export const RETAIL_FINZA_DRAWER_KICK_ENABLED = false
@@ -27,27 +28,6 @@ export type PrintRetailReceiptResult = { ok: true } | { ok: false; message: stri
 type ReceiptApiExtras = {
   default_currency?: string | null
   receipt_settings?: Record<string, unknown> | null
-}
-
-function buildPrintWindow(html: string): PrintRetailReceiptResult {
-  const printWindow = window.open("", "_blank")
-  if (!printWindow) {
-    return { ok: false, message: "Popup blocked. Allow popups for this site to print." }
-  }
-
-  printWindow.document.write(html)
-  printWindow.document.close()
-
-  printWindow.onload = () => {
-    setTimeout(() => {
-      printWindow.print()
-      setTimeout(() => {
-        printWindow.close()
-      }, 1000)
-    }, 250)
-  }
-
-  return { ok: true }
 }
 
 async function printRetailReceiptFromPayload(
@@ -105,7 +85,7 @@ async function printRetailReceiptFromPayload(
     }
   )
 
-  return buildPrintWindow(html)
+  return printReceiptHtmlInBrowser(html)
 }
 
 export async function printRetailSaleReceiptInBrowser(

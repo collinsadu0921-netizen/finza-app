@@ -4,6 +4,7 @@ import { useState } from "react"
 import { generateReceiptHTML, type ReceiptData, type PrinterWidth, type ReceiptMode } from "@/lib/escpos"
 import { retailReceiptQrDataUrl } from "@/lib/receipt/retailReceiptQrDataUrl"
 import { printRetailReceiptEscposSerial } from "@/lib/receipt/printRetailReceiptEscposSerial"
+import { printReceiptHtmlInBrowser } from "@/lib/retail/receipts/printReceiptHtmlInBrowser"
 
 type ReceiptPrinterProps = {
   receiptData: ReceiptData
@@ -84,21 +85,9 @@ export default function ReceiptPrinter({
       }
     )
 
-    const printWindow = window.open("", "_blank")
-    if (!printWindow) {
-      throw new Error("Popup blocked. Please allow popups for this site.")
-    }
-
-    printWindow.document.write(html)
-    printWindow.document.close()
-
-    printWindow.onload = () => {
-      setTimeout(() => {
-        printWindow.print()
-        setTimeout(() => {
-          printWindow.close()
-        }, 1000)
-      }, 250)
+    const result = await printReceiptHtmlInBrowser(html)
+    if (!result.ok) {
+      throw new Error(result.message)
     }
   }
 
