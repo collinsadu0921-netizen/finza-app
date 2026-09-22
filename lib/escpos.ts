@@ -3,7 +3,7 @@
  * Supports 58mm and 80mm thermal printers
  */
 
-import { retailReceiptDocumentCss } from "@/lib/retail/receipts/retailReceiptPrintCss"
+import { retailReceiptDocumentCss, retailReceipt58mmTearFeedHtml } from "@/lib/retail/receipts/retailReceiptPrintCss"
 import { wrapRetailReceiptMultiline } from "@/lib/retail/receipts/retailReceiptBusinessIdentity"
 
 export type PrinterWidth = "58mm" | "80mm"
@@ -757,7 +757,7 @@ ${retailReceiptDocumentCss(is58mm)}
 
   // QR — embedded image when qrImageDataUrl is set (see lib/receipt/retailReceiptQrDataUrl.ts)
   if (settings.showQR && data.qrCodeContent) {
-    // 58mm HTML column is ~48mm; keep QR under ~40mm so CUPS ZJ-58 does not crop it.
+    // 58mm HTML column is ~45mm; keep QR under ~40mm so CUPS ZJ-58 does not crop it.
     const qrPx = is58mm ? 112 : 168
     html += `    <div class="qr-code">\n`
     if (settings.qrImageDataUrl) {
@@ -780,9 +780,9 @@ ${retailReceiptDocumentCss(is58mm)}
     html += `    </div>\n`
   }
 
-  // 58mm Browser Print only: advance paper past the tear bar in this job.
+  // 58mm Browser Print only: non-collapsible feed past the tear bar in this job.
   if (is58mm) {
-    html += `    <div class="receipt-tear-feed" aria-hidden="true"></div>\n`
+    html += retailReceipt58mmTearFeedHtml()
   }
 
   html += `  </div>

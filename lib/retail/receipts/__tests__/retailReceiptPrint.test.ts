@@ -4,8 +4,12 @@ import { formatStoredTaxPercentLabel, getGhanaLegacyRates } from "@/lib/taxes/re
 import {
   RETAIL_RECEIPT_FORBIDDEN_PRINT_COLORS,
   RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM,
+  RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM,
   RETAIL_RECEIPT_58MM_TEAR_FEED_MM,
+  RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT,
+  RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM,
   retailReceiptDocumentCss,
+  retailReceipt58mmTearFeedHtml,
 } from "@/lib/retail/receipts/retailReceiptPrintCss"
 
 function sampleReceipt(overrides: Partial<ReceiptData> = {}): ReceiptData {
@@ -162,13 +166,19 @@ describe("retail thermal receipt HTML", () => {
     const css58 = retailReceiptDocumentCss(true)
     expect(css58).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
     expect(css58).toContain(`max-width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(css58).toContain(`margin: 0 0 0 ${RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM}mm`)
     expect(css58).toContain("box-sizing: border-box")
-    expect(css58).toContain("margin: 0 auto")
     expect(css58).toContain("overflow-wrap: anywhere")
     expect(css58).toContain(".receipt-tear-feed")
+    expect(css58).toContain(".receipt-tear-feed-line")
     expect(css58).toContain(`height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`)
+    expect(css58).toContain(`min-height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`)
+    expect(css58).toContain(`height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM}mm`)
+    expect(css58).toContain("color: #fff")
     // Must not recreate the old content-box 58mm+8mm padding oversize trap
     expect(css58).not.toMatch(/body\s*\{[^}]*padding:\s*8mm/)
+    // Must not centre a too-wide column (left clip regression)
+    expect(css58).not.toMatch(/\.receipt\s*\{[^}]*margin:\s*0 auto/)
   })
 
   it("does not change 80mm body padding / width contract", () => {
@@ -176,6 +186,7 @@ describe("retail thermal receipt HTML", () => {
     expect(css80).toContain("padding: 8mm")
     expect(css80).toContain("width: 80mm")
     expect(css80).not.toContain("receipt-tear-feed")
+    expect(css80).not.toContain("45mm")
     expect(css80).not.toContain("48mm")
   })
 })
@@ -304,7 +315,7 @@ describe("receipt tax percentages from stored rates", () => {
 })
 
 describe("58mm Browser Print layout for Linux CUPS / POS58", () => {
-  it("embeds 58mm CSS content width, overflow wrap, and tear feed after footer/QR", () => {
+  it("embeds 58mm CSS content width, left offset, overflow wrap, and non-empty tear feed", () => {
     const html = generateReceiptHTML(
       sampleReceipt({
         businessName: "Finza Retail Hardware Test",
@@ -326,10 +337,14 @@ describe("58mm Browser Print layout for Linux CUPS / POS58", () => {
     expect(html).toContain("Mobile money")
     expect(html).toContain("Thank you")
     expect(html).toContain("receipt-tear-feed")
+    expect(html).toContain("receipt-tear-feed-line")
+    expect(html).toContain("&nbsp;")
     expect(html).toContain("receipt-qr-img")
     expect(html).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(html).toContain(`margin: 0 0 0 ${RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM}mm`)
     expect(html).toContain("overflow-wrap: anywhere")
     expect(html).toContain(`height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`)
+    expect(html).toContain(`min-height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`)
     // Footer then tear feed (thank-you clears tear bar in same job)
     const footerIdx = html.indexOf('<div class="footer">')
     const tearIdx = html.indexOf('class="receipt-tear-feed"')
@@ -338,9 +353,24 @@ describe("58mm Browser Print layout for Linux CUPS / POS58", () => {
     expect(footerIdx).toBeGreaterThan(qrIdx)
     expect(tearIdx).toBeGreaterThan(footerIdx)
     expect(html).toContain('width="112"')
+    // Count markup lines only (CSS also mentions .receipt-tear-feed-line)
+    const lineMatches = html.match(/class="receipt-tear-feed-line"/g) || []
+    expect(lineMatches.length).toBe(RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT)
   })
 
-  it("does not add tear feed or 48mm column to 80mm HTML", () => {
+  it("tear-feed helper emits non-empty line boxes totaling the feed height", () => {
+    const feed = retailReceipt58mmTearFeedHtml()
+    expect(feed).toContain("receipt-tear-feed-line")
+    expect(feed).toContain("&nbsp;")
+    expect(feed.match(/receipt-tear-feed-line/g)?.length).toBe(
+      RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT
+    )
+    expect(
+      RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT * RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM
+    ).toBe(RETAIL_RECEIPT_58MM_TEAR_FEED_MM)
+  })
+
+  it("does not add tear feed or 45mm column to 80mm HTML", () => {
     const html = generateReceiptHTML(sampleReceipt({ footerText: "Thank you" }), {
       width: "80mm",
       mode: "full",
@@ -350,6 +380,7 @@ describe("58mm Browser Print layout for Linux CUPS / POS58", () => {
       qrImageDataUrl: "data:image/png;base64,AAA",
     })
     expect(html).not.toContain("receipt-tear-feed")
+    expect(html).not.toContain("45mm")
     expect(html).not.toContain("48mm")
     expect(html).toContain("width: 80mm")
     expect(html).toContain('width="168"')
@@ -367,10 +398,10 @@ describe("58mm Browser Print layout for Linux CUPS / POS58", () => {
       showQR: false,
       footerText: "Thank you",
     })
-    expect(hardwareTest).toContain(retailReceiptDocumentCss(true).slice(0, 40).trim())
-    expect(sale).toContain("receipt-tear-feed")
-    expect(hardwareTest).toContain("receipt-tear-feed")
+    expect(sale).toContain("receipt-tear-feed-line")
+    expect(hardwareTest).toContain("receipt-tear-feed-line")
     expect(sale).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
     expect(hardwareTest).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(sale).toContain(`margin: 0 0 0 ${RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM}mm`)
   })
 })

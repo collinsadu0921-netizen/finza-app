@@ -5,18 +5,45 @@
  * 58mm Browser Print: CUPS ZJ-58 / POS58 drivers typically expose ~48mm printable
  * width on 58mm paper. Older CSS used width:58mm + padding:8mm under content-box
  * (≈74mm total), which Chrome cropped on both sides at 100% scale on Linux.
+ * After physical UAT (77a8fd9): a centred 48mm column still lost ~1 glyph on the left;
+ * shift the column ~3mm right and use ~45mm width. Empty tear-feed divs were collapsed
+ * by the print pipeline — feed lines must contain real layout content.
  * 80mm Browser Print CSS is intentionally unchanged.
  */
 
 /** Printable content column for 58mm HTML (inside 58mm page). */
-export const RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM = 48
+export const RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM = 45
 
-/** Blank feed after footer so thank-you clears the tear bar on POS58. */
+/**
+ * Left offset from the page edge (was ~5mm when 48mm was centred; +3mm → 8mm).
+ * Keeps the right edge inside the safe printable band.
+ */
+export const RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM = 8
+
+/** Total trailing feed height after footer/QR (mm). */
 export const RETAIL_RECEIPT_58MM_TEAR_FEED_MM = 22
 
-/** Soft horizontal inset inside the 48mm column (keeps glyphs off the driver clip). */
+/** Each tear-feed line height (mm). Count × height = TEAR_FEED_MM. */
+export const RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM = 2
+
+export const RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT = Math.round(
+  RETAIL_RECEIPT_58MM_TEAR_FEED_MM / RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM
+)
+
+/** Soft horizontal inset inside the content column. */
 export const RETAIL_RECEIPT_58MM_INNER_PAD_MM = 1
 
+/**
+ * Non-collapsible tear-feed markup for 58mm Browser Print.
+ * Empty divs are trimmed by some CUPS/HTML print paths; each line holds &nbsp;.
+ */
+export function retailReceipt58mmTearFeedHtml(): string {
+  const lines: string[] = []
+  for (let i = 0; i < RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT; i++) {
+    lines.push(`<div class="receipt-tear-feed-line">&nbsp;</div>`)
+  }
+  return `    <div class="receipt-tear-feed" aria-hidden="true">\n      ${lines.join("\n      ")}\n    </div>\n`
+}
 function eightyMmDocumentCss(): string {
   const maxWidth = "80mm"
   const bodySize = "13px"
@@ -249,6 +276,8 @@ function eightyMmDocumentCss(): string {
 function fiftyEightMmDocumentCss(): string {
   const pageWidth = "58mm"
   const contentWidth = `${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`
+  const leftOffset = `${RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM}mm`
+  const tearLineH = `${RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM}mm`
   const tearFeed = `${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`
   const innerPad = `${RETAIL_RECEIPT_58MM_INNER_PAD_MM}mm`
   const bodySize = "11px"
@@ -311,10 +340,25 @@ function fiftyEightMmDocumentCss(): string {
       }
       .receipt-tear-feed {
         display: block !important;
+        width: 100% !important;
         height: ${tearFeed} !important;
         min-height: ${tearFeed} !important;
         page-break-inside: avoid;
         break-inside: avoid;
+      }
+      .receipt-tear-feed-line {
+        display: block !important;
+        height: ${tearLineH} !important;
+        min-height: ${tearLineH} !important;
+        line-height: ${tearLineH} !important;
+        font-size: ${tearLineH} !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        /* White (not transparent) so print pipelines keep the glyph box. */
+        color: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
     }
     body {
@@ -335,7 +379,7 @@ function fiftyEightMmDocumentCss(): string {
     .receipt {
       width: ${contentWidth};
       max-width: ${contentWidth};
-      margin: 0 auto;
+      margin: 0 0 0 ${leftOffset};
       padding: 0 ${innerPad};
       text-align: center;
       color: #000;
@@ -528,7 +572,7 @@ function fiftyEightMmDocumentCss(): string {
       color: #000;
       margin: 8px 0;
     }
-    /* Forces paper past the tear edge in the same job (POS58 / ZJ-58). */
+    /* Real line boxes (nbsp) so CUPS/Chrome cannot collapse the trailing feed. */
     .receipt-tear-feed {
       display: block;
       width: 100%;
@@ -537,8 +581,26 @@ function fiftyEightMmDocumentCss(): string {
       margin: 0;
       padding: 0;
       border: 0;
+      overflow: hidden;
       page-break-inside: avoid;
       break-inside: avoid;
+    }
+    .receipt-tear-feed-line {
+      display: block;
+      box-sizing: border-box;
+      height: ${tearLineH};
+      min-height: ${tearLineH};
+      max-height: ${tearLineH};
+      line-height: ${tearLineH};
+      font-size: ${tearLineH};
+      margin: 0;
+      padding: 0;
+      border: 0;
+      overflow: hidden;
+      /* White (not transparent) so print pipelines keep the glyph box. */
+      color: #fff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
   `
 }
