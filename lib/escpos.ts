@@ -5,13 +5,17 @@
 
 import { retailReceiptDocumentCss, retailReceipt58mmTearFeedHtml } from "@/lib/retail/receipts/retailReceiptPrintCss"
 import { wrapRetailReceiptMultiline } from "@/lib/retail/receipts/retailReceiptBusinessIdentity"
+import {
+  formatBrowserPrintItemAmountLine,
+  renderCompact58mmHeaderHtml,
+} from "@/lib/retail/receipts/retailReceiptBrowserLayout"
 
 export type PrinterWidth = "58mm" | "80mm"
 export type ReceiptMode = "compact" | "full"
 
 export interface ReceiptData {
   businessName: string
-  /** Physical store / outlet name (retail); rendered as `Store: …` when set */
+  /** Physical store / outlet name. 80mm HTML and ESC/POS use `Store: …`. 58mm Browser Print prints the name under the heading with no label. */
   storeName?: string
   /** Multi-line tenant address from business profile (or store location fallback) */
   businessLocation?: string
@@ -565,43 +569,46 @@ ${retailReceiptDocumentCss(is58mm)}
     html += `    <div class="status-banner">${escapeHtml(data.saleStatusBanner)}</div>\n`
   }
 
-  html += `    <div class="receipt-brand">\n`
-  if (settings.showLogo && data.logo) {
-    html += `      <img src="${escapeHtml(data.logo)}" alt="" class="receipt-header-logo" />\n`
-  }
-  html += `      <div class="business-name">${escapeHtml(data.businessName)}</div>\n`
-  html += `    </div>\n`
+  if (is58mm) {
+    html += renderCompact58mmHeaderHtml(data, { showLogo: settings.showLogo }, escapeHtml)
+  } else {
+    html += `    <div class="receipt-brand">\n`
+    if (settings.showLogo && data.logo) {
+      html += `      <img src="${escapeHtml(data.logo)}" alt="" class="receipt-header-logo" />\n`
+    }
+    html += `      <div class="business-name">${escapeHtml(data.businessName)}</div>\n`
+    html += `    </div>\n`
 
-  if (data.receiptNumber) {
-    html += `    <div class="receipt-header-receiptno">
+    if (data.receiptNumber) {
+      html += `    <div class="receipt-header-receiptno">
       <div class="receipt-no-label">Receipt No</div>
       <div class="receipt-no-value">${escapeHtml(data.receiptNumber)}</div>
     </div>\n`
-  }
-
-  if (data.storeName) {
-    html += `    <div class="store-line">Store: ${escapeHtml(data.storeName)}</div>\n`
-  }
-  if (data.businessLocation) {
-    for (const line of data.businessLocation.split("\n").map((l) => l.trim()).filter(Boolean)) {
-      html += `    <div class="business-location">${escapeHtml(line)}</div>\n`
     }
-  }
-  if (data.businessPhone) {
-    html += `    <div class="business-contact">Tel: ${escapeHtml(data.businessPhone)}</div>\n`
-  }
-  if (data.businessEmail) {
-    html += `    <div class="business-contact">${escapeHtml(data.businessEmail)}</div>\n`
-  }
 
-  html += `    <div class="separator"></div>\n`
+    if (data.storeName) {
+      html += `    <div class="store-line">Store: ${escapeHtml(data.storeName)}</div>\n`
+    }
+    if (data.businessLocation) {
+      for (const line of data.businessLocation.split("\n").map((l) => l.trim()).filter(Boolean)) {
+        html += `    <div class="business-location">${escapeHtml(line)}</div>\n`
+      }
+    }
+    if (data.businessPhone) {
+      html += `    <div class="business-contact">Tel: ${escapeHtml(data.businessPhone)}</div>\n`
+    }
+    if (data.businessEmail) {
+      html += `    <div class="business-contact">${escapeHtml(data.businessEmail)}</div>\n`
+    }
 
-  // Date/Time and Cashier
-  html += `    <div class="meta">
+    html += `    <div class="separator"></div>\n`
+
+    html += `    <div class="meta">
       Date: ${escapeHtml(data.dateTime)}<br/>
       ${data.registerSessionId ? `Register: ${escapeHtml(data.registerSessionId)}<br/>` : ""}
       Cashier: ${escapeHtml(data.cashierName)}
     </div>\n`
+  }
 
   if (
     data.customerName ||
@@ -649,7 +656,7 @@ ${retailReceiptDocumentCss(is58mm)}
       if (item.modifiers && item.modifiers.length > 0) {
         html += `      <div class="item-detail">Add-ons: ${escapeHtml(item.modifiers.join(", "))}</div>\n`
       }
-      html += `      <div class="item-detail">Qty: ${item.quantity} × ${data.currencyCode} ${item.unitPrice.toFixed(2)} = ${data.currencyCode} ${item.lineTotal.toFixed(2)}</div>\n`
+      html += `      <div class="item-detail item-amount">${escapeHtml(formatBrowserPrintItemAmountLine(item.quantity, item.unitPrice, item.lineTotal, data.currencyCode))}</div>\n`
       if (item.lineDiscountAmount && item.lineDiscountAmount > 0) {
           html += `      <div class="item-detail discount-line">Line discount: -${data.currencyCode} ${item.lineDiscountAmount.toFixed(2)}</div>\n`
       }

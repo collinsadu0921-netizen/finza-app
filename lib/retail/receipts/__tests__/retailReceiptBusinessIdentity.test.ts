@@ -135,7 +135,7 @@ describe("retail receipt branding mapping", () => {
     expect(html).toContain("https://cdn.example.com/acme.png")
     expect(html).toContain("12 High St")
     expect(html).toContain("Tel: 055100200")
-    expect(html).toContain("shop@acme.test")
+    expect(html).toContain("shop@<wbr>acme.<wbr>test")
     expect(html).toContain("Please keep this receipt")
 
     const esc = new TextDecoder().decode(new ESCPOSGenerator("58mm", "full", false, false, true, false).generate(data))

@@ -2,13 +2,14 @@
  * Thermal-printer CSS for Finza Retail HTML receipts only.
  * Scoped to the standalone receipt document (iframe / print window), not the app shell.
  *
- * 58mm Browser Print: CUPS ZJ-58 / POS58 drivers typically expose ~48mm printable
- * width on 58mm paper. Older CSS used width:58mm + padding:8mm under content-box
- * (≈74mm total), which Chrome cropped on both sides at 100% scale on Linux.
- * After physical UAT (77a8fd9): a centred 48mm column still lost ~1 glyph on the left;
- * shift the column ~3mm right and use ~45mm width. Empty tear-feed divs were collapsed
- * by the print pipeline — feed lines must contain real layout content.
- * 80mm Browser Print CSS is intentionally unchanged.
+ * 58mm Browser Print: CUPS ZJ-58 / POS58 drivers expose a narrow printable band.
+ * Content width stays 45mm, shifted 8mm from the left (physical UAT on ac9e9a7).
+ * Chrome/CUPS crops the job at the last painted pixel. A space glyph (`&nbsp;`)
+ * and blank padding paint nothing, so the previous 22mm feed was discarded and
+ * the thank-you stayed inside the printer until the next job. After the footer,
+ * a 24mm layout gap is followed by a centred 1px black PNG so the ink box
+ * includes the full feed.
+ * 80mm Browser Print measurements are unchanged.
  */
 
 /** Printable content column for 58mm HTML (inside 58mm page). */
@@ -20,29 +21,41 @@ export const RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM = 45
  */
 export const RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM = 8
 
-/** Total trailing feed height after footer/QR (mm). */
-export const RETAIL_RECEIPT_58MM_TEAR_FEED_MM = 22
-
-/** Each tear-feed line height (mm). Count × height = TEAR_FEED_MM. */
-export const RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM = 2
-
-export const RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT = Math.round(
-  RETAIL_RECEIPT_58MM_TEAR_FEED_MM / RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM
-)
+/**
+ * Trailing feed height after the footer (mm), before the sentinel pixel.
+ * Inside the 22–25mm band that clears the POS58 print head / tear slot.
+ */
+export const RETAIL_RECEIPT_58MM_TEAR_FEED_MM = 24
 
 /** Soft horizontal inset inside the content column. */
 export const RETAIL_RECEIPT_58MM_INNER_PAD_MM = 1
 
 /**
- * Non-collapsible tear-feed markup for 58mm Browser Print.
- * Empty divs are trimmed by some CUPS/HTML print paths; each line holds &nbsp;.
+ * 1×1 black PNG. A real image pixel (not a CSS background or a space glyph)
+ * so Chrome/CUPS must rasterize through the trailing feed.
+ */
+export const RETAIL_RECEIPT_58MM_FEED_SENTINEL_SRC =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC"
+
+/**
+ * 58mm Browser Print trailing feed.
+ * A table row keeps the 24mm gap in print layout (empty divs and padding are cropped).
+ * The next row is a centred 1px black PNG so the ink box includes that gap.
  */
 export function retailReceipt58mmTearFeedHtml(): string {
-  const lines: string[] = []
-  for (let i = 0; i < RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_COUNT; i++) {
-    lines.push(`<div class="receipt-tear-feed-line">&nbsp;</div>`)
-  }
-  return `    <div class="receipt-tear-feed" aria-hidden="true">\n      ${lines.join("\n      ")}\n    </div>\n`
+  const gap = `${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`
+  return `    <table class="receipt-tear-feed" role="presentation" aria-hidden="true">
+      <tbody>
+        <tr>
+          <td class="receipt-tear-feed-gap" style="height:${gap};min-height:${gap};padding:0;border:0;font-size:0;line-height:0"></td>
+        </tr>
+        <tr>
+          <td class="receipt-feed-sentinel-cell" style="padding:0;border:0;text-align:center;line-height:0">
+            <img class="receipt-feed-sentinel" alt="" width="1" height="1" src="${RETAIL_RECEIPT_58MM_FEED_SENTINEL_SRC}" />
+          </td>
+        </tr>
+      </tbody>
+    </table>\n`
 }
 function eightyMmDocumentCss(): string {
   const maxWidth = "80mm"
@@ -164,12 +177,17 @@ function eightyMmDocumentCss(): string {
       font-weight: 700;
       font-size: ${itemNameSize};
       color: #000;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
-    .item-detail {
+    .item-detail,
+    .item-amount {
       font-size: ${itemDetailSize};
       font-weight: 700;
       color: #000;
       margin-left: 8px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .totals {
       text-align: right;
@@ -277,7 +295,6 @@ function fiftyEightMmDocumentCss(): string {
   const pageWidth = "58mm"
   const contentWidth = `${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`
   const leftOffset = `${RETAIL_RECEIPT_58MM_LEFT_OFFSET_MM}mm`
-  const tearLineH = `${RETAIL_RECEIPT_58MM_TEAR_FEED_LINE_HEIGHT_MM}mm`
   const tearFeed = `${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`
   const innerPad = `${RETAIL_RECEIPT_58MM_INNER_PAD_MM}mm`
   const bodySize = "11px"
@@ -339,24 +356,24 @@ function fiftyEightMmDocumentCss(): string {
         image-rendering: crisp-edges;
       }
       .receipt-tear-feed {
-        display: block !important;
+        display: table !important;
         width: 100% !important;
-        height: ${tearFeed} !important;
-        min-height: ${tearFeed} !important;
+        border-collapse: collapse !important;
         page-break-inside: avoid;
         break-inside: avoid;
       }
-      .receipt-tear-feed-line {
-        display: block !important;
-        height: ${tearLineH} !important;
-        min-height: ${tearLineH} !important;
-        line-height: ${tearLineH} !important;
-        font-size: ${tearLineH} !important;
-        margin: 0 !important;
+      .receipt-tear-feed-gap {
+        height: ${tearFeed} !important;
+        min-height: ${tearFeed} !important;
+        max-height: ${tearFeed} !important;
         padding: 0 !important;
         border: 0 !important;
-        /* White (not transparent) so print pipelines keep the glyph box. */
-        color: #fff !important;
+      }
+      .receipt-feed-sentinel {
+        display: block !important;
+        width: 1px !important;
+        height: 1px !important;
+        margin: 0 auto !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
@@ -404,26 +421,36 @@ function fiftyEightMmDocumentCss(): string {
     .business-name {
       font-size: ${businessName};
       font-weight: 700;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
       color: #000;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .business-location,
-    .business-contact {
+    .business-contact,
+    .business-phone,
+    .business-email {
       font-size: ${locationSize};
       font-weight: 700;
-      margin-bottom: 4px;
+      margin-bottom: 1px;
       color: #000;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
-    .business-location {
-      margin-bottom: 8px;
+    .receipt-identity {
+      text-align: left;
+      margin-bottom: 2px;
+    }
+    .business-phone {
+      white-space: nowrap;
+    }
+    .business-email {
+      word-break: normal;
+      overflow-wrap: anywhere;
     }
     .separator {
       border-top: 1px solid #000;
-      margin: 8px 0;
+      margin: 4px 0;
     }
     .item-compact {
       text-align: left;
@@ -446,11 +473,12 @@ function fiftyEightMmDocumentCss(): string {
       overflow-wrap: anywhere;
       word-break: break-word;
     }
-    .item-detail {
+    .item-detail,
+    .item-amount {
       font-size: ${itemDetailSize};
       font-weight: 700;
       color: #000;
-      margin-left: 4px;
+      margin-left: 0;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
@@ -467,11 +495,12 @@ function fiftyEightMmDocumentCss(): string {
       color: #000;
     }
     .footer {
-      margin-top: 12px;
+      margin-top: 4px;
       font-size: ${footerSize};
       font-weight: 700;
       line-height: 1.4;
       color: #000;
+      text-align: center;
       overflow-wrap: anywhere;
       word-break: break-word;
       page-break-inside: avoid;
@@ -489,28 +518,29 @@ function fiftyEightMmDocumentCss(): string {
       word-break: break-word;
     }
     .store-line {
-      font-size: 12px;
+      font-size: ${locationSize};
       font-weight: 700;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
       color: #000;
+      text-align: center;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .receipt-brand {
       text-align: center;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
     .receipt-header-receiptno {
       width: 100%;
-      text-align: right;
-      margin: 4px 0 8px 0;
+      text-align: left;
+      margin: 2px 0 4px 0;
     }
     .receipt-no-label {
       font-size: ${receiptNoLabel};
       font-weight: 700;
       color: #000;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
+      text-transform: none;
+      letter-spacing: 0;
     }
     .receipt-no-value {
       font-family: "Courier New", Courier, monospace;
@@ -537,13 +567,13 @@ function fiftyEightMmDocumentCss(): string {
       text-align: left;
       font-size: ${metaSize};
       font-weight: 700;
-      margin: 6px 0;
+      margin: 2px 0;
       color: #000;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .qr-code {
-      margin: 12px auto 4px auto;
+      margin: 8px auto 2px auto;
       text-align: center;
       max-width: 100%;
       page-break-inside: avoid;
@@ -572,33 +602,41 @@ function fiftyEightMmDocumentCss(): string {
       color: #000;
       margin: 8px 0;
     }
-    /* Real line boxes (nbsp) so CUPS/Chrome cannot collapse the trailing feed. */
+    /* Table-row height survives print collapsing; the 1px PNG is the ink CUPS cannot crop. */
     .receipt-tear-feed {
-      display: block;
+      display: table;
       width: 100%;
-      height: ${tearFeed};
-      min-height: ${tearFeed};
+      border-collapse: collapse;
+      border-spacing: 0;
       margin: 0;
       padding: 0;
       border: 0;
-      overflow: hidden;
       page-break-inside: avoid;
       break-inside: avoid;
     }
-    .receipt-tear-feed-line {
-      display: block;
-      box-sizing: border-box;
-      height: ${tearLineH};
-      min-height: ${tearLineH};
-      max-height: ${tearLineH};
-      line-height: ${tearLineH};
-      font-size: ${tearLineH};
+    .receipt-tear-feed-gap {
+      height: ${tearFeed};
+      min-height: ${tearFeed};
+      max-height: ${tearFeed};
       margin: 0;
       padding: 0;
       border: 0;
-      overflow: hidden;
-      /* White (not transparent) so print pipelines keep the glyph box. */
-      color: #fff;
+      font-size: 0;
+      line-height: 0;
+    }
+    .receipt-feed-sentinel-cell {
+      padding: 0;
+      border: 0;
+      text-align: center;
+      line-height: 0;
+    }
+    .receipt-feed-sentinel {
+      display: block;
+      width: 1px;
+      height: 1px;
+      margin: 0 auto;
+      padding: 0;
+      border: 0;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }

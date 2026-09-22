@@ -372,8 +372,8 @@ export default function ReceiptSettingsPage() {
                 <span className="font-mono">/usr/share/cups/model/zjiang/zj58.ppd</span>
                 ). In Chrome use paper size <span className="font-semibold">58 × 3276 mm</span>, margins none,
                 headers/footers off, scale <span className="font-semibold">100%</span>. Finza’s 58mm Browser Print
-                uses a ~45mm column offset ~8mm from the left with tear-feed lines after the footer — do not use
-                80% scale.
+                uses a ~45mm column offset ~8mm from the left. After the footer, a 24mm feed ends in a
+                tiny centre mark so Chrome/CUPS does not trim the tail — do not use 80% scale.
               </p>
             </div>
           )}
