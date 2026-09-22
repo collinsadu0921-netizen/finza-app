@@ -757,7 +757,8 @@ ${retailReceiptDocumentCss(is58mm)}
 
   // QR — embedded image when qrImageDataUrl is set (see lib/receipt/retailReceiptQrDataUrl.ts)
   if (settings.showQR && data.qrCodeContent) {
-    const qrPx = is58mm ? 128 : 168
+    // 58mm HTML column is ~48mm; keep QR under ~40mm so CUPS ZJ-58 does not crop it.
+    const qrPx = is58mm ? 112 : 168
     html += `    <div class="qr-code">\n`
     if (settings.qrImageDataUrl) {
       html += `      <img class="receipt-qr-img" src="${settings.qrImageDataUrl}" width="${qrPx}" height="${qrPx}" alt="" />\n`
@@ -777,6 +778,11 @@ ${retailReceiptDocumentCss(is58mm)}
       html += `      ${escapeHtml(line.trim())}<br/>\n`
     })
     html += `    </div>\n`
+  }
+
+  // 58mm Browser Print only: advance paper past the tear bar in this job.
+  if (is58mm) {
+    html += `    <div class="receipt-tear-feed" aria-hidden="true"></div>\n`
   }
 
   html += `  </div>

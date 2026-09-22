@@ -2,7 +2,8 @@ import QRCode from "qrcode"
 import type { PrinterWidth } from "@/lib/escpos"
 
 export function receiptQrPixelSize(width: PrinterWidth): number {
-  return width === "58mm" ? 128 : 168
+  // Match generateReceiptHTML 58mm QR width so CUPS ZJ-58 (~48mm printable) does not crop.
+  return width === "58mm" ? 112 : 168
 }
 
 /** PNG data URL for receipt preview / browser print (no CDN, works in iframe srcDoc). */

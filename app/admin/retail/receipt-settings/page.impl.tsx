@@ -364,6 +364,19 @@ export default function ReceiptSettingsPage() {
             </p>
           </div>
 
+          {settings.printer_type === "browser_print" && settings.printer_width === "58mm" && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-semibold">Linux CUPS / POS58 (ZJ-58)</p>
+              <p className="mt-1">
+                Prefer the ZJiang ZJ-58 driver (
+                <span className="font-mono">/usr/share/cups/model/zjiang/zj58.ppd</span>
+                ). In Chrome use paper size <span className="font-semibold">58 × 3276 mm</span>, margins none,
+                headers/footers off, scale <span className="font-semibold">100%</span>. Finza’s 58mm Browser Print
+                layout targets ~48mm printable width with tear-feed after the footer — do not use 80% scale.
+              </p>
+            </div>
+          )}
+
           {/* Logo */}
           <div>
             <label className="flex items-center">

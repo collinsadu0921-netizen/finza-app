@@ -3,6 +3,8 @@ import { mapRetailReceiptApiToEscpos, type RetailReceiptApiBody } from "@/app/re
 import { formatStoredTaxPercentLabel, getGhanaLegacyRates } from "@/lib/taxes/readTaxLines"
 import {
   RETAIL_RECEIPT_FORBIDDEN_PRINT_COLORS,
+  RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM,
+  RETAIL_RECEIPT_58MM_TEAR_FEED_MM,
   retailReceiptDocumentCss,
 } from "@/lib/retail/receipts/retailReceiptPrintCss"
 
@@ -155,6 +157,27 @@ describe("retail thermal receipt HTML", () => {
     expect(css58).toContain("@media print")
     expect(css80).toContain("filter: grayscale(1)")
   })
+
+  it("sizes 58mm Browser Print to CUPS-safe printable width and tear feed", () => {
+    const css58 = retailReceiptDocumentCss(true)
+    expect(css58).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(css58).toContain(`max-width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(css58).toContain("box-sizing: border-box")
+    expect(css58).toContain("margin: 0 auto")
+    expect(css58).toContain("overflow-wrap: anywhere")
+    expect(css58).toContain(".receipt-tear-feed")
+    expect(css58).toContain(`height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`)
+    // Must not recreate the old content-box 58mm+8mm padding oversize trap
+    expect(css58).not.toMatch(/body\s*\{[^}]*padding:\s*8mm/)
+  })
+
+  it("does not change 80mm body padding / width contract", () => {
+    const css80 = retailReceiptDocumentCss(false)
+    expect(css80).toContain("padding: 8mm")
+    expect(css80).toContain("width: 80mm")
+    expect(css80).not.toContain("receipt-tear-feed")
+    expect(css80).not.toContain("48mm")
+  })
 })
 
 describe("receipt tax percentages from stored rates", () => {
@@ -277,5 +300,77 @@ describe("receipt tax percentages from stored rates", () => {
     )
     expect(html).not.toContain("Tax Breakdown")
     expect(html).not.toContain("VAT")
+  })
+})
+
+describe("58mm Browser Print layout for Linux CUPS / POS58", () => {
+  it("embeds 58mm CSS content width, overflow wrap, and tear feed after footer/QR", () => {
+    const html = generateReceiptHTML(
+      sampleReceipt({
+        businessName: "Finza Retail Hardware Test",
+        businessEmail: "verylong.email.address@example-business-domain.com",
+        paymentMethod: "Mobile money",
+        footerText: "Thank you",
+        qrCodeContent: "550e8400-e29b-41d4-a716-446655440000",
+      }),
+      {
+        width: "58mm",
+        mode: "full",
+        showLogo: false,
+        showQR: true,
+        footerText: "Thank you",
+        qrImageDataUrl: "data:image/png;base64,AAA",
+      }
+    )
+    expect(html).toContain("Finza Retail Hardware Test")
+    expect(html).toContain("Mobile money")
+    expect(html).toContain("Thank you")
+    expect(html).toContain("receipt-tear-feed")
+    expect(html).toContain("receipt-qr-img")
+    expect(html).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(html).toContain("overflow-wrap: anywhere")
+    expect(html).toContain(`height: ${RETAIL_RECEIPT_58MM_TEAR_FEED_MM}mm`)
+    // Footer then tear feed (thank-you clears tear bar in same job)
+    const footerIdx = html.indexOf('<div class="footer">')
+    const tearIdx = html.indexOf('class="receipt-tear-feed"')
+    const qrIdx = html.indexOf("receipt-qr-img")
+    expect(qrIdx).toBeGreaterThan(-1)
+    expect(footerIdx).toBeGreaterThan(qrIdx)
+    expect(tearIdx).toBeGreaterThan(footerIdx)
+    expect(html).toContain('width="112"')
+  })
+
+  it("does not add tear feed or 48mm column to 80mm HTML", () => {
+    const html = generateReceiptHTML(sampleReceipt({ footerText: "Thank you" }), {
+      width: "80mm",
+      mode: "full",
+      showLogo: false,
+      showQR: true,
+      footerText: "Thank you",
+      qrImageDataUrl: "data:image/png;base64,AAA",
+    })
+    expect(html).not.toContain("receipt-tear-feed")
+    expect(html).not.toContain("48mm")
+    expect(html).toContain("width: 80mm")
+    expect(html).toContain('width="168"')
+  })
+
+  it("Hardware Test and sale receipts share generateReceiptHTML + 58mm CSS path", () => {
+    const hardwareTest = generateReceiptHTML(
+      sampleReceipt({ businessName: "Finza Retail Hardware Test", footerText: "Thank you" }),
+      { width: "58mm", mode: "full", showLogo: false, showQR: false, footerText: "Thank you" }
+    )
+    const sale = generateReceiptHTML(sampleReceipt({ footerText: "Thank you" }), {
+      width: "58mm",
+      mode: "full",
+      showLogo: false,
+      showQR: false,
+      footerText: "Thank you",
+    })
+    expect(hardwareTest).toContain(retailReceiptDocumentCss(true).slice(0, 40).trim())
+    expect(sale).toContain("receipt-tear-feed")
+    expect(hardwareTest).toContain("receipt-tear-feed")
+    expect(sale).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
+    expect(hardwareTest).toContain(`width: ${RETAIL_RECEIPT_58MM_CONTENT_WIDTH_MM}mm`)
   })
 })
