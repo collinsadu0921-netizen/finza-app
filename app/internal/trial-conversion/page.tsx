@@ -31,6 +31,7 @@ type QueueResponse = {
   ok?: boolean
   filter?: string
   count?: number
+  total?: number
   queue?: TrialConversionRow[]
   error?: string
 }
@@ -104,7 +105,9 @@ export default function InternalTrialConversionPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState("all_unpaid")
-  const [limit, setLimit] = useState(100)
+  const [limit, setLimit] = useState(25)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [copied, setCopied] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -114,6 +117,7 @@ export default function InternalTrialConversionPage() {
       const qs = new URLSearchParams({
         filter,
         limit: String(limit),
+        page: String(page),
       })
       const res = await fetch(`/api/internal/trial-conversion-queue?${qs.toString()}`, {
         credentials: "same-origin",
@@ -125,13 +129,14 @@ export default function InternalTrialConversionPage() {
         return
       }
       setRows(json.queue ?? [])
+      setTotal(json.total ?? json.queue?.length ?? 0)
     } catch {
       setError("Failed to load trial conversion queue")
       setRows([])
     } finally {
       setLoading(false)
     }
-  }, [filter, limit])
+  }, [filter, limit, page])
 
   useEffect(() => {
     void load()
@@ -177,7 +182,10 @@ export default function InternalTrialConversionPage() {
               <select
                 className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={(e) => {
+                  setPage(1)
+                  setFilter(e.target.value)
+                }}
               >
                 {FILTERS.map((f) => (
                   <option key={f.value} value={f.value}>
@@ -187,13 +195,16 @@ export default function InternalTrialConversionPage() {
               </select>
             </label>
             <label className="block text-sm">
-              <span className="font-medium text-slate-700 dark:text-slate-300">Limit</span>
+              <span className="font-medium text-slate-700 dark:text-slate-300">Page size</span>
               <select
                 className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950"
                 value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
+                onChange={(e) => {
+                  setPage(1)
+                  setLimit(Number(e.target.value))
+                }}
               >
-                {[50, 100, 250, 500].map((n) => (
+                {[25, 50].map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
@@ -211,8 +222,11 @@ export default function InternalTrialConversionPage() {
         </div>
         <div className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
           <div className="rounded-md bg-slate-50 p-3 dark:bg-slate-950">
-            <p className="text-xs text-slate-500">Rows</p>
-            <p className="mt-1 text-lg font-semibold">{rows.length}</p>
+            <p className="text-xs text-slate-500">This page</p>
+            <p className="mt-1 text-lg font-semibold">
+              {rows.length}
+              <span className="ml-1 text-sm font-normal text-slate-500">/ {total}</span>
+            </p>
           </div>
           <div className="rounded-md bg-slate-50 p-3 dark:bg-slate-950">
             <p className="text-xs text-slate-500">Consent yes</p>
@@ -226,6 +240,28 @@ export default function InternalTrialConversionPage() {
             <p className="text-xs text-slate-500">Invoice, no payment</p>
             <p className="mt-1 text-lg font-semibold">{stats.invoiceNoPayment}</p>
           </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-sm">
+          <button
+            type="button"
+            className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-40 dark:border-slate-600"
+            disabled={page <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Previous
+          </button>
+          <span className="text-slate-600 dark:text-slate-300">
+            Page {page}
+            {total > 0 ? ` of ${Math.max(1, Math.ceil(total / limit))}` : ""}
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-slate-300 px-3 py-1.5 disabled:opacity-40 dark:border-slate-600"
+            disabled={page * limit >= total}
+            onClick={() => setPage((current) => current + 1)}
+          >
+            Next
+          </button>
         </div>
       </section>
 

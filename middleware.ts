@@ -36,8 +36,9 @@ import {
  *   Session only — membership, industry, and subscription remain in ProtectedLayout / APIs.
  *
  * Retail workspace (pages only):
- *   For `/retail` and `/retail/*` except `/retail/pos`, `/retail/pos/*`, and all
- *   `/retail/sales` paths (conservative PIN/sales exclusion), require a Supabase session.
+ *   For `/retail` and `/retail/*` except `/retail/pos`, `/retail/pos/*`,
+ *   `/retail/sales` (PIN/sales), and `/retail/invite` (public invitation),
+ *   require a Supabase session.
  *   PIN/cashier state is client-only — middleware cannot validate it; exclusions must match.
  *   Session only — industry, role, store, cashier, and POS rules remain in ProtectedLayout.
  */
@@ -50,6 +51,7 @@ function isRetailPagePath(pathname: string): boolean {
 function isRetailMiddlewareSessionExcluded(pathname: string): boolean {
   if (pathname === "/retail/pos" || pathname.startsWith("/retail/pos/")) return true
   if (pathname === "/retail/sales" || pathname.startsWith("/retail/sales/")) return true
+  if (pathname === "/retail/invite" || pathname.startsWith("/retail/invite/")) return true
   return false
 }
 

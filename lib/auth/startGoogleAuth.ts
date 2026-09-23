@@ -9,6 +9,7 @@ import {
   persistSignupAttributionToSession,
   signupAttributionToUserMetadata,
 } from "@/lib/growth/signupAttribution"
+import { safeRetailInviteNextPath } from "@/lib/retail/invitations/retailInvitationToken"
 
 /** Build `/auth/callback` with optional marketing params preserved through Google OAuth. */
 export function buildOAuthRedirectToWithMarketingContext(opts: {
@@ -18,6 +19,7 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   billing_cycle?: string | null
   cycle?: string | null
   invitation_token?: string | null
+  next?: string | null
   attribution?: SignupAttribution | null
 }): string {
   const base = getPublicAppUrl().replace(/\/$/, "")
@@ -44,6 +46,8 @@ export function buildOAuthRedirectToWithMarketingContext(opts: {
   if (invitationToken) {
     u.searchParams.set("invitation_token", invitationToken)
   }
+  const retailNext = safeRetailInviteNextPath(opts.next)
+  if (retailNext) u.searchParams.set("next", retailNext)
   const attr = opts.attribution
   if (attr?.signup_utm_source) u.searchParams.set("utm_source", attr.signup_utm_source)
   if (attr?.signup_utm_medium) u.searchParams.set("utm_medium", attr.signup_utm_medium)

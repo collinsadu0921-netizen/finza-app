@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { getPublicAppUrl } from "@/lib/auth/publicAppUrl"
 import { parseSignupWorkspaceParam } from "@/lib/auth/signupWorkspace"
+import { safeRetailInviteNextPath } from "@/lib/retail/invitations/retailInvitationToken"
 
 function checkEmailProductLine(workspace: ReturnType<typeof parseSignupWorkspaceParam>): string {
   if (workspace === "practice") {
@@ -22,7 +23,8 @@ function CheckEmailInner() {
   const searchParams = useSearchParams()
   const email = searchParams.get("email") ?? ""
   const workspace = parseSignupWorkspaceParam(searchParams.get("workspace"))
-  const productLine = checkEmailProductLine(workspace)
+  const retailNext = safeRetailInviteNextPath(searchParams.get("next"))
+  const productLine = retailNext ? "Finish accepting your Retail invitation." : checkEmailProductLine(workspace)
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle")
   const [message, setMessage] = useState("")
 
@@ -42,6 +44,7 @@ function CheckEmailInner() {
       } else if (workspace === "service") {
         callbackUrl.searchParams.set("workspace", "service")
       }
+      if (retailNext) callbackUrl.searchParams.set("next", retailNext)
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: email.trim(),
@@ -98,7 +101,13 @@ function CheckEmailInner() {
             Back to sign in
           </Link>
           <Link
-            href={workspace ? `/signup?workspace=${workspace}` : "/signup"}
+            href={
+              retailNext
+                ? `/signup?next=${encodeURIComponent(retailNext)}`
+                : workspace
+                  ? `/signup?workspace=${workspace}`
+                  : "/signup"
+            }
             className="text-center text-sm text-blue-600 font-semibold hover:text-blue-700 py-2"
           >
             Use a different email

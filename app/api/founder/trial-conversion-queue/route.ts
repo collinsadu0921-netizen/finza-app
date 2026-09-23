@@ -37,15 +37,25 @@ export async function GET(request: NextRequest) {
   }
 
   const limitRaw = request.nextUrl.searchParams.get("limit")
-  const limit = limitRaw ? Math.min(Math.max(parseInt(limitRaw, 10) || 100, 1), 500) : 100
+  const limit = limitRaw ? Math.min(Math.max(parseInt(limitRaw, 10) || 25, 1), 50) : 25
+  const pageRaw = request.nextUrl.searchParams.get("page")
+  const page = pageRaw ? Math.max(parseInt(pageRaw, 10) || 1, 1) : 1
   const trialingOnly = request.nextUrl.searchParams.get("trialing_only") === "1"
 
   try {
-    const queue = await buildTrialConversionQueue(admin, {
+    const result = await buildTrialConversionQueue(admin, {
       limit,
+      page,
       trialingOnly,
+      filter: trialingOnly ? "trialing_only" : "all_unpaid",
     })
-    return NextResponse.json({ ok: true, count: queue.length, queue })
+    return NextResponse.json({
+      ok: true,
+      count: result.rows.length,
+      total: result.total,
+      queue: result.rows,
+      meta: result.meta,
+    })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })

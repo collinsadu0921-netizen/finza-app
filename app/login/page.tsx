@@ -6,6 +6,7 @@ import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { FinzaLogo } from "@/components/FinzaLogo"
 import { buildOAuthRedirectToWithMarketingContext, signInWithGoogle } from "@/lib/auth/startGoogleAuth"
+import { safeRetailInviteNextPath } from "@/lib/retail/invitations/retailInvitationToken"
 
 function LoginPageContent() {
   const router = useRouter()
@@ -29,6 +30,7 @@ function LoginPageContent() {
         trial,
         workspace,
         invitation_token: invitationToken || undefined,
+        next: searchParams.get("next"),
       })
       const { error: oauthError } = await signInWithGoogle(redirectTo)
       if (oauthError) {
@@ -72,6 +74,7 @@ function LoginPageContent() {
 
         setLoading(false)
         const next = searchParams.get("next")?.trim() || ""
+        const retailNext = safeRetailInviteNextPath(next)
         if (invitationToken) {
           router.replace(`/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`)
         } else if (
@@ -79,6 +82,8 @@ function LoginPageContent() {
           !next.startsWith("//")
         ) {
           router.replace(next)
+        } else if (retailNext) {
+          router.replace(retailNext)
         } else {
           router.replace("/")
         }
@@ -237,7 +242,10 @@ function LoginPageContent() {
             Don&apos;t have an account?{" "}
             <button
               type="button"
-              onClick={() => router.push("/signup")}
+              onClick={() => {
+                const retailNext = safeRetailInviteNextPath(searchParams.get("next"))
+                router.push(retailNext ? `/signup?next=${encodeURIComponent(retailNext)}` : "/signup")
+              }}
               className="text-blue-600 font-semibold hover:text-blue-700 transition-colors duration-200 focus:outline-none focus:underline"
             >
               Sign up

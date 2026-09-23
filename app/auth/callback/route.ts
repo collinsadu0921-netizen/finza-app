@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { safeRetailInviteNextPath } from "@/lib/retail/invitations/retailInvitationToken"
 import { createServerClient } from "@supabase/ssr"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import {
@@ -284,11 +285,14 @@ export async function GET(request: NextRequest) {
     }
 
     const invitationToken = requestUrl.searchParams.get("invitation_token")?.trim()
+    const safeRetailNext = safeRetailInviteNextPath(requestUrl.searchParams.get("next"))
     if (invitationToken) {
       redirectUrl = new URL(
         `/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`,
         origin
       )
+    } else if (safeRetailNext) {
+      redirectUrl = new URL(safeRetailNext, origin)
     } else {
       const destination = resolvePostAuthDestination({
         signupIntent,

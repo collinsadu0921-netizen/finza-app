@@ -25,6 +25,7 @@ import {
   type SignupWorkspaceChoice,
 } from "@/lib/auth/signupWorkspace"
 import { INVITATION_SESSION_KEY } from "@/lib/accounting/firm/staffInvitations"
+import { safeRetailInviteNextPath } from "@/lib/retail/invitations/retailInvitationToken"
 
 const TRIAL_SUPPORTED_WORKSPACES = ["service"] as const
 
@@ -92,6 +93,7 @@ function SignupPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  const retailInviteNext = safeRetailInviteNextPath(searchParams.get("next"))
   const urlWorkspace = parseSignupWorkspaceParam(searchParams.get("workspace"))
   const invitationToken = searchParams.get("invitation_token")?.trim() ?? ""
   const [invitationPreview, setInvitationPreview] = useState<{
@@ -180,7 +182,7 @@ function SignupPageInner() {
   const oauthWorkspace = activeWorkspace ?? undefined
 
   const handleGoogle = async () => {
-    if (!activeWorkspace) {
+    if (!activeWorkspace && !retailInviteNext) {
       setError("Choose Finza Service or Finza Practice to continue.")
       return
     }
@@ -188,12 +190,13 @@ function SignupPageInner() {
     setLoading(true)
     try {
       const redirectTo = buildOAuthRedirectToWithMarketingContext({
-        plan: isPractice ? null : rawPlan,
-        trial: isPractice ? null : rawTrial,
-        workspace: oauthWorkspace,
-        billing_cycle: isPractice ? undefined : searchParams.get("billing_cycle") ?? undefined,
-        cycle: isPractice ? undefined : searchParams.get("cycle") ?? undefined,
+        plan: isPractice || retailInviteNext ? null : rawPlan,
+        trial: isPractice || retailInviteNext ? null : rawTrial,
+        workspace: retailInviteNext ? null : oauthWorkspace,
+        billing_cycle: isPractice || retailInviteNext ? undefined : searchParams.get("billing_cycle") ?? undefined,
+        cycle: isPractice || retailInviteNext ? undefined : searchParams.get("cycle") ?? undefined,
         invitation_token: invitationToken || undefined,
+        next: retailInviteNext,
         attribution: mergeSignupAttribution(
           readSignupAttributionFromSession() ?? parseSignupAttributionFromSearchParams(searchParams),
           parseSignupAttributionFromSearchParams(searchParams)
@@ -212,7 +215,7 @@ function SignupPageInner() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!activeWorkspace) {
+    if (!activeWorkspace && !retailInviteNext) {
       setError("Choose Finza Service or Finza Practice to continue.")
       return
     }
@@ -230,7 +233,7 @@ function SignupPageInner() {
         process.env.NEXT_PUBLIC_APP_URL ||
         (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
 
-      const signupIntent = signupIntentForWorkspace(activeWorkspace)
+      const signupIntent = activeWorkspace ? signupIntentForWorkspace(activeWorkspace) : signupIntentForWorkspace("service")
 
       const userMetadata: Record<string, string | boolean> = {
         full_name: fullName,
@@ -264,7 +267,8 @@ function SignupPageInner() {
       }
 
       const callbackUrl = new URL("/auth/callback", appUrl)
-      callbackUrl.searchParams.set("workspace", activeWorkspace)
+      if (activeWorkspace) callbackUrl.searchParams.set("workspace", activeWorkspace)
+      if (retailInviteNext) callbackUrl.searchParams.set("next", retailInviteNext)
       if (invitationToken) {
         callbackUrl.searchParams.set("invitation_token", invitationToken)
       }
@@ -291,14 +295,17 @@ function SignupPageInner() {
             router.push(
               `/accounting/invitations/accept?token=${encodeURIComponent(invitationToken)}`
             )
+          } else if (retailInviteNext) {
+            router.push(retailInviteNext)
           } else {
             router.push(resolveImmediatePostSignupPath(signupIntent))
           }
         } else {
           const qs = new URLSearchParams({
             email: email.trim(),
-            workspace: activeWorkspace,
           })
+          if (activeWorkspace) qs.set("workspace", activeWorkspace)
+          if (retailInviteNext) qs.set("next", retailInviteNext)
           if (invitationToken) qs.set("invitation_token", invitationToken)
           router.push(`/signup/check-email?${qs.toString()}`)
         }
@@ -317,7 +324,7 @@ function SignupPageInner() {
     )
   }
 
-  const showChoice = !activeWorkspace && !invitationToken
+  const showChoice = !activeWorkspace && !invitationToken && !retailInviteNext
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
@@ -355,7 +362,9 @@ function SignupPageInner() {
             <>
               <h1 className="mb-2 text-2xl font-bold text-gray-900">Create your Finza account</h1>
               <p className="text-sm text-gray-600">
-                {showChoice
+                {retailInviteNext
+                  ? "Create an account with the email address that received the Retail invitation."
+                  : showChoice
                   ? "What are you using Finza for?"
                   : isPractice
                     ? "Sign up for Finza Practice to manage client work and books."

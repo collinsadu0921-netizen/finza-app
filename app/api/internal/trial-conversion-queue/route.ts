@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import { isInternalOpsAdmin } from "@/lib/internalAnnouncementsAdmin"
-import {
-  buildTrialConversionQueue,
-  type TrialConversionQueueRow,
-} from "@/lib/growth/trialConversionQueue"
+import { buildTrialConversionQueue } from "@/lib/growth/trialConversionQueue"
 
 export const dynamic = "force-dynamic"
 
@@ -24,65 +21,17 @@ const FILTERS = [
 type TrialConversionFilter = (typeof FILTERS)[number]
 
 function parseLimit(raw: string | null): number {
-  if (!raw) return 100
-  return Math.min(Math.max(parseInt(raw, 10) || 100, 1), 500)
+  if (!raw) return 25
+  return Math.min(Math.max(parseInt(raw, 10) || 25, 1), 50)
+}
+
+function parsePage(raw: string | null): number {
+  if (!raw) return 1
+  return Math.max(parseInt(raw, 10) || 1, 1)
 }
 
 function parseFilter(raw: string | null): TrialConversionFilter {
   return FILTERS.includes(raw as TrialConversionFilter) ? (raw as TrialConversionFilter) : "all_unpaid"
-}
-
-function hasEvent(row: TrialConversionQueueRow, eventName: string): boolean {
-  return row.activation_events.includes(eventName)
-}
-
-function filterRows(
-  rows: TrialConversionQueueRow[],
-  filter: TrialConversionFilter,
-  trialingOnlyParam: boolean
-): TrialConversionQueueRow[] {
-  const now = Date.now()
-  const threeDaysMs = 3 * 24 * 60 * 60 * 1000
-
-  return rows.filter((row) => {
-    if (row.is_paid) return false
-
-    if (trialingOnlyParam && !["trialing", "past_due", "locked"].includes(row.trial_status ?? "")) {
-      return false
-    }
-
-    switch (filter) {
-      case "trialing_only":
-        return row.trial_status === "trialing"
-      case "ending_soon": {
-        if (row.trial_status !== "trialing" || !row.trial_ends_at) return false
-        const endsAt = new Date(row.trial_ends_at).getTime()
-        return Number.isFinite(endsAt) && endsAt >= now && endsAt <= now + threeDaysMs
-      }
-      case "expired_unpaid": {
-        if (!row.trial_ends_at) return row.trial_status === "past_due" || row.trial_status === "locked"
-        const endsAt = new Date(row.trial_ends_at).getTime()
-        return (
-          (Number.isFinite(endsAt) && endsAt <= now) ||
-          row.trial_status === "past_due" ||
-          row.trial_status === "locked"
-        )
-      }
-      case "no_activation":
-        return !hasEvent(row, "customer_created") && !hasEvent(row, "invoice_created")
-      case "invoice_no_payment":
-        return hasEvent(row, "invoice_created") && !hasEvent(row, "payment_recorded")
-      case "pricing_viewed":
-        return hasEvent(row, "pricing_viewed")
-      case "consent_yes":
-        return row.trial_contact_consent === true
-      case "consent_missing":
-        return row.trial_contact_consent !== true
-      case "all_unpaid":
-      default:
-        return true
-    }
-  })
 }
 
 export async function GET(request: NextRequest) {
@@ -107,20 +56,41 @@ export async function GET(request: NextRequest) {
   }
 
   const limit = parseLimit(request.nextUrl.searchParams.get("limit"))
+  const page = parsePage(request.nextUrl.searchParams.get("page"))
   const trialingOnlyParam = request.nextUrl.searchParams.get("trialing_only") === "1"
   const filter = parseFilter(request.nextUrl.searchParams.get("filter"))
 
   try {
-    const queue = await buildTrialConversionQueue(admin, {
+    const result = await buildTrialConversionQueue(admin, {
       limit,
-      trialingOnly: trialingOnlyParam || filter === "trialing_only",
+      page,
+      filter: trialingOnlyParam ? "trialing_only" : filter,
+      trialingOnly: trialingOnlyParam,
     })
-    const filtered = filterRows(queue, filter, trialingOnlyParam)
+    console.info(
+      "[internal/trial-conversion-queue]",
+      JSON.stringify({
+        filter,
+        page: result.meta.page,
+        page_size: result.meta.page_size,
+        count: result.rows.length,
+        total: result.total,
+        duration_ms: result.meta.duration_ms,
+        auth_admin_calls: result.meta.auth_admin_calls,
+        business_query_count: result.meta.business_query_count,
+        activation_event_query_count: result.meta.activation_event_query_count,
+        scan_truncated: result.meta.scan_truncated,
+      })
+    )
     return NextResponse.json({
       ok: true,
       filter,
-      count: filtered.length,
-      queue: filtered,
+      count: result.rows.length,
+      total: result.total,
+      page: result.meta.page,
+      page_size: result.meta.page_size,
+      queue: result.rows,
+      meta: result.meta,
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
