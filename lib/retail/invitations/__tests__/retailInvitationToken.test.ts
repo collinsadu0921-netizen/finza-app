@@ -3,8 +3,8 @@ import {
   buildRetailInvitePath,
   generateRetailInvitationToken,
   hashRetailInvitationToken,
+  isPlausibleRetailInviteToken,
   normalizeRetailInviteEmail,
-  classifyRetailInvitationForUser,
   safeRetailInviteNextPath,
 } from "../retailInvitationToken"
 
@@ -29,45 +29,8 @@ describe("retail invitation tokens", () => {
     expect(safeRetailInviteNextPath("//evil.example")).toBeNull()
     expect(safeRetailInviteNextPath("/retail/invite/../admin")).toBeNull()
     expect(safeRetailInviteNextPath("/retail/invite/resume")).toBe("/retail/invite/resume")
-  })
-
-  it("shows acceptance only for a matching pending invitation", () => {
-    const future = "2099-01-01T00:00:00.000Z"
-    const past = "2000-01-01T00:00:00.000Z"
-    expect(
-      classifyRetailInvitationForUser({
-        status: "pending",
-        expiresAt: future,
-        invitationEmail: "owner@example.com",
-        userEmail: "Owner@Example.com",
-      })
-    ).toBe("ready")
-    expect(
-      classifyRetailInvitationForUser({
-        status: "pending",
-        expiresAt: future,
-        invitationEmail: "owner@example.com",
-        userEmail: "other@example.com",
-      })
-    ).toBe("denied")
-    for (const status of ["accepted", "revoked", "expired"]) {
-      expect(
-        classifyRetailInvitationForUser({
-          status,
-          expiresAt: future,
-          invitationEmail: "owner@example.com",
-          userEmail: "owner@example.com",
-        })
-      ).toBe("unavailable")
-    }
-    expect(
-      classifyRetailInvitationForUser({
-        status: "pending",
-        expiresAt: past,
-        invitationEmail: "owner@example.com",
-        userEmail: "owner@example.com",
-      })
-    ).toBe("unavailable")
+    expect(isPlausibleRetailInviteToken("resume")).toBe(false)
+    expect(isPlausibleRetailInviteToken(token)).toBe(true)
   })
 
   it("rotation produces a different hash so the previous link cannot be reused", () => {

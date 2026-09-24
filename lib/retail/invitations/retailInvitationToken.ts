@@ -4,6 +4,26 @@ export const RETAIL_INVITE_EXPIRY_DAYS = 14
 
 const RETAIL_INVITE_PATH = /^\/retail\/invite\/[A-Za-z0-9_-]{20,200}$/
 export const RETAIL_INVITE_RESUME_PATH = "/retail/invite/resume"
+export const RETAIL_INVITE_RESUME_SEGMENT = "resume"
+
+/** Raw invitation tokens are base64url and at least 20 chars. Reserved path segments are never tokens. */
+export function isPlausibleRetailInviteToken(token: string | null | undefined): boolean {
+  if (!token) return false
+  const trimmed = token.trim()
+  if (trimmed === RETAIL_INVITE_RESUME_SEGMENT) return false
+  return /^[A-Za-z0-9_-]{20,200}$/.test(trimmed)
+}
+
+export function maskEmailForUi(email: string | null | undefined): string | null {
+  if (!email) return null
+  const normalized = normalizeRetailInviteEmail(email)
+  const at = normalized.indexOf("@")
+  if (at <= 0) return null
+  const local = normalized.slice(0, at)
+  const domain = normalized.slice(at + 1)
+  const localHint = local.length <= 2 ? `${local[0] ?? ""}…` : `${local.slice(0, 2)}…`
+  return `${localHint}@${domain}`
+}
 
 export function normalizeRetailInviteEmail(email: string): string {
   return email.trim().toLowerCase()
@@ -66,11 +86,13 @@ export function classifyRetailInvitationForUser(input: {
 }
 
 export function retailInvitationTokenFromPath(path: string): string | null {
+  if (path.trim() === RETAIL_INVITE_RESUME_PATH) return null
   const safe = safeRetailInviteNextPath(path)
-  if (!safe) return null
+  if (!safe || safe === RETAIL_INVITE_RESUME_PATH) return null
   const token = safe.slice("/retail/invite/".length)
   try {
-    return decodeURIComponent(token)
+    const decoded = decodeURIComponent(token)
+    return isPlausibleRetailInviteToken(decoded) ? decoded : null
   } catch {
     return null
   }

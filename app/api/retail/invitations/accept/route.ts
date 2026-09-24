@@ -7,6 +7,7 @@ import {
   acceptRetailInvitation,
   acceptRetailInvitationById,
 } from "@/lib/retail/invitations/retailInvitationAdmin"
+import { isPlausibleRetailInviteToken } from "@/lib/retail/invitations/retailInvitationToken"
 
 export const dynamic = "force-dynamic"
 
@@ -37,7 +38,8 @@ export async function POST(request: NextRequest) {
   const invitationId =
     body && typeof body === "object" ? String((body as { invitationId?: unknown }).invitationId ?? "").trim() : ""
   const idOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitationId)
-  if ((!token || token.length > 200) && !idOk) {
+  const tokenOk = isPlausibleRetailInviteToken(token)
+  if (!idOk && !tokenOk) {
     return NextResponse.json({ error: "This invitation link is not valid." }, { status: 400 })
   }
 

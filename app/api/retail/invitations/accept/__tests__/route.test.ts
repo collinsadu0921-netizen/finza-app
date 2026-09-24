@@ -8,6 +8,11 @@ jest.mock("@/lib/supabaseServer", () => ({
 jest.mock("@/lib/supabaseServiceRole", () => ({
   getSupabaseServiceRoleClient: jest.fn(() => ({})),
 }))
+jest.mock("@/lib/supabaseAdmin", () => ({
+  createSupabaseAdminClient: jest.fn(() => ({
+    auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ data: {}, error: null }) } },
+  })),
+}))
 jest.mock("@/lib/retail/invitations/retailInvitationAdmin", () => ({
   acceptRetailInvitation: jest.fn(),
   acceptRetailInvitationById: jest.fn(),
@@ -33,16 +38,31 @@ describe("POST /api/retail/invitations/accept", () => {
     jest.clearAllMocks()
   })
 
+  const token = "a".repeat(32)
+
   it("rejects an unauthenticated caller", async () => {
     withUser(null)
     const res = await POST(
       new NextRequest("http://localhost/api/retail/invitations/accept", {
         method: "POST",
-        body: JSON.stringify({ token: "abc" }),
+        body: JSON.stringify({ token }),
       })
     )
     expect(res.status).toBe(401)
     expect(accept).not.toHaveBeenCalled()
+  })
+
+  it("rejects the reserved resume segment as a token", async () => {
+    withUser("Owner@Example.com")
+    const res = await POST(
+      new NextRequest("http://localhost/api/retail/invitations/accept", {
+        method: "POST",
+        body: JSON.stringify({ token: "resume" }),
+      })
+    )
+    expect(res.status).toBe(400)
+    expect(accept).not.toHaveBeenCalled()
+    expect(acceptById).not.toHaveBeenCalled()
   })
 
   it("maps email mismatch, expiry, reuse, and a valid acceptance without returning a token", async () => {
@@ -51,7 +71,7 @@ describe("POST /api/retail/invitations/accept", () => {
     let res = await POST(
       new NextRequest("http://localhost/api/retail/invitations/accept", {
         method: "POST",
-        body: JSON.stringify({ token: "raw-token" }),
+        body: JSON.stringify({ token }),
       })
     )
     expect(res.status).toBe(403)
@@ -60,7 +80,7 @@ describe("POST /api/retail/invitations/accept", () => {
     res = await POST(
       new NextRequest("http://localhost/api/retail/invitations/accept", {
         method: "POST",
-        body: JSON.stringify({ token: "raw-token" }),
+        body: JSON.stringify({ token }),
       })
     )
     expect(res.status).toBe(410)
@@ -69,7 +89,7 @@ describe("POST /api/retail/invitations/accept", () => {
     res = await POST(
       new NextRequest("http://localhost/api/retail/invitations/accept", {
         method: "POST",
-        body: JSON.stringify({ token: "raw-token" }),
+        body: JSON.stringify({ token }),
       })
     )
     expect(res.status).toBe(409)
@@ -78,13 +98,13 @@ describe("POST /api/retail/invitations/accept", () => {
     res = await POST(
       new NextRequest("http://localhost/api/retail/invitations/accept", {
         method: "POST",
-        body: JSON.stringify({ token: "raw-token" }),
+        body: JSON.stringify({ token }),
       })
     )
     const json = await res.json()
     expect(res.status).toBe(200)
     expect(json).toEqual({ ok: true, businessId: "business-1" })
-    expect(JSON.stringify(json)).not.toContain("raw-token")
+    expect(JSON.stringify(json)).not.toContain(token)
     expect(accept).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({ email: "Owner@Example.com", userId: "user-1" })

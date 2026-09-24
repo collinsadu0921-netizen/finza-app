@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token")?.trim() ?? ""
-  if (!token || token.length > 200) {
+  if (!token || token.length > 200 || token === "resume") {
     return NextResponse.json({ state: "invalid" })
   }
   const admin = getSupabaseServiceRoleClient()
@@ -18,6 +18,10 @@ export async function GET(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const preview = await previewRetailInvitation(admin, token, user?.email ?? null)
+  const preview = await previewRetailInvitation(
+    admin,
+    token,
+    user?.id && user.email ? { userId: user.id, email: user.email } : null
+  )
   return NextResponse.json(preview)
 }

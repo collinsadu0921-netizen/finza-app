@@ -7,6 +7,8 @@ import {
   generateRetailInvitationToken,
   hashRetailInvitationToken,
   isPlausibleRetailInviteEmail,
+  isPlausibleRetailInviteToken,
+  maskEmailForUi,
   normalizeRetailInviteEmail,
   retailInvitationExpiresAt,
   buildRetailInvitePath,
@@ -362,21 +364,32 @@ function escapeHtml(s: string): string {
 }
 
 export type RetailInvitePreview =
-  | { state: "ready"; businessName: string | null; emailMatches: boolean | null }
-  | { state: "expired" | "revoked" | "accepted" | "invalid" }
+  | {
+      state: "ready"
+      businessName: string | null
+      emailMatches: boolean | null
+      signedInUserId: string | null
+      signedInEmailMasked: string | null
+    }
+  | { state: "expired" | "revoked" | "accepted" | "invalid"; signedInUserId: string | null; signedInEmailMasked: string | null }
 
 export async function previewRetailInvitation(
   admin: SupabaseClient,
   token: string,
-  signedInEmail: string | null
+  signedIn: { userId: string; email: string } | null
 ): Promise<RetailInvitePreview> {
+  const signedInUserId = signedIn?.userId ?? null
+  const signedInEmailMasked = maskEmailForUi(signedIn?.email ?? null)
+  if (!isPlausibleRetailInviteToken(token)) {
+    return { state: "invalid", signedInUserId, signedInEmailMasked }
+  }
   const tokenHash = hashRetailInvitationToken(token)
   const { data, error } = await admin
     .from("retail_invitations")
     .select("id, status, expires_at, email_normalized, business_name, token_version")
     .eq("token_hash", tokenHash)
     .maybeSingle()
-  if (error || !data) return { state: "invalid" }
+  if (error || !data) return { state: "invalid", signedInUserId, signedInEmailMasked }
 
   if (data.status === "pending" && new Date(String(data.expires_at)).getTime() <= Date.now()) {
     await admin.from("retail_invitations").update({ status: "expired" }).eq("id", data.id).eq("status", "pending")
@@ -386,28 +399,34 @@ export async function previewRetailInvitation(
       invitationId: String(data.id),
       metadata: { token_version: data.token_version, source: "preview" },
     })
-    return { state: "expired" }
+    return { state: "expired", signedInUserId, signedInEmailMasked }
   }
 
-  if (data.status === "expired") return { state: "expired" }
-  if (data.status === "revoked") return { state: "revoked" }
-  if (data.status === "accepted") return { state: "accepted" }
-  if (data.status !== "pending") return { state: "invalid" }
+  if (data.status === "expired") return { state: "expired", signedInUserId, signedInEmailMasked }
+  if (data.status === "revoked") return { state: "revoked", signedInUserId, signedInEmailMasked }
+  if (data.status === "accepted") return { state: "accepted", signedInUserId, signedInEmailMasked }
+  if (data.status !== "pending") return { state: "invalid", signedInUserId, signedInEmailMasked }
 
-  if (!signedInEmail) {
-    return { state: "ready", businessName: null, emailMatches: null }
+  if (!signedIn?.email) {
+    return { state: "ready", businessName: null, emailMatches: null, signedInUserId, signedInEmailMasked }
   }
-  const matches = normalizeRetailInviteEmail(signedInEmail) === String(data.email_normalized)
+  const matches = normalizeRetailInviteEmail(signedIn.email) === String(data.email_normalized)
   if (!matches) {
-    return { state: "ready", businessName: null, emailMatches: false }
+    return { state: "ready", businessName: null, emailMatches: false, signedInUserId, signedInEmailMasked }
   }
-  return { state: "ready", businessName: String(data.business_name), emailMatches: true }
+  return {
+    state: "ready",
+    businessName: String(data.business_name),
+    emailMatches: true,
+    signedInUserId,
+    signedInEmailMasked,
+  }
 }
 
 export async function pendingRetailInvitationForEmail(
   admin: SupabaseClient,
   email: string
-): Promise<{ id: string; businessName: string } | null> {
+): Promise<{ id: string; businessName: string; pendingCount: number } | null> {
   const normalized = normalizeRetailInviteEmail(email)
   const { data, error } = await admin
     .from("retail_invitations")
@@ -415,11 +434,14 @@ export async function pendingRetailInvitationForEmail(
     .eq("email_normalized", normalized)
     .eq("status", "pending")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error || !data) return null
-  if (new Date(String(data.expires_at)).getTime() <= Date.now()) return null
-  return { id: String(data.id), businessName: String(data.business_name) }
+  if (error || !data || data.length === 0) return null
+  const usable = data.filter((row) => new Date(String(row.expires_at)).getTime() > Date.now())
+  if (usable.length === 0) return null
+  return {
+    id: String(usable[0].id),
+    businessName: String(usable[0].business_name),
+    pendingCount: usable.length,
+  }
 }
 
 export async function acceptRetailInvitationById(
