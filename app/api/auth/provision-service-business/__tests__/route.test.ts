@@ -22,6 +22,10 @@ jest.mock("@/lib/accountingBootstrap", () => ({
   ensureAccountingInitialized: jest.fn(),
 }))
 
+jest.mock("@/lib/retail/invitations/retailInvitationAdmin", () => ({
+  pendingRetailInvitationForEmail: jest.fn().mockResolvedValue(null),
+}))
+
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { sendServiceWelcomeNotificationsAfterProvision } from "@/lib/auth/sendServiceWelcomeNotification"

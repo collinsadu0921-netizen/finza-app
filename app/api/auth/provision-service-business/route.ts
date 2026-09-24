@@ -10,6 +10,7 @@ import { SIGNUP_GOALS } from "@/lib/growth/signupGoals"
 import { signupAttributionFromUserMetadata } from "@/lib/growth/signupAttribution"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 import { isRetailInvitationSignupIntent } from "@/lib/auth/signupWorkspace"
+import { pendingRetailInvitationForEmail } from "@/lib/retail/invitations/retailInvitationAdmin"
 
 async function readUserMetadataForProvisioning(
   userId: string,
@@ -108,6 +109,15 @@ export async function POST(request: NextRequest) {
       { error: "A Retail invitation does not create a Service business." },
       { status: 409 }
     )
+  }
+  if (user.email) {
+    const pendingRetail = await pendingRetailInvitationForEmail(createSupabaseAdminClient(), user.email)
+    if (pendingRetail) {
+      return NextResponse.json(
+        { error: "Finish the pending Retail invitation before creating a Service business." },
+        { status: 409 }
+      )
+    }
   }
   const sub = resolveServiceBusinessSubscriptionFromUserMetadata(provisionMeta)
 
