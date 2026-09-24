@@ -1,5 +1,6 @@
 import {
   isPracticeSignupIntent,
+  isRetailInvitationSignupIntent,
   PRACTICE_HOME_PATH,
   resolvePracticePostAuthPath,
   SERVICE_BUSINESS_SETUP_PATH,
@@ -46,6 +47,10 @@ export function resolvePostAuthDestination(input: PostAuthDestinationInput): str
   }
 
   const businesses = mergeAccessibleBusinesses(input.ownedBusinesses, input.membershipRows)
+
+  if (businesses.length === 0 && isRetailInvitationSignupIntent(signupIntent)) {
+    return "/retail/invite/resume"
+  }
 
   if (businesses.length > 0) {
     return resolveBusinessDashboardRedirect(businesses, false)

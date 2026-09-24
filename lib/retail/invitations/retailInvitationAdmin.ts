@@ -404,6 +404,48 @@ export async function previewRetailInvitation(
   return { state: "ready", businessName: String(data.business_name), emailMatches: true }
 }
 
+export async function pendingRetailInvitationForEmail(
+  admin: SupabaseClient,
+  email: string
+): Promise<{ id: string; businessName: string } | null> {
+  const normalized = normalizeRetailInviteEmail(email)
+  const { data, error } = await admin
+    .from("retail_invitations")
+    .select("id, business_name, status, expires_at")
+    .eq("email_normalized", normalized)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  if (new Date(String(data.expires_at)).getTime() <= Date.now()) return null
+  return { id: String(data.id), businessName: String(data.business_name) }
+}
+
+export async function acceptRetailInvitationById(
+  admin: SupabaseClient,
+  input: { invitationId: string; userId: string; email: string; requestId: string | null }
+): Promise<string> {
+  const normalized = normalizeRetailInviteEmail(input.email)
+  const { data: row, error: readError } = await admin
+    .from("retail_invitations")
+    .select("token_hash, status, email_normalized")
+    .eq("id", input.invitationId)
+    .maybeSingle()
+  if (readError || !row || row.email_normalized !== normalized || row.status !== "pending") {
+    throw new Error("retail_invitation_not_pending")
+  }
+  const { data, error } = await admin.rpc("accept_retail_invitation", {
+    p_token_hash: row.token_hash,
+    p_user_id: input.userId,
+    p_email_normalized: normalized,
+    p_request_id: requestIdOrNull(input.requestId),
+  })
+  if (error) throw new Error(error.message || "retail_invitation_invalid")
+  if (!data || typeof data !== "string") throw new Error("retail_invitation_invalid")
+  return data
+}
+
 export async function acceptRetailInvitation(
   admin: SupabaseClient,
   input: { token: string; userId: string; email: string; requestId: string | null }

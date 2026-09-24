@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
-import { acceptRetailInvitation } from "@/lib/retail/invitations/retailInvitationAdmin"
+import {
+  acceptRetailInvitation,
+  acceptRetailInvitationById,
+} from "@/lib/retail/invitations/retailInvitationAdmin"
 
 export const dynamic = "force-dynamic"
 
@@ -29,7 +32,10 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null)
   const token = body && typeof body === "object" ? String((body as { token?: unknown }).token ?? "").trim() : ""
-  if (!token || token.length > 200) {
+  const invitationId =
+    body && typeof body === "object" ? String((body as { invitationId?: unknown }).invitationId ?? "").trim() : ""
+  const idOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitationId)
+  if ((!token || token.length > 200) && !idOk) {
     return NextResponse.json({ error: "This invitation link is not valid." }, { status: 400 })
   }
 
@@ -39,12 +45,19 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const businessId = await acceptRetailInvitation(admin, {
-      token,
-      userId: user.id,
-      email: user.email,
-      requestId: crypto.randomUUID(),
-    })
+    const businessId = idOk
+      ? await acceptRetailInvitationById(admin, {
+          invitationId,
+          userId: user.id,
+          email: user.email,
+          requestId: crypto.randomUUID(),
+        })
+      : await acceptRetailInvitation(admin, {
+          token,
+          userId: user.id,
+          email: user.email,
+          requestId: crypto.randomUUID(),
+        })
     return NextResponse.json({ ok: true, businessId })
   } catch (error) {
     const message = error instanceof Error ? error.message : "retail_invitation_invalid"

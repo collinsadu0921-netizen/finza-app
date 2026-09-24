@@ -1,5 +1,10 @@
 import { resolvePostAuthDestination } from "../resolvePostAuthDestination"
-import { SIGNUP_INTENT_PRACTICE, SIGNUP_INTENT_SERVICE, PRACTICE_HOME_PATH } from "../signupWorkspace"
+import {
+  SIGNUP_INTENT_PRACTICE,
+  SIGNUP_INTENT_RETAIL_INVITATION,
+  SIGNUP_INTENT_SERVICE,
+  PRACTICE_HOME_PATH,
+} from "../signupWorkspace"
 
 describe("resolvePostAuthDestination", () => {
   it("Practice intent with no firm → firm setup even when Service businesses exist", () => {
@@ -72,6 +77,34 @@ describe("resolvePostAuthDestination", () => {
         trialPlan: null,
       })
     ).toBe(PRACTICE_HOME_PATH)
+  })
+
+  it("Retail invitation with no businesses stays off Service setup", () => {
+    expect(
+      resolvePostAuthDestination({
+        signupIntent: SIGNUP_INTENT_RETAIL_INVITATION,
+        hasFirmMembership: false,
+        ownedBusinesses: [],
+        membershipRows: [],
+        trialIntent: false,
+        trialWorkspace: null,
+        trialPlan: null,
+      })
+    ).toBe("/retail/invite/resume")
+  })
+
+  it("Retail invitation with an existing Service business keeps that dashboard", () => {
+    expect(
+      resolvePostAuthDestination({
+        signupIntent: SIGNUP_INTENT_RETAIL_INVITATION,
+        hasFirmMembership: false,
+        ownedBusinesses: [{ id: "b1", industry: "service" }],
+        membershipRows: [],
+        trialIntent: false,
+        trialWorkspace: null,
+        trialPlan: null,
+      })
+    ).toBe("/service/dashboard")
   })
 
   it("Service intent with no businesses → business-setup", () => {

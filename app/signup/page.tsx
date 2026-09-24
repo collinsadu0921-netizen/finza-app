@@ -20,7 +20,7 @@ import {
 } from "@/lib/growth/signupAttribution"
 import {
   parseSignupWorkspaceParam,
-  signupIntentForWorkspace,
+  signupIntentForNewAccount,
   resolveImmediatePostSignupPath,
   type SignupWorkspaceChoice,
 } from "@/lib/auth/signupWorkspace"
@@ -233,7 +233,10 @@ function SignupPageInner() {
         process.env.NEXT_PUBLIC_APP_URL ||
         (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
 
-      const signupIntent = activeWorkspace ? signupIntentForWorkspace(activeWorkspace) : signupIntentForWorkspace("service")
+      const signupIntent = signupIntentForNewAccount({
+        retailInvitation: Boolean(retailInviteNext),
+        workspace: activeWorkspace,
+      })
 
       const userMetadata: Record<string, string | boolean> = {
         full_name: fullName,

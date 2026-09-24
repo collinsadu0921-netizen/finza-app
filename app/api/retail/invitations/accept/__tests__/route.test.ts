@@ -10,13 +10,15 @@ jest.mock("@/lib/supabaseServiceRole", () => ({
 }))
 jest.mock("@/lib/retail/invitations/retailInvitationAdmin", () => ({
   acceptRetailInvitation: jest.fn(),
+  acceptRetailInvitationById: jest.fn(),
 }))
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { acceptRetailInvitation } from "@/lib/retail/invitations/retailInvitationAdmin"
+import { acceptRetailInvitation, acceptRetailInvitationById } from "@/lib/retail/invitations/retailInvitationAdmin"
 
 const getClient = createSupabaseServerClient as jest.MockedFunction<typeof createSupabaseServerClient>
 const accept = acceptRetailInvitation as jest.MockedFunction<typeof acceptRetailInvitation>
+const acceptById = acceptRetailInvitationById as jest.MockedFunction<typeof acceptRetailInvitationById>
 
 function withUser(email: string | null) {
   getClient.mockResolvedValue({
@@ -86,6 +88,23 @@ describe("POST /api/retail/invitations/accept", () => {
     expect(accept).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({ email: "Owner@Example.com", userId: "user-1" })
+    )
+  })
+
+  it("accepts a pending invitation by id without a raw token", async () => {
+    withUser("Owner@Example.com")
+    acceptById.mockResolvedValueOnce("retail-business")
+    const res = await POST(
+      new NextRequest("http://localhost/api/retail/invitations/accept", {
+        method: "POST",
+        body: JSON.stringify({ invitationId: "50592961-c6c3-4ca7-bc96-2b69d0c37317" }),
+      })
+    )
+    expect(res.status).toBe(200)
+    expect(accept).not.toHaveBeenCalled()
+    expect(acceptById).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ invitationId: "50592961-c6c3-4ca7-bc96-2b69d0c37317" })
     )
   })
 })

@@ -16,6 +16,7 @@ import {
 import { resolvePostAuthDestination } from "@/lib/auth/resolvePostAuthDestination"
 import {
   isPracticeWorkspaceParam,
+  isRetailInvitationSignupIntent,
   SIGNUP_INTENT_PRACTICE,
   SIGNUP_INTENT_SERVICE,
 } from "@/lib/auth/signupWorkspace"
@@ -125,6 +126,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const safeRetailNextEarly = safeRetailInviteNextPath(requestUrl.searchParams.get("next"))
+  const retailInvitationSignup = isRetailInvitationSignupIntent(existingSignupIntent)
   const isPracticeFromUrl = isPracticeWorkspaceParam(workspaceParam)
   const isAccountingFirm =
     existingSignupIntent === SIGNUP_INTENT_PRACTICE || isPracticeFromUrl
@@ -150,7 +153,11 @@ export async function GET(request: NextRequest) {
     shouldPersistMetadata = true
   }
 
-  if (isServiceTrialFromUrl || (canApplyPlanOnlyFromUrl && parsedPlan !== null)) {
+  if (
+    !safeRetailNextEarly &&
+    !retailInvitationSignup &&
+    (isServiceTrialFromUrl || (canApplyPlanOnlyFromUrl && parsedPlan !== null))
+  ) {
     if (isServiceTrialFromUrl) {
       const trialTier = parsedPlan ?? DEFAULT_SERVICE_SUBSCRIPTION_TIER
       effectiveMeta = {

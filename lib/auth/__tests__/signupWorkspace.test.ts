@@ -1,6 +1,8 @@
 import {
   parseSignupWorkspaceParam,
+  signupIntentForNewAccount,
   signupIntentForWorkspace,
+  SIGNUP_INTENT_RETAIL_INVITATION,
   resolveImmediatePostSignupPath,
   resolvePracticePostAuthPath,
   SIGNUP_INTENT_PRACTICE,
@@ -34,6 +36,23 @@ describe("signupWorkspace", () => {
 
     it("maps service to business_owner", () => {
       expect(signupIntentForWorkspace("service")).toBe(SIGNUP_INTENT_SERVICE)
+    })
+  })
+
+  describe("signupIntentForNewAccount", () => {
+    it("uses the Retail invitation intent instead of Service", () => {
+      expect(signupIntentForNewAccount({ retailInvitation: true, workspace: null })).toBe(
+        SIGNUP_INTENT_RETAIL_INVITATION
+      )
+      expect(signupIntentForNewAccount({ retailInvitation: true, workspace: "service" })).toBe(
+        SIGNUP_INTENT_RETAIL_INVITATION
+      )
+    })
+
+    it("keeps Service and Practice when there is no Retail invitation", () => {
+      expect(signupIntentForNewAccount({ retailInvitation: false, workspace: null })).toBe(SIGNUP_INTENT_SERVICE)
+      expect(signupIntentForNewAccount({ retailInvitation: false, workspace: "service" })).toBe(SIGNUP_INTENT_SERVICE)
+      expect(signupIntentForNewAccount({ retailInvitation: false, workspace: "practice" })).toBe(SIGNUP_INTENT_PRACTICE)
     })
   })
 

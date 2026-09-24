@@ -9,6 +9,7 @@ import { parsePhoneOrWhatsApp } from "@/lib/growth/parsePhoneOrWhatsApp"
 import { SIGNUP_GOALS } from "@/lib/growth/signupGoals"
 import { signupAttributionFromUserMetadata } from "@/lib/growth/signupAttribution"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
+import { isRetailInvitationSignupIntent } from "@/lib/auth/signupWorkspace"
 
 async function readUserMetadataForProvisioning(
   userId: string,
@@ -102,6 +103,12 @@ export async function POST(request: NextRequest) {
 
   const jwtMeta = (user.user_metadata ?? {}) as Record<string, unknown>
   const { meta: provisionMeta, source: metadataSource } = await readUserMetadataForProvisioning(user.id, jwtMeta)
+  if (isRetailInvitationSignupIntent(String(provisionMeta.signup_intent ?? ""))) {
+    return NextResponse.json(
+      { error: "A Retail invitation does not create a Service business." },
+      { status: 409 }
+    )
+  }
   const sub = resolveServiceBusinessSubscriptionFromUserMetadata(provisionMeta)
 
   const body = parsed.data

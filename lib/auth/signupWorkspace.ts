@@ -7,8 +7,13 @@ export type SignupWorkspaceChoice = "service" | "practice"
 
 export const SIGNUP_INTENT_SERVICE = "business_owner" as const
 export const SIGNUP_INTENT_PRACTICE = "accounting_firm" as const
+/** New account created only to accept a Retail invitation. Not a Service trial. */
+export const SIGNUP_INTENT_RETAIL_INVITATION = "retail_invitation" as const
 
-export type SignupIntent = typeof SIGNUP_INTENT_SERVICE | typeof SIGNUP_INTENT_PRACTICE
+export type SignupIntent =
+  | typeof SIGNUP_INTENT_SERVICE
+  | typeof SIGNUP_INTENT_PRACTICE
+  | typeof SIGNUP_INTENT_RETAIL_INVITATION
 
 const PRACTICE_ALIASES = new Set(["practice", "accounting", "accountant", "firm"])
 
@@ -26,6 +31,20 @@ export function isPracticeWorkspaceParam(raw: string | null | undefined): boolea
 
 export function signupIntentForWorkspace(workspace: SignupWorkspaceChoice): SignupIntent {
   return workspace === "practice" ? SIGNUP_INTENT_PRACTICE : SIGNUP_INTENT_SERVICE
+}
+
+/** Retail invitation signup must not inherit the Service business_owner intent. */
+export function signupIntentForNewAccount(opts: {
+  retailInvitation: boolean
+  workspace: SignupWorkspaceChoice | null
+}): SignupIntent {
+  if (opts.retailInvitation) return SIGNUP_INTENT_RETAIL_INVITATION
+  if (opts.workspace === "practice") return SIGNUP_INTENT_PRACTICE
+  return SIGNUP_INTENT_SERVICE
+}
+
+export function isRetailInvitationSignupIntent(intent: string | null | undefined): boolean {
+  return intent === SIGNUP_INTENT_RETAIL_INVITATION
 }
 
 export function isPracticeSignupIntent(intent: string | null | undefined): boolean {
