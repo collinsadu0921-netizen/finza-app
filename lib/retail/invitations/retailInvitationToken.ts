@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto"
 export const RETAIL_INVITE_EXPIRY_DAYS = 14
 
 const RETAIL_INVITE_PATH = /^\/retail\/invite\/[A-Za-z0-9_-]{20,200}$/
+export const RETAIL_INVITE_RESUME_PATH = "/retail/invite/resume"
 
 export function normalizeRetailInviteEmail(email: string): string {
   return email.trim().toLowerCase()
@@ -40,9 +41,28 @@ export function buildRetailInvitePath(token: string): string {
 export function safeRetailInviteNextPath(raw: string | null | undefined): string | null {
   if (!raw) return null
   const trimmed = raw.trim()
+  if (trimmed === RETAIL_INVITE_RESUME_PATH) return trimmed
   if (!RETAIL_INVITE_PATH.test(trimmed)) return null
   if (trimmed.includes("..") || trimmed.includes("\\") || trimmed.includes("//")) return null
   return trimmed
+}
+
+export type RetailInvitationAccess = "ready" | "denied" | "unavailable"
+
+/** Authenticated email must match. The raw token is not required for the resume route. */
+export function classifyRetailInvitationForUser(input: {
+  status: string
+  expiresAt: string
+  invitationEmail: string
+  userEmail: string
+  now?: Date
+}): RetailInvitationAccess {
+  if (normalizeRetailInviteEmail(input.invitationEmail) !== normalizeRetailInviteEmail(input.userEmail)) {
+    return "denied"
+  }
+  if (input.status !== "pending") return "unavailable"
+  if (new Date(input.expiresAt).getTime() <= (input.now ?? new Date()).getTime()) return "unavailable"
+  return "ready"
 }
 
 export function retailInvitationTokenFromPath(path: string): string | null {

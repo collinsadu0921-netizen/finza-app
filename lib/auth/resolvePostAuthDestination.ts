@@ -22,6 +22,7 @@ export type PostAuthDestinationInput = {
   trialIntent: boolean
   trialWorkspace: string | null
   trialPlan: string | null
+  hasPendingRetailInvitation?: boolean
 }
 
 /**
@@ -48,7 +49,10 @@ export function resolvePostAuthDestination(input: PostAuthDestinationInput): str
 
   const businesses = mergeAccessibleBusinesses(input.ownedBusinesses, input.membershipRows)
 
-  if (businesses.length === 0 && isRetailInvitationSignupIntent(signupIntent)) {
+  if (
+    businesses.length === 0 &&
+    (input.hasPendingRetailInvitation || isRetailInvitationSignupIntent(signupIntent))
+  ) {
     return "/retail/invite/resume"
   }
 

@@ -79,6 +79,36 @@ describe("resolvePostAuthDestination", () => {
     ).toBe(PRACTICE_HOME_PATH)
   })
 
+  it("existing business_owner with a pending Retail invitation opens Retail acceptance", () => {
+    expect(
+      resolvePostAuthDestination({
+        signupIntent: SIGNUP_INTENT_SERVICE,
+        hasFirmMembership: false,
+        ownedBusinesses: [],
+        membershipRows: [],
+        trialIntent: false,
+        trialWorkspace: null,
+        trialPlan: null,
+        hasPendingRetailInvitation: true,
+      })
+    ).toBe("/retail/invite/resume")
+  })
+
+  it("business_owner with no pending Retail invitation still opens Service setup", () => {
+    expect(
+      resolvePostAuthDestination({
+        signupIntent: SIGNUP_INTENT_SERVICE,
+        hasFirmMembership: false,
+        ownedBusinesses: [],
+        membershipRows: [],
+        trialIntent: false,
+        trialWorkspace: null,
+        trialPlan: null,
+        hasPendingRetailInvitation: false,
+      })
+    ).toBe("/business-setup")
+  })
+
   it("Retail invitation with no businesses stays off Service setup", () => {
     expect(
       resolvePostAuthDestination({

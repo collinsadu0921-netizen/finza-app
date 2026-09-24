@@ -386,7 +386,7 @@ export async function resolveAccess(
       // Allow setup/onboarding routes when user has no business so they can create one
       const path = (pathname || "").split("?")[0]
       const normalizedPath = path.endsWith("/") && path !== "/" ? path.slice(0, -1) : path
-      const setupPaths = ["/business-setup", "/onboarding", "/settings/business-profile"]
+      const setupPaths = ["/business-setup", "/onboarding", "/settings/business-profile", "/retail/invite"]
       const isSetupRoute = setupPaths.some((p) => normalizedPath === p || normalizedPath.startsWith(p + "/"))
       if (isSetupRoute) {
         return debugDecision({ allowed: true })

@@ -67,12 +67,24 @@ export default function HomePage() {
         .select("business_id, businesses(id, industry, archived_at)")
         .eq("user_id", userId)
 
+      const owned = Array.isArray(ownedRows) ? ownedRows : []
+      const memberships = Array.isArray(membershipRows) ? membershipRows : []
+      let hasPendingRetailInvitation = false
+      if (owned.length === 0 && memberships.length === 0) {
+        const pendingRes = await fetch("/api/retail/invitations/pending", { credentials: "same-origin" })
+        if (pendingRes.ok) {
+          const pending = await pendingRes.json().catch(() => null)
+          hasPendingRetailInvitation = pending?.state === "ready"
+        }
+      }
+
       const destination = resolvePostAuthDestination({
         signupIntent: typeof signupIntent === "string" ? signupIntent : undefined,
         hasFirmMembership,
         firmOnboardingComplete,
-        ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
-        membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
+        ownedBusinesses: owned,
+        membershipRows: memberships,
+        hasPendingRetailInvitation,
         trialIntent: authData.user?.user_metadata?.trial_intent === true,
         trialWorkspace:
           typeof authData.user?.user_metadata?.trial_workspace === "string"

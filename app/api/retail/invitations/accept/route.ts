@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { SIGNUP_INTENT_RETAIL_INVITATION } from "@/lib/auth/signupWorkspace"
 import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import {
   acceptRetailInvitation,
@@ -58,6 +60,23 @@ export async function POST(request: NextRequest) {
           email: user.email,
           requestId: crypto.randomUUID(),
         })
+    try {
+      const adminAuth = createSupabaseAdminClient()
+      const meta = (user.user_metadata ?? {}) as Record<string, unknown>
+      if (meta.signup_intent === "business_owner" || meta.trial_intent === true) {
+        await adminAuth.auth.admin.updateUserById(user.id, {
+          user_metadata: {
+            ...meta,
+            signup_intent: SIGNUP_INTENT_RETAIL_INVITATION,
+            trial_intent: false,
+            trial_workspace: null,
+            trial_plan: null,
+          },
+        })
+      }
+    } catch {
+      // Acceptance already succeeded. Stale intent must not block the new Retail workspace.
+    }
     return NextResponse.json({ ok: true, businessId })
   } catch (error) {
     const message = error instanceof Error ? error.message : "retail_invitation_invalid"
