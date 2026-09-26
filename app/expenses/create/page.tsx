@@ -11,6 +11,7 @@ import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessU
 import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { readApiJson } from "@/lib/readApiJson"
+import { decideReceiptCurrency } from "@/lib/ocr/receiptCurrencyMode"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
@@ -265,6 +266,7 @@ export default function CreateExpensePage() {
       }
       setReceiptFile(file)
       setIncomingDocumentId(null)
+      setUploadedReceiptPath(null)
       setOcrError("")
       setOcrSuggestedFields({})
       if (file.type.startsWith("image/")) {
@@ -309,9 +311,9 @@ export default function CreateExpensePage() {
       body.set("file", receiptFile)
       const [response, receiptPath] = await Promise.all([
         fetch("/api/receipt-extract-ai", { method: "POST", body }),
-        uploadReceipt(),
+        uploadedReceiptPath ? Promise.resolve(uploadedReceiptPath) : uploadReceipt(),
       ])
-      if (receiptPath) {
+      if (receiptPath && receiptPath !== uploadedReceiptPath) {
         setUploadedReceiptPath(receiptPath)
         const reg = await fetch("/api/incoming-documents", {
           method: "POST",
@@ -369,10 +371,18 @@ export default function CreateExpensePage() {
       if (extraction.receipt_number) {
         setNotes((prev) => (prev ? `${prev}\n` : "") + `Ref: ${extraction.receipt_number}`)
       }
-      if (extraction.currency && currencyCode && extraction.currency !== currencyCode) {
+      const currencyDecision = decideReceiptCurrency(extraction.currency, currencyCode)
+      if (currencyDecision.action === "foreign") {
+        setFxEnabled(true)
+        setFxCurrencyCode(currencyDecision.currency)
+        setFxRate("")
         setOcrCurrencyNote(
-          `Receipt shows ${extraction.currency}. This expense stays in ${currencyCode} unless you turn on foreign currency.`
+          `${currencyDecision.currency} was detected from the receipt. Enter the exchange rate before saving.`
         )
+      } else if (currencyDecision.action === "home") {
+        setFxEnabled(false)
+        setFxRate("")
+        setOcrCurrencyNote("")
       }
       const evidence = [
         extraction.evidence?.supplier ? `Supplier: ${extraction.evidence.supplier}` : "",
@@ -873,6 +883,9 @@ export default function CreateExpensePage() {
                         <option value="ZAR">ZAR — South African Rand</option>
                         <option value="CNY">CNY — Chinese Yuan</option>
                         <option value="INR">INR — Indian Rupee</option>
+                        {fxCurrencyCode && !["USD", "EUR", "GBP", "KES", "NGN", "ZAR", "CNY", "INR"].includes(fxCurrencyCode) && (
+                          <option value={fxCurrencyCode}>{fxCurrencyCode}</option>
+                        )}
                       </NativeSelect>
                     </div>
                     <div>

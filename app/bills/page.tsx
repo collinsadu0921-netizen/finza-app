@@ -26,6 +26,8 @@ type Bill = {
   currency_symbol?: string | null
   fx_rate?: number | null
   home_currency_code?: string | null
+  home_currency_total?: number | null
+  attachment_path?: string | null
 }
 
 function billIsDocForeign(
@@ -359,6 +361,13 @@ export default function BillsPage() {
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-mono font-medium text-slate-800">{bill.bill_number}</span>
+                            {bill.attachment_path ? (
+                              <span title="Invoice attached" aria-label="Invoice attached" className="text-slate-400">
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                              </span>
+                            ) : null}
                             {bill.bill_type === "import" && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
                                 Import

@@ -10,6 +10,7 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
+import { decideReceiptCurrency } from "@/lib/ocr/receiptCurrencyMode"
 import BillSupplierSelector from "@/components/bills/BillSupplierSelector"
 
 type LineItem = {
@@ -114,6 +115,7 @@ export default function CreateBillPage() {
   const [incomingDocumentId, setIncomingDocumentId] = useState<string | null>(null)
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrError, setOcrError] = useState("")
+  const [ocrCurrencyNote, setOcrCurrencyNote] = useState("")
   const [ocrSuggestions, setOcrSuggestions] = useState<{
     supplier_name?: string
     document_number?: string
@@ -402,23 +404,29 @@ export default function CreateBillPage() {
       return
     }
     setOcrError("")
+    setOcrCurrencyNote("")
     setOcrLoading(true)
     try {
-      const uploaded = await uploadReceipt()
-      if (!uploaded) {
-        setOcrError("Could not upload receipt. Try again.")
-        setOcrLoading(false)
-        return
+      let storagePath = uploadedAttachmentPath
+      if (!storagePath) {
+        const uploaded = await uploadReceipt()
+        if (!uploaded) {
+          setOcrError("Could not upload receipt. Try again.")
+          setOcrLoading(false)
+          return
+        }
+        storagePath = uploaded.storagePath
+        setUploadedAttachmentPath(storagePath)
       }
-      setUploadedAttachmentPath(uploaded.storagePath)
 
+      if (!incomingDocumentId) {
       const reg = await fetch("/api/incoming-documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           business_id: businessId,
           storage_bucket: "receipts",
-          storage_path: uploaded.storagePath,
+          storage_path: storagePath,
           source_type: "bill_form_upload",
           document_kind: "supplier_bill_attachment",
           file_name: receiptFile?.name ?? null,
@@ -444,6 +452,7 @@ export default function CreateBillPage() {
         return
       }
       setIncomingDocumentId(docId)
+      }
 
       const body = new FormData()
       body.set("business_id", businessId)
@@ -458,6 +467,7 @@ export default function CreateBillPage() {
           total_amount?: number | null
           subtotal?: number | null
           receipt_number?: string | null
+          currency?: string | null
           warnings?: string[]
         }
       }>(response)
@@ -500,10 +510,22 @@ export default function CreateBillPage() {
         setIssueDate(String(s.document_date))
         next.issue_date = true
       }
-      // Map total → subtotal (tax-exclusive). Use subtotal when OCR provides it, else total as subtotal.
-      const subtotalAmount = (s.subtotal != null && Number(s.subtotal) > 0)
-        ? Number(s.subtotal)
-        : (s.total != null && Number(s.total) > 0 ? Number(s.total) : null)
+      const subtotalAmount = (s.total != null && Number(s.total) > 0)
+        ? Number(s.total)
+        : (s.subtotal != null && Number(s.subtotal) > 0 ? Number(s.subtotal) : null)
+      const currencyDecision = decideReceiptCurrency(extraction.currency, currencyCode)
+      if (currencyDecision.action === "foreign") {
+        setFxEnabled(true)
+        setFxCurrencyCode(currencyDecision.currency)
+        setFxRate("")
+        setOcrCurrencyNote(
+          `${currencyDecision.currency} was detected from the receipt. Enter the exchange rate before saving.`
+        )
+      } else if (currencyDecision.action === "home") {
+        setFxEnabled(false)
+        setFxRate("")
+        setOcrCurrencyNote("")
+      }
       if (subtotalAmount != null) {
         setItems([
           {
@@ -908,6 +930,9 @@ export default function CreateBillPage() {
                         <option value="ZAR">ZAR — South African Rand</option>
                         <option value="CNY">CNY — Chinese Yuan</option>
                         <option value="INR">INR — Indian Rupee</option>
+                        {fxCurrencyCode && !["USD", "EUR", "GBP", "KES", "NGN", "ZAR", "CNY", "INR"].includes(fxCurrencyCode) && (
+                          <option value={fxCurrencyCode}>{fxCurrencyCode}</option>
+                        )}
                       </select>
                     </div>
                     <div>
@@ -998,6 +1023,9 @@ export default function CreateBillPage() {
                     <p className="text-xs text-slate-500">
                       Pre-fills supplier, bill number, date, and total. Review and correct extraction, then click &quot;Create Bill&quot; to save.
                     </p>
+                    {ocrCurrencyNote && (
+                      <p className="text-xs text-slate-600">{ocrCurrencyNote}</p>
+                    )}
                     {incomingDocumentId && businessId && (
                       <p className="text-xs text-slate-600">
                         <a

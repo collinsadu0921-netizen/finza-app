@@ -8,6 +8,7 @@ import { useServicePageBusiness } from "@/lib/hooks/useServicePageBusiness"
 import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatCurrencyRaw, formatDate, formatYesNo } from "@/lib/exportUtils"
 import { formatMoney } from "@/lib/money"
+import { expenseDocumentCurrency, expenseHomeTotal, expenseIsForeign } from "@/lib/expenses/expenseListMoney"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { KpiStatCard } from "@/components/ui/KpiStatCard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
@@ -27,6 +28,11 @@ type Expense = {
   total: number
   notes: string | null
   receipt_path: string | null
+  currency_code?: string | null
+  currency_symbol?: string | null
+  fx_rate?: number | null
+  home_currency_code?: string | null
+  home_currency_total?: number | null
   expense_categories: {
     id: string
     name: string
@@ -145,7 +151,8 @@ export default function ExpensesPage() {
     }
   }
 
-  const totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.total || 0), 0)
+  const homeCurrency = business?.currency_code || "GHS"
+  const totalExpenses = expenses.reduce((sum, exp) => sum + (expenseHomeTotal(exp, homeCurrency) ?? 0), 0)
   const totalTaxes = expenses.reduce((sum, exp) => sum + Number(exp.nhil || 0) + Number(exp.getfund || 0) + Number(exp.covid || 0) + Number(exp.vat || 0), 0)
 
   useEffect(() => {
@@ -167,7 +174,7 @@ export default function ExpensesPage() {
       const d = new Date(exp.date)
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
     })
-    .reduce((sum, exp) => sum + Number(exp.total || 0), 0)
+    .reduce((sum, exp) => sum + (expenseHomeTotal(exp, homeCurrency) ?? 0), 0)
 
   const filtersActive = !!(filters.category_id || filters.start_date || filters.end_date || searchInput)
 
@@ -449,19 +456,33 @@ export default function ExpensesPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className="text-sm font-medium text-slate-800">{expense.supplier}</span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="text-sm font-medium text-slate-800">{expense.supplier}</span>
+                            {expense.receipt_path ? (
+                              <span title="Receipt attached" aria-label="Receipt attached" className="text-slate-400">
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                              </span>
+                            ) : null}
+                          </span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span className="text-sm text-slate-500">{expense.expense_categories?.name || "Uncategorized"}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm text-slate-700 tabular-nums">{formatMoney(Number(expense.amount), business?.currency_code || "GHS")}</span>
+                          <span className="text-sm text-slate-700 tabular-nums">{formatMoney(Number(expense.amount), expenseDocumentCurrency(expense, homeCurrency))}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm text-slate-500 tabular-nums">{formatMoney(taxes, business?.currency_code || "GHS")}</span>
+                          <span className="text-sm text-slate-500 tabular-nums">{formatMoney(taxes, expenseDocumentCurrency(expense, homeCurrency))}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
-                          <span className="text-sm font-semibold text-slate-900 tabular-nums">{formatMoney(Number(expense.total), business?.currency_code || "GHS")}</span>
+                          <div className="text-sm font-semibold text-slate-900 tabular-nums">{formatMoney(Number(expense.total), expenseDocumentCurrency(expense, homeCurrency))}</div>
+                          {expenseIsForeign(expense, homeCurrency) && expenseHomeTotal(expense, homeCurrency) != null && (
+                            <div className="text-[11px] font-normal text-slate-400 tabular-nums">
+                              {formatMoney(expenseHomeTotal(expense, homeCurrency), homeCurrency)} booked
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-right">
                           {!readOnly && (

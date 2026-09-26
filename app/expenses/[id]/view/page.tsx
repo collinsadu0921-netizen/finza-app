@@ -7,6 +7,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrencySymbol } from "@/lib/currency"
+import { receiptFileKind, receiptPublicUrl } from "@/lib/storage/receiptFileUrl"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 
 type Expense = {
@@ -298,11 +299,11 @@ export default function ViewExpensePage() {
             <div className="lg:col-span-1">
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 sticky top-8">
                 <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Receipt</h2>
-                {expense.receipt_path ? (
+                {expense.receipt_path && receiptPublicUrl(expense.receipt_path) ? (
                   <div className="space-y-3">
-                    {expense.receipt_path.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                    {receiptFileKind(expense.receipt_path) === "image" ? (
                       <img
-                        src={expense.receipt_path}
+                        src={receiptPublicUrl(expense.receipt_path) || undefined}
                         alt="Receipt"
                         className="w-full rounded-lg border border-slate-200"
                       />
@@ -311,19 +312,21 @@ export default function ViewExpensePage() {
                         <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                         </svg>
-                        <p className="text-slate-500 text-sm mb-1">PDF Receipt</p>
-                        <a href={expense.receipt_path} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
-                          View PDF
+                        <p className="text-slate-500 text-sm mb-1">
+                          {receiptFileKind(expense.receipt_path) === "pdf" ? "PDF receipt" : "Receipt file"}
+                        </p>
+                        <a href={receiptPublicUrl(expense.receipt_path) || undefined} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                          {receiptFileKind(expense.receipt_path) === "pdf" ? "View PDF" : "View file"}
                         </a>
                       </div>
                     )}
                     <a
-                      href={expense.receipt_path}
+                      href={receiptPublicUrl(expense.receipt_path) || undefined}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block w-full bg-slate-800 text-white text-center text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-slate-700 transition-colors"
                     >
-                      Download Receipt
+                      Download receipt
                     </a>
                   </div>
                 ) : (

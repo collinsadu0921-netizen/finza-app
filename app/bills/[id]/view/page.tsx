@@ -9,6 +9,7 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
 import { formatMoney } from "@/lib/money"
+import { receiptFileKind, receiptPublicUrl } from "@/lib/storage/receiptFileUrl"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
@@ -745,16 +746,38 @@ Thank you.`
                       Send via WhatsApp
                     </button>
                   )}
-                  {bill.attachment_path && (
-                    <button
-                      onClick={() => window.open(bill.attachment_path || "", "_blank")}
-                      className="bg-white text-slate-700 px-4 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-sm transition-colors flex items-center justify-center gap-2 w-full"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      View Attachment
-                    </button>
+                  {bill.attachment_path && receiptPublicUrl(bill.attachment_path) && (
+                    <div className="space-y-3">
+                      {receiptFileKind(bill.attachment_path) === "image" ? (
+                        <img
+                          src={receiptPublicUrl(bill.attachment_path) || undefined}
+                          alt="Invoice attachment"
+                          className="w-full rounded-lg border border-slate-200"
+                        />
+                      ) : (
+                        <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center">
+                          <p className="text-slate-600 text-sm font-medium">
+                            {receiptFileKind(bill.attachment_path) === "pdf" ? "PDF invoice" : "Invoice file"}
+                          </p>
+                        </div>
+                      )}
+                      <a
+                        href={receiptPublicUrl(bill.attachment_path) || undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-white text-slate-700 px-4 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-sm transition-colors flex items-center justify-center gap-2 w-full"
+                      >
+                        {receiptFileKind(bill.attachment_path) === "pdf" ? "View PDF" : "View attachment"}
+                      </a>
+                      <a
+                        href={receiptPublicUrl(bill.attachment_path) || undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-slate-800 text-white px-4 py-2.5 rounded-lg hover:bg-slate-700 font-medium text-sm transition-colors flex items-center justify-center w-full"
+                      >
+                        Download
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
