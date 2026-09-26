@@ -17,3 +17,5 @@ Paddle text is not included. The model sees the original file. Finza logs model 
 The form can show supplier, date, amount, and currency as editable suggestions marked From receipt. Creating the expense is still a separate action. The extractor does not create an expense, a supplier, or a ledger entry, and it does not change VAT calculation.
 
 The buttons appear only when `NEXT_PUBLIC_RECEIPT_AI_ENABLED=true`. The route runs only when `RECEIPT_AI_EXTRACT_ENABLED=true`. The model name comes from `OPENAI_RECEIPT_MODEL` (initial value `gpt-6-luna`).
+
+Those variables, plus `OPENAI_API_KEY`, are set on the preview environment for `feat/staging-openai-receipt` only. They are not production variables.
