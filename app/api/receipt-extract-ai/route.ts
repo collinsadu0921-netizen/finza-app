@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { checkReceiptFile } from "@/lib/ocr/receiptFileLimits"
 import { extractReceiptWithOpenAi, logReceiptAiEvent, ReceiptAiError } from "@/lib/ocr/openaiReceiptExtract"
-import { defaultReceiptAiModel, receiptAiExtractEnabled } from "@/lib/ocr/openaiReceiptRequest"
+import { defaultReceiptAiModel } from "@/lib/ocr/openaiReceiptRequest"
 import { checkReceiptAiRateLimit } from "@/lib/ocr/receiptAiRateLimit"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
@@ -16,10 +16,6 @@ function fail(status: number, code: string, error: string) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!receiptAiExtractEnabled()) {
-    return fail(404, "AI_EXTRACT_DISABLED", "Receipt AI extraction is not enabled.")
-  }
-
   const supabase = await createSupabaseServerClient()
   const {
     data: { user },

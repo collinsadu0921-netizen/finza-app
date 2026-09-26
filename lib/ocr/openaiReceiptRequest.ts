@@ -10,10 +10,6 @@ export function defaultReceiptAiModel(): string {
   return configured || "gpt-6-luna"
 }
 
-export function receiptAiExtractEnabled(): boolean {
-  return process.env.RECEIPT_AI_EXTRACT_ENABLED === "true"
-}
-
 export function buildReceiptExtractionRequest(args: {
   model: string
   mime: string

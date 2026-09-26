@@ -11,9 +11,6 @@ import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessU
 import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { readApiJson } from "@/lib/readApiJson"
-import { hasMeaningfulReceiptSuggestions, scanErrorMessage, useReceiptScanner } from "@/lib/ocr/useReceiptScanner"
-import { receiptAiUiEnabled } from "@/lib/ocr/receiptAiUi"
-import type { ReceiptOcrConfidence } from "@/lib/ocr/receiptParser"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
@@ -50,11 +47,13 @@ export default function CreateExpensePage() {
 
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrError, setOcrError] = useState("")
-  const [ocrConfidence, setOcrConfidence] = useState<ReceiptOcrConfidence>({})
+  const [ocrConfidence, setOcrConfidence] = useState<{
+    supplier_name?: "LOW"
+    total?: "LOW"
+    document_date?: "LOW"
+  }>({})
   const [ocrCurrencyNote, setOcrCurrencyNote] = useState("")
   const [aiEvidence, setAiEvidence] = useState<string[]>([])
-  const [ocrEngine, setOcrEngine] = useState<"local" | "ai" | null>(null)
-  const scanner = useReceiptScanner()
   const [ocrSuggestedFields, setOcrSuggestedFields] = useState<{ supplier?: boolean; date?: boolean; amount?: boolean }>({})
   const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null)
   const [incomingDocumentId, setIncomingDocumentId] = useState<string | null>(null)
@@ -295,99 +294,6 @@ export default function CreateExpensePage() {
   const handleExtractFromReceipt = async () => {
     if (!receiptFile || !businessId) return
     const canExtract =
-      receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf" || /\.(jpe?g|png|pdf)$/i.test(receiptFile.name)
-    if (!canExtract) {
-      setOcrError("Use a JPG, PNG, or PDF receipt file.")
-      return
-    }
-    setOcrError("")
-    setOcrCurrencyNote("")
-    setAiEvidence([])
-    setOcrEngine("local")
-    setOcrLoading(true)
-    try {
-      const [scanned, receiptPath] = await Promise.all([
-        scanner.scan(receiptFile, currencyCode || undefined).catch((err: unknown) => {
-          setOcrError(scanErrorMessage(err))
-          return null
-        }),
-        uploadReceipt(),
-      ])
-      if (receiptPath) {
-        setUploadedReceiptPath(receiptPath)
-        const reg = await fetch("/api/incoming-documents", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            business_id: businessId,
-            storage_bucket: "receipts",
-            storage_path: receiptPath,
-            source_type: "expense_form_upload",
-            document_kind: "expense_receipt",
-            file_name: receiptFile?.name ?? null,
-            mime_type: receiptFile?.type ?? null,
-            file_size: receiptFile?.size ?? null,
-          }),
-        })
-        const regParsed = await readApiJson<{ document_id?: string; error?: string }>(reg)
-        if (regParsed.ok && reg.ok && regParsed.data?.document_id) {
-          setIncomingDocumentId(regParsed.data.document_id)
-        }
-      }
-
-      if (!scanned) {
-        setOcrLoading(false)
-        return
-      }
-      if (!hasMeaningfulReceiptSuggestions(scanned)) {
-        setOcrError("Couldn't read this receipt automatically. You can still enter the expense manually.")
-        setOcrLoading(false)
-        return
-      }
-      const suggestions = scanned.suggestions
-      const conf = scanned.confidence || {}
-      setOcrConfidence(conf)
-      const nextSuggested: { supplier?: boolean; date?: boolean; amount?: boolean } = {}
-      if (suggestions.supplier_name != null && String(suggestions.supplier_name).trim()) {
-        setSupplier(String(suggestions.supplier_name).trim())
-        nextSuggested.supplier = true
-      }
-      if (suggestions.document_date != null) {
-        setDate(String(suggestions.document_date))
-        nextSuggested.date = true
-      }
-      if (suggestions.total != null && Number(suggestions.total) > 0) {
-        setAmount(String(suggestions.total))
-        nextSuggested.amount = true
-      }
-      if (suggestions.document_number != null && String(suggestions.document_number).trim()) {
-        setNotes((prev) => (prev ? `${prev}\n` : "") + `Ref: ${suggestions.document_number}`)
-      }
-      if (
-        suggestions.currency_code &&
-        currencyCode &&
-        suggestions.currency_code !== currencyCode
-      ) {
-        setOcrCurrencyNote(
-          `Receipt shows ${suggestions.currency_code}. This expense stays in ${currencyCode} unless you turn on foreign currency.`
-        )
-      }
-      if (scanned.warnings?.includes("ambiguous_date")) {
-        setOcrError("The receipt date is unclear. Please check it before saving.")
-      } else if (scanned.warnings?.includes("day_month_order_assumed")) {
-        setOcrError("Date was read as day/month. Please confirm it.")
-      }
-      setOcrSuggestedFields(nextSuggested)
-    } catch (err: unknown) {
-      setOcrError(scanErrorMessage(err))
-    } finally {
-      setOcrLoading(false)
-    }
-  }
-
-  const handleExtractWithAi = async () => {
-    if (!receiptFile || !businessId) return
-    const canExtract =
       receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf" || /\.(jpe?g|png|webp|pdf)$/i.test(receiptFile.name)
     if (!canExtract) {
       setOcrError("Use a JPG, PNG, WEBP, or PDF receipt file.")
@@ -396,7 +302,6 @@ export default function CreateExpensePage() {
     setOcrError("")
     setOcrCurrencyNote("")
     setAiEvidence([])
-    setOcrEngine("ai")
     setOcrLoading(true)
     try {
       const body = new FormData()
@@ -438,6 +343,7 @@ export default function CreateExpensePage() {
           receipt_number?: string | null
           evidence?: { supplier?: string | null; date?: string | null; total?: string | null; currency?: string | null }
           warnings?: string[]
+          clarity?: { supplier?: string | null; date?: string | null; total?: string | null }
         }
       }>(response)
       if (!parsed.ok) {
@@ -478,7 +384,11 @@ export default function CreateExpensePage() {
       if (extraction.warnings?.length) {
         setOcrError(extraction.warnings.join(" "))
       }
-      setOcrConfidence({})
+      setOcrConfidence({
+        supplier_name: extraction.clarity?.supplier === "low" ? "LOW" : undefined,
+        document_date: extraction.clarity?.date === "low" ? "LOW" : undefined,
+        total: extraction.clarity?.total === "low" ? "LOW" : undefined,
+      })
       setOcrSuggestedFields(nextSuggested)
     } catch {
       setOcrError("Couldn't read this receipt. You can still enter the expense manually.")
@@ -834,47 +744,27 @@ export default function CreateExpensePage() {
                   <div className="mt-3 flex flex-col gap-2">
                     <button
                       type="button"
-                      onClick={handleExtractFromReceipt}
+                      onClick={() => void handleExtractFromReceipt()}
                       disabled={ocrLoading}
                       className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 text-sm font-medium"
                     >
-                      {ocrLoading && ocrEngine !== "ai" ? (
+                      {ocrLoading ? (
                         <>
                           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                           </svg>
-                          {scanner.phase === "loading-model" ? "Loading receipt scanner…" : "Reading receipt…"}
+                          Reading receipt…
                         </>
                       ) : (
                         <>
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
-                          {receiptAiUiEnabled ? "Extract with local scanner" : "Extract from receipt"}
+                          Extract from receipt
                         </>
                       )}
                     </button>
-                    {receiptAiUiEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => void handleExtractWithAi()}
-                        disabled={ocrLoading}
-                        className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-50 text-sm font-medium"
-                      >
-                        {ocrLoading && ocrEngine === "ai" ? (
-                          <>
-                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            Reading receipt…
-                          </>
-                        ) : (
-                          "Extract with AI"
-                        )}
-                      </button>
-                    )}
                     <p className="text-xs text-slate-500">
                       Pre-fills supplier, date, and amount. Review and correct extraction, then click &quot;Create Expense&quot; to save.
                     </p>

@@ -44,7 +44,7 @@ describe("POST /api/receipt-extract-ai", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetReceiptAiRateLimitForTests()
-    process.env.RECEIPT_AI_EXTRACT_ENABLED = "true"
+    delete process.env.RECEIPT_AI_EXTRACT_ENABLED
     process.env.OPENAI_RECEIPT_MODEL = "gpt-6-luna"
     mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } })
     mockFrom.mockImplementation(() => {
@@ -143,10 +143,10 @@ describe("POST /api/receipt-extract-ai", () => {
     expect((await res.json()).code).toBe("AI_REFUSAL")
   })
 
-  it("stays disabled unless the staging flag is set", async () => {
-    process.env.RECEIPT_AI_EXTRACT_ENABLED = "false"
+  it("extracts when the old staging flag is unset", async () => {
+    delete process.env.RECEIPT_AI_EXTRACT_ENABLED
     const res = await POST(upload(new File([Uint8Array.from([1])], "a.jpg", { type: "image/jpeg" })))
-    expect(res.status).toBe(404)
-    expect(mockExtract).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    expect(mockExtract).toHaveBeenCalled()
   })
 })
