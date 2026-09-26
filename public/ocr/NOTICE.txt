@@ -2,7 +2,18 @@ Receipt scanning uses open-source software only.
 
 - @paddleocr/paddleocr-js 0.4.2 — Apache License 2.0 — https://github.com/PaddlePaddle/PaddleOCR
 - PP-OCRv5_mobile_det and PP-OCRv5_mobile_rec ONNX archives — Apache License 2.0 — PaddlePaddle / PaddleOCR
-- onnxruntime-web 1.30.0 — MIT License
+- @techstark/opencv-js 4.10.0-release.1 — Apache License 2.0 — bundled inside the PaddleOCR.js worker — https://github.com/TechStark/opencv-js
+- onnxruntime-web 1.30.0 — MIT License — https://github.com/microsoft/onnxruntime
 - pdfjs-dist — Apache License 2.0
 
 Model files in this directory are unmodified official inference archives.
+
+Vendored browser runtime (unmodified package file, loaded by the browser, not by the Next compiler):
+
+| Field | Value |
+| --- | --- |
+| Source package | @paddleocr/paddleocr-js@0.4.2 |
+| Original path | node_modules/@paddleocr/paddleocr-js/dist/assets/worker-entry-C9UNuyOJ.js |
+| Vendored path | public/ocr/vendor/paddleocr/0.4.2/receipt-ocr-worker.js |
+| SHA-256 | 477db3f009c118823a5f9ebe15f1e96c1c464165715ba28a9884290f61addf52 |
+| OpenCV license | public/ocr/vendor/paddleocr/0.4.2/LICENSE.opencv-js |

@@ -10,7 +10,7 @@ Tesseract.js 7 spawns a `worker_threads` worker, loads WASM from `tesseract.js-c
 
 ## What runs now
 
-Open-source PaddleOCR.js (`@paddleocr/paddleocr-js@0.4.2`, Apache-2.0) with PP-OCRv5 mobile detection and recognition. Inference runs in a browser Web Worker (WASM, SIMD, one thread). The receipt image is not sent to a third-party OCR API. Upload to Finza storage is unchanged and still happens so the expense can keep its receipt.
+Open-source PaddleOCR.js (`@paddleocr/paddleocr-js@0.4.2`, Apache-2.0) with PP-OCRv5 mobile detection and recognition. The Next app does not import that package. It starts a same-origin module worker at `public/ocr/vendor/paddleocr/0.4.2/receipt-ocr-worker.js`, which is the package's unmodified worker bundle (OpenCV and the OCR runtime are inside that file). Inference runs in that worker (WASM, SIMD, one thread). The receipt image is not sent to a third-party OCR API. Upload to Finza storage is unchanged and still happens so the expense can keep its receipt.
 
 The deterministic parser in `lib/receipt/receiptOcr.ts` turns lines into supplier, date, total, and currency. It does not create an expense. The user reviews the form and clicks Create Expense.
 
@@ -36,7 +36,7 @@ ONNX Runtime Web `1.30.0` loads the JSEP WASM build even when the backend is `wa
 | `ort-wasm-simd-threaded.wasm` | `3398c10d07d229bd91b364548e130e0e51a8e5704b88c7c083ebbeb78842dee2` |
 | `ort-wasm-simd-threaded.mjs` | `e13f7f94fc51b4ca72b12faeb1ee95f4ace6dfbc8939bc718aabdc0a27c4299b` |
 
-`numThreads` is 1 so the page does not need cross-origin isolation. In local webpack dev, React Refresh appends `$RefreshReg$` into the worker asset; `lib/ocr/stripRefreshForWorker.cjs` defines a no-op so the worker can start. Production builds do not inject that transform.
+`numThreads` is 1 so the page does not need cross-origin isolation. The worker is a static file, so the Next compiler does not parse the OpenCV bundle inside it.
 
 ## Synthetic corpus (Chromium, local webpack dev)
 
@@ -56,7 +56,7 @@ If the scanner cannot start or cannot read the file, the form stays editable and
 
 ## Build
 
-`npm run build` is `next build --webpack`. Turbopack's production compile hits a stack overflow while parsing the OpenCV bundle inside PaddleOCR.js. Webpack compiles that bundle. The webpack compile in this session succeeded. The following typecheck step then failed on a pre-existing Next 16 `params` type in an accounting route, which this OCR change does not own.
+`npm run build` is `next build` (Turbopack), the same command as current main. Importing `@paddleocr/paddleocr-js` makes Turbopack parse `@techstark/opencv-js` `dist/opencv.js`, which is a single line of about 10.3MB, and `RegExp.exec` overflows the stack. The static worker keeps that file out of the Next module graph.
 
 ## Rollback
 
