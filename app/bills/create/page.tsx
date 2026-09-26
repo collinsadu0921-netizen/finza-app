@@ -11,6 +11,12 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
 import { decideReceiptCurrency } from "@/lib/ocr/receiptCurrencyMode"
+import {
+  planSupplierBillDraft,
+  supplierBillAmountsClose,
+  supplierBillMismatchMessage,
+  type SupplierBillExtraction,
+} from "@/lib/ocr/supplierBillExtraction"
 import BillSupplierSelector from "@/components/bills/BillSupplierSelector"
 
 type LineItem = {
@@ -85,6 +91,10 @@ export default function CreateBillPage() {
   const [fxEnabled, setFxEnabled] = useState(false)
   const [fxCurrencyCode, setFxCurrencyCode] = useState<string>("USD")
   const [fxRate, setFxRate] = useState<string>("")
+  const [printedInvoiceTotal, setPrintedInvoiceTotal] = useState<number | null>(null)
+  const [extractionReviewed, setExtractionReviewed] = useState(false)
+  const [itemReadWarning, setItemReadWarning] = useState("")
+  const [taxHandlingNote, setTaxHandlingNote] = useState("")
 
   const displaySymbol = fxEnabled && fxCurrencyCode
     ? (getCurrencySymbol(fxCurrencyCode) || fxCurrencyCode)
@@ -456,20 +466,13 @@ export default function CreateBillPage() {
 
       const body = new FormData()
       body.set("business_id", businessId)
+      body.set("mode", "supplier_bill")
       body.set("file", receiptFile)
       const response = await fetch("/api/receipt-extract-ai", { method: "POST", body })
       const parsed = await readApiJson<{
         ok?: boolean
         error?: string
-        extraction?: {
-          supplier_name?: string | null
-          document_date?: string | null
-          total_amount?: number | null
-          subtotal?: number | null
-          receipt_number?: string | null
-          currency?: string | null
-          warnings?: string[]
-        }
+        extraction?: SupplierBillExtraction
       }>(response)
       if (!parsed.ok || !response.ok || !parsed.data.ok || !parsed.data.extraction) {
         setOcrError(
@@ -481,38 +484,26 @@ export default function CreateBillPage() {
         return
       }
       const extraction = parsed.data.extraction
-      const s = {
-        supplier_name: extraction.supplier_name?.trim() || undefined,
-        document_number: extraction.receipt_number?.trim() || undefined,
-        document_date: extraction.document_date || undefined,
-        subtotal: typeof extraction.subtotal === "number" && extraction.subtotal > 0 ? extraction.subtotal : undefined,
-        total: typeof extraction.total_amount === "number" && extraction.total_amount > 0 ? extraction.total_amount : undefined,
-      }
-      if (!s.supplier_name && !s.document_number && !s.document_date && s.subtotal == null && s.total == null) {
+      const draft = planSupplierBillDraft(extraction, currencyCode)
+      if (!extraction.supplier_name && !extraction.invoice_number && !extraction.document_date && draft.lines.length === 0) {
         setOcrError("Couldn't read this receipt automatically. You can still enter the bill manually.")
         setOcrLoading(false)
         return
       }
-      setOcrSuggestions(s)
-      if (extraction.warnings?.length) {
-        setOcrError(extraction.warnings.join(" "))
-      }
       const next: typeof ocrSuggestedFields = {}
-      if (s.supplier_name != null && String(s.supplier_name).trim()) {
-        setSupplierName(String(s.supplier_name).trim())
+      if (extraction.supplier_name) {
+        setSupplierName(extraction.supplier_name)
         next.supplier_name = true
       }
-      if (s.document_number != null && String(s.document_number).trim()) {
-        setBillNumber(String(s.document_number).trim())
+      if (extraction.invoice_number) {
+        setBillNumber(extraction.invoice_number)
         next.bill_number = true
       }
-      if (s.document_date != null) {
-        setIssueDate(String(s.document_date))
+      if (extraction.document_date) {
+        setIssueDate(extraction.document_date)
         next.issue_date = true
       }
-      const subtotalAmount = (s.total != null && Number(s.total) > 0)
-        ? Number(s.total)
-        : (s.subtotal != null && Number(s.subtotal) > 0 ? Number(s.subtotal) : null)
+      if (extraction.due_date) setDueDate(extraction.due_date)
       const currencyDecision = decideReceiptCurrency(extraction.currency, currencyCode)
       if (currencyDecision.action === "foreign") {
         setFxEnabled(true)
@@ -526,21 +517,31 @@ export default function CreateBillPage() {
         setFxRate("")
         setOcrCurrencyNote("")
       }
-      if (subtotalAmount != null) {
-        setItems([
-          {
-            id: Date.now().toString(),
-            description: "From receipt",
-            qty: 1,
-            unit_price: subtotalAmount,
-            discount_type: "amount",
-            discount_value: 0,
-            discount_amount: 0,
-            material_id: null,
-          },
-        ])
+      if (draft.lines.length > 0) {
+        const stamp = Date.now()
+        setItems(draft.lines.map((line, index) => ({
+          id: `${stamp}-${index}`,
+          description: line.description,
+          qty: line.qty,
+          unit_price: line.unit_price,
+          discount_type: "amount" as const,
+          discount_value: line.discount_amount,
+          discount_amount: line.discount_amount,
+          material_id: null,
+        })))
         next.subtotal = true
       }
+      setApplyTaxes(draft.applyTaxes)
+      setPrintedInvoiceTotal(draft.printedTotal)
+      setExtractionReviewed(false)
+      const arithmetic = extraction.warnings.some((warning) => warning.startsWith("line_") && warning.endsWith("_arithmetic"))
+      setItemReadWarning(
+        [draft.itemWarning, arithmetic ? "A printed line did not match quantity × price − discount. Those numbers were left as printed." : ""]
+          .filter(Boolean)
+          .join(" ")
+      )
+      setTaxHandlingNote(draft.taxNote || "")
+      setOcrError("")
       setOcrSuggestedFields(next)
     } catch (err: any) {
       setOcrError(err.message ?? "OCR failed")
@@ -641,6 +642,15 @@ export default function CreateBillPage() {
     if (!billNumber.trim()) {
       setError("Bill number is required")
       return
+    }
+
+    if (!isImportBill && printedInvoiceTotal != null && !extractionReviewed) {
+      const documentCode = fxEnabled && fxCurrencyCode ? fxCurrencyCode : (currencyCode || "GHS")
+      const payable = Number(activeTaxResult.grandTotal ?? 0)
+      if (!supplierBillAmountsClose(payable, printedInvoiceTotal)) {
+        setError(supplierBillMismatchMessage({ currency: documentCode, calculated: payable, printed: printedInvoiceTotal }))
+        return
+      }
     }
 
     if (isImportBill) {
@@ -1727,6 +1737,34 @@ export default function CreateBillPage() {
                         {currency}{Number(activeTaxResult.grandTotal ?? 0).toFixed(2)}
                       </span>
                     </div>
+                    {itemReadWarning ? (
+                      <p className="text-xs text-amber-800">{itemReadWarning}</p>
+                    ) : null}
+                    {taxHandlingNote ? (
+                      <p className="text-xs text-slate-600">{taxHandlingNote}</p>
+                    ) : null}
+                    {printedInvoiceTotal != null && !supplierBillAmountsClose(Number(activeTaxResult.grandTotal ?? 0), printedInvoiceTotal) ? (
+                      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                        <p>
+                          {supplierBillMismatchMessage({
+                            currency: fxEnabled && fxCurrencyCode ? fxCurrencyCode : (currencyCode || "GHS"),
+                            calculated: Number(activeTaxResult.grandTotal ?? 0),
+                            printed: printedInvoiceTotal,
+                          })}
+                        </p>
+                        {!extractionReviewed ? (
+                          <button
+                            type="button"
+                            className="mt-2 font-semibold underline"
+                            onClick={() => setExtractionReviewed(true)}
+                          >
+                            I've reviewed this difference
+                          </button>
+                        ) : (
+                          <p className="mt-2">Reviewed. You can save after checking the lines.</p>
+                        )}
+                      </div>
+                    ) : null}
 
                     {applyWHT && (
                       <>

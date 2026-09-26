@@ -6,4 +6,4 @@ The call uses the Responses API with Structured Outputs. `store` is `false`. The
 
 Finza logs model name, duration, file type, file size, token counts, and success or failure. It does not log the image, the receipt transcript, the supplier, or the amount.
 
-The form shows supplier, date, and amount as editable suggestions marked From receipt. Creating the expense or bill is still a separate action. The extractor does not create an expense, a supplier, or a ledger entry, and it does not change VAT calculation.
+Create Expense keeps the receipt fields: supplier, date, amount, and currency. Create Supplier Bill sends `mode=supplier_bill` and receives one line per printed invoice row. Those lines stay editable. Creating the expense or bill is still a separate action. The extractor does not create an expense, a bill, a supplier, or a ledger entry, and it does not change the Ghana tax formulas.

@@ -112,6 +112,18 @@ describe("POST /api/receipt-extract-ai", () => {
     expect(mockFrom).not.toHaveBeenCalled()
     const request = mockExtract.mock.calls[0][0]
     expect(request.mime).toBe("image/jpeg")
+    expect(request.mode).toBe("expense")
+  })
+
+  it("forwards supplier bill mode without writing a bill", async () => {
+    const form = new FormData()
+    form.set("business_id", "biz-1")
+    form.set("mode", "supplier_bill")
+    form.set("file", new File([Uint8Array.from([1])], "invoice.pdf", { type: "application/pdf" }))
+    const res = await POST(new NextRequest("http://localhost/api/receipt-extract-ai", { method: "POST", body: form }))
+    expect(res.status).toBe(200)
+    expect(mockExtract.mock.calls[0][0].mode).toBe("supplier_bill")
+    expect(mockFrom).not.toHaveBeenCalled()
   })
 
   it("accepts a PDF and forwards pdf bytes", async () => {

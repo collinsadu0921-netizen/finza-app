@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { checkReceiptFile } from "@/lib/ocr/receiptFileLimits"
 import { extractReceiptWithOpenAi, logReceiptAiEvent, ReceiptAiError } from "@/lib/ocr/openaiReceiptExtract"
-import { defaultReceiptAiModel } from "@/lib/ocr/openaiReceiptRequest"
+import { defaultReceiptAiModel, type ReceiptExtractionMode } from "@/lib/ocr/openaiReceiptRequest"
 import { checkReceiptAiRateLimit } from "@/lib/ocr/receiptAiRateLimit"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
@@ -53,6 +53,12 @@ export async function POST(request: NextRequest) {
     return fail(denied.status, denied.status === 401 ? "AI_UNAUTHORIZED" : "AI_FORBIDDEN", message)
   }
 
+  const modeRaw = String(form.get("mode") || "expense").trim()
+  if (modeRaw !== "expense" && modeRaw !== "supplier_bill") {
+    return fail(400, "AI_BAD_REQUEST", "mode must be expense or supplier_bill")
+  }
+  const mode: ReceiptExtractionMode = modeRaw
+
   const file = form.get("file")
   if (!(file instanceof File)) return fail(400, "AI_BAD_REQUEST", "file is required")
 
@@ -71,6 +77,7 @@ export async function POST(request: NextRequest) {
       bytes,
       mime: checked.mime,
       filename: file.name || "receipt",
+      mode,
     })
     logReceiptAiEvent({
       model: result.model,

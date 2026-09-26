@@ -5,9 +5,15 @@ import {
   type ReceiptExtraction,
 } from "@/lib/ocr/openaiReceiptSchema"
 import {
+  normalizeSupplierBillExtraction,
+  supplierBillExtractionSchema,
+  type SupplierBillExtraction,
+} from "@/lib/ocr/supplierBillExtraction"
+import {
   buildReceiptExtractionRequest,
   defaultReceiptAiModel,
   RECEIPT_AI_TIMEOUT_MS,
+  type ReceiptExtractionMode,
 } from "@/lib/ocr/openaiReceiptRequest"
 
 export type ReceiptAiTelemetry = {
@@ -79,10 +85,12 @@ export async function extractReceiptWithOpenAi(args: {
   bytes: Uint8Array
   mime: string
   filename: string
+  mode?: ReceiptExtractionMode
   model?: string
   client?: ReceiptAiClient
-}): Promise<{ extraction: ReceiptExtraction; model: string; usage?: { inputTokens?: number; outputTokens?: number }; requestId?: string; durationMs: number }> {
+}): Promise<{ extraction: ReceiptExtraction | SupplierBillExtraction; model: string; usage?: { inputTokens?: number; outputTokens?: number }; requestId?: string; durationMs: number }> {
   const model = args.model?.trim() || defaultReceiptAiModel()
+  const mode = args.mode === "supplier_bill" ? "supplier_bill" : "expense"
   const started = Date.now()
   const client = args.client ?? createReceiptAiClient(process.env.OPENAI_API_KEY?.trim() || "")
   if (!args.client && !process.env.OPENAI_API_KEY?.trim()) {
@@ -97,6 +105,7 @@ export async function extractReceiptWithOpenAi(args: {
         mime: args.mime,
         filename: args.filename,
         bytes: args.bytes,
+        mode,
       }),
       { timeout: RECEIPT_AI_TIMEOUT_MS, maxRetries: 0 }
     )
@@ -106,6 +115,22 @@ export async function extractReceiptWithOpenAi(args: {
 
   if (refusalInOutput(response.output)) {
     throw new ReceiptAiError("AI_REFUSAL", 422, "The receipt could not be read.")
+  }
+
+  if (mode === "supplier_bill") {
+    const parsed = supplierBillExtractionSchema.safeParse(response.output_parsed)
+    if (!parsed.success) {
+      throw new ReceiptAiError("AI_PARSE_FAILED", 502, "Receipt reading returned an unusable result.")
+    }
+    return {
+      extraction: normalizeSupplierBillExtraction(parsed.data),
+      model,
+      usage: response.usage
+        ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens }
+        : undefined,
+      requestId: response._request_id || response.id,
+      durationMs: Date.now() - started,
+    }
   }
 
   const parsed = receiptExtractionSchema.safeParse(response.output_parsed)
