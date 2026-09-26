@@ -23,7 +23,7 @@ const ALLOWED: Record<string, string[]> = {
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

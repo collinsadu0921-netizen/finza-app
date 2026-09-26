@@ -9,7 +9,7 @@ import {
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; paymentId: string }> | { id: string; paymentId: string } }
+  { params }: { params: Promise<{ id: string; paymentId: string }> }
 ) {
   try {
     // Handle Next.js 16 params (can be a Promise)
@@ -144,7 +144,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; paymentId: string }> | { id: string; paymentId: string } }
+  { params }: { params: Promise<{ id: string; paymentId: string }> }
 ) {
   try {
     // Handle Next.js 16 params (can be a Promise)

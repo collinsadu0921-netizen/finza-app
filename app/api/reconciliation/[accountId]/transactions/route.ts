@@ -5,7 +5,7 @@ import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/servic
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ accountId: string }> | { accountId: string } }
+  { params }: { params: Promise<{ accountId: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

@@ -12,7 +12,7 @@ const MATERIAL_SELECT =
  */
 export async function GET(
   _request: NextRequest,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await Promise.resolve(context.params)
@@ -63,7 +63,7 @@ export async function GET(
  */
 export async function PATCH(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await Promise.resolve(context.params)

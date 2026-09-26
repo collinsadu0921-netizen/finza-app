@@ -44,7 +44,7 @@ async function clearOtherDefaults(
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: staffId } = await Promise.resolve(params)
@@ -103,7 +103,7 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: staffId } = await Promise.resolve(params)

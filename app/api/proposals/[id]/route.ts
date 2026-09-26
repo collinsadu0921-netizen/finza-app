@@ -55,7 +55,7 @@ async function loadBusinessCustomer(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: proposalId } = await Promise.resolve(params)
@@ -150,7 +150,7 @@ const putSchema = z
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: proposalId } = await Promise.resolve(params)
@@ -312,7 +312,7 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: proposalId } = await Promise.resolve(params)

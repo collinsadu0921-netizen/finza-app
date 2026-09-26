@@ -18,7 +18,7 @@ type ImportRowInput = {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ accountId: string }> | { accountId: string } }
+  { params }: { params: Promise<{ accountId: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

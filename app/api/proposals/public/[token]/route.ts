@@ -25,7 +25,7 @@ type ProposalDbRow = ProposalRow & {
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: Promise<{ token: string }> | { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
   try {
     const { token: raw } = await Promise.resolve(params)

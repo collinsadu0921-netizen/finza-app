@@ -12,7 +12,7 @@ export const runtime = "nodejs"
  */
 export async function GET(
   _request: NextRequest,
-  { params }: { params: Promise<{ token: string; assetId: string }> | { token: string; assetId: string } }
+  { params }: { params: Promise<{ token: string; assetId: string }> }
 ) {
   try {
     const { token: rawToken, assetId } = await Promise.resolve(params)

@@ -13,9 +13,7 @@ export async function PATCH(
   {
     params,
   }: {
-    params:
-      | Promise<{ id: string; batchId: string; itemId: string }>
-      | { id: string; batchId: string; itemId: string }
+    params: Promise<{ id: string; batchId: string; itemId: string }>
   }
 ) {
   try {

@@ -6,7 +6,7 @@ import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceSer
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ name: string }> | { name: string } }
+  { params }: { params: Promise<{ name: string }> }
 ) {
   try {
     // Handle Next.js 16 params (can be a Promise)

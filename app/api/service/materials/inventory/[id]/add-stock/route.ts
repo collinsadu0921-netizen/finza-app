@@ -11,7 +11,7 @@ import { isValidStockInReason } from "@/lib/service/materialMovementLabels"
  */
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: materialId } = await Promise.resolve(context.params)

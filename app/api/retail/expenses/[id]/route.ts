@@ -5,7 +5,7 @@ import { assertRetailExpenseAction, gateRetailExpenseBusiness } from "@/lib/reta
 /** GET /api/retail/expenses/[id] — single expense for the current retail store */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: expenseId } = await Promise.resolve(params)

@@ -7,7 +7,7 @@ import { recalcPayrollEntryForStaffOnDraftRun } from "@/lib/payroll/recalcPayrol
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; deductionId: string }> | { id: string; deductionId: string } }
+  { params }: { params: Promise<{ id: string; deductionId: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)
@@ -149,7 +149,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; deductionId: string }> | { id: string; deductionId: string } }
+  { params }: { params: Promise<{ id: string; deductionId: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

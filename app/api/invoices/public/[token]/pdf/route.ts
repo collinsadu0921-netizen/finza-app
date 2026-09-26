@@ -14,7 +14,7 @@ export const maxDuration = 60
  */
 export async function GET(
   _request: NextRequest,
-  { params }: { params: Promise<{ token: string }> | { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)
