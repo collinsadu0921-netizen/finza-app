@@ -487,10 +487,15 @@ export default function CreateExpensePage() {
 
       const total = totalIncludingTaxes // Total is what user entered
 
-      // Upload receipt if provided (reuse path from OCR extract if already uploaded)
+      // Reuse the file uploaded during extraction. Upload once if extract was skipped.
       let receiptPath = uploadedReceiptPath ?? null
       if (!receiptPath && receiptFile) {
         receiptPath = await uploadReceipt()
+      }
+      if (receiptFile && !receiptPath) {
+        setError("Could not upload the receipt. The expense was not created.")
+        setLoading(false)
+        return
       }
 
       // Create expense via API

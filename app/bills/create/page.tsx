@@ -683,6 +683,11 @@ export default function CreateBillPage() {
         const uploaded = await uploadReceipt()
         attachmentPath = uploaded ? uploaded.storagePath : null
       }
+      if (receiptFile && !attachmentPath) {
+        setError("Could not upload the attachment. The bill was not created.")
+        setLoading(false)
+        return
+      }
 
       const response = await fetch("/api/bills/create", {
         method: "POST",
