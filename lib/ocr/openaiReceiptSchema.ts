@@ -51,7 +51,8 @@ const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 function blankToNull(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
-  return trimmed ? trimmed : null
+  if (!trimmed || /^(null|undefined|>null<)$/i.test(trimmed)) return null
+  return trimmed
 }
 
 function clip(value: string | null): string | null {

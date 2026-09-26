@@ -79,6 +79,11 @@ describe("normalizeReceiptExtraction", () => {
     expect(next.warnings).toContain("date_not_iso")
   })
 
+  it("drops a literal null token in the receipt number", () => {
+    const next = normalizeReceiptExtraction({ ...base, receipt_number: ">null<" })
+    expect(next.receipt_number).toBeNull()
+  })
+
   it("drops a non-currency token instead of keeping punctuation", () => {
     expect(normalizeCurrencyCode(".")).toBeNull()
     expect(normalizeCurrencyCode("GH₵")).toBe("GHS")
