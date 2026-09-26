@@ -18,8 +18,6 @@ export const maxDuration = 60
 /** Tesseract / Buffer require Node; Edge would crash or return HTML error pages */
 export const runtime = "nodejs"
 
-export { RECEIPT_OCR_ERROR_CODES as OCR_ERROR_CODES } from "@/lib/receipt/performReceiptOcr"
-
 function jsonForOcrResult(result: PerformReceiptOcrResult, documentId: string | null) {
   const doc = documentId || undefined
   if (!result.ok) {
