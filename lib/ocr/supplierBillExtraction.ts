@@ -28,6 +28,7 @@ export const supplierBillExtractionSchema = z.object({
     supplier: z.string().nullable(),
     invoice_number: z.string().nullable(),
     date: z.string().nullable(),
+    due_date: z.string().nullable(),
     total: z.string().nullable(),
     currency: z.string().nullable(),
   }),
@@ -56,6 +57,8 @@ subtotal, tax_amount, and total_amount are the printed summary figures. total_am
 
 document_date and due_date must be ISO YYYY-MM-DD or null. Ghana commonly prints day-month-year. Do not substitute today's date.
 
+due_date is null unless the document prints a due date or an explicit payment term that states when payment is due, such as "Due Date", "Date due", "Payable by", or "Net 30". Do not copy the issue date, sale date, or receipt date into due_date. A receipt that only shows the sale date has due_date null. The same calendar day is allowed only when a due date is itself printed. evidence.due_date is the short printed phrase that supports due_date, or null when there is no due date.
+
 currency is the printed ISO code when shown. Ghana forms GHS, GHC, GH₵, GH¢, and ₵ mean GHS. Return null when no currency is printed.
 
 evidence is short source text, not the whole invoice. warnings name specific reading problems. Use an empty array when there is nothing to warn about. clarity is high, medium, low, or null. It is not a probability.`
@@ -80,6 +83,24 @@ function clip(value: string | null): string | null {
 function finiteAmount(value: number | null | undefined): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null
   return value
+}
+
+function dueDateWasDenied(warnings: string[]): boolean {
+  return warnings.some((warning) =>
+    /due date/i.test(warning) && /not printed|no due|omitted|not shown|not found|unreadable|missing/i.test(warning)
+  )
+}
+
+function evidenceSupportsDueDate(evidence: string | null): boolean {
+  if (!evidence) return false
+  return /\b(due|payable by|pay by|net\s*\d+|within\s+\d+\s+days)\b/i.test(evidence)
+}
+
+function acceptedDueDate(dueDate: string | null, evidence: string | null, warnings: string[]): string | null {
+  if (!dueDate) return null
+  if (dueDateWasDenied(warnings)) return null
+  if (!evidenceSupportsDueDate(evidence)) return null
+  return dueDate
 }
 
 function isoDateOrNull(value: string | null | undefined): string | null {
@@ -116,8 +137,11 @@ export function normalizeSupplierBillExtraction(input: SupplierBillExtraction): 
 
   const documentDate = isoDateOrNull(input.document_date)
   if (blankToNull(input.document_date) && !documentDate) pushWarning(warnings, "date_not_iso")
-  const dueDate = isoDateOrNull(input.due_date)
-  if (blankToNull(input.due_date) && !dueDate) pushWarning(warnings, "due_date_not_iso")
+  const parsedDueDate = isoDateOrNull(input.due_date)
+  if (blankToNull(input.due_date) && !parsedDueDate) pushWarning(warnings, "due_date_not_iso")
+  const dueEvidence = clip(blankToNull(input.evidence.due_date))
+  const dueDate = acceptedDueDate(parsedDueDate, dueEvidence, warnings)
+  if (parsedDueDate && !dueDate) pushWarning(warnings, "due_date_unsupported")
 
   const lineItems = input.line_items.slice(0, MAX_LINES).map((line, index) => {
     const description = blankToNull(line.description)
@@ -170,6 +194,7 @@ export function normalizeSupplierBillExtraction(input: SupplierBillExtraction): 
       supplier: clip(blankToNull(input.evidence.supplier)),
       invoice_number: clip(blankToNull(input.evidence.invoice_number)),
       date: clip(blankToNull(input.evidence.date)),
+      due_date: dueEvidence,
       total: clip(blankToNull(input.evidence.total)),
       currency: clip(blankToNull(input.evidence.currency)),
     },

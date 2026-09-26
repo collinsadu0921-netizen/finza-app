@@ -13,6 +13,7 @@ const emptyEvidence = {
   supplier: null,
   invoice_number: null,
   date: null,
+  due_date: null,
   total: null,
   currency: null,
 }
@@ -205,6 +206,46 @@ describe("supplier bill line extraction", () => {
       total_amount: 40,
     })), "GHS")
     expect(draft.lines).toEqual([{ description: "Call-out", qty: 1, unit_price: 40, discount_amount: 0 }])
+  })
+})
+
+describe("supplier bill due date", () => {
+  it("keeps an explicit printed due date", () => {
+    const later = normalizeSupplierBillExtraction(invoice({
+      document_date: "2026-04-21",
+      due_date: "2026-05-21",
+      evidence: { ...emptyEvidence, due_date: "Due Date: 21 May 2026" },
+    }))
+    expect(later.due_date).toBe("2026-05-21")
+
+    const sameDay = normalizeSupplierBillExtraction(invoice({
+      document_date: "2026-07-29",
+      due_date: "2026-07-29",
+      evidence: { ...emptyEvidence, due_date: "Date due July 29, 2026" },
+    }))
+    expect(sameDay.due_date).toBe("2026-07-29")
+  })
+
+  it("returns null when the receipt has no due date", () => {
+    const normalized = normalizeSupplierBillExtraction(invoice({
+      document_type: "receipt",
+      document_date: "2022-04-22",
+      due_date: "2022-04-22",
+      evidence: { ...emptyEvidence, due_date: "Due 22/04/2022" },
+      warnings: ["Due date is not printed; omitted."],
+    }))
+    expect(normalized.document_date).toBe("2022-04-22")
+    expect(normalized.due_date).toBeNull()
+  })
+
+  it("does not copy the issue date when no due date is printed", () => {
+    const normalized = normalizeSupplierBillExtraction(invoice({
+      document_date: "2026-04-21",
+      due_date: "2026-04-21",
+      evidence: { ...emptyEvidence, date: "Invoice Date: 21 April 2026", due_date: null },
+    }))
+    expect(normalized.document_date).toBe("2026-04-21")
+    expect(normalized.due_date).toBeNull()
   })
 })
 

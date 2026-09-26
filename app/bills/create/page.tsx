@@ -503,7 +503,7 @@ export default function CreateBillPage() {
         setIssueDate(extraction.document_date)
         next.issue_date = true
       }
-      if (extraction.due_date) setDueDate(extraction.due_date)
+      setDueDate(extraction.due_date || "")
       const currencyDecision = decideReceiptCurrency(extraction.currency, currencyCode)
       if (currencyDecision.action === "foreign") {
         setFxEnabled(true)
