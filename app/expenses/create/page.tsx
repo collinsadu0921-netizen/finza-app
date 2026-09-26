@@ -12,6 +12,7 @@ import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib
 import { getCurrencySymbol } from "@/lib/currency"
 import { readApiJson } from "@/lib/readApiJson"
 import { hasMeaningfulReceiptSuggestions, scanErrorMessage, useReceiptScanner } from "@/lib/ocr/useReceiptScanner"
+import { receiptAiUiEnabled } from "@/lib/ocr/receiptAiUi"
 import type { ReceiptOcrConfidence } from "@/lib/ocr/receiptParser"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import { ServiceFinancialWritePageGuard } from "@/components/service/ServiceFinancialWritePageGuard"
@@ -51,6 +52,8 @@ export default function CreateExpensePage() {
   const [ocrError, setOcrError] = useState("")
   const [ocrConfidence, setOcrConfidence] = useState<ReceiptOcrConfidence>({})
   const [ocrCurrencyNote, setOcrCurrencyNote] = useState("")
+  const [aiEvidence, setAiEvidence] = useState<string[]>([])
+  const [ocrEngine, setOcrEngine] = useState<"local" | "ai" | null>(null)
   const scanner = useReceiptScanner()
   const [ocrSuggestedFields, setOcrSuggestedFields] = useState<{ supplier?: boolean; date?: boolean; amount?: boolean }>({})
   const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null)
@@ -299,6 +302,8 @@ export default function CreateExpensePage() {
     }
     setOcrError("")
     setOcrCurrencyNote("")
+    setAiEvidence([])
+    setOcrEngine("local")
     setOcrLoading(true)
     try {
       const [scanned, receiptPath] = await Promise.all([
@@ -375,6 +380,108 @@ export default function CreateExpensePage() {
       setOcrSuggestedFields(nextSuggested)
     } catch (err: unknown) {
       setOcrError(scanErrorMessage(err))
+    } finally {
+      setOcrLoading(false)
+    }
+  }
+
+  const handleExtractWithAi = async () => {
+    if (!receiptFile || !businessId) return
+    const canExtract =
+      receiptFile.type.startsWith("image/") || receiptFile.type === "application/pdf" || /\.(jpe?g|png|webp|pdf)$/i.test(receiptFile.name)
+    if (!canExtract) {
+      setOcrError("Use a JPG, PNG, WEBP, or PDF receipt file.")
+      return
+    }
+    setOcrError("")
+    setOcrCurrencyNote("")
+    setAiEvidence([])
+    setOcrEngine("ai")
+    setOcrLoading(true)
+    try {
+      const body = new FormData()
+      body.set("business_id", businessId)
+      body.set("file", receiptFile)
+      const [response, receiptPath] = await Promise.all([
+        fetch("/api/receipt-extract-ai", { method: "POST", body }),
+        uploadReceipt(),
+      ])
+      if (receiptPath) {
+        setUploadedReceiptPath(receiptPath)
+        const reg = await fetch("/api/incoming-documents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            business_id: businessId,
+            storage_bucket: "receipts",
+            storage_path: receiptPath,
+            source_type: "expense_form_upload",
+            document_kind: "expense_receipt",
+            file_name: receiptFile?.name ?? null,
+            mime_type: receiptFile?.type ?? null,
+            file_size: receiptFile?.size ?? null,
+          }),
+        })
+        const regParsed = await readApiJson<{ document_id?: string }>(reg)
+        if (regParsed.ok && reg.ok && regParsed.data?.document_id) {
+          setIncomingDocumentId(regParsed.data.document_id)
+        }
+      }
+      const parsed = await readApiJson<{
+        ok?: boolean
+        error?: string
+        extraction?: {
+          supplier_name?: string | null
+          document_date?: string | null
+          total_amount?: number | null
+          currency?: string | null
+          receipt_number?: string | null
+          evidence?: { supplier?: string | null; date?: string | null; total?: string | null; currency?: string | null }
+          warnings?: string[]
+        }
+      }>(response)
+      if (!parsed.ok) {
+        setOcrError("Couldn't read this receipt. You can still enter the expense manually.")
+        return
+      }
+      if (!response.ok || !parsed.data.ok || !parsed.data.extraction) {
+        setOcrError(parsed.data.error || "Couldn't read this receipt. You can still enter the expense manually.")
+        return
+      }
+      const extraction = parsed.data.extraction
+      const nextSuggested: { supplier?: boolean; date?: boolean; amount?: boolean } = {}
+      setSupplier(extraction.supplier_name || "")
+      if (extraction.supplier_name) nextSuggested.supplier = true
+      setDate(extraction.document_date || "")
+      if (extraction.document_date) nextSuggested.date = true
+      if (typeof extraction.total_amount === "number" && extraction.total_amount > 0) {
+        setAmount(String(extraction.total_amount))
+        nextSuggested.amount = true
+      } else {
+        setAmount("")
+      }
+      if (extraction.receipt_number) {
+        setNotes((prev) => (prev ? `${prev}\n` : "") + `Ref: ${extraction.receipt_number}`)
+      }
+      if (extraction.currency && currencyCode && extraction.currency !== currencyCode) {
+        setOcrCurrencyNote(
+          `Receipt shows ${extraction.currency}. This expense stays in ${currencyCode} unless you turn on foreign currency.`
+        )
+      }
+      const evidence = [
+        extraction.evidence?.supplier ? `Supplier: ${extraction.evidence.supplier}` : "",
+        extraction.evidence?.date ? `Date: ${extraction.evidence.date}` : "",
+        extraction.evidence?.total ? `Total: ${extraction.evidence.total}` : "",
+        extraction.evidence?.currency ? `Currency: ${extraction.evidence.currency}` : "",
+      ].filter(Boolean)
+      setAiEvidence(evidence)
+      if (extraction.warnings?.length) {
+        setOcrError(extraction.warnings.join(" "))
+      }
+      setOcrConfidence({})
+      setOcrSuggestedFields(nextSuggested)
+    } catch {
+      setOcrError("Couldn't read this receipt. You can still enter the expense manually.")
     } finally {
       setOcrLoading(false)
     }
@@ -731,7 +838,7 @@ export default function CreateExpensePage() {
                       disabled={ocrLoading}
                       className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 text-sm font-medium"
                     >
-                      {ocrLoading ? (
+                      {ocrLoading && ocrEngine !== "ai" ? (
                         <>
                           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -744,13 +851,36 @@ export default function CreateExpensePage() {
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
-                          Extract from receipt
+                          {receiptAiUiEnabled ? "Extract with local scanner" : "Extract from receipt"}
                         </>
                       )}
                     </button>
+                    {receiptAiUiEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => void handleExtractWithAi()}
+                        disabled={ocrLoading}
+                        className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-50 text-sm font-medium"
+                      >
+                        {ocrLoading && ocrEngine === "ai" ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            Reading receipt…
+                          </>
+                        ) : (
+                          "Extract with AI"
+                        )}
+                      </button>
+                    )}
                     <p className="text-xs text-slate-500">
                       Pre-fills supplier, date, and amount. Review and correct extraction, then click &quot;Create Expense&quot; to save.
                     </p>
+                    {aiEvidence.length > 0 && (
+                      <p className="text-xs text-slate-500">{aiEvidence.join(" · ")}</p>
+                    )}
                     {ocrCurrencyNote && (
                       <p className="text-xs text-slate-600">{ocrCurrencyNote}</p>
                     )}

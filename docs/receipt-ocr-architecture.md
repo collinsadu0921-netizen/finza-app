@@ -50,6 +50,8 @@ PP-OCRv5 often reads the printed cedi sign as `GHC`. The parser treats `GHC` as 
 
 PaddleOCR and these models are Apache-2.0. ONNX Runtime Web is MIT. See `public/ocr/NOTICE.txt`.
 
+Staging can also call `POST /api/receipt-extract-ai` for an OpenAI vision comparison. That path is off unless `RECEIPT_AI_EXTRACT_ENABLED` and `NEXT_PUBLIC_RECEIPT_AI_ENABLED` are set. It does not replace Paddle. See `docs/receipt-ai-extraction.md`.
+
 ## Failure behavior
 
 If the scanner cannot start or cannot read the file, the form stays editable and shows: "Couldn't read this receipt automatically. You can still enter the expense manually." `POST /api/receipt-ocr` no longer runs OCR. It returns JSON `{ ok: false, error, code, stage }` (including `OCR_CLIENT_REQUIRED`) instead of an HTML platform page.
