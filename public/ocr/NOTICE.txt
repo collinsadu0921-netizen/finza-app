@@ -1,0 +1,8 @@
+Receipt scanning uses open-source software only.
+
+- @paddleocr/paddleocr-js 0.4.2 — Apache License 2.0 — https://github.com/PaddlePaddle/PaddleOCR
+- PP-OCRv5_mobile_det and PP-OCRv5_mobile_rec ONNX archives — Apache License 2.0 — PaddlePaddle / PaddleOCR
+- onnxruntime-web 1.30.0 — MIT License
+- pdfjs-dist — Apache License 2.0
+
+Model files in this directory are unmodified official inference archives.

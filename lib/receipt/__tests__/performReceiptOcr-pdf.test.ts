@@ -76,7 +76,7 @@ describe("performReceiptOcr PDF vs image", () => {
     expect(result.diagnostics.extraction_mode).toBe("pdf_text")
     expect(result.diagnostics.page_count).toBe(2)
     expect(result.diagnostics.warnings).toEqual(["test-warning"])
-    expect(result.diagnostics.provider).toBe("pdfjs+tesseract")
+    expect(result.diagnostics.provider).toBe("pdfjs")
     expect(mockExtractPdf).toHaveBeenCalled()
   })
 

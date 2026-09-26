@@ -4,11 +4,9 @@
  */
 import "server-only"
 
-import { createCanvas } from "canvas"
 import {
   PDF_MIN_DIGITAL_TEXT_CHARS,
   pdfMaxPages,
-  TESSERACT_PROVIDER_VERSION,
 } from "@/lib/documents/constants"
 
 export type PdfExtractionMode = "pdf_text" | "pdf_ocr" | "pdf_hybrid"
@@ -73,39 +71,9 @@ async function extractTextWithPdfJs(buffer: ArrayBuffer): Promise<{ text: string
   return { text: parts.join("\n"), numPages }
 }
 
-async function ocrPdfPagesRaster(buffer: ArrayBuffer): Promise<{ text: string; pagesRendered: number }> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
-  const { extractTextWithTesseract } = await import("@/lib/receipt/tesseractReceiptOcr")
-  const data = new Uint8Array(buffer)
-  const loadingTask = pdfjs.getDocument(pdfjsServerGetDocumentParams(data))
-  const doc = await loadingTask.promise
-  const numPages = doc.numPages
-  const max = Math.min(numPages, pdfMaxPages())
-  const chunks: string[] = []
-
-  for (let p = 1; p <= max; p++) {
-    const page = await doc.getPage(p)
-    const viewport = page.getViewport({ scale: 2 })
-    const w = Math.max(1, Math.floor(viewport.width))
-    const h = Math.max(1, Math.floor(viewport.height))
-    const canvas = createCanvas(w, h)
-    const ctx = canvas.getContext("2d")
-    const renderTask = page.render({
-      canvasContext: ctx as unknown as CanvasRenderingContext2D,
-      viewport,
-    })
-    await renderTask.promise
-    const pngBuffer = canvas.toBuffer("image/png")
-    const dataUrl = `data:image/png;base64,${pngBuffer.toString("base64")}`
-    const pageText = await extractTextWithTesseract(dataUrl)
-    chunks.push(`\n--- PDF page ${p} ---\n${pageText}`)
-  }
-
-  return { text: chunks.join("\n"), pagesRendered: max }
-}
-
 /**
  * Extract receipt-relevant text from a PDF buffer.
+ * Scanned pages are read in the browser. This server path only uses embedded PDF text.
  */
 export async function extractReceiptPdf(buffer: ArrayBuffer): Promise<ExtractReceiptPdfResult> {
   const warnings: string[] = []
@@ -149,33 +117,13 @@ export async function extractReceiptPdf(buffer: ArrayBuffer): Promise<ExtractRec
     }
   }
 
-  warnings.push("sparse_pdf_text_using_raster_ocr")
-
-  try {
-    const { text: rasterText, pagesRendered } = await ocrPdfPagesRaster(buffer)
-    const rasterNorm = normalizeText(rasterText)
-    const mode: PdfExtractionMode =
-      digitalLen > 15 && rasterNorm.length > 15 ? "pdf_hybrid" : rasterNorm.length > 0 ? "pdf_ocr" : "pdf_text"
-    return {
-      rawText: [digitalCombined, rasterText].filter(Boolean).join("\n\n").trim(),
-      extraction_mode: mode,
-      page_count: pageCount || pagesRendered,
-      warnings,
-    }
-  } catch (e) {
-    warnings.push(`raster_ocr_failed: ${e instanceof Error ? e.message : String(e)}`)
-    if (digitalCombined.length > 0) {
-      return {
-        rawText: digitalCombined,
-        extraction_mode: "pdf_text",
-        page_count: pageCount,
-        warnings,
-      }
-    }
-    throw new Error(
-      `PDF text and raster OCR failed (${warnings.join("; ")}). ${e instanceof Error ? e.message : ""}`
-    )
+  warnings.push("scanned_pdf_text_unavailable_use_browser_ocr")
+  return {
+    rawText: digitalCombined,
+    extraction_mode: "pdf_text",
+    page_count: pageCount,
+    warnings,
   }
 }
 
-export const PDF_EXTRACTION_PROVIDER_LABEL = `pdf-parse+pdfjs+${TESSERACT_PROVIDER_VERSION}`
+export const PDF_EXTRACTION_PROVIDER_LABEL = "pdf-parse+pdfjs"

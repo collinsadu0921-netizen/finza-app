@@ -1,0 +1,80 @@
+{
+  "01-clear-ghana-shop.jpg": {
+    "supplier": "KOFI SHOP LTD",
+    "date": "2026-03-12",
+    "total": 45.5,
+    "currency": "GHS"
+  },
+  "02-ghs-total.jpg": {
+    "supplier": "AMA STORES LTD",
+    "date": "2026-01-02",
+    "total": 120,
+    "currency": "GHS"
+  },
+  "03-cedi-symbol.jpg": {
+    "supplier": "MAKOLA MART LTD",
+    "date": "2026-03-12",
+    "total": 88,
+    "currency": "GHS"
+  },
+  "04-vat-receipt.jpg": {
+    "supplier": "BLUE WAVE SERVICES LTD",
+    "date": "2026-06-15",
+    "total": 115,
+    "currency": "GHS"
+  },
+  "05-subtotal-and-total.jpg": {
+    "supplier": "SUNRISE ENTERPRISES LIMITED",
+    "date": null,
+    "total": 100,
+    "currency": "GHS"
+  },
+  "06-cash-and-change.jpg": {
+    "supplier": "KOFI SHOP LTD",
+    "date": null,
+    "total": 100,
+    "currency": "GHS"
+  },
+  "07-tilted.jpg": {
+    "supplier": "KOFI SHOP LTD",
+    "date": "2026-03-12",
+    "total": 45.5,
+    "currency": "GHS"
+  },
+  "08-low-contrast.jpg": {
+    "supplier": "KOFI SHOP LTD",
+    "date": "2026-03-12",
+    "total": 45.5,
+    "currency": "GHS"
+  },
+  "09-long-receipt.png": {
+    "supplier": "LONG MARKET LTD",
+    "date": "2026-08-20",
+    "total": 250,
+    "currency": "GHS"
+  },
+  "10-png-receipt.png": {
+    "supplier": "PNG CORNER SHOP",
+    "date": "2026-04-01",
+    "total": 19.99,
+    "currency": "GHS"
+  },
+  "11-jpeg-receipt.jpeg": {
+    "supplier": "JPEG CORNER SHOP",
+    "date": "2026-04-01",
+    "total": 19.99,
+    "currency": "GHS"
+  },
+  "12-phone-camera.jpg": {
+    "supplier": "KOFI SHOP LTD",
+    "date": "2026-03-12",
+    "total": 45.5,
+    "currency": "GHS"
+  },
+  "13-simple-receipt.pdf": {
+    "supplier": "KOFI SHOP LTD",
+    "date": "2026-03-12",
+    "total": 45.5,
+    "currency": "GHS"
+  }
+}

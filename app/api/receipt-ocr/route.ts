@@ -23,23 +23,16 @@ export { RECEIPT_OCR_ERROR_CODES as OCR_ERROR_CODES } from "@/lib/receipt/perfor
 function jsonForOcrResult(result: PerformReceiptOcrResult, documentId: string | null) {
   const doc = documentId || undefined
   if (!result.ok) {
-    if (result.suggestions !== undefined) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: result.error,
-          code: result.code,
-          suggestions: result.suggestions,
-          confidence: result.confidence ?? {},
-          ...(doc ? { document_id: doc } : {}),
-        },
-        { status: result.httpStatus }
-      )
+    const body = {
+      ok: false as const,
+      error: result.error,
+      code: result.code,
+      stage: result.stage ?? "ocr",
+      ...(result.suggestions !== undefined ? { suggestions: result.suggestions } : {}),
+      ...(result.confidence !== undefined ? { confidence: result.confidence } : {}),
+      ...(doc ? { document_id: doc } : {}),
     }
-    return NextResponse.json(
-      { error: result.error, code: result.code, ...(doc ? { document_id: doc } : {}) },
-      { status: result.httpStatus }
-    )
+    return NextResponse.json(body, { status: result.httpStatus })
   }
   return NextResponse.json({
     ok: true,
@@ -55,13 +48,21 @@ export async function POST(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized", code: "OCR_UNAUTHORIZED", stage: "auth" },
+        { status: 401 }
+      )
+    }
 
     let body: Record<string, unknown>
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: "Invalid JSON body", code: "OCR_BAD_REQUEST", stage: "request" },
+        { status: 400 }
+      )
     }
 
     const business_id = typeof body.business_id === "string" ? body.business_id.trim() : ""
@@ -70,12 +71,20 @@ export async function POST(request: NextRequest) {
     const document_type = body.document_type
 
     if (!business_id) {
-      return NextResponse.json({ error: "business_id is required" }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: "business_id is required", code: "OCR_BAD_REQUEST", stage: "request" },
+        { status: 400 }
+      )
     }
 
     if (!document_id && !receipt_path) {
       return NextResponse.json(
-        { error: "document_id or receipt_path is required" },
+        {
+          ok: false,
+          error: "document_id or receipt_path is required",
+          code: "OCR_BAD_REQUEST",
+          stage: "request",
+        },
         { status: 400 }
       )
     }
@@ -100,13 +109,13 @@ export async function POST(request: NextRequest) {
 
     return jsonForOcrResult(run.ocr, run.documentId || null)
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error)
-    const DEV = process.env.NODE_ENV === "development"
-    if (DEV) console.error("[receipt-ocr] error", error)
+    if (process.env.NODE_ENV === "development") console.error("[receipt-ocr] error", error)
     return NextResponse.json(
       {
+        ok: false,
         error: "OCR extraction failed",
-        ...(DEV ? { detail: message, code: "OCR_INTERNAL" } : { code: "OCR_INTERNAL" }),
+        code: "OCR_INTERNAL",
+        stage: "unhandled",
       },
       { status: 500 }
     )
