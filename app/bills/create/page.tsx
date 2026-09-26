@@ -10,6 +10,7 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
+import { hasMeaningfulReceiptSuggestions, scanErrorMessage, useReceiptScanner } from "@/lib/ocr/useReceiptScanner"
 import BillSupplierSelector from "@/components/bills/BillSupplierSelector"
 
 type LineItem = {
@@ -114,6 +115,7 @@ export default function CreateBillPage() {
   const [incomingDocumentId, setIncomingDocumentId] = useState<string | null>(null)
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrError, setOcrError] = useState("")
+  const scanner = useReceiptScanner()
   const [ocrSuggestions, setOcrSuggestions] = useState<{
     supplier_name?: string
     document_number?: string
@@ -445,51 +447,29 @@ export default function CreateBillPage() {
       }
       setIncomingDocumentId(docId)
 
-      const res = await fetch("/api/receipt-ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          business_id: businessId,
-          document_id: docId,
-          document_type: "supplier_bill",
-        }),
-      })
-      const parsed = await readApiJson<{
-        ok?: boolean
-        error?: string
-        suggestions?: Record<string, unknown>
-        confidence?: Record<string, string>
-      }>(res)
-      if (!parsed.ok) {
-        const looksLikeHtml = /An error occurred|<!DOCTYPE/i.test(parsed.snippet)
-        setOcrError(
-          looksLikeHtml
-            ? "Receipt scan failed: the server returned an error page (often OCR timeout or crash on serverless). Try a smaller/clearer image, add RECEIPT_OCR_USE_STUB=true in .env.local to test without OCR, or fill the form manually."
-            : `Receipt scan failed (${parsed.snippet || "invalid response"}). Try again or fill manually.`
-        )
+      let scanned: Awaited<ReturnType<typeof scanner.scan>> | null = null
+      try {
+        scanned = await scanner.scan(receiptFile)
+      } catch (err: unknown) {
+        setOcrError(scanErrorMessage(err))
         setOcrLoading(false)
         return
       }
-      const data = parsed.data
-      if (!res.ok) {
-        setOcrError(typeof data.error === "string" ? data.error : "OCR failed")
+      if (!scanned || !hasMeaningfulReceiptSuggestions(scanned)) {
+        setOcrError("Couldn't read this receipt automatically. You can still enter the bill manually.")
         setOcrLoading(false)
         return
       }
-      if (!data.ok || !data.suggestions) {
-        setOcrError(
-          typeof data.error === "string"
-            ? data.error
-            : "Couldn't confidently read this receipt. Please fill manually."
-        )
-        setOcrLoading(false)
-        return
-      }
-      const s = data.suggestions
+      const s = scanned.suggestions
       setOcrSuggestions(s)
-      const conf = data.confidence || {}
+      const conf = scanned.confidence || {}
       const allLow = Object.keys(conf).length > 0 && Object.values(conf).every((c) => c === "LOW")
-      if (allLow) setOcrError("Couldn't confidently read this receipt. Please fill manually.")
+      if (allLow) setOcrError("Couldn't read this receipt automatically. You can still enter the bill manually.")
+      if (scanned.warnings?.includes("ambiguous_date")) {
+        setOcrError("The receipt date is unclear. Please check it before saving.")
+      } else if (scanned.warnings?.includes("day_month_order_assumed")) {
+        setOcrError("Date was read as day/month. Please confirm it.")
+      }
       const next: typeof ocrSuggestedFields = {}
       if (s.supplier_name != null && String(s.supplier_name).trim()) {
         setSupplierName(String(s.supplier_name).trim())
@@ -987,7 +967,7 @@ export default function CreateBillPage() {
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                           </svg>
-                          Extracting…
+                          {scanner.phase === "loading-model" ? "Loading receipt scanner…" : "Reading receipt…"}
                         </>
                       ) : (
                         <>
@@ -999,7 +979,7 @@ export default function CreateBillPage() {
                       )}
                     </button>
                     <p className="text-xs text-slate-500">
-                      Pre-fills supplier, bill number, date, and total. You must still click &quot;Create Bill&quot; to save.
+                      Pre-fills supplier, bill number, date, and total. Review and correct extraction, then click &quot;Create Bill&quot; to save.
                     </p>
                     {incomingDocumentId && businessId && (
                       <p className="text-xs text-slate-600">

@@ -1143,7 +1143,7 @@ export async function executeFinzaAssistTool(
               suggestions: ocr.suggestions ?? null,
               confidence: ocr.confidence ?? null,
               document_id: run.documentId || null,
-              note: "OCR is suggestion-only; user should confirm before booking.",
+              note: "Receipt scanning runs in the browser on the expense or bill form. Figures are suggestion-only and are not posted to the ledger.",
             }),
           }
         }

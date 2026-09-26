@@ -108,6 +108,15 @@ describe("receiptOcr parse", () => {
     expect(suggestions.currency_code).toBe("GHS")
   })
 
+  it("parses TOTAL GHC when a cedi sign is read as C", () => {
+    const text = "MAKOLA MART LTD\n12/03/2026\nTOTAL GHC 88.00"
+    const { suggestions } = parseReceiptText(text, "expense")
+    expect(suggestions.supplier_name).toBe("MAKOLA MART LTD")
+    expect(suggestions.document_date).toBe("2026-03-12")
+    expect(suggestions.total).toBe(88)
+    expect(suggestions.currency_code).toBe("GHS")
+  })
+
   it("parses GHS 120 without decimals", () => {
     const text = "Amount GHS 120"
     const { suggestions } = parseReceiptText(text, "expense")
@@ -184,5 +193,48 @@ describe("receiptOcr parse", () => {
     expect(suggestions.getfund_amount).toBe(8.53)
     expect(suggestions.vat_amount).toBe(53.71)
     expect(suggestions.subtotal).toBeCloseTo(341, 5)
+  })
+
+  it("prefers grand total over cash and change", () => {
+    const text = ["KOFI SHOP LTD", "SUBTOTAL 80.00", "TOTAL GHS 100.00", "CASH 120.00", "CHANGE 20.00"].join("\n")
+    const { suggestions, field_sources } = parseReceiptText(text, "expense", "GHS")
+    expect(suggestions.total).toBe(100)
+    expect(field_sources?.total).toMatch(/TOTAL/i)
+    expect(suggestions.supplier_name).toBe("KOFI SHOP LTD")
+  })
+
+  it("parses DD/MM/YY as day-month", () => {
+    const text = "DATE: 12/03/26\nTOTAL GHS 45.50"
+    const { suggestions, warnings } = parseReceiptText(text, "expense", "GHS")
+    expect(suggestions.document_date).toBe("2026-03-12")
+    expect(suggestions.total).toBe(45.5)
+    expect(warnings).toContain("day_month_order_assumed")
+  })
+
+  it("does not invent a date when two different dates are present", () => {
+    const text = "01/02/2026\n03/04/2026\nTOTAL 10"
+    const { suggestions, warnings } = parseReceiptText(text, "expense", "GHS")
+    expect(suggestions.document_date).toBeUndefined()
+    expect(warnings).toContain("ambiguous_date")
+    expect(suggestions.total).toBe(10)
+  })
+
+  it("does not hard-code GHS when no currency is printed and no business default is passed", () => {
+    const { suggestions } = parseReceiptText("TOTAL 99.00", "expense")
+    expect(suggestions.total).toBe(99)
+    expect(suggestions.currency_code).toBeUndefined()
+  })
+
+  it("returns no fields for blank OCR text", () => {
+    const { suggestions } = parseReceiptText("   \n", "expense")
+    expect(suggestions.supplier_name).toBeUndefined()
+    expect(suggestions.total).toBeUndefined()
+    expect(suggestions.document_date).toBeUndefined()
+  })
+
+  it("ignores malformed OCR noise", () => {
+    const { suggestions } = parseReceiptText("@@@\n###\n----", "expense", "GHS")
+    expect(suggestions.total).toBeUndefined()
+    expect(suggestions.supplier_name).toBeUndefined()
   })
 })

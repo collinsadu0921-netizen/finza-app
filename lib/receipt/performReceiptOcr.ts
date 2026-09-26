@@ -6,7 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { getUserRole } from "@/lib/userRoles"
 import { downscaleReceiptDataUrlForOcr } from "@/lib/receipt/downscaleReceiptImageForOcr"
-import { getReceiptOcrProvider, parseReceiptText } from "@/lib/receipt/receiptOcr"
+import { getReceiptOcrProvider, isServerImageOcrDisabled, parseReceiptText } from "@/lib/receipt/receiptOcr"
 import type { DocumentType, ReceiptOcrConfidence, ReceiptOcrSuggestions } from "@/lib/receipt/receiptOcr"
 import { RECEIPT_OCR_PARSER_VERSION, TESSERACT_PROVIDER_VERSION } from "@/lib/documents/constants"
 import { PDF_EXTRACTION_PROVIDER_LABEL, type PdfExtractionMode } from "@/lib/receipt/extractReceiptPdf"
@@ -93,7 +93,7 @@ async function fetchReceiptAsset(url: string): Promise<FetchedAsset> {
 
 export type ReceiptOcrDiagnostics = {
   raw_ocr_text: string
-  provider: "tesseract" | "pdfjs+tesseract"
+  provider: "tesseract" | "pdfjs" | "pdfjs+tesseract"
   provider_version: string | null
   parser_version: string
   extraction_mode?: ReceiptExtractionMode
@@ -150,6 +150,7 @@ export type PerformReceiptOcrFailure = {
   error: string
   code: string
   httpStatus: number
+  stage?: string
   suggestions?: Record<string, unknown>
   confidence?: Record<string, string>
   diagnostics?: ReceiptOcrDiagnostics
@@ -188,6 +189,16 @@ export async function performReceiptOcr(
         code: RECEIPT_OCR_ERROR_CODES.OCR_FORBIDDEN,
         httpStatus: 403,
       }
+    }
+  }
+
+  if (isServerImageOcrDisabled()) {
+    return {
+      ok: false,
+      error: "Receipt scanning runs in your browser. You can still enter the expense manually.",
+      code: "OCR_CLIENT_REQUIRED",
+      stage: "server_inference",
+      httpStatus: 410,
     }
   }
 
@@ -238,7 +249,7 @@ export async function performReceiptOcr(
       const pdf = await extractReceiptPdf(asset.buffer)
       rawText = pdf.rawText
       diagnosticsBase = {
-        provider: "pdfjs+tesseract",
+        provider: "pdfjs",
         provider_version: PDF_EXTRACTION_PROVIDER_LABEL,
         extraction_mode: pdf.extraction_mode,
         page_count: pdf.page_count,

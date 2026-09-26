@@ -1,5 +1,5 @@
 /** Version string stored on extraction rows when parser logic in `lib/receipt/receiptOcr.ts` changes. */
-export const RECEIPT_OCR_PARSER_VERSION = "receiptOcr_parseReceiptText@v1"
+export const RECEIPT_OCR_PARSER_VERSION = "receiptOcr_parseReceiptText@v2"
 
 /** tesseract.js major line — keep in sync with package.json when upgrading. */
 export const TESSERACT_PROVIDER_VERSION = "tesseract.js@7"

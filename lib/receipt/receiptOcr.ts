@@ -33,9 +33,19 @@ export type ReceiptOcrConfidence = {
   total?: ConfidenceLevel
 }
 
+export type ReceiptFieldSources = {
+  supplier_name?: string
+  document_date?: string
+  total?: string
+  currency_code?: string
+}
+
 export type ReceiptOcrResult = {
   suggestions: ReceiptOcrSuggestions
   confidence: ReceiptOcrConfidence
+  /** Line or snippet that produced each field. Review aid only. */
+  field_sources?: ReceiptFieldSources
+  warnings?: string[]
 }
 
 export interface ReceiptOcrProvider {
@@ -46,7 +56,7 @@ const NOISE_WORDS = /^(receipt|invoice|bill|tel|tin|vat|v\.a\.t|nhil|getfund|cov
 const SUPPLIER_NOISE = /^(official\s+receipt|customer\s+particulars|date\s*:?|amount\s*:?|receipt\s*#|invoice\s*#|bill\s*#|mobile\s*money|ref\s*:?|reference)$/i
 
 const CURRENCY_PATTERNS: Array<{ re: RegExp; code: string }> = [
-  { re: /GH[S¢₵]|GHS|₵|Cedi/i, code: "GHS" },
+  { re: /GH[CS¢₵]|GHS|GHC|₵|Cedi/i, code: "GHS" },
   { re: /₦|NGN/i, code: "NGN" },
   { re: /KES|KSh/i, code: "KES" },
   { re: /UGX/i, code: "UGX" },
@@ -55,7 +65,7 @@ const CURRENCY_PATTERNS: Array<{ re: RegExp; code: string }> = [
   { re: /CFA|XOF|XAF/i, code: "XOF" },
 ]
 
-const ALL_CCY = `(?:GH[S¢₵]|GHS|₵|Cedi|₦|NGN|KES|KSh|UGX|TZS|TSh|ZAR|CFA|XOF|XAF)`
+const ALL_CCY = `(?:GH[CS¢₵]|GHS|GHC|₵|Cedi|₦|NGN|KES|KSh|UGX|TZS|TSh|ZAR|CFA|XOF|XAF)`
 // (?<!SUB-) avoids matching "TOTAL" inside "SUB-TOTAL" (prefer GRAND TOTAL / real final total).
 const TOTAL_LABELS = new RegExp(
   `\\b(Grand Total|(?<!SUB-)TOTAL|Amount Due|Balance Due|Net Total|Amount Payable|AMOUNT)\\s*[:]?\\s*${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)`,
@@ -73,8 +83,16 @@ const MONTH_NAMES: Record<string, string> = {
 }
 
 const DATE_PATTERNS: Array<{ re: RegExp; fn: (m: RegExpMatchArray) => string | null }> = [
-  { re: /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/, fn: (m) => `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` },
-  { re: /(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/, fn: (m) => `${m[1]}-${m[2]!.padStart(2, "0")}-${m[3]!.padStart(2, "0")}` },
+  { re: /(?<!\d)(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?!\d)/, fn: (m) => `${m[1]}-${m[2]!.padStart(2, "0")}-${m[3]!.padStart(2, "0")}` },
+  { re: /(?<!\d)(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?!\d)/, fn: (m) => `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` },
+  {
+    re: /(?<!\d)(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})(?!\d)/,
+    fn: (m) => {
+      const yy = Number(m[3])
+      const year = yy >= 70 ? 1900 + yy : 2000 + yy
+      return `${year}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}`
+    },
+  },
   { re: /(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})/i, fn: (m) => { const mon = MONTH_NAMES[m[2]!.toLowerCase().slice(0, 3)]; return mon ? `${m[3]}-${mon}-${m[1]!.padStart(2, "0")}` : null } },
   { re: /(?:MON|TUE|WED|THU|FRI|SAT|SUN)[A-Z]*\s*,?\s*(\d{1,2})\s+(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s*,?\s*(\d{4})/i, fn: (m) => { const mon = MONTH_NAMES[m[2]!.toLowerCase()]; return mon ? `${m[3]}-${mon}-${m[1]!.padStart(2, "0")}` : null } },
   { re: /(\d{1,2})\s+(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s*,?\s*(\d{4})/i, fn: (m) => { const mon = MONTH_NAMES[m[2]!.toLowerCase()]; return mon ? `${m[3]}-${mon}-${m[1]!.padStart(2, "0")}` : null } },
@@ -111,79 +129,160 @@ function isPlausibleDate(iso: string): boolean {
   return d <= future
 }
 
-function parseDate(text: string): { value: string; confidence: ConfidenceLevel } | undefined {
-  const hasExplicitDateLine = /\bDATE\s*:/i.test(text)
-  for (const { re, fn } of DATE_PATTERNS) {
-    const m = text.match(re)
-    if (m) {
+function calendarPartsValid(iso: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return false
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false
+  const dt = new Date(Date.UTC(year, month - 1, day))
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day
+}
+
+function numericDayMonthAmbiguous(snippet: string): boolean {
+  const m = snippet.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/)
+  if (!m) return false
+  const a = Number(m[1])
+  const b = Number(m[2])
+  return a >= 1 && a <= 12 && b >= 1 && b <= 12
+}
+
+function parseDate(
+  text: string,
+  warnings: string[]
+): { value: string; confidence: ConfidenceLevel; source: string } | undefined {
+  const lines = text.split(/\r?\n/)
+  const hits: Array<{ iso: string; source: string; labeled: boolean; ambiguous: boolean }> = []
+  for (const line of lines) {
+    const labeled = /\bDATE\b/i.test(line)
+    for (const { re, fn } of DATE_PATTERNS) {
+      const m = line.match(re)
+      if (!m) continue
       const iso = fn(m)
-      if (iso && isPlausibleDate(iso)) {
-        const confidence = hasExplicitDateLine ? "HIGH" : "MEDIUM"
-        return { value: iso, confidence }
-      }
-      if (iso) return { value: iso, confidence: "LOW" }
+      if (!iso || !calendarPartsValid(iso)) continue
+      hits.push({
+        iso,
+        source: line.trim(),
+        labeled,
+        ambiguous: numericDayMonthAmbiguous(m[0]),
+      })
+      break
     }
   }
+  if (hits.length === 0) return undefined
+  const labeledHits = hits.filter((h) => h.labeled)
+  const pool = labeledHits.length > 0 ? labeledHits : hits
+  const distinct = [...new Set(pool.map((h) => h.iso))]
+  if (distinct.length > 1) {
+    warnings.push("ambiguous_date")
+    return undefined
+  }
+  const pick = pool[0]!
+  if (!isPlausibleDate(pick.iso)) {
+    return { value: pick.iso, confidence: "LOW", source: pick.source }
+  }
+  if (pick.ambiguous) {
+    warnings.push("day_month_order_assumed")
+    return { value: pick.iso, confidence: "MEDIUM", source: pick.source }
+  }
+  return {
+    value: pick.iso,
+    confidence: pick.labeled ? "HIGH" : "MEDIUM",
+    source: pick.source,
+  }
+}
+
+function detectCurrency(
+  text: string,
+  businessCurrency?: string
+): { code: string; source?: string; fromBusinessDefault: boolean } | undefined {
+  for (const { re, code } of CURRENCY_PATTERNS) {
+    re.lastIndex = 0
+    if (!re.test(text)) continue
+    re.lastIndex = 0
+    const source = text.split(/\r?\n/).find((line) => {
+      re.lastIndex = 0
+      return re.test(line)
+    })
+    return { code, source: source?.trim(), fromBusinessDefault: false }
+  }
+  if (businessCurrency) return { code: businessCurrency, fromBusinessDefault: true }
   return undefined
 }
 
-function detectCurrency(text: string, businessCurrency?: string): string | undefined {
-  for (const { re, code } of CURRENCY_PATTERNS) {
-    if (re.test(text)) return code
-  }
-  return businessCurrency || "GHS"
+const AMOUNT_REJECT_LINE =
+  /\b(sub[\s-]*total|vat|v\.a\.t|nhil|get[\s-]*fund|covid|discount|change|tendered|cash|tip|balance\s+tendered)\b/i
+
+function lineAtIndex(text: string, index: number): string {
+  const start = text.lastIndexOf("\n", Math.max(0, index - 1)) + 1
+  const end = text.indexOf("\n", index)
+  return text.slice(start, end === -1 ? text.length : end).trim()
 }
 
-function extractTotal(text: string): { value: number; confidence: ConfidenceLevel } | undefined {
-  const candidates: Array<{ value: number; label: string; isAmountLine: boolean }> = []
+function totalRank(label: string): number {
+  const l = label.toUpperCase()
+  if (l.includes("GRAND")) return 100
+  if (l.includes("AMOUNT DUE") || l.includes("TOTAL DUE")) return 90
+  if (l.includes("BALANCE DUE")) return 85
+  if (l.includes("NET TOTAL") || l.includes("NET")) return 80
+  if (l.includes("PAYABLE")) return 70
+  if (l === "TOTAL" || l.startsWith("TOTAL")) return 75
+  if (l === "AMOUNT") return 40
+  if (l === "CURRENCY") return 15
+  return 0
+}
+
+function extractTotal(text: string): { value: number; confidence: ConfidenceLevel; source: string } | undefined {
+  const candidates: Array<{ value: number; label: string; source: string; index: number }> = []
   let m: RegExpExecArray | null
+  const push = (value: number | undefined, label: string, index: number, source: string) => {
+    if (value == null || value <= 0) return
+    if (AMOUNT_REJECT_LINE.test(source) && !/\b(grand\s+total|amount\s+due|balance\s+due|net\s+total)\b/i.test(source)) {
+      return
+    }
+    candidates.push({ value, label: label.toUpperCase(), source, index })
+  }
+
   const totalRe = new RegExp(TOTAL_LABELS.source, "gi")
   while ((m = totalRe.exec(text)) !== null) {
-    const value = parseNumber(m[2] ?? m[3] ?? "")
-    if (value != null && value > 0) candidates.push({ value, label: (m[1] || "").toUpperCase(), isAmountLine: /AMOUNT/i.test(m[1] || "") })
+    push(parseNumber(m[2] ?? ""), m[1] || "TOTAL", m.index, lineAtIndex(text, m.index))
   }
   const amountRe = new RegExp(AMOUNT_LINE.source, "gi")
   while ((m = amountRe.exec(text)) !== null) {
-    const value = parseNumber(m[1]!)
-    if (value != null && value > 0) candidates.push({ value, label: "AMOUNT", isAmountLine: true })
+    push(parseNumber(m[1]!), "AMOUNT", m.index, lineAtIndex(text, m.index))
   }
-  // Multi-line totals: label on one line, amount (optionally prefixed with currency) on the next
   if (candidates.length === 0) {
     const labelOnlyRe =
-      /^\s*(Grand\s+Total|(?<!SUB-)TOTAL|Amount\s+Due|Balance\s+Due|Net\s+Total|Amount\s+Payable|AMOUNT)\s*[:]?\s*$/i
-    const amountOnlyRe = new RegExp(`^${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)\\s*${ALL_CCY}?$`)
+      /^\s*(Grand\s+Total|(?<!SUB-?)TOTAL|Amount\s+Due|Balance\s+Due|Net\s+Total|Amount\s+Payable|AMOUNT)\s*[:]?\s*$/i
+    const amountOnlyRe = new RegExp(`^${ALL_CCY}?\\s*([\\d,]+\\.?\\d*)\\s*${ALL_CCY}?$`, "i")
     const splitLines = text.split(/\r?\n/)
     for (let i = 0; i < splitLines.length - 1; i++) {
-      if (labelOnlyRe.test(splitLines[i]!)) {
-        const next = (splitLines[i + 1] ?? "").trim()
-        const nm = next.match(amountOnlyRe)
-        if (nm && nm[1]) {
-          const value = parseNumber(nm[1])
-          if (value != null && value > 0) candidates.push({ value, label: "TOTAL", isAmountLine: false })
-        }
-      }
+      const labelLine = splitLines[i] ?? ""
+      const lm = labelLine.match(labelOnlyRe)
+      if (!lm) continue
+      const next = (splitLines[i + 1] ?? "").trim()
+      const nm = next.match(amountOnlyRe)
+      if (!nm?.[1]) continue
+      const label = (lm[1] || "TOTAL").toUpperCase()
+      push(parseNumber(nm[1]), label.includes("AMOUNT") && !label.includes("TOTAL") ? "AMOUNT" : label, i, `${labelLine.trim()} ${next}`.trim())
     }
   }
   if (candidates.length === 0) {
     const currencyAmountRe = new RegExp(CURRENCY_AMOUNT.source, "gi")
     while ((m = currencyAmountRe.exec(text)) !== null) {
-      const value = parseNumber(m[1] || m[2] || "")
-      if (value != null && value > 0) candidates.push({ value, label: "CURRENCY", isAmountLine: false })
+      const source = lineAtIndex(text, m.index)
+      if (AMOUNT_REJECT_LINE.test(source)) continue
+      push(parseNumber(m[1] || m[2] || ""), "CURRENCY", m.index, source)
     }
   }
-  if (candidates.length === 0) {
-    const tenderedRe = new RegExp(TENDERED_LABELS.source, "gi")
-    while ((m = tenderedRe.exec(text)) !== null) {
-      const value = parseNumber(m[2]!)
-      if (value != null && value > 0) candidates.push({ value, label: m[1]!, isAmountLine: false })
-    }
-  }
-  const preferred = candidates.find((c) => c.isAmountLine || /TOTAL|Grand|Amount Due|Balance|Net|Payable|AMOUNT/.test(c.label))
-  const fallback = candidates.filter((c) => !/Change|Tendered|Cash/.test(c.label))
-  const pick = preferred ?? (fallback.length ? fallback.reduce((a, b) => (a.value > b.value ? a : b)) : null) ?? candidates[0]
-  if (!pick) return undefined
-  const confidence = pick.isAmountLine || /TOTAL|AMOUNT|Amount Due/.test(pick.label) ? "HIGH" : fallback.length ? "MEDIUM" : "LOW"
-  return { value: pick.value, confidence }
+
+  if (candidates.length === 0) return undefined
+  candidates.sort((a, b) => totalRank(b.label) - totalRank(a.label) || b.index - a.index)
+  const pick = candidates[0]!
+  const rank = totalRank(pick.label)
+  const confidence: ConfidenceLevel = rank >= 70 ? "HIGH" : rank >= 40 ? "MEDIUM" : "LOW"
+  return { value: pick.value, confidence, source: pick.source }
 }
 
 /** City/country line (e.g. ACCRA, GHANA) — not the trading name */
@@ -275,6 +374,7 @@ function textLooksFinzaServiceReceipt(lines: string[]): boolean {
 
 function scoreSupplierCandidate(t: string, lineIndex: number, lines: string[]): number {
   if (t.length < 3 || t.length > 120) return -1e6
+  if (!/[A-Za-z]{2,}/.test(t)) return -1e6
   if (NOISE_WORDS.test(t)) return -1e6
   if (SUPPLIER_NOISE.test(t)) return -1e6
   if (/^\d+$/.test(t)) return -1e6
@@ -344,6 +444,7 @@ function extractSupplierName(lines: string[]): { value: string; confidence: Conf
   for (const line of lines.slice(0, 8)) {
     const t = line.trim()
     if (t.length < 3 || t.length > 100) continue
+    if (!/[A-Za-z]{2,}/.test(t)) continue
     if (NOISE_WORDS.test(t) || SUPPLIER_NOISE.test(t)) continue
     if (TAX_OR_FIGURE_HEAD_LINE.test(t)) continue
     if (isLikelyAddressOrContactLine(t)) continue
@@ -404,31 +505,37 @@ function stubReceiptTextForDev(): string {
   ].join("\n")
 }
 
-/** Set RECEIPT_OCR_USE_STUB=true to skip Tesseract (faster local dev, no WASM download). */
+/** Set RECEIPT_OCR_USE_STUB=true only in local dev. Production UI never mentions this. */
 const defaultProvider: ReceiptOcrProvider = {
   async extractText(imageDataUrl: string): Promise<string> {
     if (!imageDataUrl?.startsWith("data:")) return ""
     if (process.env.RECEIPT_OCR_USE_STUB === "true") {
       return stubReceiptTextForDev()
     }
-    try {
-      const { extractTextWithTesseract } = await import("./tesseractReceiptOcr")
-      return await extractTextWithTesseract(imageDataUrl)
-    } catch (e) {
-      console.error("[receipt-ocr] Tesseract OCR failed:", e)
-      return ""
-    }
+    return ""
   },
 }
 
 let provider: ReceiptOcrProvider = defaultProvider
+let providerOverridden = false
 
 export function setReceiptOcrProvider(p: ReceiptOcrProvider): void {
   provider = p
+  providerOverridden = true
+}
+
+export function resetReceiptOcrProvider(): void {
+  provider = defaultProvider
+  providerOverridden = false
 }
 
 export function getReceiptOcrProvider(): ReceiptOcrProvider {
   return provider
+}
+
+/** Serverless Tesseract is disabled. Browser OCR is the product path unless a test injects a provider or the dev stub is on. */
+export function isServerImageOcrDisabled(): boolean {
+  return !providerOverridden && process.env.RECEIPT_OCR_USE_STUB !== "true"
 }
 
 export function parseReceiptText(
@@ -439,29 +546,37 @@ export function parseReceiptText(
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const suggestions: ReceiptOcrSuggestions = {}
   const confidence: ReceiptOcrConfidence = {}
+  const field_sources: ReceiptFieldSources = {}
+  const warnings: string[] = []
 
-  const currencyCode = detectCurrency(text, businessCurrency)
-  suggestions.currency_code = currencyCode
+  const currency = detectCurrency(text, businessCurrency)
+  if (currency) {
+    suggestions.currency_code = currency.code
+    if (currency.source) field_sources.currency_code = currency.source
+  }
 
   const supplier = extractSupplierName(lines)
   if (supplier) {
     suggestions.supplier_name = supplier.value
     confidence.supplier_name = supplier.confidence
+    field_sources.supplier_name = supplier.value
   }
 
   const docNum = extractDocumentNumber(text)
   if (docNum) suggestions.document_number = docNum
 
-  const dateResult = parseDate(text)
+  const dateResult = parseDate(text, warnings)
   if (dateResult) {
     suggestions.document_date = dateResult.value
     confidence.document_date = dateResult.confidence
+    field_sources.document_date = dateResult.source
   }
 
   const totalResult = extractTotal(text)
   if (totalResult) {
     suggestions.total = totalResult.value
     confidence.total = totalResult.confidence
+    field_sources.total = totalResult.source
   }
 
   const vat = extractVat(text)
@@ -478,7 +593,12 @@ export function parseReceiptText(
     suggestions.subtotal = suggestions.total - taxSum
   }
 
-  return { suggestions, confidence }
+  return {
+    suggestions,
+    confidence,
+    field_sources,
+    ...(warnings.length ? { warnings } : {}),
+  }
 }
 
 export type ExtractReceiptSuggestionsParams = {

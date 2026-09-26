@@ -188,7 +188,7 @@ export default function AiAssistant({
             next[lastIndex] = {
               ...next[lastIndex],
               content:
-                "No text came back from the AI. If you use Ollama locally, ensure it is running (e.g. ollama serve), set AI_BASE_URL and AI_MODEL in .env.local, and try a shorter question. For receipt scans, try RECEIPT_OCR_USE_STUB=true in .env.local to rule out OCR delays.",
+                "No text came back from the AI. If you use Ollama locally, ensure it is running (e.g. ollama serve), set AI_BASE_URL and AI_MODEL in .env.local, and try a shorter question.",
             }
           }
           return next
@@ -197,7 +197,7 @@ export default function AiAssistant({
     } catch (err: any) {
       const msg =
         err?.name === "AbortError"
-          ? `Request timed out after ${Math.round(AI_FETCH_TIMEOUT_MS / 1000)}s. Receipt OCR plus the language model can be slow — try a smaller/clearer image, or set RECEIPT_OCR_USE_STUB=true for local dev. Confirm your AI backend is running.`
+          ? `Request timed out after ${Math.round(AI_FETCH_TIMEOUT_MS / 1000)}s. Try a shorter question and confirm your AI backend is running.`
           : err?.message || "Failed to get AI response"
       setError(msg)
       setMessages((prev) => {
