@@ -202,7 +202,8 @@ describe("incoming OpenAI extraction", () => {
   })
 
   it("labels inbox states without exposing internal status names", () => {
-    expect(inboxStatusLabel({ status: "extracting" })).toBe("Reading document…")
+    expect(inboxStatusLabel({ status: "extracting" })).toBe("Reading…")
+    expect(inboxStatusLabel({ status: "uploaded" })).toBe("Needs review")
     expect(inboxStatusLabel({ status: "needs_review" })).toBe("Needs review")
     expect(inboxStatusLabel({ status: "reviewed", reviewStatus: "accepted" })).toBe("Ready")
     expect(inboxStatusLabel({ status: "extracted", linked: true })).toBe("Handled")

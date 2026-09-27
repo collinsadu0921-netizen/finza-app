@@ -39,6 +39,8 @@ describe("GET /api/incoming-documents", () => {
           source_type: "expense_form_upload",
           source_email_sender: null,
           source_email_subject: null,
+          inbound_email_message_id: null,
+          mime_type: null,
           status: "extracted",
           review_status: "none",
           created_at: "2026-01-01T00:00:00Z",

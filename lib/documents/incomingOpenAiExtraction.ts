@@ -176,7 +176,7 @@ export function inboxStatusLabel(args: {
 }): string {
   if (args.linked || args.status === "linked") return "Handled"
   if (args.status === "failed") return "Could not read"
-  if (args.status === "uploaded" || args.status === "extracting") return "Reading document…"
+  if (args.status === "extracting") return "Reading…"
   if (args.status === "reviewed" || args.reviewStatus === "accepted") return "Ready"
   return "Needs review"
 }

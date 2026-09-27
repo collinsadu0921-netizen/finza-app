@@ -30,6 +30,8 @@ export type IncomingDocumentListSummary = {
   source_type: string
   source_email_sender: string | null
   source_email_subject: string | null
+  inbound_email_message_id: string | null
+  mime_type: string | null
   status: string
   review_status: string
   created_at: string
@@ -210,7 +212,7 @@ export async function listIncomingDocumentSummaries(
   let q = supabase
     .from("incoming_documents")
     .select(
-      "id, file_name, document_kind, status, review_status, source_type, source_email_sender, source_email_subject, storage_path, linked_entity_type, linked_entity_id, latest_extraction_id, created_at, mime_type",
+      "id, file_name, document_kind, status, review_status, source_type, source_email_sender, source_email_subject, inbound_email_message_id, storage_path, linked_entity_type, linked_entity_id, latest_extraction_id, created_at, mime_type",
       { count: "exact" }
     )
     .eq("business_id", params.businessId)
@@ -288,6 +290,7 @@ export async function listIncomingDocumentSummaries(
     source_type: string
     source_email_sender: string | null
     source_email_subject: string | null
+    inbound_email_message_id: string | null
     storage_path: string | null
     linked_entity_type: string | null
     linked_entity_id: string | null
@@ -337,6 +340,8 @@ export async function listIncomingDocumentSummaries(
       source_type: row.source_type,
       source_email_sender: row.source_email_sender ?? null,
       source_email_subject: row.source_email_subject ?? null,
+      inbound_email_message_id: row.inbound_email_message_id ?? null,
+      mime_type: row.mime_type ?? null,
       status: row.status,
       review_status: row.review_status ?? "none",
       created_at: row.created_at,

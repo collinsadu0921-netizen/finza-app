@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useSearchParams } from "next/navigation"
 import { buildEffectiveParsedFields } from "@/lib/documents/effectiveIncomingFields"
+import { emailOriginLines } from "@/lib/documents/incomingDocumentPresentation"
 import { inboxStatusLabel } from "@/lib/documents/incomingOpenAiExtraction"
 import { buildServiceRoute } from "@/lib/service/routes"
 
@@ -13,6 +14,9 @@ type DocRow = {
   reviewed_fields?: Record<string, unknown> | null
   file_name?: string | null
   source_type?: string | null
+  source_email_sender?: string | null
+  source_email_subject?: string | null
+  created_at?: string | null
   document_kind?: string | null
   mime_type?: string | null
   linked_entity_id?: string | null
@@ -255,6 +259,17 @@ export default function IncomingDocumentReviewPage() {
           </div>
         </div>
       </div>
+
+      {emailOriginLines(document ?? {}).length > 0 ? (
+        <dl className="mt-4 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+          {emailOriginLines(document ?? {}).map((line) => (
+            <div key={line.label}>
+              <dt className="inline text-slate-400">{line.label}: </dt>
+              <dd className="inline text-slate-700">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
 
       {error ? <p className="mt-4 text-sm text-red-700" role="alert">{error}</p> : null}
       {message ? <p className="mt-4 text-sm text-slate-600">{message}</p> : null}
