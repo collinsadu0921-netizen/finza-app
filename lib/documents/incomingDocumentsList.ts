@@ -32,6 +32,7 @@ export type IncomingDocumentListSummary = {
   source_email_subject: string | null
   inbound_email_message_id: string | null
   mime_type: string | null
+  email_received_at: string | null
   status: string
   review_status: string
   created_at: string
@@ -92,6 +93,35 @@ function parseCsvEnums<T extends string>(raw: string | null, allowed: Set<string
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function sanitizeIncomingDocumentSearch(raw: string): string | null {
+  const safe = raw.replace(/[%_,()"\\]/g, "").trim().slice(0, 200)
+  return safe.length > 0 ? safe : null
+}
+
+function quotedIlike(column: string, safe: string): string {
+  return `${column}.ilike."%${safe}%"`
+}
+
+export function extractionFieldSearchFilter(safe: string): string {
+  return [
+    quotedIlike("parsed_json->>supplier_name", safe),
+    quotedIlike("parsed_json->>document_number", safe),
+  ].join(",")
+}
+
+export function incomingDocumentSearchFilter(safe: string, extractionIds: string[]): string {
+  const clauses = [
+    quotedIlike("file_name", safe),
+    quotedIlike("storage_path", safe),
+    quotedIlike("source_email_subject", safe),
+    quotedIlike("source_email_sender", safe),
+  ]
+  if (UUID_RE.test(safe)) clauses.push(`id.eq.${safe}`)
+  const ids = extractionIds.filter((id) => UUID_RE.test(id)).slice(0, 200)
+  if (ids.length > 0) clauses.push(`latest_extraction_id.in.(${ids.join(",")})`)
+  return clauses.join(",")
+}
 
 export function parseIncomingDocumentsListQuery(searchParams: URLSearchParams): ParsedListQuery {
   const businessId = searchParams.get("business_id")?.trim() ?? ""
@@ -255,18 +285,19 @@ export async function listIncomingDocumentSummaries(
   }
 
   if (params.search) {
-    const safe = params.search.replace(/%/g, "").replace(/_/g, "").replace(/,/g, "").trim()
-    if (safe.length > 0) {
-      const pattern = `%${safe}%`
-      if (UUID_RE.test(safe)) {
-        q = q.or(
-          `file_name.ilike.${pattern},storage_path.ilike.${pattern},source_email_subject.ilike.${pattern},source_email_sender.ilike.${pattern},id.eq.${safe}`
-        )
-      } else {
-        q = q.or(
-          `file_name.ilike.${pattern},storage_path.ilike.${pattern},source_email_subject.ilike.${pattern},source_email_sender.ilike.${pattern}`
-        )
+    const safe = sanitizeIncomingDocumentSearch(params.search)
+    if (safe) {
+      const matched = await supabase
+        .from("incoming_document_extractions")
+        .select("id")
+        .eq("business_id", params.businessId)
+        .or(extractionFieldSearchFilter(safe))
+        .limit(200)
+      if (matched.error) {
+        throw new Error(matched.error.message || "Failed to search extracted fields")
       }
+      const extractionIds = (matched.data ?? []).map((row) => String((row as { id?: string }).id || "")).filter(Boolean)
+      q = q.or(incomingDocumentSearchFilter(safe, extractionIds))
     }
   }
 
@@ -326,6 +357,24 @@ export async function listIncomingDocumentSummaries(
     }
   }
 
+  const messageIds = [...new Set(docRows.map((row) => row.inbound_email_message_id).filter(Boolean))] as string[]
+  const receivedAt = new Map<string, string>()
+  if (messageIds.length > 0) {
+    const { data: messages, error: messageErr } = await supabase
+      .from("inbound_email_messages")
+      .select("id, received_at")
+      .eq("business_id", params.businessId)
+      .in("id", messageIds)
+    if (messageErr) {
+      throw new Error(messageErr.message || "Failed to load email received times")
+    }
+    for (const message of messages ?? []) {
+      const id = String((message as { id?: string }).id || "")
+      const at = (message as { received_at?: string | null }).received_at
+      if (id && at) receivedAt.set(id, at)
+    }
+  }
+
   let summaries: IncomingDocumentListSummary[] = docRows.map((row) => {
     const ext = row.latest_extraction_id ? extMap.get(row.latest_extraction_id) : undefined
     const warnings = ext?.extraction_warnings
@@ -342,6 +391,7 @@ export async function listIncomingDocumentSummaries(
       source_email_subject: row.source_email_subject ?? null,
       inbound_email_message_id: row.inbound_email_message_id ?? null,
       mime_type: row.mime_type ?? null,
+      email_received_at: row.inbound_email_message_id ? receivedAt.get(row.inbound_email_message_id) ?? null : null,
       status: row.status,
       review_status: row.review_status ?? "none",
       created_at: row.created_at,

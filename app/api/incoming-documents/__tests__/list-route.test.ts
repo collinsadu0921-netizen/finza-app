@@ -41,6 +41,7 @@ describe("GET /api/incoming-documents", () => {
           source_email_subject: null,
           inbound_email_message_id: null,
           mime_type: null,
+          email_received_at: null,
           status: "extracted",
           review_status: "none",
           created_at: "2026-01-01T00:00:00Z",

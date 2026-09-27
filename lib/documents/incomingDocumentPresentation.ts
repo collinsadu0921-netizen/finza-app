@@ -130,13 +130,18 @@ export function emailOriginLines(doc: {
   source_email_subject?: string | null
   file_name?: string | null
   created_at?: string | null
+  email_received_at?: string | null
 }): Array<{ label: string; value: string }> {
   if (doc.source_type !== "email_inbound") return []
   const lines: Array<{ label: string; value: string }> = []
   if (doc.source_email_sender?.trim()) lines.push({ label: "From", value: doc.source_email_sender.trim() })
   if (doc.source_email_subject?.trim()) lines.push({ label: "Subject", value: doc.source_email_subject.trim() })
-  const received = formatInboxDate(doc.created_at ?? null)
+  const received = formatInboxDate(doc.email_received_at ?? null)
   if (received) lines.push({ label: "Received", value: received })
+  else {
+    const added = formatInboxDate(doc.created_at ?? null)
+    if (added) lines.push({ label: "Added", value: added })
+  }
   if (doc.file_name?.trim()) lines.push({ label: "Attachment", value: doc.file_name.trim() })
   return lines
 }

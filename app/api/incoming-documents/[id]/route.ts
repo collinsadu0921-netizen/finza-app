@@ -50,7 +50,19 @@ export async function GET(request: NextRequest, context: RouteContext) {
       preview_url = signed?.signedUrl ?? null
     }
 
-    return NextResponse.json({ ...payload, preview_url })
+    let email_received_at: string | null = null
+    const messageId = typeof doc.inbound_email_message_id === "string" ? doc.inbound_email_message_id : ""
+    if (doc.source_type === "email_inbound" && messageId) {
+      const { data: message } = await supabase
+        .from("inbound_email_messages")
+        .select("received_at")
+        .eq("id", messageId)
+        .eq("business_id", businessId)
+        .maybeSingle()
+      email_received_at = typeof message?.received_at === "string" ? message.received_at : null
+    }
+
+    return NextResponse.json({ ...payload, preview_url, email_received_at })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
     console.error("[incoming-documents] GET", error)

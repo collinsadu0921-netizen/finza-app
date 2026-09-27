@@ -107,7 +107,25 @@ describe("incoming document inbox presentation", () => {
       source_email_subject: "Your Vercel invoice for July",
       file_name: "Invoice-UPWOCJMT-0004.pdf",
       created_at: "2026-07-29T10:00:00.000Z",
-    }).map((line) => line.label)).toEqual(["From", "Subject", "Received", "Attachment"])
+    }).map((line) => line.label)).toEqual(["From", "Subject", "Added", "Attachment"])
+    expect(emailOriginLines({
+      source_type: "email_inbound",
+      source_email_sender: "billing@vercel.com",
+      source_email_subject: "Your Vercel invoice for July",
+      file_name: "Invoice-UPWOCJMT-0004.pdf",
+      created_at: "2026-07-29T10:00:00.000Z",
+    }).map((line) => `${line.label}:${line.value}`)).toEqual([
+      "From:billing@vercel.com",
+      "Subject:Your Vercel invoice for July",
+      "Added:Jul 29, 2026",
+      "Attachment:Invoice-UPWOCJMT-0004.pdf",
+    ])
+    expect(emailOriginLines({
+      source_type: "email_inbound",
+      source_email_sender: "billing@vercel.com",
+      created_at: "2026-07-30T10:00:00.000Z",
+      email_received_at: "2026-07-29T08:00:00.000Z",
+    }).find((line) => line.label === "Received")?.value).toBe("Jul 29, 2026")
     expect(emailOriginLines({ source_type: "manual_upload", file_name: "scan.pdf" })).toEqual([])
     expect(emailOriginLines({ source_type: "email_inbound", source_email_sender: "billing@vercel.com" }).some((line) => line.label === "Subject")).toBe(false)
   })

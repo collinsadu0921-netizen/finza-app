@@ -17,6 +17,7 @@ type DocRow = {
   source_email_sender?: string | null
   source_email_subject?: string | null
   created_at?: string | null
+  email_received_at?: string | null
   document_kind?: string | null
   mime_type?: string | null
   linked_entity_id?: string | null
@@ -106,6 +107,7 @@ export default function IncomingDocumentReviewPage() {
       return
     }
     const doc = (data?.document ?? null) as DocRow | null
+    if (doc && typeof data?.email_received_at === "string") doc.email_received_at = data.email_received_at
     const ext = (data?.latest_extraction ?? null) as ExtractionRow | null
     setDocument(doc)
     setExtraction(ext)
