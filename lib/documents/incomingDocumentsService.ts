@@ -88,7 +88,8 @@ export async function getIncomingDocumentForBusiness(
 export async function beginIncomingDocumentExtraction(
   supabase: SupabaseClient,
   documentId: string,
-  businessId: string
+  businessId: string,
+  provider?: { provider: string; providerVersion: string | null; parserVersion: string }
 ): Promise<{ extractionId: string } | { error: string }> {
   const startedAt = new Date().toISOString()
   const { error: uErr } = await supabase
@@ -106,9 +107,9 @@ export async function beginIncomingDocumentExtraction(
     .insert({
       document_id: documentId,
       business_id: businessId,
-      provider: "tesseract",
-      provider_version: TESSERACT_PROVIDER_VERSION,
-      parser_version: RECEIPT_OCR_PARSER_VERSION,
+      provider: provider?.provider ?? "tesseract",
+      provider_version: provider?.providerVersion ?? TESSERACT_PROVIDER_VERSION,
+      parser_version: provider?.parserVersion ?? RECEIPT_OCR_PARSER_VERSION,
       status: "started",
       started_at: startedAt,
     })
@@ -327,17 +328,41 @@ export async function getIncomingDocumentWithLatestExtraction(
 /** Keys users may correct in review UI (matches receipt parser output shape). */
 const REVIEW_FIELD_KEYS = new Set([
   "supplier_name",
+  "supplier_tax_id",
   "document_number",
   "document_date",
+  "due_date",
   "currency_code",
   "subtotal",
+  "tax_amount",
   "total",
   "vat_amount",
   "nhil_amount",
   "getfund_amount",
   "covid_amount",
   "notes",
+  "line_items",
 ])
+
+function sanitizeLineItems(value: unknown): Array<Record<string, unknown>> | null {
+  if (!Array.isArray(value)) return null
+  return value.slice(0, 40).map((row) => {
+    const item = row && typeof row === "object" ? (row as Record<string, unknown>) : {}
+    const num = (key: string) => {
+      const raw = item[key]
+      if (raw == null || raw === "") return null
+      const n = typeof raw === "number" ? raw : Number(String(raw).replace(/,/g, ""))
+      return Number.isFinite(n) ? n : null
+    }
+    return {
+      description: typeof item.description === "string" ? item.description : item.description == null ? null : String(item.description),
+      quantity: num("quantity"),
+      unit_price: num("unit_price"),
+      discount_amount: num("discount_amount"),
+      line_total: num("line_total"),
+    }
+  })
+}
 
 export function sanitizeReviewFields(input: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -346,6 +371,19 @@ export function sanitizeReviewFields(input: Record<string, unknown>): Record<str
     const v = input[key]
     if (v === undefined || v === null) {
       out[key] = null
+      continue
+    }
+    if (key === "line_items") {
+      out[key] = sanitizeLineItems(v)
+      continue
+    }
+    if (key === "due_date" || key === "document_date" || key === "supplier_tax_id") {
+      out[key] = typeof v === "string" && v.trim() ? v.trim() : null
+      continue
+    }
+    if (key === "tax_amount") {
+      const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""))
+      out[key] = Number.isFinite(n) ? n : null
       continue
     }
     if (

@@ -150,11 +150,25 @@ export default function CreateExpensePage() {
         const bit = `Ref: ${ef.document_number.trim()}`
         setNotes((prev) => (prev?.includes(bit) ? prev : (prev ? `${prev}\n` : "") + bit))
       }
+      const currencyDecision = decideReceiptCurrency(
+        typeof ef.currency_code === "string" ? ef.currency_code : null,
+        currencyCode
+      )
+      if (currencyDecision.action === "foreign") {
+        setFxEnabled(true)
+        setFxCurrencyCode(currencyDecision.currency)
+        setFxRate("")
+      }
+      const docRes = await fetch(`/api/incoming-documents/${encodeURIComponent(fid)}?business_id=${encodeURIComponent(businessId)}`)
+      const docJson = (await docRes.json().catch(() => null)) as { document?: { storage_path?: string }; preview_url?: string } | null
+      const storedPath = docJson?.document?.storage_path
+      if (typeof storedPath === "string" && storedPath) setUploadedReceiptPath(storedPath)
+      if (typeof docJson?.preview_url === "string") setReceiptPreview(docJson.preview_url)
     })()
     return () => {
       cancelled = true
     }
-  }, [businessId, searchParams])
+  }, [businessId, currencyCode, searchParams])
 
   const loadData = async () => {
     try {

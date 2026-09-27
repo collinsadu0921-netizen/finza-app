@@ -44,6 +44,11 @@ describe("GET /api/incoming-documents", () => {
           created_at: "2026-01-01T00:00:00Z",
           linked_entity_type: null,
           linked_entity_id: null,
+          supplier_name: null,
+          document_number: null,
+          document_date: null,
+          currency_code: null,
+          total: null,
           latest_extraction: {
             extraction_mode: "pdf_text",
             page_count: 1,

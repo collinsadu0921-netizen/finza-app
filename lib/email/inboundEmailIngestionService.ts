@@ -2,7 +2,7 @@ import "server-only"
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createIncomingDocumentRow } from "@/lib/documents/incomingDocumentsService"
-import { runPersistedReceiptOcr } from "@/lib/documents/runPersistedReceiptOcr"
+import { runPersistedOpenAiExtraction } from "@/lib/documents/runPersistedOpenAiExtraction"
 import { normalizeRecipientAddress } from "@/lib/email/inboundEmailAddresses"
 import type { NormalizedInboundEmailPayload } from "@/lib/email/inboundEmailNormalizedPayload"
 import {
@@ -402,28 +402,16 @@ export async function ingestNormalizedInboundEmail(
         })
         .eq("id", attRow.id)
 
-      const ocrResult = await runPersistedReceiptOcr({
+      const extracted = await runPersistedOpenAiExtraction({
         supabase,
         userId: "",
         businessId,
-        receiptPath: storagePath,
-        documentType: "expense",
         existingDocumentId: created.id,
-        sourceType: "email_inbound",
         skipUserAuthorization: true,
-        legacyFileMeta: {
-          file_name: att.fileName,
-          mime_type: storageMime,
-          file_size: buf.byteLength,
-        },
       })
 
-      if (!ocrResult.ocr.ok) {
-        console.warn(
-          "[inboundEmailIngestion] OCR incomplete for",
-          created.id,
-          ocrResult.ocr.ok === false ? ocrResult.ocr.error : ""
-        )
+      if (!extracted.ok) {
+        console.warn("[inboundEmailIngestion] extraction incomplete", created.id)
       }
 
       await supabase

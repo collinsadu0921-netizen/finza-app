@@ -231,33 +231,73 @@ export default function CreateBillPage() {
         setIssueDate(String(ef.document_date))
         next.issue_date = true
       }
-      const subtotalAmount =
-        ef.subtotal != null && Number(ef.subtotal) > 0
-          ? Number(ef.subtotal)
-          : ef.total != null && Number(ef.total) > 0
-            ? Number(ef.total)
-            : null
-      if (subtotalAmount != null) {
-        setItems([
-          {
-            id: Date.now().toString(),
-            description: "From receipt",
-            qty: 1,
-            unit_price: subtotalAmount,
-            discount_type: "amount",
-            discount_value: 0,
-            discount_amount: 0,
-            material_id: null,
-          },
-        ])
-        next.subtotal = true
+      if (typeof ef.due_date === "string" && ef.due_date.trim()) setDueDate(ef.due_date.trim())
+      else setDueDate("")
+      const currencyDecision = decideReceiptCurrency(
+        typeof ef.currency_code === "string" ? ef.currency_code : null,
+        currencyCode
+      )
+      if (currencyDecision.action === "foreign") {
+        setFxEnabled(true)
+        setFxCurrencyCode(currencyDecision.currency)
+        setFxRate("")
       }
+      const lineItems = Array.isArray(ef.line_items) ? ef.line_items : []
+      if (lineItems.length > 0 || (ef.total != null && Number(ef.total) > 0)) {
+        const draft = planSupplierBillDraft({
+          document_type: "invoice",
+          supplier_name: typeof ef.supplier_name === "string" ? ef.supplier_name : null,
+          supplier_tax_id: typeof ef.supplier_tax_id === "string" ? ef.supplier_tax_id : null,
+          invoice_number: typeof ef.document_number === "string" ? ef.document_number : null,
+          document_date: typeof ef.document_date === "string" ? ef.document_date : null,
+          due_date: typeof ef.due_date === "string" ? ef.due_date : null,
+          currency: typeof ef.currency_code === "string" ? ef.currency_code : null,
+          line_items: lineItems.map((row) => {
+            const item = row && typeof row === "object" ? (row as Record<string, unknown>) : {}
+            const num = (key: string) => (typeof item[key] === "number" ? item[key] as number : null)
+            return {
+              description: typeof item.description === "string" ? item.description : null,
+              quantity: num("quantity"),
+              unit_price: num("unit_price"),
+              discount_amount: num("discount_amount"),
+              line_total: num("line_total"),
+            }
+          }),
+          subtotal: typeof ef.subtotal === "number" ? ef.subtotal : null,
+          tax_amount: typeof ef.tax_amount === "number" ? ef.tax_amount : null,
+          total_amount: typeof ef.total === "number" ? ef.total : null,
+          evidence: { supplier: null, invoice_number: null, date: null, due_date: null, total: null, currency: null },
+          warnings: [],
+          clarity: { supplier: null, invoice_number: null, date: null, total: null, currency: null, line_items: null },
+        }, currencyCode)
+        if (draft.lines.length > 0) {
+          const stamp = Date.now()
+          setItems(draft.lines.map((line, index) => ({
+            id: `${stamp}-${index}`,
+            description: line.description,
+            qty: line.qty,
+            unit_price: line.unit_price,
+            discount_type: "amount" as const,
+            discount_value: line.discount_amount,
+            discount_amount: line.discount_amount,
+            material_id: null,
+          })))
+          setApplyTaxes(draft.applyTaxes)
+          setPrintedInvoiceTotal(draft.printedTotal)
+          next.subtotal = true
+        }
+      }
+      const docRes = await fetch(`/api/incoming-documents/${encodeURIComponent(fid)}?business_id=${encodeURIComponent(businessId)}`)
+      const docJson = (await docRes.json().catch(() => null)) as { document?: { storage_path?: string }; preview_url?: string } | null
+      const storedPath = docJson?.document?.storage_path
+      if (typeof storedPath === "string" && storedPath) setUploadedAttachmentPath(storedPath)
+      if (typeof docJson?.preview_url === "string") setReceiptPreview(docJson.preview_url)
       setOcrSuggestedFields((prev) => ({ ...prev, ...next }))
     })()
     return () => {
       cancelled = true
     }
-  }, [businessId, searchParams])
+  }, [businessId, currencyCode, searchParams])
 
   const handleSupplierSelect = (
     supplierId: string,

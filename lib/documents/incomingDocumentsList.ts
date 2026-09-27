@@ -20,6 +20,8 @@ const DOC_STATUSES = new Set([
 const REVIEW_STATUSES = new Set(["none", "draft", "accepted"])
 
 const DOC_KINDS = new Set(["expense_receipt", "supplier_bill_attachment", "unknown"])
+const SOURCE_TYPES = new Set(["manual_upload", "expense_form_upload", "bill_form_upload", "email_inbound"])
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 
 export type IncomingDocumentListSummary = {
   id: string
@@ -33,6 +35,11 @@ export type IncomingDocumentListSummary = {
   created_at: string
   linked_entity_type: string | null
   linked_entity_id: string | null
+  supplier_name: string | null
+  document_number: string | null
+  document_date: string | null
+  currency_code: string | null
+  total: number | null
   latest_extraction: {
     extraction_mode: string | null
     page_count: number | null
@@ -51,6 +58,9 @@ export type ListIncomingDocumentsParams = {
   statusIn: string[] | null
   reviewStatusIn: string[] | null
   documentKind: string | null
+  sourceType: string | null
+  createdFrom: string | null
+  createdTo: string | null
   linked: "all" | "linked" | "unlinked"
   search: string | null
   /** Failed, needs_review, or extracted+unlinked+not accepted */
@@ -106,6 +116,18 @@ export function parseIncomingDocumentsListQuery(searchParams: URLSearchParams): 
     return { ok: false, error: "Invalid document_kind" }
   }
 
+  const sourceRaw = searchParams.get("source_type")?.trim() ?? ""
+  if (sourceRaw && !SOURCE_TYPES.has(sourceRaw)) {
+    return { ok: false, error: "Invalid source_type" }
+  }
+  const sourceType = sourceRaw || null
+
+  const createdFrom = searchParams.get("from")?.trim() || null
+  const createdTo = searchParams.get("to")?.trim() || null
+  if ((createdFrom && !ISO_DAY.test(createdFrom)) || (createdTo && !ISO_DAY.test(createdTo))) {
+    return { ok: false, error: "from and to must be YYYY-MM-DD" }
+  }
+
   const linkedRaw = (searchParams.get("linked") ?? "all").trim().toLowerCase()
   const linked: "all" | "linked" | "unlinked" =
     linkedRaw === "linked" ? "linked" : linkedRaw === "unlinked" ? "unlinked" : "all"
@@ -147,6 +169,9 @@ export function parseIncomingDocumentsListQuery(searchParams: URLSearchParams): 
       statusIn,
       reviewStatusIn,
       documentKind,
+      sourceType,
+      createdFrom,
+      createdTo,
       linked,
       search,
       attentionOnly,
@@ -211,6 +236,15 @@ export async function listIncomingDocumentSummaries(
   if (params.documentKind) {
     q = q.eq("document_kind", params.documentKind)
   }
+  if (params.sourceType) {
+    q = q.eq("source_type", params.sourceType)
+  }
+  if (params.createdFrom) {
+    q = q.gte("created_at", params.createdFrom)
+  }
+  if (params.createdTo) {
+    q = q.lte("created_at", `${params.createdTo}T23:59:59.999Z`)
+  }
 
   if (params.linked === "linked") {
     q = q.not("linked_entity_id", "is", null)
@@ -271,13 +305,14 @@ export async function listIncomingDocumentSummaries(
       extraction_warnings: unknown
       status: string
       error_message: string | null
+      parsed_json: Record<string, unknown> | null
     }
   >()
 
   if (extIds.length > 0) {
     const { data: exts, error: extErr } = await supabase
       .from("incoming_document_extractions")
-      .select("id, extraction_mode, page_count, extraction_warnings, status, error_message")
+      .select("id, extraction_mode, page_count, extraction_warnings, status, error_message, parsed_json")
       .in("id", extIds)
 
     if (extErr) {
@@ -292,7 +327,8 @@ export async function listIncomingDocumentSummaries(
     const ext = row.latest_extraction_id ? extMap.get(row.latest_extraction_id) : undefined
     const warnings = ext?.extraction_warnings
     const hasWarnings = Array.isArray(warnings) && warnings.length > 0
-    const extractionFailed = ext?.status === "failed" || row.status === "failed"
+    const parsed = ext?.parsed_json && typeof ext.parsed_json === "object" ? ext.parsed_json : null
+    const totalValue = parsed && typeof parsed.total === "number" ? parsed.total : null
 
     return {
       id: row.id,
@@ -306,6 +342,11 @@ export async function listIncomingDocumentSummaries(
       created_at: row.created_at,
       linked_entity_type: row.linked_entity_type,
       linked_entity_id: row.linked_entity_id,
+      supplier_name: parsed && typeof parsed.supplier_name === "string" ? parsed.supplier_name : null,
+      document_number: parsed && typeof parsed.document_number === "string" ? parsed.document_number : null,
+      document_date: parsed && typeof parsed.document_date === "string" ? parsed.document_date : null,
+      currency_code: parsed && typeof parsed.currency_code === "string" ? parsed.currency_code : null,
+      total: totalValue,
       latest_extraction: ext
         ? {
             extraction_mode: ext.extraction_mode ?? null,
