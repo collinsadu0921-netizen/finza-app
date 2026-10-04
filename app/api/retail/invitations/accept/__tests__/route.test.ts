@@ -127,4 +127,21 @@ describe("POST /api/retail/invitations/accept", () => {
       expect.objectContaining({ invitationId: "50592961-c6c3-4ca7-bc96-2b69d0c37317" })
     )
   })
+
+  it("reports a profile setup failure without calling the link invalid", async () => {
+    withUser("Owner@Example.com")
+    accept.mockRejectedValueOnce(
+      new Error('insert or update on table "businesses" violates foreign key constraint "businesses_owner_id_fkey"')
+    )
+    const res = await POST(
+      new NextRequest("http://localhost/api/retail/invitations/accept", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      })
+    )
+    const json = await res.json()
+    expect(res.status).toBe(500)
+    expect(json.error).not.toContain("violates")
+    expect(json.error).not.toBe("This invitation link is not valid.")
+  })
 })

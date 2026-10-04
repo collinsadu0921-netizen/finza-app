@@ -50,6 +50,14 @@ export function salePaymentReferenceFromLines(
   return null
 }
 
+export function paymentLinesMatchSaleAmount(
+  lines: Array<{ amount: number }>,
+  saleAmount: number
+): boolean {
+  const total = lines.reduce((sum, line) => sum + Number(line.amount || 0), 0)
+  return Math.abs(total - Number(saleAmount)) <= 0.01
+}
+
 export function withNormalizedTenderReferences<T extends ManualTenderLine>(lines: T[]): T[] {
   return lines.map((line) => {
     if (line.method === "cash") {

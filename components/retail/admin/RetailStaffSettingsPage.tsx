@@ -229,6 +229,13 @@ export default function RetailStaffSettingsPage() {
       }
     }
 
+    if (systemUserForm.role === "manager") {
+      if (!systemUserForm.store_id) {
+        setError("Store assignment is required for store managers")
+        return
+      }
+    }
+
     if (systemUserForm.role === "cashier") {
       if (stores.length === 0) {
         setError("No stores available. Please create a store first before adding cashiers.")
@@ -453,7 +460,7 @@ export default function RetailStaffSettingsPage() {
                       </span>
                     </div>
                     <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                      Store: {bu.store?.name || (bu.user?.store_id ? "Unassigned" : "—")}
+                      Store: {bu.store?.name || (bu.role === "manager" && !bu.user?.store_id ? "Store required" : bu.user?.store_id ? "Unassigned" : "—")}
                     </p>
                     {canManageStaff &&
                       bu.role !== "owner" &&
@@ -508,7 +515,7 @@ export default function RetailStaffSettingsPage() {
                           </span>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-900 dark:text-white">
-                          {bu.store?.name || (bu.user?.store_id ? "Unassigned" : "—")}
+                          {bu.store?.name || (bu.role === "manager" && !bu.user?.store_id ? "Store required" : bu.user?.store_id ? "Unassigned" : "—")}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-sm">
                           {canManageStaff &&
@@ -642,19 +649,27 @@ export default function RetailStaffSettingsPage() {
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                        Store (optional)
+                        {systemUserForm.role === "manager" ? "Store *" : "Store (optional)"}
                       </label>
                       <NativeSelect
                         value={systemUserForm.store_id}
                         onChange={(e) => setSystemUserForm({ ...systemUserForm, store_id: e.target.value })}
+                        required={systemUserForm.role === "manager"}
                       >
-                        <option value="">All stores</option>
+                        <option value="">
+                          {systemUserForm.role === "manager" ? "Select a store" : "All stores"}
+                        </option>
                         {stores.map((store) => (
                           <option key={store.id} value={store.id}>
                             {store.name}
                           </option>
                         ))}
                       </NativeSelect>
+                      {systemUserForm.role === "manager" && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          Store managers can only see their assigned store.
+                        </p>
+                      )}
                     </div>
 
                     <div>

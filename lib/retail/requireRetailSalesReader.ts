@@ -6,6 +6,15 @@ import { getUserRole } from "@/lib/userRoles"
 const LIST_ROLES = ["owner", "admin", "manager", "employee"]
 const RECEIPT_ROLES = ["owner", "admin", "manager", "employee", "cashier"]
 
+export function isAllowedRetailSalesReaderRole(
+  purpose: "list" | "receipt",
+  role: string | null
+): boolean {
+  if (!role) return false
+  const allowed = purpose === "list" ? LIST_ROLES : RECEIPT_ROLES
+  return allowed.includes(role)
+}
+
 export type RetailSalesReader =
   | {
       ok: true
@@ -45,8 +54,7 @@ export async function requireRetailSalesReader(
   }
 
   const role = await getUserRole(supabase, auth.user.id, businessId)
-  const allowed = purpose === "list" ? LIST_ROLES : RECEIPT_ROLES
-  if (!role || !allowed.includes(role)) {
+  if (!role || !isAllowedRetailSalesReaderRole(purpose, role)) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Access denied" }, { status: 403 }),

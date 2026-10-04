@@ -8,21 +8,9 @@ import {
   acceptRetailInvitationById,
 } from "@/lib/retail/invitations/retailInvitationAdmin"
 import { isPlausibleRetailInviteToken } from "@/lib/retail/invitations/retailInvitationToken"
+import { retailInvitationPublicError } from "@/lib/retail/invitations/retailInvitationAcceptError"
 
 export const dynamic = "force-dynamic"
-
-function publicError(message: string): { error: string; status: number } {
-  if (message.includes("email_mismatch")) {
-    return { error: "This signed-in account does not match the invitation.", status: 403 }
-  }
-  if (message.includes("expired")) {
-    return { error: "This invitation has expired.", status: 410 }
-  }
-  if (message.includes("not_pending") || message.includes("race")) {
-    return { error: "This invitation can no longer be used.", status: 409 }
-  }
-  return { error: "This invitation link is not valid.", status: 400 }
-}
 
 export async function POST(request: NextRequest) {
   const supabase = await createSupabaseServerClient()
@@ -82,7 +70,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, businessId })
   } catch (error) {
     const message = error instanceof Error ? error.message : "retail_invitation_invalid"
-    const mapped = publicError(message)
+    const mapped = retailInvitationPublicError(message)
     return NextResponse.json({ error: mapped.error }, { status: mapped.status })
   }
 }

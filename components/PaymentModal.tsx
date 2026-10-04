@@ -5,6 +5,11 @@ import { formatMoney } from "@/lib/money"
 import { normalizeCountry, getAllowedMethods, getMobileMoneyLabel } from "@/lib/payments/eligibility"
 import type { RetailMomoCartSnapshot } from "@/lib/retail/pos/retailMomoCartFingerprint"
 import { isRetailMtnSandboxMomoPublicEnvEnabled } from "@/lib/retail/pos/isRetailMtnSandboxMomoPublicEnvEnabled"
+import {
+  singleTenderReferenceAfterMethodChange,
+  singleTenderReferenceOnOpen,
+  splitLineAfterMethodChange,
+} from "@/lib/retail/pos/tenderReferenceState"
 
 /** Matches Retail POS register/search fields (`border-2 border-slate-300`, `shadow-inner`, blue focus). */
 const retailTextInputClass =
@@ -235,6 +240,7 @@ export default function PaymentModal({
       setMomoPhase("idle")
       setMomoReference(null)
       setMomoMessage(null)
+      setSingleTenderReference(singleTenderReferenceOnOpen())
       momoAttemptIdRef.current = null
       momoPollTickInFlightRef.current = false
       momoCompleteFiredForRef.current = null
@@ -433,6 +439,7 @@ export default function PaymentModal({
       setMomoMessage(null)
     }
     stopMomoPoll()
+    setSingleTenderReference(singleTenderReferenceOnOpen())
     onClose()
   }
 
@@ -617,8 +624,10 @@ export default function PaymentModal({
   ) => {
     const updated = [...splitPayments]
     if (field === "method") {
-      updated[index].method = value as "cash" | "momo" | "card"
-      if (updated[index].method === "cash") updated[index].reference = undefined
+      updated[index] = splitLineAfterMethodChange(
+        updated[index],
+        value as "cash" | "momo" | "card"
+      )
     } else if (field === "reference") {
       updated[index].reference = String(value)
     } else {
@@ -973,7 +982,12 @@ export default function PaymentModal({
                   <button
                     key={method.value}
                     type="button"
-                    onClick={() => setSingleMethod(method.value)}
+                    onClick={() => {
+                      setSingleTenderReference((current) =>
+                        singleTenderReferenceAfterMethodChange(singleMethod, method.value, current)
+                      )
+                      setSingleMethod(method.value)
+                    }}
                     className={methodTileClass(
                       singleMethod === method.value,
                       method.value,

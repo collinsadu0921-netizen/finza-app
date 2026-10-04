@@ -8,6 +8,22 @@ const SALE_A = "11111111-1111-4111-8111-111111111111"
 const SALE_B = "22222222-2222-4222-8222-222222222222"
 
 describe("online sale idempotency", () => {
+  it("replays a duplicate split submission instead of inserting again", () => {
+    const existing = {
+      id: "sale-split",
+      amount: 10,
+      business_id: "biz-a",
+      register_id: "reg-1",
+    }
+    expect(
+      decideOnlineSaleReplay(existing, { businessId: "biz-a", registerId: "reg-1", amount: 10 })
+    ).toBe("replay")
+    expect(simulateUniqueInsertRace([`biz-a|reg-1|${SALE_A}`, `biz-a|reg-1|${SALE_A}`])).toEqual([
+      "inserted",
+      "duplicate",
+    ])
+  })
+
   it("replays the same request instead of inserting again", () => {
     const existing = {
       id: "sale-1",

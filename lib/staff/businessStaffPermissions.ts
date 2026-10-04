@@ -3,6 +3,11 @@
  * Applies to any business industry using these endpoints.
  */
 
+/** Retail managers are store-scoped. Service managers stay company-wide. */
+export function retailManagerRequiresAssignedStore(industry: string | null | undefined): boolean {
+  return String(industry ?? "").trim().toLowerCase() === "retail"
+}
+
 export function canActorCreateStaffRole(actorRole: string | null, targetRole: string): boolean {
   if (!actorRole || actorRole === "cashier") return false
   if (actorRole === "manager") return targetRole === "cashier"

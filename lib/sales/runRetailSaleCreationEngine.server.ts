@@ -22,6 +22,7 @@ import type { RetailMomoCartSnapshot } from "@/lib/retail/pos/retailMomoCartFing
 import { computeServerRetailMomoFingerprint } from "@/lib/retail/pos/retailMomoFingerprintServer"
 import {
   missingManualTenderReference,
+  paymentLinesMatchSaleAmount,
   salePaymentReferenceFromLines,
   withNormalizedTenderReferences,
   type ManualTenderLine,
@@ -310,8 +311,7 @@ export async function runRetailSaleCreationEngine(
         (sum: number, p: PaymentLine) => sum + Number(p.amount || 0),
         0
       )
-      const difference = Math.abs(paymentsTotal - amount)
-      if (difference > 0.01) {
+      if (!paymentLinesMatchSaleAmount(normalizedPayments, amount)) {
         return NextResponse.json(
           { error: `Payment total (${paymentsTotal.toFixed(2)}) does not match sale amount (${amount.toFixed(2)})` },
           { status: 400 }

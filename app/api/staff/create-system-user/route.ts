@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
-import { canActorCreateStaffRole } from "@/lib/staff/businessStaffPermissions"
+import {
+  canActorCreateStaffRole,
+  retailManagerRequiresAssignedStore,
+} from "@/lib/staff/businessStaffPermissions"
 import { createClient } from "@supabase/supabase-js"
 import { randomUUID } from "node:crypto"
 import { findAuthUserIdByEmail } from "@/lib/authAdminLookup"
@@ -161,6 +164,24 @@ export async function POST(request: NextRequest) {
           { error: "Password is required and must be at least 6 characters" },
           { status: 400 }
         )
+      }
+
+      if (role === "manager" && retailManagerRequiresAssignedStore(ind)) {
+        if (!store_id) {
+          return NextResponse.json(
+            { error: "Store assignment is required for store managers" },
+            { status: 400 }
+          )
+        }
+        const { data: managerStore } = await supabaseAdmin
+          .from("stores")
+          .select("id")
+          .eq("id", store_id)
+          .eq("business_id", business.id)
+          .maybeSingle()
+        if (!managerStore) {
+          return NextResponse.json({ error: "Store not found" }, { status: 404 })
+        }
       }
 
       // Create user in Supabase Auth

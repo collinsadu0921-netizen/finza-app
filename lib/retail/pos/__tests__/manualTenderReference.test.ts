@@ -1,5 +1,6 @@
 import {
   missingManualTenderReference,
+  paymentLinesMatchSaleAmount,
   salePaymentReferenceFromLines,
   withNormalizedTenderReferences,
 } from "../manualTenderReference"
@@ -39,5 +40,53 @@ describe("manual card and MoMo references", () => {
     ])
     expect(lines.map((line) => line.reference)).toEqual([undefined, "CARD-1", "MOMO-2"])
     expect(salePaymentReferenceFromLines(lines)).toBeNull()
+  })
+
+  it.each([
+    [
+      "cash + card",
+      [
+        { method: "cash" as const, amount: 4 },
+        { method: "card" as const, amount: 6, reference: "STAGE-CARD-SPLIT-001" },
+      ],
+    ],
+    [
+      "cash + MoMo",
+      [
+        { method: "cash" as const, amount: 4 },
+        { method: "momo" as const, amount: 6, reference: "STAGE-MOMO-SPLIT-001" },
+      ],
+    ],
+    [
+      "card + MoMo",
+      [
+        { method: "card" as const, amount: 3, reference: "STAGE-CARD-SPLIT-001" },
+        { method: "momo" as const, amount: 7, reference: "STAGE-MOMO-SPLIT-001" },
+      ],
+    ],
+    [
+      "cash + card + MoMo",
+      [
+        { method: "cash" as const, amount: 4 },
+        { method: "momo" as const, amount: 3, reference: "STAGE-MOMO-SPLIT-001" },
+        { method: "card" as const, amount: 3, reference: "STAGE-CARD-SPLIT-001" },
+      ],
+    ],
+  ])("accepts %s when line totals match the sale", (_label, lines) => {
+    const normalized = withNormalizedTenderReferences(lines)
+    const total = normalized.reduce((sum, line) => sum + line.amount, 0)
+    expect(paymentLinesMatchSaleAmount(normalized, total)).toBe(true)
+    expect(missingManualTenderReference(normalized)).toBe(false)
+    const cash = normalized.find((line) => line.method === "cash")
+    if (cash) expect(cash.reference).toBeUndefined()
+    expect(normalized.filter((line) => line.method !== "cash").every((line) => line.reference)).toBe(true)
+  })
+
+  it("rejects split lines whose totals do not match the sale", () => {
+    const lines = [
+      { method: "cash" as const, amount: 4 },
+      { method: "card" as const, amount: 3, reference: "STAGE-CARD-SPLIT-001" },
+    ]
+    expect(paymentLinesMatchSaleAmount(lines, 10)).toBe(false)
   })
 })

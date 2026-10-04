@@ -37,6 +37,8 @@ describe("saleLookupSearchParse", () => {
       "momo_transaction_id.ilike.%550e8400-e29b%",
       "hubtel_transaction_id.ilike.%550e8400-e29b%",
       "description.ilike.%550e8400-e29b%",
+      "payment_reference.ilike.%550e8400-e29b%",
+      'payment_lines.cs."[{""reference"":""550e8400-e29b""}]"',
     ])
     const ordinary = buildSalesHistoryTextSearchOrParts("Ada")
     expect(ordinary.some((p) => p.startsWith("id.ilike."))).toBe(false)
@@ -61,6 +63,18 @@ describe("saleLookupSearchParse", () => {
     expect(parseSaleAmountSearch("120.50")).toBe(120.5)
     expect(parseSaleAmountSearch("120,50")).toBe(120.5)
     expect(parseSaleAmountSearch("2024-01-01")).toBeNull()
+  })
+
+  it("searches the sale reference and each split payment-line reference", () => {
+    const card = buildSalesHistoryTextSearchOrParts("STAGE-CARD-SPLIT-001")
+    const momo = buildSalesHistoryTextSearchOrParts("STAGE-MOMO-SPLIT-001")
+    expect(card.some((part) => part.startsWith("payment_reference.ilike.%STAGE-CARD-SPLIT-001%"))).toBe(true)
+    expect(card.some((part) => part.includes("STAGE-CARD-SPLIT-001") && part.startsWith("payment_lines.cs."))).toBe(
+      true
+    )
+    expect(momo.some((part) => part.includes("STAGE-MOMO-SPLIT-001") && part.startsWith("payment_lines.cs."))).toBe(
+      true
+    )
   })
 
   it("strips ilike wildcards from pattern", () => {

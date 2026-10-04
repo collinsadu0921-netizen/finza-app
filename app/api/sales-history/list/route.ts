@@ -7,6 +7,7 @@ import {
   parseSaleHistoryDateSearch,
 } from "@/lib/retail/saleLookupSearchParse"
 import { requireRetailSalesReader } from "@/lib/retail/requireRetailSalesReader"
+import { resolveRetailSalesStoreScope } from "@/lib/retail/retailSalesStoreScope"
 
 function salesHistoryAdmin() {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null
@@ -47,25 +48,25 @@ export async function GET(request: NextRequest) {
     // Manager: locked to their assigned store (ignore client input)
     let effectiveStoreId: string | null = null
 
-    if (reader.role === "manager") {
-      const { data: userData } = await supabase
-        .from("users")
-        .select("store_id")
-        .eq("id", userId)
-        .maybeSingle()
-
-      if (!userData?.store_id) {
-        return NextResponse.json(
-          { error: "Store manager must be assigned to a store" },
-          { status: 403 }
-        )
-      }
-
-      effectiveStoreId = userData.store_id
-    } else {
-      // Admin/Owner: can use provided storeId or null for global view
-      effectiveStoreId = storeId && storeId !== 'all' ? storeId : null
+    const assignedStoreId =
+      reader.role === "manager" || reader.role === "cashier"
+        ? (
+            await supabase
+              .from("users")
+              .select("store_id")
+              .eq("id", userId)
+              .maybeSingle()
+          ).data?.store_id ?? null
+        : null
+    const storeScope = resolveRetailSalesStoreScope({
+      role: reader.role,
+      assignedStoreId,
+      requestedStoreId: storeId,
+    })
+    if (!storeScope.ok) {
+      return NextResponse.json({ error: storeScope.error }, { status: storeScope.status })
     }
+    effectiveStoreId = storeScope.storeId
 
     const offset = (page - 1) * pageSize
 

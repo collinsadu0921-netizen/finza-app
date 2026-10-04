@@ -47,11 +47,26 @@ export function buildSalesHistoryTextSearchOrParts(search: string): string[] {
   if (pat.length === 0) return []
   const safe = pat.replace(/,/g, "")
   const like = `%${safe}%`
-  return [
+  const parts = [
     `momo_transaction_id.ilike.${like}`,
     `hubtel_transaction_id.ilike.${like}`,
     `description.ilike.${like}`,
+    `payment_reference.ilike.${like}`,
   ]
+  const lineReference = paymentLinesReferenceContainsOrPart(safe)
+  if (lineReference) parts.push(lineReference)
+  return parts
+}
+
+/**
+ * Exact reference stored on a payment_lines jsonb element.
+ * PostgREST `or` splits on commas, so the JSON value is double-quoted.
+ */
+export function paymentLinesReferenceContainsOrPart(reference: string): string | null {
+  if (reference.length < 3) return null
+  if (/[",()\\]/.test(reference)) return null
+  const json = JSON.stringify([{ reference }]).replace(/"/g, '""')
+  return `payment_lines.cs."${json}"`
 }
 
 /** YYYY-MM-DD calendar date (UTC day bounds for DB filter). */
