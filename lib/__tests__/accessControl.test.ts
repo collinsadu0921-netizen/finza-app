@@ -148,6 +148,39 @@ describe("accessControl", () => {
     })
   })
 
+  describe("resolveAccess – Retail invitation stays off Service setup", () => {
+    it("sends a pending Retail invitee to resume", async () => {
+      const supabase = createMockSupabase({
+        authUser: { user_metadata: { signup_intent: "retail_invitation" } },
+      })
+      mockGetCurrentBusiness.mockResolvedValue(null)
+      const res = await resolveAccess(supabase, "user-1", "/retail/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/retail/invite/resume")
+    })
+
+    it("still sends a Service signup with no business to business-setup", async () => {
+      const supabase = createMockSupabase({
+        authUser: { user_metadata: { signup_intent: "business_owner" } },
+      })
+      mockGetCurrentBusiness.mockResolvedValue(null)
+      const res = await resolveAccess(supabase, "user-1", "/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/business-setup")
+    })
+
+    it("still sends a Practice signup with no firm to firm setup", async () => {
+      const supabase = createMockSupabase({
+        firmUsersData: [],
+        authUser: { user_metadata: { signup_intent: "accounting_firm" } },
+      })
+      mockGetCurrentBusiness.mockResolvedValue(null)
+      const res = await resolveAccess(supabase, "user-1", "/accounting/dashboard")
+      expect(res.allowed).toBe(false)
+      expect(res.redirectTo).toBe("/accounting/firm/setup")
+    })
+  })
+
   describe("resolveAccess – Service workspace blocked from accounting", () => {
     it("denies service user on all /accounting/* (use /service/* instead)", async () => {
       const supabase = createMockSupabase({ firmUsersData: [] })

@@ -74,7 +74,7 @@ export function resolvePracticePostAuthPath(opts: {
 
 /** Immediate post-email-signup destination when a session exists (no confirmation email). */
 export function resolveImmediatePostSignupPath(signupIntent: SignupIntent): string {
-  return signupIntent === SIGNUP_INTENT_PRACTICE
-    ? PRACTICE_FIRM_SETUP_PATH
-    : SERVICE_BUSINESS_SETUP_PATH
+  if (signupIntent === SIGNUP_INTENT_PRACTICE) return PRACTICE_FIRM_SETUP_PATH
+  if (signupIntent === SIGNUP_INTENT_RETAIL_INVITATION) return "/retail/invite/resume"
+  return SERVICE_BUSINESS_SETUP_PATH
 }

@@ -26,9 +26,10 @@ const ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkb25oaHRvb2F3a2VlbWRxcWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxNjE2ODAsImV4cCI6MjA5NzczNzY4MH0.gteoKZMizYHZgxbsiFsNfrb-1CI8Mh8Yps5nuX4xjkc"
 
-const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkb25oaHRvb2F3a2VlbWRxcWVvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjE2MTY4MCwiZXhwIjoyMDk3NzM3NjgwfQ.kX4ycRl6QBs77Nro5e_uXVj9es75VgYS59XTFvPWFnY"
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+if (!SERVICE_ROLE_KEY || SERVICE_ROLE_KEY === "YOUR_STAGING_SERVICE_ROLE_KEY") {
+  fail("SUPABASE_SERVICE_ROLE_KEY is required. Set it in .env.staging. Do not commit a live key.")
+}
 
 const probeOnly = process.argv.includes("--probe")
 

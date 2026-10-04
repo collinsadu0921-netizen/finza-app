@@ -75,7 +75,25 @@ export default function RetailOnboardingPage() {
           }
         }
         
-        // Default: business owner needs a business
+        if (
+          signupIntent === "retail_invitation" ||
+          user.user_metadata?.signup_intent === "retail_invitation"
+        ) {
+          router.push("/retail/invite/resume")
+          return
+        }
+        try {
+          const pendingRes = await fetch("/api/retail/invitations/pending", { credentials: "same-origin" })
+          if (pendingRes.ok) {
+            const pending = await pendingRes.json()
+            if (pending?.state === "ready") {
+              router.push("/retail/invite/resume")
+              return
+            }
+          }
+        } catch {
+          // Fall through to Service setup only when no Retail invite can be confirmed.
+        }
         router.push("/business-setup")
         return
       }

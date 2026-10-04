@@ -21,9 +21,11 @@ const STAGING_URL = "https://adonhhtooawkeemdqqeo.supabase.co"
 const LOAD_BUSINESS_ID = "4e6cdfba-e2ab-4ee4-ac00-9b077d696544"
 const PRODUCTION_REF = "qjxhibvbmzogyzbhswjj"
 
-const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkb25oaHRvb2F3a2VlbWRxcWVvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjE2MTY4MCwiZXhwIjoyMDk3NzM3NjgwfQ.kX4ycRl6QBs77Nro5e_uXVj9es75VgYS59XTFvPWFnY"
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+if (!SERVICE_ROLE_KEY || SERVICE_ROLE_KEY === "YOUR_STAGING_SERVICE_ROLE_KEY") {
+  console.error("SUPABASE_SERVICE_ROLE_KEY is required. Set it in .env.staging. Do not commit a live key.")
+  process.exit(1)
+}
 
 const ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||

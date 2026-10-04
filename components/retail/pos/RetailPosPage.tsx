@@ -111,6 +111,7 @@ export default function RetailPosPage() {
   const [variantStockById, setVariantStockById] = useState<Record<string, number>>({})
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [processingPayment, setProcessingPayment] = useState(false)
+  const onlineSaleAttemptIdRef = useRef<string | null>(null)
   const [showParkedSales, setShowParkedSales] = useState(false)
   const [parkingSale, setParkingSale] = useState(false)
   /** `/api/sales/park` requires Supabase user; hide/disable Park when PIN-only (no auth user). */
@@ -4318,6 +4319,10 @@ export default function RetailPosPage() {
         deposit_amount: is_layaway ? deposit_amount : undefined,
         cart_discount_value: cartDiscountType !== 'none' ? cartDiscountValue : undefined,
       }
+      if (!onlineSaleAttemptIdRef.current) {
+        onlineSaleAttemptIdRef.current = crypto.randomUUID()
+      }
+      salePayload.client_sale_id = onlineSaleAttemptIdRef.current
       
       // Note: Discount amounts are computed server-side from discount_type and discount_value
       // The API will calculate and store the immutable discount_amount values
@@ -4416,6 +4421,7 @@ export default function RetailPosPage() {
       }
 
       if (!response.ok) {
+        if (response.status < 500) onlineSaleAttemptIdRef.current = null
         console.error("API returned error:", response.status)
         console.error("Error response data:", JSON.stringify(data, null, 2))
         console.error("Error response keys:", Object.keys(data))
@@ -4456,6 +4462,7 @@ export default function RetailPosPage() {
       })
 
       if (data.sale_id) {
+        onlineSaleAttemptIdRef.current = null
         const receiptNumber = data.sale_id
           .replace(/-/g, "")
           .substring(0, 12)

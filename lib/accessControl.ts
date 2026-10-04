@@ -23,6 +23,8 @@ import { logAccessDeniedAttempt } from "./firmActivityLog"
 import { hasPermission, type CustomPermissions } from "./permissions"
 import { ROUTE_PERMISSION_RULES } from "./nav/routePermissionRules"
 import { isRetailPosPinUrlIsolationActive } from "./retail/posPinUrlIsolation"
+import { isRetailInvitationSignupIntent } from "./auth/signupWorkspace"
+import { RETAIL_INVITE_RESUME_PATH } from "./retail/invitations/retailInvitationToken"
 import {
   isPracticeBlockedServicePath,
   isPracticeClientBooksPath,
@@ -236,10 +238,14 @@ export async function resolveAccess(
 
   // STEP 2: Get user metadata (for signup intent check)
   let signupIntent: "business_owner" | "accounting_firm" = "business_owner"
+  let retailInvitationSignup = false
   try {
     const { data: { user: authUser } } = await supabase.auth.getUser()
-    if (authUser?.user_metadata?.signup_intent) {
-      signupIntent = authUser.user_metadata.signup_intent
+    retailInvitationSignup = isRetailInvitationSignupIntent(authUser?.user_metadata?.signup_intent)
+    if (authUser?.user_metadata?.signup_intent === "accounting_firm") {
+      signupIntent = "accounting_firm"
+    } else if (authUser?.user_metadata?.signup_intent === "business_owner") {
+      signupIntent = "business_owner"
     }
   } catch (error) {
     // Ignore - will default to business_owner
@@ -340,6 +346,12 @@ export async function resolveAccess(
           redirectTo: "/accounting/firm/setup", 
           reason: "Accounting workspace requires accountant firm membership" 
         })
+      } else if (retailInvitationSignup) {
+        return debugDecision({
+          allowed: false,
+          redirectTo: RETAIL_INVITE_RESUME_PATH,
+          reason: "Retail invitation must be accepted before other workspaces",
+        })
       } else {
         return debugDecision({ 
           allowed: false, 
@@ -390,6 +402,13 @@ export async function resolveAccess(
       const isSetupRoute = setupPaths.some((p) => normalizedPath === p || normalizedPath.startsWith(p + "/"))
       if (isSetupRoute) {
         return debugDecision({ allowed: true })
+      }
+      if (retailInvitationSignup) {
+        return debugDecision({
+          allowed: false,
+          redirectTo: RETAIL_INVITE_RESUME_PATH,
+          reason: "Pending retail invitation",
+        })
       }
       // Default: business owner needs a business
       return debugDecision({ allowed: false, redirectTo: "/business-setup", reason: "No business found" })

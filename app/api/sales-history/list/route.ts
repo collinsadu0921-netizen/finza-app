@@ -6,17 +6,20 @@ import {
   parseSaleAmountSearch,
   parseSaleHistoryDateSearch,
 } from "@/lib/retail/saleLookupSearchParse"
+import { requireRetailSalesReader } from "@/lib/retail/requireRetailSalesReader"
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+function salesHistoryAdmin() {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return null
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  )
+}
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const businessId = searchParams.get("business_id")
-    const userId = searchParams.get("user_id")
+    const requestedBusinessId = searchParams.get("business_id")
     const page = parseInt(searchParams.get("page") || "1")
     const pageSize = parseInt(searchParams.get("page_size") || "50")
     const dateFrom = searchParams.get("date_from")
@@ -30,47 +33,21 @@ export async function GET(request: NextRequest) {
     const sortDirection = searchParams.get("sort_direction") || "desc"
     const search = (searchParams.get("search") || "").trim()
 
-    if (!businessId || !userId) {
-      return NextResponse.json(
-        { error: "Missing required parameters: business_id, user_id" },
-        { status: 400 }
-      )
+    const reader = await requireRetailSalesReader(request, requestedBusinessId, "list")
+    if (!reader.ok) return reader.response
+    const userId = reader.userId
+    const businessId = reader.businessId
+
+    const supabase = salesHistoryAdmin()
+    if (!supabase) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 })
     }
 
-    // Check user role - only owner, admin, manager can access
-    const { data: businessUser, error: roleError } = await supabase
-      .from("business_users")
-      .select("role")
-      .eq("business_id", businessId)
-      .eq("user_id", userId)
-      .maybeSingle()
-
-    if (roleError || !businessUser) {
-      return NextResponse.json(
-        { error: "Access denied" },
-        { status: 403 }
-      )
-    }
-
-    if (
-      businessUser.role !== "owner" &&
-      businessUser.role !== "admin" &&
-      businessUser.role !== "manager" &&
-      businessUser.role !== "employee"
-    ) {
-      return NextResponse.json(
-        { error: "Only owners, admins, managers, and employees can access sales history" },
-        { status: 403 }
-      )
-    }
-
-    // Get effective store_id based on role
     // Admin/Owner: can use null (global) or selected store_id
     // Manager: locked to their assigned store (ignore client input)
     let effectiveStoreId: string | null = null
 
-    if (businessUser.role === "manager") {
-      // Manager must use their assigned store - get from users table
+    if (reader.role === "manager") {
       const { data: userData } = await supabase
         .from("users")
         .select("store_id")

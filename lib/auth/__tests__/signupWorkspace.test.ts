@@ -64,6 +64,10 @@ describe("signupWorkspace", () => {
     it("routes service to business-setup", () => {
       expect(resolveImmediatePostSignupPath(SIGNUP_INTENT_SERVICE)).toBe("/business-setup")
     })
+
+    it("routes a Retail invitation to resume instead of business-setup", () => {
+      expect(resolveImmediatePostSignupPath(SIGNUP_INTENT_RETAIL_INVITATION)).toBe("/retail/invite/resume")
+    })
   })
 
   describe("resolvePracticePostAuthPath", () => {

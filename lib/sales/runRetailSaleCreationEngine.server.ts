@@ -20,6 +20,18 @@ import { type UserRole } from "@/lib/userRoles"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import type { RetailMomoCartSnapshot } from "@/lib/retail/pos/retailMomoCartFingerprint"
 import { computeServerRetailMomoFingerprint } from "@/lib/retail/pos/retailMomoFingerprintServer"
+import {
+  missingManualTenderReference,
+  salePaymentReferenceFromLines,
+  withNormalizedTenderReferences,
+  type ManualTenderLine,
+} from "@/lib/retail/pos/manualTenderReference"
+import {
+  decideOnlineSaleReplay,
+  isUniqueViolation,
+  normalizeClientSaleId,
+  type ExistingOnlineSale,
+} from "@/lib/retail/pos/onlineSaleIdempotency"
 
 const supabaseEngine = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -151,6 +163,42 @@ async function abortRetailSaleWithCompensation(params: {
 type PaymentLine = {
   method: "cash" | "momo" | "card"
   amount: number
+  reference?: string | null
+}
+
+async function lookupOnlineSaleReplay(
+  supabase: SupabaseClient,
+  input: { businessId: string; registerId: string; clientSaleId: string; amount: number }
+): Promise<NextResponse | null> {
+  const { data, error } = await supabase
+    .from("sales")
+    .select("id, amount, business_id, register_id")
+    .eq("business_id", input.businessId)
+    .eq("register_id", input.registerId)
+    .eq("client_sale_id", input.clientSaleId)
+    .maybeSingle()
+
+  if (error || !data) return null
+  const decision = decideOnlineSaleReplay(data as ExistingOnlineSale, {
+    businessId: input.businessId,
+    registerId: input.registerId,
+    amount: input.amount,
+  })
+  if (decision === "replay") {
+    return NextResponse.json({
+      success: true,
+      sale_id: data.id,
+      message: "Sale already recorded",
+      idempotent: true,
+    })
+  }
+  if (decision === "conflict") {
+    return NextResponse.json(
+      { error: "This checkout was already used for a different sale", code: "CLIENT_SALE_ID_CONFLICT" },
+      { status: 409 }
+    )
+  }
+  return null
 }
 
 export type RetailSaleCreationAuth =
@@ -202,6 +250,7 @@ export async function runRetailSaleCreationEngine(
       // is_layaway and deposit_amount are ignored for now - layaway not implemented
       /** Retail POS — MTN MoMo sandbox: finalize only after provider success (see retail API routes). */
       retail_mtn_sandbox_payment_reference,
+      client_sale_id,
     } = body as any
 
     const business_id = auth.businessId
@@ -245,9 +294,19 @@ export async function runRetailSaleCreationEngine(
 
     // Register session validation for online sales runs after finalStoreId is resolved (below).
 
-    // Validate payments if provided
+    let normalizedPayments: PaymentLine[] | null = null
     if (payments && Array.isArray(payments)) {
-      const paymentsTotal = payments.reduce(
+      normalizedPayments = withNormalizedTenderReferences(payments as ManualTenderLine[]) as PaymentLine[]
+      if (!retailMomoRef && missingManualTenderReference(normalizedPayments)) {
+        return NextResponse.json(
+          {
+            error: "Card and Mobile Money need the terminal reference. Cash does not.",
+            code: "PAYMENT_REFERENCE_REQUIRED",
+          },
+          { status: 400 }
+        )
+      }
+      const paymentsTotal = normalizedPayments.reduce(
         (sum: number, p: PaymentLine) => sum + Number(p.amount || 0),
         0
       )
@@ -258,6 +317,14 @@ export async function runRetailSaleCreationEngine(
           { status: 400 }
         )
       }
+    }
+
+    let clientSaleId: string | null = null
+    try {
+      clientSaleId = normalizeClientSaleId(client_sale_id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Invalid client_sale_id"
+      return NextResponse.json({ error: message, code: "INVALID_CLIENT_SALE_ID" }, { status: 400 })
     }
 
     // Load business to check country eligibility and get owner_id for system accountant
@@ -1147,9 +1214,25 @@ const validation = validateCartDiscount(
     // Foreign currency fields not set - FX not fully supported end-to-end
     // Exchange rate capture, ledger posting, and reporting for foreign currency are not implemented
 
-    // Store payment lines as JSON if provided
-    if (payments && Array.isArray(payments)) {
-      saleData.payment_lines = JSON.stringify(payments)
+    if (normalizedPayments && normalizedPayments.length > 0) {
+      saleData.payment_lines = JSON.stringify(normalizedPayments)
+      saleData.payment_reference = salePaymentReferenceFromLines(
+        normalizedPayments,
+        retailMomoRef || null
+      )
+    }
+    if (clientSaleId) {
+      saleData.client_sale_id = clientSaleId
+    }
+
+    if (clientSaleId && register_id) {
+      const replay = await lookupOnlineSaleReplay(supabase, {
+        businessId: business_id,
+        registerId: String(register_id),
+        clientSaleId,
+        amount: Number(amount),
+      })
+      if (replay) return replay
     }
 
     // Try to insert sale with store_id and status, but handle gracefully if columns don't exist
@@ -1199,6 +1282,18 @@ const validation = validateCartDiscount(
         }
         sale = retrySale
       }
+    } else if (saleError && isUniqueViolation(saleError) && clientSaleId && register_id) {
+      const replay = await lookupOnlineSaleReplay(supabase, {
+        businessId: business_id,
+        registerId: String(register_id),
+        clientSaleId,
+        amount: Number(amount),
+      })
+      if (replay) return replay
+      return NextResponse.json(
+        { error: "This checkout was already used for a different sale", code: "CLIENT_SALE_ID_CONFLICT" },
+        { status: 409 }
+      )
     } else if (saleError) {
       return NextResponse.json(
         { error: saleError.message || "Failed to create sale" },

@@ -30,10 +30,11 @@ export type PostAuthDestinationInput = {
  *
  * Precedence:
  * 1. Practice signup intent → Practice setup / onboarding / dashboard (even if Service businesses exist)
- * 2. Existing accessible businesses → Service/Retail dashboards or workspace selector
- * 3. Firm membership without Service businesses → Practice (invited staff path)
- * 4. Service trial intent with no businesses → business-setup
- * 5. Default → business-setup
+ * 2. No businesses plus a pending Retail invitation or retail_invitation intent → /retail/invite/resume
+ * 3. Existing accessible businesses → Service/Retail dashboards or workspace selector
+ * 4. Firm membership without Service businesses → Practice (invited staff path)
+ * 5. Service trial intent with no businesses → business-setup
+ * 6. Default → business-setup
  *
  * Authorization for Practice access is firm membership; signup_intent is onboarding preference only.
  */

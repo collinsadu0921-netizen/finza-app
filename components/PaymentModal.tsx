@@ -57,6 +57,8 @@ function momoStatusWellClass(phase: "idle" | "sending" | "pending" | "finalizing
 export type PaymentLine = {
   method: "cash" | "momo" | "card"
   amount: number
+  /** Bank-terminal or MoMo reference. Required for card and manual MoMo. Never required for cash. */
+  reference?: string
 }
 
 export type PaymentResult = {
@@ -118,6 +120,7 @@ export default function PaymentModal({
   const splitModePrevRef = useRef<"single" | "split" | "layaway">("single")
   const [paymentMode, setPaymentMode] = useState<"single" | "split" | "layaway">("single")
   const [singleMethod, setSingleMethod] = useState<"cash" | "momo" | "card">("cash")
+  const [singleTenderReference, setSingleTenderReference] = useState("")
   const [splitPayments, setSplitPayments] = useState<PaymentLine[]>([
     { method: "cash", amount: 0 },
   ])
@@ -607,10 +610,17 @@ export default function PaymentModal({
     setSplitPayments(splitPayments.filter((_, i) => i !== index))
   }
 
-  const handleUpdateSplitPayment = (index: number, field: "method" | "amount", value: string | number) => {
+  const handleUpdateSplitPayment = (
+    index: number,
+    field: "method" | "amount" | "reference",
+    value: string | number
+  ) => {
     const updated = [...splitPayments]
     if (field === "method") {
       updated[index].method = value as "cash" | "momo" | "card"
+      if (updated[index].method === "cash") updated[index].reference = undefined
+    } else if (field === "reference") {
+      updated[index].reference = String(value)
     } else {
       const numValue = Number(value)
       updated[index].amount = (isNaN(numValue) || numValue < 0) ? 0 : numValue
@@ -692,6 +702,27 @@ export default function PaymentModal({
       return
     }
 
+    if (
+      paymentMode === "single" &&
+      (singleMethod === "card" || (singleMethod === "momo" && !retailMtnSandboxMomoActive)) &&
+      !singleTenderReference.trim()
+    ) {
+      setError("Enter the terminal reference from the bank POS. Cash does not need one.")
+      return
+    }
+    if (paymentMode === "split") {
+      const missingSplitRef = splitPayments.some(
+        (p) =>
+          Number(p.amount) > 0 &&
+          (p.method === "card" || p.method === "momo") &&
+          !String(p.reference || "").trim()
+      )
+      if (missingSplitRef) {
+        setError("Each card or Mobile Money line needs its own terminal reference.")
+        return
+      }
+    }
+
     // Foreign currency not supported - must use base currency
     if (currency !== currencyCode) {
       setError("Foreign currency payments are not currently supported. Please use the base business currency only.")
@@ -737,7 +768,9 @@ export default function PaymentModal({
         result.change_given = Math.max(0, cashGivenNum - depositNum)
       }
     } else if (paymentMode === "single") {
-      result.payments = [{ method: singleMethod, amount: totalPayable }]
+      const reference =
+        singleMethod === "cash" ? undefined : singleTenderReference.trim() || undefined
+      result.payments = [{ method: singleMethod, amount: totalPayable, reference }]
       if (singleMethod === "cash") {
         const cashGivenNum = Number(cashGiven)
         result.cash_received = cashGivenNum
@@ -750,6 +783,7 @@ export default function PaymentModal({
         .map((p) => ({
           method: p.method,
           amount: Number(p.amount.toFixed(2)),
+          reference: p.method === "cash" ? undefined : String(p.reference || "").trim() || undefined,
         }))
 
       // Adjust last payment to account for rounding
@@ -952,6 +986,25 @@ export default function PaymentModal({
                 ))}
               </div>
             </div>
+            {(singleMethod === "card" || (singleMethod === "momo" && !showMomoSandboxFlow)) && (
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {singleMethod === "card" ? "Bank terminal reference" : "MoMo reference"}
+                </label>
+                <input
+                  type="text"
+                  value={singleTenderReference}
+                  onChange={(e) => setSingleTenderReference(e.target.value)}
+                  placeholder={singleMethod === "card" ? "Terminal approval or RRN" : "MoMo transaction reference"}
+                  autoComplete="off"
+                  className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900"
+                  disabled={momoBusy || saleProcessing}
+                />
+                <p className="mt-1 text-xs font-medium text-slate-500">
+                  Enter this after the customer pays on the bank terminal. Cash does not need a reference.
+                </p>
+              </div>
+            )}
             {showMomoSandboxFlow && (
               <div className="space-y-3 rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
@@ -1279,6 +1332,16 @@ export default function PaymentModal({
                       Remove
                     </button>
                   </div>
+                  {(payment.method === "card" || payment.method === "momo") && (
+                    <input
+                      type="text"
+                      value={payment.reference || ""}
+                      onChange={(e) => handleUpdateSplitPayment(index, "reference", e.target.value)}
+                      placeholder={payment.method === "card" ? "Bank terminal reference" : "MoMo reference"}
+                      autoComplete="off"
+                      className="mt-2 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900"
+                    />
+                  )}
                 </div>
               ))}
             </div>

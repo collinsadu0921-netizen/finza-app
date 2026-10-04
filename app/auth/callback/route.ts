@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { safeRetailInviteNextPath } from "@/lib/retail/invitations/retailInvitationToken"
+import { pendingRetailInvitationForEmail } from "@/lib/retail/invitations/retailInvitationAdmin"
 import { createServerClient } from "@supabase/ssr"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import {
@@ -301,15 +302,28 @@ export async function GET(request: NextRequest) {
     } else if (safeRetailNext) {
       redirectUrl = new URL(safeRetailNext, origin)
     } else {
+      const ownedBusinesses = Array.isArray(ownedRows) ? ownedRows : []
+      const memberships = Array.isArray(membershipRows) ? membershipRows : []
+      let hasPendingRetailInvitation = false
+      if (ownedBusinesses.length === 0 && memberships.length === 0 && user.email) {
+        try {
+          const admin = createSupabaseAdminClient()
+          const pending = await pendingRetailInvitationForEmail(admin, user.email)
+          hasPendingRetailInvitation = Boolean(pending)
+        } catch {
+          // A missing service role must not break Service or Practice login.
+        }
+      }
       const destination = resolvePostAuthDestination({
         signupIntent,
         hasFirmMembership,
         firmOnboardingComplete,
-        ownedBusinesses: Array.isArray(ownedRows) ? ownedRows : [],
-        membershipRows: Array.isArray(membershipRows) ? membershipRows : [],
+        ownedBusinesses,
+        membershipRows: memberships,
         trialIntent,
         trialWorkspace: typeof trialWorkspace === "string" ? trialWorkspace : null,
         trialPlan: typeof trialPlan === "string" ? trialPlan : null,
+        hasPendingRetailInvitation,
       })
 
       redirectUrl = new URL(destination, origin)
