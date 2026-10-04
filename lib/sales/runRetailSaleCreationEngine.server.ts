@@ -21,7 +21,6 @@ import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import type { RetailMomoCartSnapshot } from "@/lib/retail/pos/retailMomoCartFingerprint"
 import { computeServerRetailMomoFingerprint } from "@/lib/retail/pos/retailMomoFingerprintServer"
 import {
-  missingManualTenderReference,
   paymentLinesMatchSaleAmount,
   salePaymentReferenceFromLines,
   withNormalizedTenderReferences,
@@ -298,15 +297,6 @@ export async function runRetailSaleCreationEngine(
     let normalizedPayments: PaymentLine[] | null = null
     if (payments && Array.isArray(payments)) {
       normalizedPayments = withNormalizedTenderReferences(payments as ManualTenderLine[]) as PaymentLine[]
-      if (!retailMomoRef && missingManualTenderReference(normalizedPayments)) {
-        return NextResponse.json(
-          {
-            error: "Card and Mobile Money need the terminal reference. Cash does not.",
-            code: "PAYMENT_REFERENCE_REQUIRED",
-          },
-          { status: 400 }
-        )
-      }
       const paymentsTotal = normalizedPayments.reduce(
         (sum: number, p: PaymentLine) => sum + Number(p.amount || 0),
         0

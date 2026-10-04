@@ -16,16 +16,11 @@ export function normalizeTenderReference(raw: unknown): string | null {
 }
 
 /**
- * Cash never needs a reference.
- * Card and manual MoMo do, unless the line is covered by an already-confirmed
- * sandbox provider reference (that path is not used for Shop #1 standalone terminals).
+ * Cash, Card, and manual MoMo can all complete with no reference.
+ * A blank reference is omitted by normalizeTenderReference; it is not an error.
  */
-export function missingManualTenderReference(lines: ManualTenderLine[]): boolean {
-  return lines.some((line) => {
-    if (!(line.method === "card" || line.method === "momo")) return false
-    if (!(Number(line.amount) > 0)) return false
-    return !normalizeTenderReference(line.reference)
-  })
+export function missingManualTenderReference(_lines: ManualTenderLine[]): boolean {
+  return false
 }
 
 /**

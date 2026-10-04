@@ -27,9 +27,49 @@ describe("manual card and MoMo references", () => {
     expect(salePaymentReferenceFromLines(lines)).toBe("MOMO-77")
   })
 
-  it("rejects card and manual MoMo lines that have no reference", () => {
-    expect(missingManualTenderReference([{ method: "card", amount: 10 }])).toBe(true)
-    expect(missingManualTenderReference([{ method: "momo", amount: 10, reference: "  " }])).toBe(true)
+  it("allows card and manual MoMo lines with no reference", () => {
+    const card = withNormalizedTenderReferences([{ method: "card", amount: 10 }])
+    const momo = withNormalizedTenderReferences([{ method: "momo", amount: 10, reference: "  " }])
+    expect(missingManualTenderReference(card)).toBe(false)
+    expect(missingManualTenderReference(momo)).toBe(false)
+    expect(salePaymentReferenceFromLines(card)).toBeNull()
+    expect(salePaymentReferenceFromLines(momo)).toBeNull()
+    expect(JSON.parse(JSON.stringify(card))).toEqual([{ method: "card", amount: 10 }])
+    expect(JSON.parse(JSON.stringify(momo))).toEqual([{ method: "momo", amount: 10 }])
+  })
+
+  it("keeps a supplied card or MoMo reference and drops a blank one on a split", () => {
+    const both = withNormalizedTenderReferences([
+      { method: "cash", amount: 4 },
+      { method: "card", amount: 3, reference: "STAGE-CARD-SPLIT-002" },
+      { method: "momo", amount: 3, reference: "STAGE-MOMO-SPLIT-002" },
+    ])
+    expect(salePaymentReferenceFromLines(both)).toBeNull()
+    expect(JSON.parse(JSON.stringify(both))).toEqual([
+      { method: "cash", amount: 4 },
+      { method: "card", amount: 3, reference: "STAGE-CARD-SPLIT-002" },
+      { method: "momo", amount: 3, reference: "STAGE-MOMO-SPLIT-002" },
+    ])
+
+    const cardOnly = withNormalizedTenderReferences([
+      { method: "cash", amount: 4 },
+      { method: "card", amount: 3, reference: "STAGE-CARD-SPLIT-002" },
+      { method: "momo", amount: 3, reference: "" },
+    ])
+    expect(salePaymentReferenceFromLines(cardOnly)).toBeNull()
+    expect(JSON.parse(JSON.stringify(cardOnly))[2]).toEqual({ method: "momo", amount: 3 })
+
+    const none = withNormalizedTenderReferences([
+      { method: "cash", amount: 4 },
+      { method: "card", amount: 3 },
+      { method: "momo", amount: 3, reference: "   " },
+    ])
+    expect(salePaymentReferenceFromLines(none)).toBeNull()
+    expect(JSON.parse(JSON.stringify(none))).toEqual([
+      { method: "cash", amount: 4 },
+      { method: "card", amount: 3 },
+      { method: "momo", amount: 3 },
+    ])
   })
 
   it("keeps each non-cash reference on its own split line", () => {

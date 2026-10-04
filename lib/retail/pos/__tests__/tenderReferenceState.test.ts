@@ -21,6 +21,13 @@ describe("tender reference isolation", () => {
     expect(singleTenderReferenceAfterMethodChange("card", "card", "STAGE-CARD-001")).toBe("STAGE-CARD-001")
   })
 
+  it("successful sale resets reference state", () => {
+    const typed = singleTenderReferenceAfterMethodChange("cash", "card", "")
+    expect(typed).toBe("")
+    expect(singleTenderReferenceAfterMethodChange("card", "card", "STAGE-CARD-002")).toBe("STAGE-CARD-002")
+    expect(singleTenderReferenceOnOpen()).toBe("")
+  })
+
   it("clears a cancelled reference on the next open", () => {
     const leftover = singleTenderReferenceAfterMethodChange("card", "card", "STAGE-CARD-001")
     expect(leftover).toBe("STAGE-CARD-001")

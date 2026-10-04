@@ -1,6 +1,10 @@
 /**
  * Parse staff lookup input for retail sales (receipt ID, scanned QR, amount, date).
- * Used by /api/sales-history/list — no DB migrations; operates on existing columns.
+ * Used by /api/sales-history/list.
+ *
+ * payment_lines is jsonb, but rows are stored as JSON strings (double-encoded).
+ * Array containment does not match that shape. Search uses payment_lines_search,
+ * a stored text copy that unwraps a jsonb string or renders a jsonb array.
  */
 
 const UUID_STANDARD =
@@ -38,35 +42,93 @@ export function isPartialHyphenatedUuidLookup(raw: string): boolean {
   return /^[0-9a-f-]+$/.test(s) && s.includes("-") && s.length >= 8 && s.length < 36
 }
 
+/** Characters that split or quote a PostgREST `or()` filter. */
+const SALES_HISTORY_OR_UNSAFE = /[%_,"()\\]/g
+
 /**
- * Text/ilike OR fragments for non-UUID Sales History search.
- * Never includes `id.ilike` (UUID column). Exact UUID lookup is handled separately via `.eq("id", …)`.
+ * Literal embedded in a quoted ilike value.
+ * Strips wildcards and PostgREST `or()` metacharacters so a bad search cannot 500.
  */
-export function buildSalesHistoryTextSearchOrParts(search: string): string[] {
-  const pat = saleLookupIlikePattern(search)
-  if (pat.length === 0) return []
-  const safe = pat.replace(/,/g, "")
-  const like = `%${safe}%`
-  const parts = [
-    `momo_transaction_id.ilike.${like}`,
-    `hubtel_transaction_id.ilike.${like}`,
-    `description.ilike.${like}`,
-    `payment_reference.ilike.${like}`,
-  ]
-  const lineReference = paymentLinesReferenceContainsOrPart(safe)
-  if (lineReference) parts.push(lineReference)
-  return parts
+export function salesHistorySearchLiteral(raw: string): string {
+  return raw.trim().replace(SALES_HISTORY_OR_UNSAFE, "")
+}
+
+function ilikeOrPart(column: string, literal: string): string {
+  return `${column}.ilike."%${literal}%"`
 }
 
 /**
- * Exact reference stored on a payment_lines jsonb element.
- * PostgREST `or` splits on commas, so the JSON value is double-quoted.
+ * Text/ilike OR fragments for non-UUID Sales History search.
+ * Never includes `id.ilike` (UUID column). Exact UUID lookup is handled separately via `.eq("id", …)`.
+ * Never embeds JSON in the filter. Line references use payment_lines_search.
  */
-export function paymentLinesReferenceContainsOrPart(reference: string): string | null {
-  if (reference.length < 3) return null
-  if (/[",()\\]/.test(reference)) return null
-  const json = JSON.stringify([{ reference }]).replace(/"/g, '""')
-  return `payment_lines.cs."${json}"`
+export function buildSalesHistoryTextSearchOrParts(search: string): string[] {
+  const literal = salesHistorySearchLiteral(saleLookupIlikePattern(search))
+  if (literal.length === 0) return []
+  return [
+    ilikeOrPart("momo_transaction_id", literal),
+    ilikeOrPart("hubtel_transaction_id", literal),
+    ilikeOrPart("description", literal),
+    ilikeOrPart("payment_reference", literal),
+    ilikeOrPart("payment_lines_search", literal),
+  ]
+}
+
+/**
+ * Text actually stored for sales-history line search.
+ * A jsonb string is unwrapped once. An array or object is rendered as JSON text.
+ */
+export function paymentLinesSearchText(lines: unknown): string {
+  if (lines == null) return ""
+  if (typeof lines === "string") {
+    const trimmed = lines.trim()
+    if (!trimmed) return ""
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      if (typeof parsed === "string") return parsed
+      return JSON.stringify(parsed)
+    } catch {
+      return trimmed
+    }
+  }
+  if (typeof lines === "object") {
+    try {
+      return JSON.stringify(lines)
+    } catch {
+      return ""
+    }
+  }
+  return ""
+}
+
+export type SalesHistoryReferenceSale = {
+  id: string
+  businessId: string
+  storeId: string | null
+  paymentReference: string | null
+  paymentLines: unknown
+}
+
+/**
+ * Same match the list route applies after business and store scope:
+ * payment_reference or the plain-text payment lines contain the sanitized search.
+ * A null store scope is company-wide inside that business. A set store scope is exact.
+ */
+export function findSalesByPaymentReference(
+  sales: SalesHistoryReferenceSale[],
+  query: string,
+  scope: { businessId: string; storeId: string | null }
+): SalesHistoryReferenceSale[] {
+  const literal = salesHistorySearchLiteral(saleLookupIlikePattern(query))
+  if (!literal) return []
+  const needle = literal.toLowerCase()
+  return sales.filter((sale) => {
+    if (sale.businessId !== scope.businessId) return false
+    if (scope.storeId && sale.storeId !== scope.storeId) return false
+    const reference = (sale.paymentReference || "").toLowerCase()
+    const lines = paymentLinesSearchText(sale.paymentLines).toLowerCase()
+    return reference.includes(needle) || lines.includes(needle)
+  })
 }
 
 /** YYYY-MM-DD calendar date (UTC day bounds for DB filter). */
