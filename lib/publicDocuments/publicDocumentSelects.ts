@@ -111,9 +111,11 @@ export {
   PUBLIC_ESTIMATE_COLUMNS_MODERN as PUBLIC_ESTIMATE_COLUMNS,
 } from "./fetchPublicEstimateRowByToken"
 
-/** Quote line items — supports legacy `quantity`/`price`/`total` and newer `qty`/`unit_price`/`line_total`. */
-export const PUBLIC_ESTIMATE_ITEM_SELECT =
-  "id, description, quantity, price, total, qty, unit_price, line_total, discount_amount, created_at"
+/**
+ * Quote line items are loaded by `fetchNormalizedEstimateItems`.
+ * Do not select legacy and current columns in one PostgREST query: a missing
+ * column rejects the whole select and can blank a PDF.
+ */
 
 /**
  * Public proforma invoice row — covers proforma-public UI + `buildProformaFinancialDocumentHtmlForPdf`.

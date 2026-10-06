@@ -7,8 +7,12 @@ import {
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
-import { PUBLIC_BUSINESS_SELECT, PUBLIC_ESTIMATE_ITEM_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
+import { PUBLIC_BUSINESS_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
 import { fetchPublicEstimateRowByToken } from "@/lib/publicDocuments/fetchPublicEstimateRowByToken"
+import {
+  estimateItemForPdf,
+  fetchNormalizedEstimateItems,
+} from "@/lib/publicDocuments/fetchEstimateItems"
 import { logPublicQuoteEstimateFetch } from "@/lib/publicDocuments/publicQuoteRouteDiagnostics"
 
 export const dynamic = "force-dynamic"
@@ -66,7 +70,7 @@ export async function GET(
       estimate_number?: string | null
     }
 
-    const [{ data: customer }, { data: business }, { data: items }] = await Promise.all([
+    const [{ data: customer }, { data: business }, itemLoad] = await Promise.all([
       est.customer_id
         ? supabase
             .from("customers")
@@ -79,12 +83,16 @@ export async function GET(
         .select(PUBLIC_BUSINESS_SELECT)
         .eq("id", est.business_id)
         .single(),
-      supabase
-        .from("estimate_items")
-        .select(PUBLIC_ESTIMATE_ITEM_SELECT)
-        .eq("estimate_id", est.id)
-        .order("created_at", { ascending: true }),
+      fetchNormalizedEstimateItems(supabase, est.id),
     ])
+
+    if (!itemLoad.ok) {
+      console.error("[public-quote] pdf line items failed", {
+        estimateId: est.id,
+        error: itemLoad.error,
+      })
+      return NextResponse.json({ error: "Unable to generate PDF" }, { status: 500 })
+    }
 
     const invSettings = await loadInvoiceSettingsForDocument(supabase, est.business_id)
     const quoteTerms = mergeQuotePdfTerms(invSettings, null)
@@ -95,7 +103,7 @@ export async function GET(
         estimate: est,
         business: business ?? undefined,
         customer: customer ?? undefined,
-        items: items || [],
+        items: itemLoad.items.map(estimateItemForPdf),
         payment_terms: quoteTerms.payment_terms,
         footer_message: quoteTerms.footer_message,
         quote_terms: quoteTerms.quote_terms,

@@ -8,6 +8,10 @@ import {
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
+import {
+  estimateItemForPdf,
+  fetchNormalizedEstimateItems,
+} from "@/lib/publicDocuments/fetchEstimateItems"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -55,7 +59,7 @@ export async function GET(
       return NextResponse.json({ error: "Estimate not found" }, { status: 404 })
     }
 
-    const [{ data: business }, { data: items }] = await Promise.all([
+    const [{ data: business }, itemLoad] = await Promise.all([
       supabase
         .from("businesses")
         .select(
@@ -63,12 +67,16 @@ export async function GET(
         )
         .eq("id", scopedBusinessId)
         .single(),
-      supabase
-        .from("estimate_items")
-        .select("*")
-        .eq("estimate_id", estimateId)
-        .order("created_at", { ascending: true }),
+      fetchNormalizedEstimateItems(supabase, estimateId),
     ])
+
+    if (!itemLoad.ok) {
+      console.error("[estimate export-pdf] line items failed", {
+        estimateId,
+        error: itemLoad.error,
+      })
+      return NextResponse.json({ error: "Unable to generate PDF" }, { status: 500 })
+    }
 
     let customer: {
       id: string
@@ -96,7 +104,7 @@ export async function GET(
         estimate: estimateRow as Record<string, unknown>,
         business: business ?? undefined,
         customer: customer ?? undefined,
-        items: items || [],
+        items: itemLoad.items.map(estimateItemForPdf),
         payment_terms: quoteTerms.payment_terms,
         footer_message: quoteTerms.footer_message,
         quote_terms: quoteTerms.quote_terms,

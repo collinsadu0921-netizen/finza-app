@@ -11,6 +11,7 @@ import { sendTransactionalEmail } from "@/lib/email/sendTransactionalEmail"
 import { sendServiceWorkspaceDocumentEmail } from "@/lib/email/sendServiceWorkspaceDocumentEmail"
 import { buildEstimateEmailHtml } from "@/lib/email/templates/estimate"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import { resolveEstimatePublicLink } from "@/lib/estimates/quotePublicUrl"
 
 export async function POST(
   request: NextRequest,
@@ -130,11 +131,41 @@ export async function POST(
       )
     }
 
-    // Generate public estimate URL (if public_token exists)
-    let publicEstimateUrl = ""
-    if (estimate.public_token) {
-      publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/quote-public/${estimate.public_token}`
+    let requestOrigin: string | null = null
+    try {
+      requestOrigin = new URL(request.url).origin
+    } catch {
+      requestOrigin = null
     }
+    const publicLink = await resolveEstimatePublicLink({
+      appUrl: process.env.NEXT_PUBLIC_APP_URL,
+      requestOrigin,
+      vercelUrl: process.env.VERCEL_URL,
+      vercelEnv: process.env.VERCEL_ENV,
+      existingToken: typeof estimate.public_token === "string" ? estimate.public_token : null,
+      estimateId,
+      persistToken: async (token) => {
+        const { error } = await supabase
+          .from("estimates")
+          .update({ public_token: token })
+          .eq("id", estimateId)
+          .eq("business_id", scopedBusinessId)
+        if (error) {
+          console.error("[quote-public-url] token persist failed", {
+            estimateId,
+            message: error.message,
+          })
+        }
+        return { errorMessage: error?.message ?? null }
+      },
+    })
+    if (!publicLink.ok) {
+      return NextResponse.json(
+        { success: false, error: publicLink.error, message: publicLink.error },
+        { status: 500 }
+      )
+    }
+    const publicEstimateUrl = publicLink.publicUrl
 
     // Handle different send actions
     if (sendWhatsApp) {
@@ -236,36 +267,7 @@ export async function POST(
         )
       }
 
-      let tokenForEmail = (estimate.public_token as string | null) || null
-      if (!tokenForEmail) {
-        const generated = `est_${estimateId}_${Date.now()}`
-        const { error: tokUpdErr } = await supabase
-          .from("estimates")
-          .update({ public_token: generated })
-          .eq("id", estimateId)
-          .eq("business_id", scopedBusinessId)
-        if (tokUpdErr) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Could not create a public link for this quote. Try again or use Copy link first.",
-              message: tokUpdErr.message,
-            },
-            { status: 500 }
-          )
-        }
-        tokenForEmail = generated
-      }
-      let emailQuotePublicBase = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
-      try {
-        if (request.url) {
-          const origin = new URL(request.url).origin
-          if (origin) emailQuotePublicBase = origin
-        }
-      } catch {
-        /* keep */
-      }
-      const publicEstimateUrlForEmail = `${emailQuotePublicBase}/quote-public/${tokenForEmail}`
+      const publicEstimateUrlForEmail = publicEstimateUrl
 
       const businessName = estimate.businesses?.trading_name || estimate.businesses?.legal_name || "Our Business"
       const estimateNumber = estimate.estimate_number || estimate.id.substring(0, 8)
@@ -360,18 +362,6 @@ export async function POST(
     }
 
     if (copyLink) {
-      if (!publicEstimateUrl) {
-        // Generate public token if it doesn't exist
-        const publicToken = `est_${estimateId}_${Date.now()}`
-        await supabase
-          .from("estimates")
-          .update({ public_token: publicToken })
-          .eq("id", estimateId)
-          .eq("business_id", scopedBusinessId)
-
-        publicEstimateUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/quote-public/${publicToken}`
-      }
-
       // Update status only if sending (draft → sent), not if resending
       if (isSend) {
         if (!isValidEstimateTransition("draft", "sent")) {
