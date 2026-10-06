@@ -6,11 +6,14 @@ import { supabase } from "@/lib/supabaseClient"
 import { getAllUserBusinesses, resolvePreferredBusinessForUser, setSelectedBusinessId } from "@/lib/business"
 import {
   buildInvoiceListHref,
+  emptyInvoiceListPagination,
   findBusinessWithMostInvoices,
   hasActiveInvoiceListFilters,
   invoiceListHrefNeedsUpdate,
+  invoiceListQueryKey,
   SERVICE_INVOICES_LIST_PATH,
   shouldResetInvoiceListPage,
+  shouldSkipDuplicateInvoiceListLoad,
 } from "@/lib/invoices/invoiceListClient"
 import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatDate } from "@/lib/exportUtils"
@@ -230,6 +233,8 @@ function InvoicesPageContent() {
   const isInitialLoadRef = useRef(true)
   const businessIdRef = useRef("")
   const skipFilterEffectOnce = useRef(true)
+  const mountListQueryKeyRef = useRef<string | null>(null)
+  const listFetchGenRef = useRef(0)
   const prevPathnameRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -348,6 +353,7 @@ function InvoicesPageContent() {
       currentPage: number,
       opts?: { allowBusinessRecovery?: boolean; fresh?: boolean }
     ) => {
+      const fetchGen = ++listFetchGenRef.current
       let activeBid = bid
       let { invoices: data, pagination: pg } = await fetchInvoiceList(activeBid, currentPage, {
         fresh: opts?.fresh,
@@ -399,10 +405,13 @@ function InvoicesPageContent() {
         data = retry.invoices
         pg = retry.pagination
       }
+      if (fetchGen !== listFetchGenRef.current) {
+        return { data, pg, businessId: activeBid, stale: true as const }
+      }
       setInvoices(data)
       setPagination(pg)
       setTotalInvoices(pg.totalCount || data.length)
-      return { data, pg, businessId: activeBid }
+      return { data, pg, businessId: activeBid, stale: false as const }
     },
     [
       fetchInvoiceList,
@@ -448,9 +457,13 @@ function InvoicesPageContent() {
     const bid = businessIdRef.current
     if (!bid) return
     try {
-      await applyInvoiceListResult(bid, page)
+      await applyInvoiceListResult(bid, page, { fresh: true })
+      setError("")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load invoices")
+      setInvoices([])
+      setPagination(emptyInvoiceListPagination(PAGE_SIZE))
+      setTotalInvoices(0)
     }
   }, [applyInvoiceListResult, page])
 
@@ -489,6 +502,17 @@ function InvoicesPageContent() {
         }
         return
       }
+
+      mountListQueryKeyRef.current = invoiceListQueryKey({
+        businessId: bid,
+        statusFilter,
+        approvalFilter,
+        customerFilter,
+        startDate,
+        endDate,
+        searchQuery,
+        page,
+      })
 
       try {
         await Promise.all([
@@ -579,9 +603,21 @@ function InvoicesPageContent() {
 
   useEffect(() => {
     if (!businessId) return
+    const nextKey = invoiceListQueryKey({
+      businessId,
+      statusFilter,
+      approvalFilter,
+      customerFilter,
+      startDate,
+      endDate,
+      searchQuery,
+      page,
+    })
     if (skipFilterEffectOnce.current) {
       skipFilterEffectOnce.current = false
-      return
+      if (shouldSkipDuplicateInvoiceListLoad(mountListQueryKeyRef.current, nextKey)) {
+        return
+      }
     }
     void reloadInvoicesOnly()
   }, [businessId, statusFilter, approvalFilter, customerFilter, startDate, endDate, searchQuery, page, reloadInvoicesOnly])
@@ -624,28 +660,27 @@ function InvoicesPageContent() {
   }, [businessId])
 
   useEffect(() => {
-    const calc = async () => {
-      if (!businessId || !invoices.length) {
-        setOutstandingAmount(0)
-        return
-      }
-      const open = invoices.filter((i) => ["sent", "overdue", "partially_paid"].includes(i.status))
-      if (!open.length) {
-        setOutstandingAmount(0)
-        return
-      }
-      const t0 = performance.now()
-      const { payments, creditNotes } = await fetchPaymentTotals(open.map((i) => i.id))
-      devInvoiceTiming("outstanding totals load", t0)
-      setOutstandingAmount(
-        open.reduce(
-          (s, inv) => s + Math.max(0, Number(inv.total) - (payments[inv.id] || 0) - (creditNotes[inv.id] || 0)),
-          0
-        )
-      )
+    if (!businessId) {
+      setOutstandingAmount(0)
+      return
     }
-    void calc()
-  }, [businessId, invoices])
+    let cancelled = false
+    const loadOutstanding = async () => {
+      const t0 = performance.now()
+      const res = await sharedJsonGet<{ unpaidInvoicesTotal?: number; error?: string }>(
+        `/api/invoices/operational-unpaid?business_id=${encodeURIComponent(businessId)}`,
+        { fresh: true }
+      )
+      devInvoiceTiming("outstanding totals load", t0)
+      if (cancelled) return
+      if (!res.ok) return
+      setOutstandingAmount(Number(res.json?.unpaidInvoicesTotal) || 0)
+    }
+    void loadOutstanding()
+    return () => {
+      cancelled = true
+    }
+  }, [businessId])
 
   const handleExportCSV = async () => {
     if (!invoices.length) { toast.showToast("No invoices to export", "error"); return }
@@ -842,7 +877,7 @@ function InvoicesPageContent() {
             iconWrapperClassName="bg-amber-50"
             value={format(outstandingAmount)}
             valueVariant="currency"
-            hint="Awaiting payment"
+            hint="All unpaid invoices"
           />
           <KpiStatCard
             layout="header"

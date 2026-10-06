@@ -116,10 +116,49 @@ export function hasActiveInvoiceListFilters(input: {
 }): boolean {
   return (
     input.statusFilter !== "all" ||
-    input.approvalFilter !== "all" ||
+    (input.approvalFilter ?? "all") !== "all" ||
     input.customerFilter !== "all" ||
     Boolean(input.startDate) ||
     Boolean(input.endDate) ||
     Boolean(input.searchInput.trim())
   )
+}
+
+export function invoiceListQueryKey(input: {
+  businessId: string
+  statusFilter: string
+  approvalFilter: string
+  customerFilter: string
+  startDate: string
+  endDate: string
+  searchQuery: string
+  page: number
+}): string {
+  return [
+    input.businessId,
+    input.statusFilter,
+    input.approvalFilter,
+    input.customerFilter,
+    input.startDate,
+    input.endDate,
+    input.searchQuery,
+    String(input.page),
+  ].join("|")
+}
+
+/** Skip the mount filter effect only when it is the same list request already in flight. */
+export function shouldSkipDuplicateInvoiceListLoad(
+  mountQueryKey: string | null,
+  nextQueryKey: string
+): boolean {
+  return mountQueryKey != null && mountQueryKey === nextQueryKey
+}
+
+export function emptyInvoiceListPagination(pageSize: number): InvoiceListPagination {
+  return {
+    page: 1,
+    pageSize,
+    totalCount: 0,
+    totalPages: 0,
+  }
 }
