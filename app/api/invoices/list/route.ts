@@ -185,7 +185,18 @@ async function fetchOverdueInvoicesPage(
     .map((id) => byId.get(id))
     .filter((row): row is NonNullable<typeof row> => row != null)
 
-  return { invoices: ordered, totalCount }
+  // Draft and cancelled invoices are not operationally overdue. The RPC in
+  // migration 583 excludes them; this drops any still returned by an older function.
+  const visible = ordered.filter((row) => {
+    const status = String((row as { status?: string | null }).status || "").toLowerCase()
+    return status !== "draft" && status !== "cancelled"
+  })
+  const excludedOnPage = ordered.length - visible.length
+
+  return {
+    invoices: visible,
+    totalCount: Math.max(0, totalCount - excludedOnPage),
+  }
 }
 
 export async function GET(request: NextRequest) {

@@ -10,6 +10,7 @@ import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { downloadEstimatePdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
+import { buildQuotePublicUrl } from "@/lib/estimates/quotePublicUrl"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
@@ -75,7 +76,7 @@ export default function EstimateViewPage() {
 
   const handleCopyClientLink = () => {
     if (!estimate?.public_token) return
-    const url = `${window.location.origin}/quote-public/${estimate.public_token}`
+    const url = buildQuotePublicUrl(window.location.origin, estimate.public_token)
     navigator.clipboard.writeText(url).then(() => {
       setCopiedClientLink(true)
       setTimeout(() => setCopiedClientLink(false), 2000)

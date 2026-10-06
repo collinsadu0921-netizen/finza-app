@@ -6,6 +6,10 @@ import {
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { PUBLIC_BUSINESS_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
 import { fetchPublicEstimateRowByToken } from "@/lib/publicDocuments/fetchPublicEstimateRowByToken"
+import {
+  estimateItemForPublicJson,
+  fetchNormalizedEstimateItems,
+} from "@/lib/publicDocuments/fetchEstimateItems"
 import { logPublicQuoteEstimateFetch } from "@/lib/publicDocuments/publicQuoteRouteDiagnostics"
 
 export const dynamic = "force-dynamic"
@@ -126,12 +130,8 @@ export async function GET(
     const invSettings = await loadInvoiceSettingsForDocument(supabase, estimate.business_id)
     const mergedTerms = mergeQuotePdfTerms(invSettings, null)
 
-    const [{ data: items }, { data: biz }, { data: settingsRow }] = await Promise.all([
-      supabase
-        .from("estimate_items")
-        .select("id, description, quantity, price, total, discount_amount")
-        .eq("estimate_id", estimate.id)
-        .order("created_at", { ascending: true }),
+    const [itemLoad, { data: biz }, { data: settingsRow }] = await Promise.all([
+      fetchNormalizedEstimateItems(supabase, estimate.id),
       supabase
         .from("businesses")
         .select(PUBLIC_BUSINESS_SELECT)
@@ -144,9 +144,17 @@ export async function GET(
         .maybeSingle(),
     ])
 
+    if (!itemLoad.ok) {
+      console.error("[public-quote] line items failed", {
+        estimateId: estimate.id,
+        error: itemLoad.error,
+      })
+      return NextResponse.json({ error: "Unable to load document" }, { status: 500 })
+    }
+
     return NextResponse.json({
       estimate,
-      items: items ?? [],
+      items: itemLoad.items.map(estimateItemForPublicJson),
       business: biz ?? null,
       settings: {
         brand_color: settingsRow?.brand_color ?? null,

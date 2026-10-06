@@ -222,4 +222,42 @@ describe("GET /api/invoices/list", () => {
     const invoicesFrom = from.mock.calls.filter(([table]) => table === "invoices")
     expect(invoicesFrom.length).toBe(1)
   })
+
+  it("drops cancelled and draft rows from the overdue result set", async () => {
+    const rpc = jest.fn().mockResolvedValue({
+      data: { total_count: 3, invoice_ids: ["inv-sent", "inv-cancelled", "inv-draft"] },
+      error: null,
+    })
+    const invoiceRows = [
+      { id: "inv-sent", status: "sent", invoice_number: "INV-1", total: 50 },
+      { id: "inv-cancelled", status: "cancelled", invoice_number: "INV-2", total: 45000 },
+      { id: "inv-draft", status: "draft", invoice_number: "INV-3", total: 10 },
+    ]
+    const from = jest.fn((table: string) => {
+      if (table === "invoices") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          is: jest.fn().mockReturnThis(),
+          in: jest.fn().mockResolvedValue({ data: invoiceRows, error: null }),
+        }
+      }
+      return { select: jest.fn().mockReturnThis() }
+    })
+    mockCreateSupabase.mockResolvedValue({
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
+      from,
+      rpc,
+    } as any)
+    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-cancelled-guard" })
+
+    const req = new NextRequest(
+      "http://localhost/api/invoices/list?business_id=biz-cancelled-guard&status=overdue&page=1&limit=25"
+    )
+    const res = await GET(req)
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.invoices.map((row: { id: string }) => row.id)).toEqual(["inv-sent"])
+    expect(body.pagination.totalCount).toBe(1)
+  })
 })

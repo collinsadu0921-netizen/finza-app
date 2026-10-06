@@ -162,3 +162,24 @@ export function emptyInvoiceListPagination(pageSize: number): InvoiceListPaginat
     totalPages: 0,
   }
 }
+
+/**
+ * Decide whether a list response may replace the rows on screen.
+ * A slower "All" response must not overwrite a newer Overdue response.
+ * A failed filter request must not keep the previous unfiltered rows.
+ */
+export function commitInvoiceListFetch(input: {
+  requestGeneration: number
+  latestGeneration: number
+  ok: boolean
+  previousIds: string[]
+  nextIds: string[]
+}): { apply: boolean; ids: string[] } {
+  if (input.requestGeneration !== input.latestGeneration) {
+    return { apply: false, ids: input.previousIds }
+  }
+  if (!input.ok) {
+    return { apply: true, ids: [] }
+  }
+  return { apply: true, ids: input.nextIds }
+}

@@ -14,6 +14,7 @@ import {
   SERVICE_INVOICES_LIST_PATH,
   shouldResetInvoiceListPage,
   shouldSkipDuplicateInvoiceListLoad,
+  commitInvoiceListFetch,
 } from "@/lib/invoices/invoiceListClient"
 import { useToast } from "@/components/ui/ToastProvider"
 import { exportToCSV, exportToExcel, ExportColumn, formatDate } from "@/lib/exportUtils"
@@ -354,6 +355,7 @@ function InvoicesPageContent() {
       opts?: { allowBusinessRecovery?: boolean; fresh?: boolean }
     ) => {
       const fetchGen = ++listFetchGenRef.current
+      try {
       let activeBid = bid
       let { invoices: data, pagination: pg } = await fetchInvoiceList(activeBid, currentPage, {
         fresh: opts?.fresh,
@@ -405,13 +407,35 @@ function InvoicesPageContent() {
         data = retry.invoices
         pg = retry.pagination
       }
-      if (fetchGen !== listFetchGenRef.current) {
+      const decision = commitInvoiceListFetch({
+        requestGeneration: fetchGen,
+        latestGeneration: listFetchGenRef.current,
+        ok: true,
+        previousIds: [],
+        nextIds: data.map((row) => row.id),
+      })
+      if (!decision.apply) {
         return { data, pg, businessId: activeBid, stale: true as const }
       }
       setInvoices(data)
       setPagination(pg)
       setTotalInvoices(pg.totalCount || data.length)
       return { data, pg, businessId: activeBid, stale: false as const }
+      } catch (err) {
+        const decision = commitInvoiceListFetch({
+          requestGeneration: fetchGen,
+          latestGeneration: listFetchGenRef.current,
+          ok: false,
+          previousIds: [],
+          nextIds: [],
+        })
+        if (decision.apply) {
+          setInvoices([])
+          setPagination(emptyInvoiceListPagination(PAGE_SIZE))
+          setTotalInvoices(0)
+        }
+        throw err
+      }
     },
     [
       fetchInvoiceList,
@@ -461,9 +485,6 @@ function InvoicesPageContent() {
       setError("")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load invoices")
-      setInvoices([])
-      setPagination(emptyInvoiceListPagination(PAGE_SIZE))
-      setTotalInvoices(0)
     }
   }, [applyInvoiceListResult, page])
 
