@@ -186,9 +186,9 @@ async function fetchOverdueInvoicesPage(
     .filter((row): row is NonNullable<typeof row> => row != null)
 
   // Draft and cancelled invoices are not operationally overdue. Migration 587
-  // excludes them in the RPC. Until that migration is applied, drop any rows
-  // an older function still returns. totalCount only adjusts for rows on this
-  // page; the database count is exact after migration 587.
+  // excludes them in both RPC overloads, so total_count is the full filtered
+  // set. Until that migration is applied, drop any rows an older function
+  // still returns. totalCount only adjusts for rows on this page.
   const visible = ordered.filter((row) => {
     const status = String((row as { status?: string | null }).status || "").toLowerCase()
     return status !== "draft" && status !== "cancelled"

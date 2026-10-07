@@ -141,7 +141,65 @@ describe("operational overdue regression", () => {
     expect(decision.updateLoading).toBe(false)
   })
 
-  it("migration 587 excludes draft and cancelled using the operational outstanding formula", () => {
+  it("cancelled invoices stay out of overdue pages, totalCount, and outstanding", () => {
+    const sent = Array.from({ length: 26 }, (_, index) => ({
+      id: `sent-${index}`,
+      status: "sent",
+      dueDate: "2026-09-01",
+      issueDate: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      total: 10,
+    }))
+    const rows = [
+      ...sent,
+      {
+        id: "partial",
+        status: "partially_paid",
+        dueDate: "2026-09-01",
+        issueDate: "2026-07-01",
+        total: 1000,
+        payments: 400,
+      },
+      {
+        id: "cancelled",
+        status: "cancelled",
+        dueDate: "2026-09-01",
+        issueDate: "2026-08-15",
+        total: 45000,
+      },
+      {
+        id: "draft",
+        status: "draft",
+        dueDate: "2026-09-01",
+        issueDate: "2026-08-16",
+        total: 9999,
+      },
+      {
+        id: "paid",
+        status: "paid",
+        dueDate: "2026-09-01",
+        issueDate: "2026-08-17",
+        total: 800,
+        payments: 800,
+      },
+    ]
+
+    const page1 = pageOperationalOverdue(rows, 25, 0)
+    const page2 = pageOperationalOverdue(rows, 25, 25)
+
+    expect(page1.totalCount).toBe(27)
+    expect(page2.totalCount).toBe(27)
+    expect(page1.ids).toHaveLength(25)
+    expect(page2.ids).toHaveLength(2)
+    expect(page1.outstanding).toBe(26 * 10 + 600)
+    expect(page2.outstanding).toBe(page1.outstanding)
+    const ids = [...page1.ids, ...page2.ids]
+    expect(ids).not.toContain("cancelled")
+    expect(ids).not.toContain("draft")
+    expect(ids).not.toContain("paid")
+    expect(new Set([...page1.ids, ...page2.ids]).size).toBe(27)
+  })
+
+  it("migration 587 excludes draft and cancelled on both overdue overloads", () => {
     const sql = fs.readFileSync(
       path.join(
         process.cwd(),
@@ -149,16 +207,59 @@ describe("operational overdue regression", () => {
       ),
       "utf8"
     )
-    expect(sql).toContain("i.status NOT IN ('draft', 'cancelled')")
-    expect(sql).toContain("i.due_date < CURRENT_DATE")
-    expect(sql).toContain("FROM payments p")
-    expect(sql).toContain("cn.status = 'applied'")
-    expect(sql).toContain("wo.outstanding > 0")
-    expect(sql).toContain("SECURITY INVOKER")
-    expect(sql).toContain("STABLE")
-    expect(sql).toContain("RETURNS JSONB")
+    const bodies = sql
+      .split(/(?=CREATE OR REPLACE FUNCTION)/)
+      .filter((part) => part.includes("CREATE OR REPLACE FUNCTION"))
+
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).not.toContain("p_customer_approval_status")
+    expect(bodies[1]).toContain("p_customer_approval_status")
+    expect(sql.match(/i\.status NOT IN \('draft', 'cancelled'\)/g)).toHaveLength(2)
+    expect(sql.match(/'total_count', \(SELECT COUNT\(\*\)::BIGINT FROM overdue\)/g)).toHaveLength(2)
+    expect(sql.match(/LIMIT v_limit OFFSET v_offset/g)).toHaveLength(2)
+
+    for (const body of bodies) {
+      expect(body).toContain("i.business_id = p_business_id")
+      expect(body).toContain("p.business_id = p_business_id")
+      expect(body).toContain("cn.business_id = p_business_id")
+      expect(body).toContain("c.business_id = p_business_id")
+      expect(body).toContain("i.due_date < CURRENT_DATE")
+      expect(body).toContain("FROM payments p")
+      expect(body).toContain("cn.status = 'applied'")
+      expect(body).toContain("wo.outstanding > 0")
+      expect(body).toContain("SECURITY INVOKER")
+      expect(body).toContain("SET search_path = public")
+      expect(body).toContain("STABLE")
+      expect(body).toContain("RETURNS JSONB")
+      expect(body).not.toContain("SECURITY DEFINER")
+    }
+
     expect(sql).not.toContain("i.status <> 'draft'")
     expect(sql).not.toMatch(/^GRANT\s+EXECUTE/m)
-    expect(sql).not.toContain("SECURITY DEFINER")
+    expect(sql).not.toMatch(/^REVOKE\s+/m)
   })
 })
+
+function pageOperationalOverdue(
+  rows: Array<{
+    id: string
+    status: string
+    dueDate: string
+    issueDate: string
+    total: number
+    payments?: number
+    appliedCredits?: number
+  }>,
+  limit: number,
+  offset: number
+) {
+  const overdue = rows
+    .filter((row) => isOperationallyOverdue(row, TODAY))
+    .sort((a, b) => (a.issueDate < b.issueDate ? 1 : a.issueDate > b.issueDate ? -1 : 0))
+  const outstanding = overdue.reduce((sum, row) => sum + operationalRemainingBalance(row), 0)
+  return {
+    totalCount: overdue.length,
+    ids: overdue.slice(offset, offset + limit).map((row) => row.id),
+    outstanding: Math.round(outstanding * 100) / 100,
+  }
+}

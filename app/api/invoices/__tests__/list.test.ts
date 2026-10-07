@@ -260,4 +260,55 @@ describe("GET /api/invoices/list", () => {
     expect(body.invoices.map((row: { id: string }) => row.id)).toEqual(["inv-sent"])
     expect(body.pagination.totalCount).toBe(1)
   })
+
+  it("keeps the filtered overdue totalCount on a later page", async () => {
+    const pageIds = ["inv-page2-a", "inv-page2-b"]
+    const invoiceRows = pageIds.map((id) => ({
+      id,
+      status: "sent",
+      invoice_number: id,
+      total: 10,
+    }))
+    const rpc = jest.fn().mockResolvedValue({
+      data: { total_count: 27, invoice_ids: pageIds },
+      error: null,
+    })
+    const from = jest.fn((table: string) => {
+      if (table === "invoices") {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          is: jest.fn().mockReturnThis(),
+          in: jest.fn().mockResolvedValue({ data: invoiceRows, error: null }),
+        }
+      }
+      return { select: jest.fn().mockReturnThis() }
+    })
+    mockCreateSupabase.mockResolvedValue({
+      auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: "user-001" } } }) },
+      from,
+      rpc,
+    } as any)
+    mockResolveScope.mockResolvedValue({ ok: true, businessId: "biz-a" })
+
+    const req = new NextRequest(
+      "http://localhost/api/invoices/list?business_id=biz-a&status=overdue&page=2&limit=25"
+    )
+    const res = await GET(req)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(rpc).toHaveBeenCalledWith(
+      "get_operational_overdue_invoices_page",
+      expect.objectContaining({
+        p_limit: 25,
+        p_offset: 25,
+        p_customer_approval_status: null,
+      })
+    )
+    expect(body.invoices.map((row: { id: string }) => row.id)).toEqual(pageIds)
+    expect(body.pagination.totalCount).toBe(27)
+    expect(body.pagination.page).toBe(2)
+    expect(body.pagination.totalPages).toBe(2)
+  })
 })
