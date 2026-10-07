@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getAllUserBusinesses, resolvePreferredBusinessForUser, setSelectedBusinessId } from "@/lib/business"
 import {
   buildInvoiceListHref,
+  commitInvoiceListFetch,
   emptyInvoiceListPagination,
   findBusinessWithMostInvoices,
   hasActiveInvoiceListFilters,
@@ -354,10 +355,44 @@ function InvoicesPageContent() {
       opts?: { allowBusinessRecovery?: boolean; fresh?: boolean }
     ) => {
       const fetchGen = ++listFetchGenRef.current
+      const listDecision = (ok: boolean, nextIds: string[]) =>
+        commitInvoiceListFetch({
+          requestGeneration: fetchGen,
+          latestGeneration: listFetchGenRef.current,
+          ok,
+          previousIds: [],
+          nextIds,
+        })
+      const staleResult = () => ({ stale: true as const, generation: fetchGen })
+
+      const publishFailure = (err: unknown) => {
+        const decision = listDecision(false, [])
+        if (!decision.apply) return staleResult()
+        if (decision.updateRows) setInvoices([])
+        if (decision.updatePagination) {
+          setPagination(emptyInvoiceListPagination(PAGE_SIZE))
+          setTotalInvoices(0)
+        }
+        if (decision.updateError) {
+          setError(err instanceof Error ? err.message : "Failed to load invoices")
+        }
+        if (decision.updateLoading) setLoading(false)
+        return { stale: false as const, generation: fetchGen }
+      }
+
       let activeBid = bid
-      let { invoices: data, pagination: pg } = await fetchInvoiceList(activeBid, currentPage, {
-        fresh: opts?.fresh,
-      })
+      let data: Awaited<ReturnType<typeof fetchInvoiceList>>["invoices"]
+      let pg: Awaited<ReturnType<typeof fetchInvoiceList>>["pagination"]
+      try {
+        const first = await fetchInvoiceList(activeBid, currentPage, {
+          fresh: opts?.fresh,
+        })
+        data = first.invoices
+        pg = first.pagination
+      } catch (err) {
+        return publishFailure(err)
+      }
+      if (!listDecision(true, []).updateRows) return staleResult()
 
       const filtersActive = hasActiveInvoiceListFilters({
         statusFilter,
@@ -385,33 +420,55 @@ function InvoicesPageContent() {
               accessible.map((b) => b.id)
             )
             if (better && better !== activeBid) {
+              if (!listDecision(true, []).updateRows) return staleResult()
               activeBid = better
               setSelectedBusinessId(better)
               skipFilterEffectOnce.current = true
               setBusinessId(better)
-              await loadCustomersForBusiness(better)
+              try {
+                await loadCustomersForBusiness(better)
+              } catch (err) {
+                if (!listDecision(true, []).updateError) return staleResult()
+                setError(err instanceof Error ? err.message : "Failed to load invoices")
+                if (listDecision(true, []).updateLoading) setLoading(false)
+                return { stale: false as const, generation: fetchGen }
+              }
+              if (!listDecision(true, []).updatePagination) return staleResult()
               if (currentPage !== 1) setPage(1)
-              const retry = await fetchInvoiceList(better, 1)
-              data = retry.invoices
-              pg = retry.pagination
+              try {
+                const retry = await fetchInvoiceList(better, 1)
+                data = retry.invoices
+                pg = retry.pagination
+              } catch (err) {
+                return publishFailure(err)
+              }
             }
           }
         }
       }
 
+      if (!listDecision(true, []).updatePagination) return staleResult()
       if (shouldResetInvoiceListPage(data.length, pg, currentPage)) {
         setPage(1)
-        const retry = await fetchInvoiceList(activeBid, 1)
-        data = retry.invoices
-        pg = retry.pagination
+        try {
+          const retry = await fetchInvoiceList(activeBid, 1)
+          if (!listDecision(true, []).updateRows) return staleResult()
+          data = retry.invoices
+          pg = retry.pagination
+        } catch (err) {
+          return publishFailure(err)
+        }
       }
-      if (fetchGen !== listFetchGenRef.current) {
-        return { data, pg, businessId: activeBid, stale: true as const }
-      }
+      const decision = listDecision(true, data.map((row) => row.id))
+      if (!decision.updateRows) return staleResult()
       setInvoices(data)
-      setPagination(pg)
-      setTotalInvoices(pg.totalCount || data.length)
-      return { data, pg, businessId: activeBid, stale: false as const }
+      if (decision.updatePagination) {
+        setPagination(pg)
+        setTotalInvoices(pg.totalCount || data.length)
+      }
+      if (decision.updateError && decision.clearError) setError("")
+      if (decision.updateLoading) setLoading(false)
+      return { data, pg, businessId: activeBid, stale: false as const, generation: fetchGen }
     },
     [
       fetchInvoiceList,
@@ -442,12 +499,7 @@ function InvoicesPageContent() {
           await loadCustomersForBusiness(bid)
         }
       }
-      try {
-        await applyInvoiceListResult(bid, page, { allowBusinessRecovery: true, fresh: true })
-        setError("")
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to load invoices")
-      }
+      await applyInvoiceListResult(bid, page, { allowBusinessRecovery: true, fresh: true })
       return bid
     },
     [resolveAuthBusiness, loadCustomersForBusiness, applyInvoiceListResult, page]
@@ -456,15 +508,7 @@ function InvoicesPageContent() {
   const reloadInvoicesOnly = useCallback(async () => {
     const bid = businessIdRef.current
     if (!bid) return
-    try {
-      await applyInvoiceListResult(bid, page, { fresh: true })
-      setError("")
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load invoices")
-      setInvoices([])
-      setPagination(emptyInvoiceListPagination(PAGE_SIZE))
-      setTotalInvoices(0)
-    }
+    await applyInvoiceListResult(bid, page, { fresh: true })
   }, [applyInvoiceListResult, page])
 
   useEffect(() => {
@@ -514,17 +558,21 @@ function InvoicesPageContent() {
         page,
       })
 
+      let listGeneration = 0
       try {
-        await Promise.all([
+        const [, listResult] = await Promise.all([
           loadCustomersForBusiness(bid),
           applyInvoiceListResult(bid, page, { allowBusinessRecovery: true }),
         ])
+        listGeneration = listResult.generation
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load invoices")
       } finally {
         if (!cancelled) {
-          setLoading(false)
           isInitialLoadRef.current = false
+          if (listGeneration === 0 || listGeneration === listFetchGenRef.current) {
+            setLoading(false)
+          }
         }
       }
     })()

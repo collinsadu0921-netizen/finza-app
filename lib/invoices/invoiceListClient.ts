@@ -162,3 +162,61 @@ export function emptyInvoiceListPagination(pageSize: number): InvoiceListPaginat
     totalPages: 0,
   }
 }
+
+export type InvoiceListFetchCommit = {
+  /** False when this response lost the race and must not change the screen. */
+  apply: boolean
+  ids: string[]
+  updateRows: boolean
+  updateError: boolean
+  /** Meaningful only when updateError is true. */
+  clearError: boolean
+  updatePagination: boolean
+  updateLoading: boolean
+}
+
+/**
+ * Decide whether a list response may replace what is on screen.
+ * A slower All response, successful or failed, must not change the rows,
+ * error, pagination, or loading state of a newer Overdue selection.
+ * A failed request that is still the latest selection clears the previous rows.
+ */
+export function commitInvoiceListFetch(input: {
+  requestGeneration: number
+  latestGeneration: number
+  ok: boolean
+  previousIds: string[]
+  nextIds: string[]
+}): InvoiceListFetchCommit {
+  if (input.requestGeneration !== input.latestGeneration) {
+    return {
+      apply: false,
+      ids: input.previousIds,
+      updateRows: false,
+      updateError: false,
+      clearError: false,
+      updatePagination: false,
+      updateLoading: false,
+    }
+  }
+  if (!input.ok) {
+    return {
+      apply: true,
+      ids: [],
+      updateRows: true,
+      updateError: true,
+      clearError: false,
+      updatePagination: true,
+      updateLoading: true,
+    }
+  }
+  return {
+    apply: true,
+    ids: input.nextIds,
+    updateRows: true,
+    updateError: true,
+    clearError: true,
+    updatePagination: true,
+    updateLoading: true,
+  }
+}
