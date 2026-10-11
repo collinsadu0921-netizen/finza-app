@@ -204,7 +204,7 @@ export default function PayInvoicePage() {
 
       if (paymentRef.startsWith("finza-mtn-")) {
         const res = await fetch(
-          `/api/payments/momo/tenant/invoice/status?reference=${encodeURIComponent(paymentRef)}&invoice_id=${encodeURIComponent(invoiceId)}`
+          `/api/payments/momo/tenant/invoice/status?reference=${encodeURIComponent(paymentRef)}&invoice_id=${encodeURIComponent(invoiceId)}&token=${encodeURIComponent(publicToken)}`
         )
         const data = await res.json()
         if (data.success && data.status === "success") {
@@ -220,7 +220,9 @@ export default function PayInvoicePage() {
         return
       }
 
-      const res = await fetch(`/api/payments/paystack/verify?reference=${paymentRef}`)
+      const res = await fetch(
+        `/api/payments/paystack/verify?reference=${encodeURIComponent(paymentRef)}&invoice_id=${encodeURIComponent(invoiceId)}&token=${encodeURIComponent(publicToken)}`
+      )
       if (res.status === 403) {
         if (pollRef.current) clearInterval(pollRef.current)
         setPaymentStatus("failed")
@@ -231,6 +233,9 @@ export default function PayInvoicePage() {
       const data = await res.json()
       if (data.status === "success") {
         if (pollRef.current) clearInterval(pollRef.current)
+        if (typeof data.public_token === "string" && data.public_token) {
+          setChargePublicToken(data.public_token)
+        }
         setPaymentStatus("success")
         setTimeout(loadInvoice, 1000)
       } else if (data.status === "failed" || data.status === "abandoned") {

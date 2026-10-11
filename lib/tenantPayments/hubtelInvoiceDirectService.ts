@@ -17,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { ensureAccountingInitializedForServerJob } from "@/lib/accountingBootstrap"
 import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
 import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
+import { assertInvoicePayCapability } from "@/lib/payments/invoicePayCapability"
 import { normalizeCountry, assertProviderAllowed } from "@/lib/payments/eligibility"
 import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
 import {
@@ -53,13 +54,6 @@ const HUBTEL_CALLBACK_EVENT = "hubtel_callback" as const
 
 function isUniqueViolation(err: PostgrestError | null): boolean {
   return err?.code === "23505"
-}
-
-function isNonPublicInvoiceStatus(status: string | null | undefined): boolean {
-  const s = String(status || "")
-    .trim()
-    .toLowerCase()
-  return s === "draft" || s === "cancelled" || s === "void"
 }
 
 function hubtelCredentialsFromResolved(resolved: ResolvedHubtelConfig): HubtelCredentials {
@@ -125,42 +119,8 @@ export async function validateInvoicePublicToken(
   supabase: SupabaseClient,
   invoiceId: string,
   publicToken: string
-): Promise<
-  | {
-      ok: true
-      invoice: {
-        id: string
-        invoice_number: string
-        total: number
-        business_id: string
-        status: string
-        public_token: string
-      }
-    }
-  | { ok: false; error: string; statusCode: number }
-> {
-  const token = publicToken?.trim()
-  if (!invoiceId?.trim() || !token) {
-    return { ok: false, error: "invoice_id and public_token are required", statusCode: 400 }
-  }
-
-  const { data: invoice, error } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, total, business_id, status, public_token")
-    .eq("id", invoiceId.trim())
-    .eq("public_token", token)
-    .is("deleted_at", null)
-    .maybeSingle()
-
-  if (error || !invoice) {
-    return { ok: false, error: "Invoice not found", statusCode: 404 }
-  }
-
-  if (isNonPublicInvoiceStatus(invoice.status)) {
-    return { ok: false, error: "Invoice not available for payment", statusCode: 404 }
-  }
-
-  return { ok: true, invoice: invoice as typeof invoice & { public_token: string } }
+) {
+  return assertInvoicePayCapability(supabase, invoiceId, publicToken)
 }
 
 async function recalculateInvoicePaymentStatus(supabase: SupabaseClient, invoiceId: string): Promise<void> {

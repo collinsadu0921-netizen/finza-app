@@ -16,7 +16,7 @@ import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceSer
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createSupabaseServerClient()

@@ -4,7 +4,7 @@
  * Classification:
  * - **Initiation only:** creates/updates `payment_provider_transactions`, calls MTN RTP — **not** settlement.
  * - **No** `payments` row until authoritative verify (deferred settlement).
- * - Invoice id in JSON body is the capability token; **never** trust client `business_id`.
+ * - Capability is invoice id **and** matching `public_token`. Never trust client `business_id`.
  *
  * **Authoritative settlement:** `GET /api/payments/momo/tenant/invoice/status`
  * **Hint only:** `POST /api/payments/momo/callback`
@@ -25,17 +25,34 @@ function serviceClient() {
 }
 
 export async function POST(request: NextRequest) {
-  let body: { invoice_id?: string; phone?: string }
+  let body: {
+    invoice_id?: string
+    public_token?: string
+    publicToken?: string
+    phone?: string
+    business_id?: string
+  }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ success: false, error: "Invalid JSON" }, { status: 400 })
   }
 
+  const invoiceId = (body.invoice_id ?? "").trim()
+  const publicToken = (body.public_token ?? body.publicToken ?? "").trim()
+  const phone = (body.phone ?? "").trim()
+  if (!invoiceId || !publicToken || !phone) {
+    return NextResponse.json(
+      { success: false, error: "invoice_id, public_token, and phone are required" },
+      { status: 400 }
+    )
+  }
+
   const supabase = serviceClient()
   const result = await initiateTenantMtnInvoicePayment(supabase, {
-    invoiceId: body.invoice_id ?? "",
-    phone: body.phone ?? "",
+    invoiceId,
+    publicToken,
+    phone,
   })
 
   if (!result.ok) {

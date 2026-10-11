@@ -28,7 +28,7 @@ async function resolveAndEnforce(supabase: Awaited<ReturnType<typeof createSupab
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

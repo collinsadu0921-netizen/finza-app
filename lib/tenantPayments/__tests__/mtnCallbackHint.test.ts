@@ -37,15 +37,15 @@ describe("recordTenantMtnCallbackHint", () => {
   it("returns unbound for unknown reference (no txn)", async () => {
     const supabase = {
       from: jest.fn(() => ({
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
+            select: () => ({
               eq: () => ({
-                maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                in: () => ({
+                  eq: () => ({
+                    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                  }),
+                }),
               }),
             }),
-          }),
-        }),
       })),
     } as unknown as SupabaseClient
 
@@ -64,11 +64,11 @@ describe("recordTenantMtnCallbackHint", () => {
           return {
             select: () => ({
               eq: () => ({
-                eq: () => ({
+                in: () => ({
                   eq: () => ({
                     maybeSingle: () =>
                       Promise.resolve({
-                        data: { id: "ppt-1", status: "pending" },
+                        data: { id: "ppt-1", status: "pending", workspace: "service" },
                         error: null,
                       }),
                   }),
@@ -99,12 +99,22 @@ describe("recordTenantMtnCallbackHint", () => {
     } as unknown as SupabaseClient
 
     const first = await recordTenantMtnCallbackHint(supabase, body)
-    expect(first).toEqual({ bound: true, duplicate_hint: false })
+    expect(first).toEqual({
+      bound: true,
+      duplicate_hint: false,
+      workspace: "service",
+      reference: "finza-mtn-same",
+    })
     expect(insertCalls).toBe(1)
     expect(events).toHaveLength(1)
 
     const second = await recordTenantMtnCallbackHint(supabase, body)
-    expect(second).toEqual({ bound: true, duplicate_hint: true })
+    expect(second).toEqual({
+      bound: true,
+      duplicate_hint: true,
+      workspace: "service",
+      reference: "finza-mtn-same",
+    })
     expect(insertCalls).toBe(2)
   })
 
@@ -120,12 +130,12 @@ describe("recordTenantMtnCallbackHint", () => {
           return {
             select: () => ({
               eq: () => ({
-                eq: () => ({
+                in: () => ({
                   eq: () => ({
                     maybeSingle: () => {
                       pptSelectCount += 1
                       return Promise.resolve({
-                        data: { id: "ppt-ok", status: "successful" },
+                        data: { id: "ppt-ok", status: "successful", workspace: "service" },
                         error: null,
                       })
                     },

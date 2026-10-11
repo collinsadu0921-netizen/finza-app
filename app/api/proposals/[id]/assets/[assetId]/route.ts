@@ -21,7 +21,7 @@ const patchSchema = z
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; assetId: string }> | { id: string; assetId: string } }
+  { params }: { params: Promise<{ id: string; assetId: string }> }
 ) {
   try {
     const { id: proposalId, assetId } = await Promise.resolve(params)
@@ -107,7 +107,7 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; assetId: string }> | { id: string; assetId: string } }
+  { params }: { params: Promise<{ id: string; assetId: string }> }
 ) {
   try {
     const { id: proposalId, assetId } = await Promise.resolve(params)

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation"
 
-export default function ControlTowerClientPage({
+export default async function ControlTowerClientPage({
   params,
 }: {
-  params: { businessId: string }
+  params: Promise<{ businessId: string }>
 }) {
-  redirect(`/accounting/clients/${params.businessId}/overview`)
+  const { businessId } = await params
+  redirect(`/accounting/clients/${businessId}/overview`)
 }

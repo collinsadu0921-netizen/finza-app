@@ -21,7 +21,7 @@ import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingCont
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ run_id: string }> | { run_id: string } }
+  { params }: { params: Promise<{ run_id: string }> }
 ) {
   try {
     const supabase = await createSupabaseServerClient()

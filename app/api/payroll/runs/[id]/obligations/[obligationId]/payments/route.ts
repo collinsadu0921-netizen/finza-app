@@ -14,7 +14,7 @@ function deriveStatus(amountDue: number, amountPaid: number): "unpaid" | "partia
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; obligationId: string }> | { id: string; obligationId: string } }
+  { params }: { params: Promise<{ id: string; obligationId: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

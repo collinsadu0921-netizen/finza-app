@@ -15,7 +15,7 @@ const bodySchema = z
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ token: string }> | { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
   try {
     const { token: raw } = await Promise.resolve(params)

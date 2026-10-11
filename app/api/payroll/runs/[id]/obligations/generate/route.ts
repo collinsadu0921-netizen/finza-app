@@ -15,7 +15,7 @@ import { generateOrSyncPayrollObligationsForRun } from "@/lib/payroll/obligation
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params)

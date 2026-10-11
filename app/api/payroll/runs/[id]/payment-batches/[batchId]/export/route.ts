@@ -15,7 +15,7 @@ export async function GET(
   _request: NextRequest,
   {
     params,
-  }: { params: Promise<{ id: string; batchId: string }> | { id: string; batchId: string } }
+  }: { params: Promise<{ id: string; batchId: string }> }
 ) {
   try {
     const { id: runId, batchId } = await Promise.resolve(params)

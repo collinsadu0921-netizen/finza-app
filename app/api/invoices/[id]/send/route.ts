@@ -111,7 +111,7 @@ function formatDueDateForWhatsApp(dueDate: string | null | undefined, paymentTer
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Handle Next.js 16 params (can be Promise)

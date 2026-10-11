@@ -53,7 +53,7 @@ function isNonPublicInvoiceStatus(status: string | null | undefined): boolean {
   return s === "draft" || s === "cancelled" || s === "void"
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> | { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: invoiceId } = await Promise.resolve(params)
 
   if (!invoiceId || !String(invoiceId).trim()) {

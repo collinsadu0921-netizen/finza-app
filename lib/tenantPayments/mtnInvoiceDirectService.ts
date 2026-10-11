@@ -21,6 +21,7 @@ import { randomUUID } from "crypto"
 import type { PostgrestError } from "@supabase/supabase-js"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
+import { assertInvoicePayCapability } from "@/lib/payments/invoicePayCapability"
 import { normalizeCountry, assertProviderAllowed } from "@/lib/payments/eligibility"
 import {
   fetchMtnCollectionAccessToken,
@@ -270,28 +271,23 @@ export type InitiateTenantMtnInvoiceResult =
   | { ok: false; error: string; statusCode: number }
 
 /**
- * Public invoice pay: validate invoice, use canonical tenant MTN credentials, create provider txn + pending payment, call MTN.
- * `invoice_id` is the capability — no `business_id` from client is trusted for scoping.
+ * Public invoice pay. Authorization is invoice id plus matching public_token.
+ * Client business_id is ignored; the business comes from the matched invoice row.
  */
 export async function initiateTenantMtnInvoicePayment(
   supabase: SupabaseClient,
-  input: { invoiceId: string; phone: string }
+  input: { invoiceId: string; publicToken: string; phone: string }
 ): Promise<InitiateTenantMtnInvoiceResult> {
   const phone = input.phone?.trim()
-  if (!input.invoiceId || !phone) {
-    return { ok: false, error: "invoice_id and phone are required", statusCode: 400 }
+  if (!input.invoiceId?.trim() || !input.publicToken?.trim() || !phone) {
+    return { ok: false, error: "invoice_id, public_token, and phone are required", statusCode: 400 }
   }
 
-  const { data: invoice, error: invErr } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, total, business_id, status")
-    .eq("id", input.invoiceId)
-    .is("deleted_at", null)
-    .single()
-
-  if (invErr || !invoice?.business_id) {
-    return { ok: false, error: "Invoice not found", statusCode: 404 }
+  const capability = await assertInvoicePayCapability(supabase, input.invoiceId, input.publicToken)
+  if (!capability.ok) {
+    return capability
   }
+  const invoice = capability.invoice
   if (invoice.status === "paid") {
     return { ok: false, error: "Invoice is already paid", statusCode: 400 }
   }

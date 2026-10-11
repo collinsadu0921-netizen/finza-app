@@ -1,0 +1,27 @@
+name: Staging isolation checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".env*.example"
+      - "instrumentation.ts"
+      - "lib/staging/**"
+      - "lib/email/sendTransactionalEmail.ts"
+      - "lib/sendEmailForensicAlert.ts"
+      - "scripts/staging/**"
+      - "package.json"
+      - ".github/workflows/staging-isolation.yml"
+
+jobs:
+  staging-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run staging:check-examples
+      - run: npx jest lib/staging --no-coverage

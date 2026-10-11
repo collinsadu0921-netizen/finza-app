@@ -293,18 +293,21 @@ describe("initiateTenantMtnInvoicePayment — repeated initiate", () => {
           return {
             select: () => ({
               eq: () => ({
-                is: () => ({
-                  single: () =>
-                    Promise.resolve({
-                      data: {
-                        id: "inv-1",
-                        invoice_number: "INV-1",
-                        total: 100,
-                        business_id: "biz-1",
-                        status: "sent",
-                      },
-                      error: null,
-                    }),
+                eq: () => ({
+                  is: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: {
+                          id: "inv-1",
+                          invoice_number: "INV-1",
+                          total: 100,
+                          business_id: "biz-1",
+                          status: "sent",
+                          public_token: "pay-token",
+                        },
+                        error: null,
+                      }),
+                  }),
                 }),
               }),
             }),
@@ -352,7 +355,11 @@ describe("initiateTenantMtnInvoicePayment — repeated initiate", () => {
       }),
     } as unknown as SupabaseClient
 
-    const r = await initiateTenantMtnInvoicePayment(supabase, { invoiceId: "inv-1", phone: "0240000000" })
+    const r = await initiateTenantMtnInvoicePayment(supabase, {
+      invoiceId: "inv-1",
+      publicToken: "pay-token",
+      phone: "0240000000",
+    })
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.reference).toBe("finza-mtn-existing")
@@ -371,18 +378,21 @@ describe("initiateTenantMtnInvoicePayment — repeated initiate", () => {
           return {
             select: () => ({
               eq: () => ({
-                is: () => ({
-                  single: () =>
-                    Promise.resolve({
-                      data: {
-                        id: "inv-1",
-                        invoice_number: "INV-1",
-                        total: 100,
-                        business_id: "biz-1",
-                        status: "sent",
-                      },
-                      error: null,
-                    }),
+                eq: () => ({
+                  is: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: {
+                          id: "inv-1",
+                          invoice_number: "INV-1",
+                          total: 100,
+                          business_id: "biz-1",
+                          status: "sent",
+                          public_token: "pay-token",
+                        },
+                        error: null,
+                      }),
+                  }),
                 }),
               }),
             }),
@@ -430,9 +440,64 @@ describe("initiateTenantMtnInvoicePayment — repeated initiate", () => {
       }),
     } as unknown as SupabaseClient
 
-    const r = await initiateTenantMtnInvoicePayment(supabase, { invoiceId: "inv-1", phone: "0240000000" })
+    const r = await initiateTenantMtnInvoicePayment(supabase, {
+      invoiceId: "inv-1",
+      publicToken: "pay-token",
+      phone: "0240000000",
+    })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.statusCode).toBe(409)
+    expect(requestToPayCollection).not.toHaveBeenCalled()
+  })
+})
+
+describe("initiateTenantMtnInvoicePayment — public token", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("rejects a missing public token before loading the invoice or MTN credentials", async () => {
+    const from = jest.fn()
+    const supabase = { from } as unknown as SupabaseClient
+    const r = await initiateTenantMtnInvoicePayment(supabase, {
+      invoiceId: "inv-1",
+      publicToken: "  ",
+      phone: "0240000000",
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.statusCode).toBe(400)
+    expect(from).not.toHaveBeenCalled()
+    expect(getDefaultBusinessPaymentProvider).not.toHaveBeenCalled()
+  })
+
+  it("does not start a collection when the token belongs to a different invoice", async () => {
+    const supabase = {
+      from: jest.fn((table: string) => {
+        if (table === "invoices") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  is: () => ({
+                    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          }
+        }
+        throw new Error(`unexpected table ${table}`)
+      }),
+    } as unknown as SupabaseClient
+
+    const r = await initiateTenantMtnInvoicePayment(supabase, {
+      invoiceId: "inv-tenant-a",
+      publicToken: "token-for-tenant-b",
+      phone: "0240000000",
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.statusCode).toBe(404)
+    expect(getDefaultBusinessPaymentProvider).not.toHaveBeenCalled()
     expect(requestToPayCollection).not.toHaveBeenCalled()
   })
 })

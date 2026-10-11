@@ -6,7 +6,7 @@
  *
  * **Not authoritative:** `POST /api/payments/momo/callback` (hint only).
  *
- * **Public trust:** `invoice_id` query param is **required** (Phase 6/7).
+ * **Public trust:** invoice id and matching public_token. The invoice UUID alone is not enough.
  *
  * Phase 7: preferred canonical **public** status URL for tenant MTN invoices (vs generic `momo/status`).
  */
@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { verifyTenantMtnInvoiceByReference } from "@/lib/tenantPayments/mtnInvoiceDirectService"
 import { requireInvoiceIdForPublicTenantMtnStatus } from "@/lib/tenantPayments/mtnPublicMtnStatus"
+import { assertInvoicePayCapability } from "@/lib/payments/invoicePayCapability"
 
 export const dynamic = "force-dynamic"
 
@@ -35,9 +36,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, error: invoiceCheck.error }, { status: invoiceCheck.statusCode })
   }
 
+  const publicToken =
+    request.nextUrl.searchParams.get("token")?.trim() ||
+    request.nextUrl.searchParams.get("public_token")?.trim() ||
+    ""
+
   const supabase = serviceClient()
+  const capability = await assertInvoicePayCapability(supabase, invoiceCheck.invoiceId, publicToken)
+  if (!capability.ok) {
+    return NextResponse.json({ success: false, error: capability.error }, { status: capability.statusCode })
+  }
+
   const result = await verifyTenantMtnInvoiceByReference(supabase, reference, {
-    invoiceId: invoiceCheck.invoiceId,
+    invoiceId: capability.invoice.id,
   })
 
   if (!result.ok) {

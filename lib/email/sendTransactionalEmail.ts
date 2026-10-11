@@ -9,6 +9,7 @@ import {
   mergeFinzaWithOtherTags,
   type BuildFinzaResendTagsInput,
 } from "@/lib/email/buildFinzaResendTags"
+import { decideStagingEmailDelivery } from "@/lib/staging/stagingEmailPolicy"
 
 const RESEND_API = "https://api.resend.com/emails"
 
@@ -52,6 +53,12 @@ export type SendTransactionalEmailResult =
 export async function sendTransactionalEmail(
   params: SendTransactionalEmailParams
 ): Promise<SendTransactionalEmailResult> {
+  const stagingEmail = decideStagingEmailDelivery(process.env, params.to)
+  if (!stagingEmail.deliver) {
+    console.warn("[sendTransactionalEmail] blocked:", stagingEmail.code)
+    return { success: false, reason: stagingEmail.code }
+  }
+
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
     if (process.env.NODE_ENV === "development") {

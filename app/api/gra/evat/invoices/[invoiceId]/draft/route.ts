@@ -81,7 +81,7 @@ async function readJsonBody(request: NextRequest): Promise<
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ invoiceId: string }> | { invoiceId: string } }
+  { params }: { params: Promise<{ invoiceId: string }> }
 ) {
   try {
     const { invoiceId } = await Promise.resolve(params)

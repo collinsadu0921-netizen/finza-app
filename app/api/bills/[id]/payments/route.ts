@@ -12,7 +12,7 @@ import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Handle Next.js 16 params (can be a Promise)
@@ -64,7 +64,7 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Handle Next.js 16 params (can be a Promise)

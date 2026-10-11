@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { verifyTenantMtnInvoiceByReference } from "@/lib/tenantPayments/mtnInvoiceDirectService"
 import { requireInvoiceIdForPublicTenantMtnStatus } from "@/lib/tenantPayments/mtnPublicMtnStatus"
+import { assertInvoicePayCapability } from "@/lib/payments/invoicePayCapability"
 
 export const dynamic = "force-dynamic"
 
@@ -29,11 +30,30 @@ export async function GET(request: NextRequest) {
     }
 
     const invoiceIdParam = request.nextUrl.searchParams.get("invoice_id")
+    const publicToken =
+      request.nextUrl.searchParams.get("token")?.trim() ||
+      request.nextUrl.searchParams.get("public_token")?.trim() ||
+      ""
 
     const supabase = serviceClient()
 
+    if (!invoiceIdParam?.trim() || !publicToken) {
+      return NextResponse.json(
+        { success: false, error: "invoice_id and public_token are required", status: "BAD_REQUEST" },
+        { status: 400 }
+      )
+    }
+
+    const capability = await assertInvoicePayCapability(supabase, invoiceIdParam, publicToken)
+    if (!capability.ok) {
+      return NextResponse.json(
+        { success: false, error: capability.error, status: "NOT_FOUND" },
+        { status: capability.statusCode }
+      )
+    }
+
     if (reference.startsWith("finza-mtn-")) {
-      const invoiceCheck = requireInvoiceIdForPublicTenantMtnStatus(invoiceIdParam)
+      const invoiceCheck = requireInvoiceIdForPublicTenantMtnStatus(capability.invoice.id)
       if (!invoiceCheck.ok) {
         return NextResponse.json(
           { success: false, error: invoiceCheck.error, status: "BAD_REQUEST" },
@@ -41,7 +61,7 @@ export async function GET(request: NextRequest) {
         )
       }
       const r = await verifyTenantMtnInvoiceByReference(supabase, reference, {
-        invoiceId: invoiceCheck.invoiceId,
+        invoiceId: capability.invoice.id,
       })
       if (!r.ok) {
         return NextResponse.json({ success: false, error: r.error, status: "NOT_FOUND" }, { status: r.statusCode })
@@ -58,16 +78,23 @@ export async function GET(request: NextRequest) {
 
     const { data: payment, error: paymentError } = await supabase
       .from("payments")
-      .select("id, invoice_id, amount, reference, notes")
+      .select("id, invoice_id, business_id, amount, reference, notes")
       .eq("reference", reference)
+      .eq("invoice_id", capability.invoice.id)
+      .eq("business_id", capability.invoice.business_id)
       .is("deleted_at", null)
-      .single()
+      .maybeSingle()
 
     if (paymentError || !payment) {
       return NextResponse.json({ success: false, error: "Payment not found", status: "NOT_FOUND" }, { status: 404 })
     }
 
-    const { data: invoice } = await supabase.from("invoices").select("status").eq("id", payment.invoice_id).single()
+    const { data: invoice } = await supabase
+      .from("invoices")
+      .select("status")
+      .eq("id", capability.invoice.id)
+      .eq("business_id", capability.invoice.business_id)
+      .maybeSingle()
 
     if (invoice?.status === "paid") {
       return NextResponse.json({

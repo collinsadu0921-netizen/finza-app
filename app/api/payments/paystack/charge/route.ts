@@ -2,14 +2,14 @@
  * Paystack Mobile Money Charge — Public endpoint
  *
  * Called by the public pay flow when `/pay/[invoiceId]?token=...` loads and tenant invoice Paystack is enabled.
- * No user session required —
- * the invoice ID is the access token for this payment operation.
+ * No user session. Authorization is the invoice id together with its public_token.
+ * A client-supplied business id is ignored.
  *
  * Flow:
- *   1. Validate invoice exists, is unpaid, and amount > 0
+ *   1. Require the invoice id and its public token. Ignore any client business id.
  *   2. POST to Paystack /charge (mobile_money)
- *   3. Insert a pending payments record (triggers ledger post via DB trigger)
- *   4. Return { success, reference, status, otp_required }
+ *   3. Return pending or OTP without inserting payments.
+ *   4. Insert a payment only when Paystack reports success for this same request.
  *
  * Paystack charge statuses relevant here:
  *   - "pay_offline"  → push prompt sent to phone (MTN / AirtelTigo)
@@ -22,8 +22,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { assertInvoicePayCapability } from "@/lib/payments/invoicePayCapability"
+import { assessPaystackInvoiceSettlement } from "@/lib/payments/paystackInvoiceBinding"
+import { recordSuccessfulPaystackInvoicePayment } from "@/lib/payments/paystackInvoiceSettlement"
 import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
-import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
 
 export const dynamic = "force-dynamic"
 
@@ -59,34 +61,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Paystack is not configured" }, { status: 503 })
   }
 
-  let body: { invoice_id: string; provider: string; phone: string; email?: string }
+  let body: {
+    invoice_id?: string
+    public_token?: string
+    publicToken?: string
+    provider?: string
+    phone?: string
+    email?: string
+  }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ success: false, error: "Invalid JSON" }, { status: 400 })
   }
 
-  const { invoice_id, provider, phone, email } = body
-  if (!invoice_id || !provider || !phone) {
+  const invoice_id = (body.invoice_id ?? "").trim()
+  const publicToken = (body.public_token ?? body.publicToken ?? "").trim()
+  const provider = (body.provider ?? "").trim()
+  const phone = (body.phone ?? "").trim()
+  const email = body.email
+  if (!invoice_id || !publicToken || !provider || !phone) {
     return NextResponse.json(
-      { success: false, error: "invoice_id, provider, and phone are required" },
+      { success: false, error: "invoice_id, public_token, provider, and phone are required" },
       { status: 400 }
     )
   }
 
   const supabase = serviceClient()
 
-  // ── 1. Load invoice ──────────────────────────────────────────────────────────
-  const { data: invoice, error: invErr } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, total, currency_symbol, business_id, status")
-    .eq("id", invoice_id)
-    .is("deleted_at", null)
-    .single()
-
-  if (invErr || !invoice) {
-    return NextResponse.json({ success: false, error: "Invoice not found" }, { status: 404 })
+  const capability = await assertInvoicePayCapability(supabase, invoice_id, publicToken)
+  if (!capability.ok) {
+    return NextResponse.json({ success: false, error: capability.error }, { status: capability.statusCode })
   }
+  const invoice = capability.invoice
   if (invoice.status === "paid") {
     return NextResponse.json({ success: false, error: "Invoice is already paid" }, { status: 400 })
   }
@@ -177,51 +184,50 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { data: tokenData } = await supabase.rpc("generate_public_token")
-  const publicToken =
-    (typeof tokenData === "string" && tokenData) ||
-    Buffer.from(`${invoice.business_id}-${invoice_id}-${Date.now()}`).toString("base64url")
-
-  // ── 6. Create pending payment record ────────────────────────────────────────
-  const { data: payment, error: payErr } = await supabase
-    .from("payments")
-    .insert({
-      business_id: invoice.business_id,
-      invoice_id,
-      amount: remaining,
-      date: new Date().toISOString().split("T")[0],
-      method: "momo",
+  // Pending phone approval and OTP do not insert payments. The payments insert
+  // trigger posts the ledger, so only a confirmed Paystack success may record one.
+  if (chargeStatus !== "success") {
+    return NextResponse.json({
+      success: true,
       reference,
-      notes: `Paystack MoMo — ${provider.toUpperCase()} — ${chargeStatus}`,
-      public_token: publicToken,
+      payment_id: null,
+      public_token: null,
+      status: chargeStatus,
+      otp_required: chargeStatus === "send_otp",
+      display_text: psData.data?.display_text ?? null,
     })
-    .select("id, public_token")
-    .single()
-
-  if (payErr) {
-    console.error("[paystack/charge] payment insert error:", payErr)
-    return NextResponse.json(
-      { success: false, error: payErr.message || "Failed to record payment" },
-      { status: 500 }
-    )
   }
 
-  const journalAssert = await assertPaymentJournalPosted(
-    supabase,
-    payment.id,
-    invoice.business_id
-  )
-  if (!journalAssert.ok) {
-    return NextResponse.json({ success: false, error: journalAssert.error }, { status: 500 })
+  const binding = assessPaystackInvoiceSettlement({
+    data: psData.data,
+    requestedReference: reference,
+    invoiceId: invoice.id,
+    businessId: invoice.business_id,
+    expectedAmount: remaining,
+    sameRequestInitiation: true,
+  })
+  if (!binding.ok) {
+    return NextResponse.json({ success: false, error: binding.error, status: "not_bound" }, { status: binding.statusCode })
+  }
+
+  const settled = await recordSuccessfulPaystackInvoicePayment(supabase, {
+    invoiceId: invoice.id,
+    businessId: invoice.business_id,
+    reference,
+    amount: remaining,
+    providerLabel: provider.toUpperCase(),
+  })
+  if (!settled.ok) {
+    return NextResponse.json({ success: false, error: settled.error }, { status: settled.statusCode })
   }
 
   return NextResponse.json({
     success: true,
     reference,
-    payment_id: payment.id,
-    public_token: payment.public_token ?? null,
-    status: chargeStatus,                      // "pay_offline" | "send_otp" | "success"
-    otp_required: chargeStatus === "send_otp", // Vodafone needs OTP step
+    payment_id: settled.paymentId,
+    public_token: settled.publicToken,
+    status: chargeStatus,
+    otp_required: false,
     display_text: psData.data?.display_text ?? null,
   })
 }

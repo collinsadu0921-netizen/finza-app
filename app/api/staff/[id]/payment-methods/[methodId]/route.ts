@@ -30,7 +30,7 @@ async function clearOtherDefaults(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; methodId: string }> | { id: string; methodId: string } }
+  { params }: { params: Promise<{ id: string; methodId: string }> }
 ) {
   try {
     const { id: staffId, methodId } = await Promise.resolve(params)
@@ -184,7 +184,7 @@ export async function PATCH(
 
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string; methodId: string }> | { id: string; methodId: string } }
+  { params }: { params: Promise<{ id: string; methodId: string }> }
 ) {
   try {
     const { id: staffId, methodId } = await Promise.resolve(params)

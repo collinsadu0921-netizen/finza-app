@@ -26,7 +26,10 @@
                 "group": ["@/service/*", "@/retail/*"],
                 "message": "Accounting domain cannot import from Service or Retail"
               },
-              "@/!(*accounting|shared)/*"
+              {
+                "group": ["@/!(*accounting|shared)/*"],
+                "message": "Accounting domain can import only from accounting and shared modules"
+              }
             ]
           }
         ]

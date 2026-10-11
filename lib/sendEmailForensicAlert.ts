@@ -5,6 +5,7 @@
  */
 
 import type { ForensicAlertPayload } from "./forensicAlertBuilder"
+import { decideStagingEmailDelivery } from "./staging/stagingEmailPolicy"
 
 const RESEND_API = "https://api.resend.com/emails"
 
@@ -39,6 +40,12 @@ export async function sendEmailForensicAlert(
   toEmail: string,
   payload: ForensicAlertPayload
 ): Promise<boolean> {
+  const stagingEmail = decideStagingEmailDelivery(process.env, toEmail)
+  if (!stagingEmail.deliver) {
+    console.warn("sendEmailForensicAlert blocked:", stagingEmail.code)
+    return false
+  }
+
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
     console.warn("sendEmailForensicAlert: RESEND_API_KEY not set; skipping email")

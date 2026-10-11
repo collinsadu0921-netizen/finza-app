@@ -4,11 +4,11 @@ Use a **separate Supabase project** for staging. Do not share credentials, data,
 
 ## Checklist
 
-1. Create Supabase **staging** project (new project ref).
-2. Copy `.env.staging.example` → `.env.staging` (gitignored); fill staging values only.
-3. Set the same variables on **Vercel Preview / Staging** environment (not Production).
-4. Link repo branch or deploy preview URL — **never** point k6 or load tests at `app.finza.africa`.
-5. Apply migrations through **496** (or full chain from empty DB) then **497–501**.
+1. Use the existing staging Supabase project `adonhhtooawkeemdqqeo`. Do not create another project unless the owner approves a new cost.
+2. Copy `.env.staging.example` → `.env.staging` (gitignored). Fill staging values from the staging dashboard. The example file must not contain real keys.
+3. Set staging variables on a Vercel Preview branch scope, not Production. See `docs/remediation/service/STAGING_DEPLOYMENT_RUNBOOK.md`.
+4. Link a preview URL — **never** point k6, callbacks, or load tests at `app.finza.africa`.
+5. Do not reapply migrations through 496. Staging is already past that range. Migration 588 is already applied on staging and must not be applied to production from this checklist.
 6. Onboard or seed one fake service business; capture `businessId`.
 7. Create `load-tests/sessions.staging.json` with staging cookies.
 8. Run k6 smoke with `SCENARIO=smoke` against staging URL only.

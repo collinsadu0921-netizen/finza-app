@@ -9,7 +9,7 @@ import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceSer
  */
 export async function GET(
   _request: Request,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: jobId } = await Promise.resolve(context.params)
