@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { salesSummaryPaidRevenue } from "@/lib/reports/salesSummaryPaidRevenue"
 
 export async function GET(request: NextRequest) {
   // HARD GUARD: Block execution - This report uses operational tables instead of ledger
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
     // INVARIANT 1: Exclude drafts - drafts never affect Financial Reports
     let query = supabase
       .from("invoices")
-      .select("total, subtotal_before_tax, total_tax_amount, status, issue_date")
+      .select("id, business_id, deleted_at, total, subtotal_before_tax, total_tax_amount, status, issue_date")
       .eq("business_id", business.id)
       .neq("status", "draft")
       .is("deleted_at", null)
@@ -113,7 +114,29 @@ export async function GET(request: NextRequest) {
     const totalRevenue = (nonDraftInvoices.reduce((sum, inv) => sum + Number(inv.total || 0), 0) || 0) - totalCredits
     const totalSubtotal = (nonDraftInvoices.reduce((sum, inv) => sum + Number(inv.subtotal_before_tax || 0), 0) || 0) - totalCreditSubtotal
     const totalTax = (nonDraftInvoices.reduce((sum, inv) => sum + Number(inv.total_tax_amount || 0), 0) || 0) - totalCreditTax
-    const paidRevenue = nonDraftInvoices.filter(inv => inv.status === "paid" || inv.status === "partially_paid").reduce((sum, inv) => sum + Number(inv.total || 0), 0) || 0
+    let paymentQuery = supabase
+      .from("payments")
+      .select("amount, date, deleted_at, invoice_id, wht_amount")
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+    if (startDate) paymentQuery = paymentQuery.gte("date", startDate)
+    if (endDate) paymentQuery = paymentQuery.lte("date", endDate)
+    const { data: paymentRows } = await paymentQuery
+
+    const { data: settlementInvoices } = await supabase
+      .from("invoices")
+      .select("id, business_id, deleted_at, status")
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+      .neq("status", "draft")
+
+    const paidRevenue = salesSummaryPaidRevenue({
+      businessId: business.id,
+      startDate,
+      endDate,
+      payments: paymentRows || [],
+      invoices: settlementInvoices || [],
+    })
     const pendingRevenue = nonDraftInvoices.filter(inv => inv.status === "sent" || inv.status === "overdue").reduce((sum, inv) => sum + Number(inv.total || 0), 0) || 0
 
     // Group by status

@@ -159,6 +159,7 @@ export default function PublicInvoicePage() {
   const effectiveBalanceDue = paymentSummary?.balanceDue ?? Number(invoice.total ?? 0)
   const badgeLabel =
     paymentSummary?.statusLabel ?? invoiceCustomerStatusLabel(invoice.status)
+  const cashPaidInFull = badgeLabel === "Paid in full"
 
   // Status banner config
   const bannerClass = isPaid
@@ -284,7 +285,7 @@ export default function PublicInvoicePage() {
             <div className="flex-1 min-w-0">
               <p className={`font-semibold text-sm ${bannerTextClass}`}>
                 {isPaid ? (
-                  "This invoice has been paid — thank you."
+                  cashPaidInFull ? "This invoice has been paid — thank you." : badgeLabel
                 ) : (
                   <>
                     <span>{badgeLabel}</span>
@@ -300,9 +301,9 @@ export default function PublicInvoicePage() {
               )}
             </div>
             <div className="shrink-0 text-right">
-              <p className={`text-xs ${bannerTextClass} opacity-60`}>{isPaid ? "Amount paid" : "Balance due"}</p>
+              <p className={`text-xs ${bannerTextClass} opacity-60`}>{cashPaidInFull ? "Amount paid" : "Balance due"}</p>
               <p className={`text-lg font-bold tabular-nums ${bannerTextClass}`}>
-                {formatMoney(isPaid ? Number(invoice.total) : effectiveBalanceDue, invoice.currency_code)}
+                {formatMoney(cashPaidInFull ? Number(invoice.total) : effectiveBalanceDue, invoice.currency_code)}
               </p>
             </div>
           </div>

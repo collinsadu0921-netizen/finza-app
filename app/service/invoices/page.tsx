@@ -30,6 +30,7 @@ import { useServiceFinancialWrite } from "@/components/service/useServiceFinanci
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { useWorkspaceBusiness } from "@/components/WorkspaceBusinessContext"
 import { SERVICE_LIST_REMOUNT_TTL_MS, sharedJsonGet } from "@/lib/client/sharedJsonGet"
+import { listInvoiceBadgeLabel } from "@/lib/invoices/invoiceSettlementPresentation"
 
 function devInvoiceTiming(label: string, startedAt: number) {
   if (process.env.NODE_ENV === "production") return
@@ -56,6 +57,9 @@ type Invoice = {
   due_date: string | null
   /** Present for CSV/Excel export VAT breakdown; optional when older rows lack JSON. */
   tax_lines?: unknown
+  payments_total?: number | null
+  applied_credits_total?: number | null
+  settlement_amounts_unavailable?: boolean
 }
 
 /** Format a list-row total using the currency stored on the invoice (same as invoice view). */
@@ -115,12 +119,13 @@ function ApprovalBadge({ status }: { status: string | null | undefined }) {
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.draft
+function StatusBadge({ status, label }: { status: string; label: string }) {
+  const styleKey = label === "Amounts unavailable" ? "draft" : status
+  const cfg = STATUS_CONFIG[styleKey] ?? STATUS_CONFIG.draft
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-      {cfg.label}
+      {label}
     </span>
   )
 }
@@ -1104,7 +1109,19 @@ function InvoicesPageContent() {
                           </span>
                         </td>
                         <td className="px-5 py-4">
-                          <StatusBadge status={statusForListBadge(invoice)} />
+                          <StatusBadge
+                            status={statusForListBadge(invoice)}
+                            label={listInvoiceBadgeLabel({
+                              workflowBadgeKey: statusForListBadge(invoice),
+                              total: Number(invoice.total) || 0,
+                              payments: invoice.payments_total ?? null,
+                              appliedCredits: invoice.applied_credits_total ?? null,
+                              amountsUnavailable:
+                                Boolean(invoice.settlement_amounts_unavailable) ||
+                                invoice.payments_total == null ||
+                                invoice.applied_credits_total == null,
+                            })}
+                          />
                         </td>
                         <td className="px-5 py-4">
                           <ApprovalBadge status={invoice.customer_approval_status} />

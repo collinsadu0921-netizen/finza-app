@@ -7,6 +7,7 @@ import {
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs, jsonResponseWithServerTiming } from "@/lib/server/routeDiagnostics"
 import { isCustomerApprovalStatus } from "@/lib/invoices/customerApproval"
+import { attachInvoiceSettlementSums } from "@/lib/invoices/invoiceSettlementAmounts"
 
 const INVOICE_SELECT = `
         id,
@@ -300,8 +301,14 @@ export async function GET(request: NextRequest) {
         total_count: payload.pagination.totalCount,
       })
 
+      const invoicesWithSettlement = await attachInvoiceSettlementSums(
+        supabase,
+        (payload.invoices ?? []) as Array<{ id: string }>,
+        business.id
+      )
+
       diag.finish(200, { page, limit })
-      return respond(payload, 200)
+      return respond({ ...payload, invoices: invoicesWithSettlement }, 200)
     }
 
     let query = supabase
@@ -380,8 +387,13 @@ export async function GET(request: NextRequest) {
     }
 
     const totalCount = count ?? 0
+    const invoicesWithSettlement = await attachInvoiceSettlementSums(
+      supabase,
+      (invoices || []) as Array<{ id: string }>,
+      business.id
+    )
     const payload = {
-      invoices: invoices || [],
+      invoices: invoicesWithSettlement,
       pagination: {
         page,
         pageSize: limit,

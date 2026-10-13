@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { mergeInvoiceTermsFooter } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { invoiceCustomerStatusLabel } from "@/lib/invoices/invoiceCustomerPaymentDisplay"
+import { loadInvoiceSettlementAmounts } from "@/lib/invoices/invoiceSettlementAmounts"
 import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
 import { resolvePublicInvoicePaymentFlow } from "@/lib/tenantPayments/publicInvoicePaymentFlow"
 import { tenantInvoiceOnlinePaymentsEnabled } from "@/lib/payments/tenantInvoiceOnlinePayments"
@@ -99,11 +100,17 @@ export async function GET(
       footer_message: merged.footer_message,
     }
 
-    const balanceDue = await fetchInvoiceBalanceDuePublic(
-      supabase,
-      inv.id,
-      Number(inv.total ?? 0)
-    )
+    const invoiceTotal = Number(inv.total ?? 0)
+    const [balanceDue, settlementAmounts] = await Promise.all([
+      fetchInvoiceBalanceDuePublic(supabase, inv.id, invoiceTotal),
+      loadInvoiceSettlementAmounts(supabase, inv.id),
+    ])
+    const statusLabel = invoiceCustomerStatusLabel(inv.status, {
+      total: invoiceTotal,
+      payments: settlementAmounts.payments,
+      appliedCredits: settlementAmounts.appliedCredits,
+      amountsUnavailable: settlementAmounts.amountsUnavailable,
+    })
 
     let invoice_payment_flow: Awaited<ReturnType<typeof resolvePublicInvoicePaymentFlow>> | null = null
     if (balanceDue > 0 && inv.business_id) {
@@ -117,7 +124,7 @@ export async function GET(
       items: items || [],
       paymentSummary: {
         balanceDue,
-        statusLabel: invoiceCustomerStatusLabel(inv.status),
+        statusLabel,
       },
       tenant_invoice_online_payments_enabled: tenantInvoiceOnlinePaymentsEnabled(),
       invoice_payment_flow,

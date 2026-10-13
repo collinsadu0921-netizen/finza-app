@@ -429,8 +429,10 @@ export async function GET(
     const payload: Record<string, unknown> = {
       invoice,
       items: enrichedItems,
-      payments: payments || [],
-      creditNotes: creditNotes || [],
+      payments: paymentsError ? [] : payments || [],
+      creditNotes: creditNotesError ? [] : creditNotes || [],
+      paymentsLoadError: Boolean(paymentsError),
+      creditNotesLoadError: Boolean(creditNotesError),
     }
     if (reconciliationWarning) (payload as any).reconciliationWarning = reconciliationWarning
 

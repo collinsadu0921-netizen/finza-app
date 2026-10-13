@@ -27,6 +27,10 @@ import { PrepareEvatDraftCard } from "@/components/invoices/PrepareEvatDraftCard
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
+import {
+  presentInvoiceSettlement,
+  settlementLabelForCashClaimStatus,
+} from "@/lib/invoices/invoiceSettlementPresentation"
 import CustomerApprovalSection from "@/components/invoices/CustomerApprovalSection"
 import {
   canShowReturnMaterialsAction,
@@ -237,6 +241,7 @@ export default function InvoiceViewPage() {
   const [items, setItems] = useState<InvoiceItem[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([])
+  const [settlementAmountsUnavailable, setSettlementAmountsUnavailable] = useState(false)
   const [error, setError] = useState("")
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
@@ -305,10 +310,17 @@ export default function InvoiceViewPage() {
         throw new Error("Invoice data is missing from the response")
       }
 
+      const paymentsLoadError = Boolean(data.paymentsLoadError)
+      const creditNotesLoadError = Boolean(data.creditNotesLoadError)
+      const paymentsAreArray = Array.isArray(data.payments)
+      const creditsAreArray = Array.isArray(data.creditNotes)
       setInvoice(data.invoice)
       setItems(data.items || [])
-      setPayments(data.payments || [])
-      setCreditNotes(data.creditNotes || [])
+      setPayments(paymentsAreArray ? data.payments : [])
+      setCreditNotes(creditsAreArray ? data.creditNotes : [])
+      setSettlementAmountsUnavailable(
+        paymentsLoadError || creditNotesLoadError || !paymentsAreArray || !creditsAreArray
+      )
 
       if (data.invoice?.business_id) {
         const actualBusinessId = data.invoice.business_id as string
@@ -792,6 +804,14 @@ Thank you.`
     .filter((cn) => cn.status === "applied")
     .reduce((sum, cn) => sum + Number(cn.total), 0)
   const remainingBalance = Number(invoice.total || 0) - totalPaid - totalCredits
+  const settlementInput = {
+    total: Number(invoice.total || 0),
+    payments: settlementAmountsUnavailable ? null : totalPaid,
+    appliedCredits: settlementAmountsUnavailable ? null : totalCredits,
+    amountsUnavailable: settlementAmountsUnavailable,
+  }
+  const settlement = presentInvoiceSettlement(settlementInput)
+  const cashClaimLabel = settlementLabelForCashClaimStatus(invoice.status, settlementInput)
 
   const creditCapacity = computeInvoiceCreditCapacity(
     invoice.id,
@@ -850,7 +870,11 @@ Thank you.`
                       Invoice #{invoice.invoice_number || "Draft"}
                     </h1>
                   </div>
-                  <StatusBadge status={invoice.status} className="shrink-0 px-2.5 py-0.5 text-xs font-medium" />
+                  <StatusBadge
+                    status={invoice.status}
+                    label={cashClaimLabel}
+                    className="shrink-0 px-2.5 py-0.5 text-xs font-medium"
+                  />
                 </div>
                 <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                   <span className="text-slate-500 dark:text-slate-500">Issued to </span>
@@ -942,7 +966,11 @@ Thank you.`
                     </div>
                   ) : (
                     <div className="flex w-full flex-col gap-2 sm:flex-row sm:w-auto sm:items-stretch">
-                      {remainingBalance > 0.01 ? (
+                      {settlementAmountsUnavailable ? (
+                        <div className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700 select-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 sm:w-auto">
+                          Amounts unavailable
+                        </div>
+                      ) : (settlement.remaining ?? 0) > 0.01 ? (
                         <button
                           type="button"
                           onClick={() => setShowPaymentModal(true)}
@@ -955,7 +983,7 @@ Thank you.`
                         </button>
                       ) : (
                         <div className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-emerald-200/80 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 select-none dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 sm:w-auto">
-                          Paid in full
+                          {settlement.label}
                         </div>
                       )}
                       {invoice.invoice_number &&
@@ -993,7 +1021,7 @@ Thank you.`
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-emerald-600 tracking-wider mb-1">Paid</span>
               <span className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                +{formatMoney(Number(totalPaid), invoice.currency_code)}
+                {settlementAmountsUnavailable ? "Unavailable" : `+${formatMoney(Number(totalPaid), invoice.currency_code)}`}
               </span>
             </div>
             {totalCredits > 0 && (
@@ -1009,11 +1037,11 @@ Thank you.`
             )}
             <div className="hidden sm:block text-slate-300 text-2xl font-light select-none">=</div>
             <div className="flex flex-col sm:border-l-2 border-slate-100 dark:border-slate-700 sm:pl-8 ml-auto sm:ml-0 pt-4 sm:pt-0 border-t sm:border-t-0 w-full sm:w-auto mt-2 sm:mt-0">
-              <span className={`text-[10px] uppercase font-bold tracking-wider mb-1 ${remainingBalance > 0.01 ? "text-rose-600" : "text-emerald-600"}`}>
-                {remainingBalance > 0.01 ? "Amount Due" : "Balance"}
+              <span className={`text-[10px] uppercase font-bold tracking-wider mb-1 ${settlementAmountsUnavailable ? "text-slate-500" : remainingBalance > 0.01 ? "text-rose-600" : "text-emerald-600"}`}>
+                {settlementAmountsUnavailable ? "Balance" : remainingBalance > 0.01 ? "Amount Due" : "Balance"}
               </span>
-              <span className={`text-2xl font-semibold tabular-nums ${remainingBalance > 0.01 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                {formatMoney(Number(remainingBalance), invoice.currency_code)}
+              <span className={`text-2xl font-semibold tabular-nums ${settlementAmountsUnavailable ? "text-slate-600 dark:text-slate-300" : remainingBalance > 0.01 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                {settlementAmountsUnavailable ? "Unavailable" : formatMoney(Number(remainingBalance), invoice.currency_code)}
               </span>
             </div>
           </div>
@@ -1572,7 +1600,7 @@ Thank you.`
                 <div className="bg-slate-50 dark:bg-slate-800/50 px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Payment History</h3>
                   {/* Only show 'Add' if there's balance */}
-                  {remainingBalance > 0.01 && invoice.status !== 'draft' && !readOnly && (
+                  {(settlement.remaining ?? 0) > 0.01 && !settlementAmountsUnavailable && invoice.status !== 'draft' && !readOnly && (
                     <button
                       onClick={() => setShowPaymentModal(true)}
                       className="text-xs text-blue-600 font-medium hover:underline"

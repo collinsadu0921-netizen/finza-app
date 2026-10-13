@@ -13,6 +13,7 @@ import {
   mergeInvoiceTermsFooter,
 } from "@/lib/invoices/loadInvoiceSettingsForDocument"
 import { invoiceCustomerStatusLabel } from "@/lib/invoices/invoiceCustomerPaymentDisplay"
+import { loadInvoiceSettlementAmounts } from "@/lib/invoices/invoiceSettlementAmounts"
 import { fetchInvoiceBalanceDuePublic } from "@/lib/invoices/invoicePublicBalanceDue"
 import { PUBLIC_INVOICE_PREVIEW_SELECT } from "@/lib/publicDocuments/publicDocumentSelects"
 
@@ -93,7 +94,16 @@ async function buildInvoicePreviewHtmlFromLoadedInvoice(
       : {}),
   }
 
-  const balanceDue = await fetchInvoiceBalanceDuePublic(supabase, inv.id, invoiceTotal)
+  const [balanceDue, settlementAmounts] = await Promise.all([
+    fetchInvoiceBalanceDuePublic(supabase, inv.id, invoiceTotal),
+    loadInvoiceSettlementAmounts(supabase, inv.id),
+  ])
+  const statusLabel = invoiceCustomerStatusLabel(inv.status, {
+    total: invoiceTotal,
+    payments: settlementAmounts.payments,
+    appliedCredits: settlementAmounts.appliedCredits,
+    amountsUnavailable: settlementAmounts.amountsUnavailable,
+  })
 
   const documentMeta: DocumentMeta = {
     document_number: inv.invoice_number || "DRAFT",
@@ -148,7 +158,7 @@ async function buildInvoicePreviewHtmlFromLoadedInvoice(
     home_currency_code: inv.home_currency_code ?? null,
     home_currency_total: inv.home_currency_total ?? null,
     invoice_customer_payment_summary: {
-      status_label: invoiceCustomerStatusLabel(inv.status),
+      status_label: statusLabel,
       balance_due: balanceDue > 0.005 ? balanceDue : null,
     },
   })

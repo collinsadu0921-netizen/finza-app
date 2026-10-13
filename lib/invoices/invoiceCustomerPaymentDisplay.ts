@@ -3,14 +3,24 @@
  * Display only — does not change payment or status calculations in the database.
  */
 
+import {
+  presentInvoiceSettlement,
+  type InvoiceSettlementInput,
+} from "@/lib/invoices/invoiceSettlementPresentation"
+
 /** Label for the status pill / PDF line (sentence case). */
-export function invoiceCustomerStatusLabel(invoiceStatus: string | null | undefined): string {
+export function invoiceCustomerStatusLabel(
+  invoiceStatus: string | null | undefined,
+  settlement?: InvoiceSettlementInput | null
+): string {
   const s = String(invoiceStatus || "")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_")
-  if (s === "paid") return "Paid"
-  if (s === "partially_paid") return "Partially paid"
+  if (s === "paid" || s === "partially_paid" || s === "partial") {
+    if (!settlement) return "Amounts unavailable"
+    return presentInvoiceSettlement(settlement).label
+  }
   if (s === "overdue") return "Overdue"
   if (
     s === "sent" ||
