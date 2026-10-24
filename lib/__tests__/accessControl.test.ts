@@ -174,6 +174,14 @@ describe("accessControl", () => {
       expect(res.redirectTo).toBe("/service/dashboard")
     })
 
+    it("allows service user on /service/accounting/journals", async () => {
+      const supabase = createMockSupabase({ firmUsersData: [] })
+      mockGetCurrentBusiness.mockResolvedValue({ id: "b1", industry: "service" } as any)
+
+      const res = await resolveAccess(supabase, "user-1", "/service/accounting/journals")
+      expect(res.allowed).toBe(true)
+    })
+
     it("denies service user on /accounting/adjustments/*", async () => {
       const supabase = createMockSupabase({ firmUsersData: [] })
       mockGetCurrentBusiness.mockResolvedValue({ id: "b1", industry: "service" } as any)

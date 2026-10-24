@@ -580,6 +580,7 @@ export default function Sidebar() {
           title: "Advanced accounting",
           items: [
             { label: "General Ledger", route: buildServiceRoute("/service/reports/general-ledger", accountingBusinessId), minTier: "business" },
+            { label: "Manual Journals", route: buildServiceRoute("/service/accounting/journals", accountingBusinessId), minTier: "business" },
             { label: "Journal Entries", route: buildServiceRoute("/service/ledger", accountingBusinessId), minTier: "business" },
             { label: "Chart of Accounts", route: buildServiceRoute("/service/accounting/chart-of-accounts", accountingBusinessId), minTier: "business" },
             { label: "Trial Balance", route: buildServiceRoute("/service/reports/trial-balance", accountingBusinessId), minTier: "business" },
