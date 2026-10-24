@@ -253,6 +253,23 @@ BEGIN
     RAISE EXCEPTION 'TEST_FAILED: ledger/report source rows are missing';
   END IF;
 
+  -- 9) Live grant boundary: anon cannot execute the RPCs or read drafts.
+  IF has_function_privilege('anon', 'public.create_service_manual_journal_draft(uuid,date,text,text,jsonb,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST_FAILED: anon can execute create_service_manual_journal_draft';
+  END IF;
+  IF has_function_privilege('anon', 'public.post_service_manual_journal_draft(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST_FAILED: anon can execute post_service_manual_journal_draft';
+  END IF;
+  IF has_function_privilege('anon', 'public.reverse_service_manual_journal(uuid,date,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST_FAILED: anon can execute reverse_service_manual_journal';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.create_service_manual_journal_draft(uuid,date,text,text,jsonb,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST_FAILED: authenticated cannot execute create_service_manual_journal_draft';
+  END IF;
+  IF has_table_privilege('anon', 'public.service_manual_journal_drafts', 'SELECT') THEN
+    RAISE EXCEPTION 'TEST_FAILED: anon can read service manual journal drafts';
+  END IF;
+
   RAISE NOTICE 'PASS: 583 Service manual journal database tests';
 END $$;
 

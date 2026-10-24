@@ -920,18 +920,21 @@ $$;
 -- ----------------------------------------------------------------------------
 -- 8) Function privileges: no PUBLIC execution; authenticated only
 -- ----------------------------------------------------------------------------
-REVOKE ALL ON FUNCTION public.is_service_manual_control_account(TEXT, BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_service_manual_control_account(TEXT, BOOLEAN) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.is_service_manual_control_account(TEXT, BOOLEAN) TO authenticated;
-REVOKE ALL ON FUNCTION public.service_manual_journal_actor_role(UUID, UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.service_manual_journal_assert_open_period(UUID, DATE) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.service_manual_journal_validate_lines(UUID, JSONB) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.create_service_manual_journal_draft(UUID, DATE, TEXT, TEXT, JSONB, TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.post_service_manual_journal_draft(UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.reverse_service_manual_journal(UUID, DATE, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.service_manual_journal_actor_role(UUID, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.service_manual_journal_assert_open_period(UUID, DATE) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.service_manual_journal_validate_lines(UUID, JSONB) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.create_service_manual_journal_draft(UUID, DATE, TEXT, TEXT, JSONB, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.post_service_manual_journal_draft(UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.reverse_service_manual_journal(UUID, DATE, TEXT) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.create_service_manual_journal_draft(UUID, DATE, TEXT, TEXT, JSONB, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.post_service_manual_journal_draft(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.reverse_service_manual_journal(UUID, DATE, TEXT) TO authenticated;
+
+REVOKE ALL ON TABLE public.service_manual_journal_drafts FROM anon;
+GRANT SELECT ON TABLE public.service_manual_journal_drafts TO authenticated;
 
 COMMENT ON FUNCTION public.create_service_manual_journal_draft(UUID, DATE, TEXT, TEXT, JSONB, TEXT) IS
   'Service-only. Creates an idempotent manual journal draft after membership, role, account, balance and open-period validation.';
