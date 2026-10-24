@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { logAudit } from "@/lib/auditLog"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
@@ -15,6 +16,42 @@ import {
 } from "@/lib/server/routeDiagnostics"
 
 const MIN_REASON_LENGTH = 10
+
+type ReversalOriginal = {
+  id: string
+  business_id: string
+  source_type: string | null
+}
+
+/**
+ * Keep the Service manual-journal draft in sync with generic GL reversals.
+ * The ledger reversal is already authoritative; this is display/link state only.
+ */
+async function linkServiceManualDraftToReversal(
+  original: ReversalOriginal,
+  reversalJournalEntryId: string
+): Promise<void> {
+  if (original.source_type !== "service_manual") return
+
+  try {
+    const admin = createSupabaseAdminClient()
+    const { error } = await admin
+      .from("service_manual_journal_drafts")
+      .update({
+        status: "reversed",
+        reversal_journal_entry_id: reversalJournalEntryId,
+      })
+      .eq("journal_entry_id", original.id)
+      .eq("business_id", original.business_id)
+      .neq("status", "reversed")
+
+    if (error) {
+      console.error("Reversal: failed to link Service manual draft:", error)
+    }
+  } catch (error) {
+    console.error("Reversal: failed to link Service manual draft:", error)
+  }
+}
 
 /**
  * POST /api/accounting/reversal
@@ -114,7 +151,7 @@ export async function POST(request: NextRequest) {
     const tLookup = performance.now()
     const { data: originalJe, error: fetchError } = await dataClient
       .from("journal_entries")
-      .select("id, business_id, date, description, period_id, reference_type, reference_id")
+      .select("id, business_id, date, description, period_id, source_type, reference_type, reference_id")
       .eq("id", original_je_id)
       .eq("business_id", resolvedBusinessId)
       .maybeSingle()
@@ -180,6 +217,10 @@ export async function POST(request: NextRequest) {
 
     const existingReversal = existingRes.data
     if (existingReversal) {
+      await linkServiceManualDraftToReversal(
+        originalJe as ReversalOriginal,
+        existingReversal.id
+      )
       return NextResponse.json({
         reversal_journal_entry_id: existingReversal.id,
         original_journal_entry_id: original_je_id,
@@ -231,6 +272,7 @@ export async function POST(request: NextRequest) {
       p_description: description,
       p_reference_type: "reversal",
       p_reference_id: original_je_id,
+      p_reverses_entry_id: original_je_id,
       p_lines,
       p_is_adjustment: true,
       p_adjustment_reason: reason,
@@ -246,11 +288,41 @@ export async function POST(request: NextRequest) {
 
     diag.recordTiming("rpc", timedStepMs(tRpc), "post_journal_entry")
     if (postError) {
+      const message = postError.message || "Failed to post reversal journal entry"
+
+      // A concurrent/retried reversal can lose the race after the pre-check.
+      // Reconcile to the existing reversal instead of returning an opaque 500.
+      if (
+        message.includes("SERVICE_MANUAL_ALREADY_REVERSED") ||
+        message.toLowerCase().includes("duplicate key")
+      ) {
+        const { data: racedReversal } = await dataClient
+          .from("journal_entries")
+          .select("id")
+          .eq("business_id", resolvedBusinessId)
+          .eq("reference_type", "reversal")
+          .eq("reference_id", original_je_id)
+          .limit(1)
+          .maybeSingle()
+
+        if (racedReversal) {
+          await linkServiceManualDraftToReversal(
+            originalJe as ReversalOriginal,
+            racedReversal.id
+          )
+          return respond(
+            {
+              reversal_journal_entry_id: racedReversal.id,
+              original_journal_entry_id: original_je_id,
+              already_reversed: true,
+            },
+            200
+          )
+        }
+      }
+
       console.error("Reversal: post_journal_entry error", postError)
-      return respond(
-        { error: postError.message || "Failed to post reversal journal entry" },
-        500
-      )
+      return respond({ error: message }, 500)
     }
 
     if (!journalEntryId) {
@@ -259,6 +331,11 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       )
     }
+
+    await linkServiceManualDraftToReversal(
+      originalJe as ReversalOriginal,
+      journalEntryId
+    )
 
     const tAudit = performance.now()
     await logAudit({

@@ -7,6 +7,7 @@ import { supabaseErrorDiag, timedStepMs, type createRouteDiag } from "@/lib/serv
 import {
   creditNoteDetailHref,
   expenseDetailHref,
+  manualJournalDetailHref,
   supplierBillDetailHref,
   classifyLoanActivityKind,
   isCreditNoteReclassJournal,
@@ -37,6 +38,8 @@ const SOURCE_TYPE_MAP: Record<string, Exclude<ActivityType, "email">> = {
   receipt: "payment",
   customer_payment: "payment",
   journal: "expense",
+  service_manual: "manual_journal",
+  service_manual_reversal: "reversal",
 }
 
 export const MAX_ACTIVITY_LIMIT = 15
@@ -98,6 +101,16 @@ function journalAmountFromRow(e: JournalActivityRow): number {
 }
 
 function mapActivityType(e: JournalActivityRow): Exclude<ActivityType, "email"> {
+  // Manual journals must never be labeled as expenses just because a line uses
+  // an expense account. Reversals cover both the Service RPC and the generic
+  // GL reversal form (reference_type='reversal').
+  const sourceRaw = (e.source_type ?? "").toLowerCase()
+  const referenceRaw = (e.reference_type ?? "").toLowerCase()
+  if (sourceRaw === "service_manual") return "manual_journal"
+  if (sourceRaw === "service_manual_reversal" || referenceRaw === "reversal") {
+    return "reversal"
+  }
+
   const loanKind = classifyLoanActivityKind(e.description, e.reference_type)
   if (loanKind) return loanKind
 
@@ -109,7 +122,10 @@ function mapActivityType(e: JournalActivityRow): Exclude<ActivityType, "email"> 
   return mapped
 }
 
-function basicJournalActivityItems(entries: JournalActivityRow[]): ServiceDashboardActivityItem[] {
+function basicJournalActivityItems(
+  entries: JournalActivityRow[],
+  businessId?: string | null
+): ServiceDashboardActivityItem[] {
   return entries.map((e) => {
     const type = mapActivityType(e)
     const rawDesc = e.description
@@ -118,12 +134,22 @@ function basicJournalActivityItems(entries: JournalActivityRow[]): ServiceDashbo
       (e.reference_type
         ? `${e.reference_type.replace(/_/g, " ")} entry`
         : "Journal entry")
+    const manualHref =
+      businessId && (type === "manual_journal" || type === "reversal")
+        ? manualJournalDetailHref(
+            businessId,
+            e.id,
+            e.reference_type,
+            e.reference_id
+          )
+        : undefined
     return {
       id: e.id,
       type,
       description,
       amount: journalAmountFromRow(e),
       timestamp: e.created_at,
+      href: manualHref,
     }
   })
 }
@@ -131,7 +157,8 @@ function basicJournalActivityItems(entries: JournalActivityRow[]): ServiceDashbo
 /** Test helper / shared mapper: journal rows → dashboard activity items. */
 export async function buildJournalActivityItems(
   supabase: SupabaseClient,
-  entries: JournalActivityRow[]
+  entries: JournalActivityRow[],
+  businessId?: string | null
 ): Promise<ServiceDashboardActivityItem[]> {
   const invoiceIds: string[] = []
   const creditNoteIds: string[] = []
@@ -343,7 +370,17 @@ export async function buildJournalActivityItems(
             : journalAmount
 
     let href: string | undefined
-    if (type === "invoice" && refId && knownInvoiceIds.has(refId)) {
+    if (
+      businessId &&
+      (type === "manual_journal" || type === "reversal")
+    ) {
+      href = manualJournalDetailHref(
+        businessId,
+        e.id,
+        e.reference_type,
+        e.reference_id
+      )
+    } else if (type === "invoice" && refId && knownInvoiceIds.has(refId)) {
       href = `/service/invoices/${refId}`
     } else if (
       (type === "credit_note" || type === "credit_note_reclass") &&
@@ -494,14 +531,14 @@ export async function loadServiceDashboardActivityFeed(
   const tJournalBuild = performance.now()
   let journalItems: ServiceDashboardActivityItem[]
   try {
-    journalItems = await buildJournalActivityItems(supabase, journalRows)
+    journalItems = await buildJournalActivityItems(supabase, journalRows, businessId)
   } catch (enrichErr) {
     console.warn("[service-activity] enrichment failed:", enrichErr)
     diag.step("build_journal_items_degraded", {
       ms_build: timedStepMs(tJournalBuild),
       error: enrichErr instanceof Error ? enrichErr.message : "enrichment_failed",
     })
-    journalItems = basicJournalActivityItems(journalRows)
+    journalItems = basicJournalActivityItems(journalRows, businessId)
   }
   diag.step("build_journal_items", {
     ms_build: timedStepMs(tJournalBuild),

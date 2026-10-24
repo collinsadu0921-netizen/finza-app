@@ -519,14 +519,38 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-400 mb-4">
                 <dt>Created by</dt><dd>{shortId(selectedDraft.created_by)} · {formatTimestamp(selectedDraft.created_at)}</dd>
                 <dt>Posted by</dt><dd>{selectedDraft.posted_by ? `${shortId(selectedDraft.posted_by)} · ${formatTimestamp(selectedDraft.posted_at)}` : "Not posted"}</dd>
-                <dt>Journal entry</dt><dd>{selectedDraft.journal_entry_id ? shortId(selectedDraft.journal_entry_id) : "—"}</dd>
-                <dt>Reversal</dt><dd>{selectedDraft.reversal_journal_entry_id ? shortId(selectedDraft.reversal_journal_entry_id) : "—"}</dd>
+                <dt>Journal entry</dt>
+                <dd>
+                  {selectedDraft.journal_entry_id ? (
+                    <Link
+                      href={`${buildServiceRoute("/service/ledger", businessId)}&reference_type=manual&reference_id=${selectedDraft.id}`}
+                      className="underline underline-offset-2 hover:no-underline"
+                    >
+                      {shortId(selectedDraft.journal_entry_id)}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
+                <dt>Reversal</dt>
+                <dd>
+                  {selectedDraft.reversal_journal_entry_id ? (
+                    <Link
+                      href={`${buildServiceRoute("/service/ledger", businessId)}&reference_type=reversal&reference_id=${selectedDraft.journal_entry_id}`}
+                      className="underline underline-offset-2 hover:no-underline"
+                    >
+                      {shortId(selectedDraft.reversal_journal_entry_id)}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
               </dl>
 
               <div className="flex flex-wrap gap-2">
                 {selectedDraft.journal_entry_id && (
                   <Link
-                    href={`${buildServiceRoute("/service/ledger", businessId)}&highlight=${selectedDraft.journal_entry_id}`}
+                    href={`${buildServiceRoute("/service/ledger", businessId)}&reference_type=manual&reference_id=${selectedDraft.id}`}
                     className="rounded-md border border-gray-300 px-3 py-1.5 text-xs dark:border-gray-600"
                   >
                     View in ledger
