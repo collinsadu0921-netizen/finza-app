@@ -6,7 +6,6 @@ import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import {
   calculateWHTForRate,
   getWHTRate,
-  isResidentContractWhtCode,
 } from "@/lib/wht"
 import {
   getIncomingDocumentForBusiness,
@@ -317,21 +316,8 @@ export async function POST(request: NextRequest) {
           })
         : { whtAmount: 0, thresholdMet: true }
 
-    if (
-      apply_wht &&
-      isResidentContractWhtCode(whtCode) &&
-      !whtCalculation.thresholdMet
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Resident contract WHT applies only where the contract value exceeds GHS 2,000.",
-          code: "WHT_CONTRACT_THRESHOLD_NOT_MET",
-        },
-        { status: 400 }
-      )
-    }
+    // The GHS 2,000 resident-contract threshold is informational only. The
+    // tenant may apply WHT to any document, including below the threshold.
 
     // Standard bills: always insert as draft, then insert lines, then open if requested
     // so the post trigger never runs before bill_items exist.

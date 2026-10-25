@@ -808,7 +808,7 @@ function NewInvoicePageContent() {
         baseAmountGhs: whtBaseGhs,
       })
     : { whtAmount: 0, netPayable: total, thresholdMet: true }
-  const whtThresholdBlocked =
+  const whtThresholdReminder =
     applyWHTReceivable &&
     isResidentContractWhtCode(selectedWHTRecvRate?.code) &&
     !whtRecvCalcResult.thresholdMet
@@ -891,13 +891,6 @@ function NewInvoicePageContent() {
     // Guardrail: Invalid amounts or missing data
     if (items.some(i => i.price < 0 || i.quantity <= 0)) {
       setError("Items contain invalid quantities or prices.")
-      return
-    }
-
-    if (whtThresholdBlocked) {
-      setError(
-        "Resident contract WHT applies only where the contract value exceeds GHS 2,000. Turn off WHT or increase the contract value."
-      )
       return
     }
 
@@ -1494,10 +1487,10 @@ function NewInvoicePageContent() {
                       <p className="text-xs text-slate-500">
                         {selectedWHTRecvRate?.description}
                       </p>
-                      {whtThresholdBlocked && (
+                      {whtThresholdReminder && (
                         <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-                          Resident contract WHT applies only where the contract value
-                          exceeds GHS 2,000. WHT will not be applied to this invoice.
+                          Reminder: GRA&apos;s resident-contract threshold is GHS 2,000.
+                          You can still apply WHT to this invoice.
                         </p>
                       )}
                       <div className="flex justify-between text-sm">

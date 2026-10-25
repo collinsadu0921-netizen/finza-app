@@ -17,7 +17,6 @@ import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enf
 import {
   calculateWHTForRate,
   getWHTRate,
-  isResidentContractWhtCode,
 } from "@/lib/wht"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 import {
@@ -366,20 +365,8 @@ export async function POST(request: NextRequest) {
           })
         : { whtAmount: 0, thresholdMet: true }
 
-    if (
-      wht_receivable_applicable &&
-      isResidentContractWhtCode(whtCode) &&
-      !whtCalculation.thresholdMet
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Resident contract WHT applies only where the contract value exceeds GHS 2,000.",
-          code: "WHT_CONTRACT_THRESHOLD_NOT_MET",
-        },
-        { status: 400 }
-      )
-    }
+    // The GHS 2,000 resident-contract threshold is informational only. The
+    // tenant may apply WHT to any document, including below the threshold.
 
     // Generate public token
     let publicToken: string

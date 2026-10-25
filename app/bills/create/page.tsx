@@ -594,7 +594,7 @@ export default function CreateBillPage() {
         baseAmountGhs: whtBaseGhs,
       })
     : { whtAmount: 0, netPayable: activeTaxResult.grandTotal, thresholdMet: true }
-  const whtThresholdBlocked =
+  const whtThresholdReminder =
     applyWHT &&
     isResidentContractWhtCode(selectedWHTRate.code) &&
     !whtCalcResult.thresholdMet
@@ -652,13 +652,6 @@ export default function CreateBillPage() {
 
     if (fxEnabled && fxCurrencyCode && (!fxRate || parseFloat(fxRate) <= 0)) {
       setError(`Exchange rate is required for ${fxCurrencyCode} bills. Please enter the current rate.`)
-      return
-    }
-
-    if (whtThresholdBlocked) {
-      setError(
-        "Resident contract WHT applies only where the contract value exceeds GHS 2,000. Turn off WHT or increase the contract value."
-      )
       return
     }
 
@@ -1593,10 +1586,10 @@ export default function CreateBillPage() {
                       ))}
                     </select>
                     <p className="mt-1 text-xs text-slate-500">{selectedWHTRate.description}</p>
-                    {whtThresholdBlocked && (
+                    {whtThresholdReminder && (
                       <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-                        Resident contract WHT applies only where the contract value
-                        exceeds GHS 2,000. WHT will not be applied to this bill.
+                        Reminder: GRA&apos;s resident-contract threshold is GHS 2,000.
+                        You can still apply WHT to this bill.
                       </p>
                     )}
                   </div>

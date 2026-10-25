@@ -97,7 +97,7 @@ describe("WHT calculation base and threshold", () => {
     ).toBe(750)
   })
 
-  it("applies the GHS 2,000 resident-contract threshold only above the threshold", () => {
+  it("reports the GHS 2,000 reminder but still calculates WHT below it", () => {
     expect(isResidentContractWhtCode("GH_SVC_75")).toBe(true)
     expect(whtContractThresholdMet("GH_SVC_75", 2000)).toBe(false)
     expect(whtContractThresholdMet("GH_SVC_75", 2000.01)).toBe(true)
@@ -110,7 +110,48 @@ describe("WHT calculation base and threshold", () => {
       baseAmountGhs: 2000,
     })
     expect(atThreshold.thresholdMet).toBe(false)
-    expect(atThreshold.whtAmount).toBe(0)
+    expect(atThreshold.whtAmount).toBe(150)
+
+    const belowThreshold = calculateWHTForRate({
+      code: "GH_SVC_75",
+      baseAmount: 1500,
+      rate: 0.075,
+      baseAmountGhs: 1500,
+    })
+    expect(belowThreshold.thresholdMet).toBe(false)
+    expect(belowThreshold.whtAmount).toBe(112.5)
+  })
+
+  it("keeps WHT on and off independent of the threshold", () => {
+    const above = calculateWHTForRate({
+      code: "GH_SVC_75",
+      baseAmount: 10000,
+      rate: 0.075,
+      baseAmountGhs: 10000,
+    })
+    expect(above.thresholdMet).toBe(true)
+    expect(above.whtAmount).toBe(750)
+
+    const below = calculateWHTForRate({
+      code: "GH_SVC_75",
+      baseAmount: 1000,
+      rate: 0.075,
+      baseAmountGhs: 1000,
+    })
+    expect(below.thresholdMet).toBe(false)
+    expect(below.whtAmount).toBe(75)
+  })
+
+  it("calculates WHT on the pre-tax base below the threshold when tax-inclusive", () => {
+    // GHS 1,200 inclusive back-calculates to a GHS 1,000 pre-tax base.
+    const below = calculateWHTForRate({
+      code: "GH_SVC_75",
+      baseAmount: 1000,
+      rate: 0.075,
+      baseAmountGhs: 1000,
+    })
+    expect(below.whtAmount).toBe(75)
+    expect(below.whtAmount).not.toBe(90)
   })
 
   it("tests the contract threshold on the GHS equivalent for FX amounts", () => {

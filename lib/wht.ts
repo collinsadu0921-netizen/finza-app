@@ -49,7 +49,7 @@ export const GH_WHT_RATES: WHTRate[] = [
     name: "Resident services - 7.5%",
     rate: 0.075,
     description:
-      "Resident contract services. Non-final; applies only where the contract value exceeds GHS 2,000. Base excludes VAT, NHIL and GETFund; related contracts are aggregated.",
+      "Resident contract services. Non-final; GRA's GHS 2,000 resident-contract threshold is shown as a reminder only, and you may still apply WHT below it. Base excludes VAT, NHIL and GETFund; related contracts are aggregated.",
     category: "resident_contract",
   },
   {
@@ -57,7 +57,7 @@ export const GH_WHT_RATES: WHTRate[] = [
     name: "Resident works - 5%",
     rate: 0.05,
     description:
-      "Resident contract works. Non-final; applies only where the contract value exceeds GHS 2,000. Base excludes VAT, NHIL and GETFund.",
+      "Resident contract works. Non-final; GRA's GHS 2,000 resident-contract threshold is shown as a reminder only, and you may still apply WHT below it. Base excludes VAT, NHIL and GETFund.",
     category: "resident_contract",
   },
   {
@@ -65,7 +65,7 @@ export const GH_WHT_RATES: WHTRate[] = [
     name: "Resident goods - 3%",
     rate: 0.03,
     description:
-      "Resident contract goods. Non-final; applies only where the contract value exceeds GHS 2,000. Excludes trading stock of both parties and written exemptions. Base excludes VAT, NHIL and GETFund.",
+      "Resident contract goods. Non-final; GRA's GHS 2,000 resident-contract threshold is shown as a reminder only, and you may still apply WHT below it. Excludes trading stock of both parties and written exemptions. Base excludes VAT, NHIL and GETFund.",
     category: "resident_contract",
   },
   {
@@ -156,8 +156,10 @@ export function isResidentContractWhtCode(
 }
 
 /**
- * The resident contract threshold is tested on the GHS contract value before
- * VAT and levies. A contract exactly at GHS 2,000 does not qualify.
+ * Informational only: GRA's resident-contract threshold is tested on the GHS
+ * contract value before VAT and levies. The tenant still decides whether to
+ * apply WHT, including below the threshold. A contract exactly at GHS 2,000
+ * is reported as below the threshold so the reminder can be shown.
  */
 export function whtContractThresholdMet(
   code: string | null | undefined,
@@ -187,8 +189,10 @@ export function calculateWHT(
 }
 
 /**
- * Calculate WHT with the resident-contract threshold applied.
- * `baseAmountGhs` must be the GHS equivalent of the pre-tax base.
+ * Calculate WHT from the pre-tax base.
+ * `baseAmountGhs` must be the GHS equivalent of the pre-tax base and is used
+ * only to report whether the GRA resident-contract threshold is met. The
+ * threshold never blocks or zeroes a tenant's explicit WHT choice.
  */
 export function calculateWHTForRate(input: {
   baseAmount: number
@@ -204,14 +208,6 @@ export function calculateWHTForRate(input: {
   const baseGhs =
     input.baseAmountGhs != null ? input.baseAmountGhs : input.baseAmount
   const thresholdMet = whtContractThresholdMet(input.code, baseGhs)
-  if (!thresholdMet) {
-    return {
-      whtAmount: 0,
-      netPayable: Math.round(Number(input.baseAmount) * 100) / 100,
-      thresholdMet: false,
-      thresholdGhs: WHT_CONTRACT_THRESHOLD_GHS,
-    }
-  }
 
   const { whtAmount, netPayable } = calculateWHT(
     input.baseAmount,
@@ -220,7 +216,7 @@ export function calculateWHTForRate(input: {
   return {
     whtAmount,
     netPayable,
-    thresholdMet: true,
+    thresholdMet,
     ...(isResidentContractWhtCode(input.code)
       ? { thresholdGhs: WHT_CONTRACT_THRESHOLD_GHS }
       : {}),

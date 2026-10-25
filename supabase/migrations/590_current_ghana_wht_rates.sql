@@ -27,7 +27,7 @@ VALUES
     'GH_SVC_75',
     'Resident services - 7.5%',
     0.0750,
-    'Resident contract services. Non-final; applies only where the contract value exceeds GHS 2,000. Base excludes VAT, NHIL and GETFund; related contracts are aggregated.',
+    'Resident contract services. Non-final; GRA''s GHS 2,000 resident-contract threshold is shown as a reminder only, and you may still apply WHT below it. Base excludes VAT, NHIL and GETFund; related contracts are aggregated.',
     'GH',
     DATE '2026-01-01',
     TRUE
@@ -36,7 +36,7 @@ VALUES
     'GH_WORKS_5',
     'Resident works - 5%',
     0.0500,
-    'Resident contract works. Non-final; applies only where the contract value exceeds GHS 2,000. Base excludes VAT, NHIL and GETFund.',
+    'Resident contract works. Non-final; GRA''s GHS 2,000 resident-contract threshold is shown as a reminder only, and you may still apply WHT below it. Base excludes VAT, NHIL and GETFund.',
     'GH',
     DATE '2026-01-01',
     TRUE
@@ -45,7 +45,7 @@ VALUES
     'GH_GOODS_3',
     'Resident goods - 3%',
     0.0300,
-    'Resident contract goods. Non-final; applies only where the contract value exceeds GHS 2,000. Excludes trading stock of both parties and written exemptions. Base excludes VAT, NHIL and GETFund.',
+    'Resident contract goods. Non-final; GRA''s GHS 2,000 resident-contract threshold is shown as a reminder only, and you may still apply WHT below it. Excludes trading stock of both parties and written exemptions. Base excludes VAT, NHIL and GETFund.',
     'GH',
     DATE '2026-01-01',
     TRUE
