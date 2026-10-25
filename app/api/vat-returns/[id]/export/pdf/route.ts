@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { createPdfKitDocument } from "@/lib/pdf/createPdfKitDocument"
+import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
 import {
   GRA_VAT3_BOXES,
   getBoxesForSection,
@@ -102,8 +104,9 @@ export async function GET(
     }
 
     // ── Generate PDF ─────────────────────────────────────────────────────────
-    const PDFDocument = (await import("pdfkit")).default
-    const doc = new PDFDocument({ size: "A4", margin: 50 })
+    // Use the standalone PDFKit build so standard Helvetica AFM files are
+    // bundled into the serverless output instead of being read from disk.
+    const doc = await createPdfKitDocument({ size: "A4", margin: 50 })
     const chunks: Buffer[] = []
     doc.on("data", (chunk: Buffer) => chunks.push(chunk))
 
@@ -120,6 +123,8 @@ export async function GET(
     // ── Utility helpers ───────────────────────────────────────────────────────
 
     const fmt = (n: number) => `GHS ${n.toFixed(2)}`
+    const filingDate = (value: unknown) =>
+      String(value ?? "").slice(0, 10).replace(/[^0-9-]/g, "") || "unknown"
 
     const drawFooter = () => {
       const ph = doc.page.height
@@ -174,12 +179,53 @@ export async function GET(
       )
     doc.moveDown(0.15)
 
-    const statusLabel = String(vatReturn.status || "draft").toUpperCase()
+    const paymentState = vatPaymentState(vatReturn)
+    const statusLabel =
+      paymentState === "paid_recorded"
+        ? "PAID — PAYMENT RECORDED"
+        : paymentState === "paid_without_payment"
+          ? "PAID — NO PAYMENT JOURNAL"
+          : String(vatReturn.status || "draft").toUpperCase()
+    const statusColor =
+      paymentState === "paid_recorded"
+        ? "#16a34a"
+        : paymentState === "paid_without_payment"
+          ? "#b45309"
+          : vatReturn.status === "submitted"
+            ? "#2563eb"
+            : "#b45309"
     doc
       .fontSize(8)
       .font("Helvetica-Bold")
-      .fillColor(vatReturn.status === "paid" ? "#16a34a" : vatReturn.status === "submitted" ? "#2563eb" : "#b45309")
+      .fillColor(statusColor)
       .text(`Status: ${statusLabel}`, { align: "center" })
+
+    if (paymentState === "paid_without_payment") {
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#92400e")
+        .text(
+          "This filing was marked paid without a linked payment journal. It is not evidence that the tax liability was settled in the ledger.",
+          { align: "center" }
+        )
+    } else if (paymentState === "paid_recorded") {
+      const paidOn = vatReturn.payment_date
+        ? String(vatReturn.payment_date).slice(0, 10)
+        : "date not recorded"
+      const ref = vatReturn.payment_reference
+        ? ` · Ref: ${vatReturn.payment_reference}`
+        : ""
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#166534")
+        .text(
+          `Payment recorded ${paidOn}${ref} · Journal ${vatReturn.payment_journal_entry_id}`,
+          { align: "center" }
+        )
+    }
+
     doc.moveDown(0.4)
     doc.fillColor("#000000")
 
@@ -404,7 +450,7 @@ export async function GET(
     await new Promise<void>((resolve) => doc.on("end", resolve))
 
     const pdfBuffer = Buffer.concat(chunks)
-    const filename = `gra-vat3-${vatReturn.period_start_date}-${vatReturn.period_end_date}.pdf`
+    const filename = `gra-vat3-${filingDate(vatReturn.period_start_date)}-${filingDate(vatReturn.period_end_date)}.pdf`
 
     return new NextResponse(pdfBuffer, {
       status: 200,

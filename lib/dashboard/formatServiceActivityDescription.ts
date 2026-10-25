@@ -18,6 +18,8 @@ export type ServiceActivityType =
   | "loan_interest"
   | "manual_journal"
   | "reversal"
+  | "vat_payment"
+  | "vat_accrual"
 
 export type ServiceActivityItemLike = {
   type: ServiceActivityType
@@ -151,7 +153,13 @@ export function formatServiceActivityDescription(item: ServiceActivityItemLike):
       return raw ? `Manual journal — ${raw}` : "Manual journal"
     case "reversal":
       if (/^reversal/i.test(raw)) return raw
-      return raw ? `Reversal — ${raw}` : "Reversal"
+      return raw ? `Reversal - ${raw}` : "Reversal"
+    case "vat_payment":
+      if (/^vat payment/i.test(raw)) return raw
+      return raw ? `VAT payment recorded - ${raw}` : "VAT payment recorded"
+    case "vat_accrual":
+      if (/^vat accrual/i.test(raw)) return raw
+      return raw ? `VAT accrual recorded - ${raw}` : "VAT accrual recorded"
     case "customer": {
       if (/^new customer/i.test(raw)) return raw
       return raw ? `New customer — ${raw}` : "New customer added"

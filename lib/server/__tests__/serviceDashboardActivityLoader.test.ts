@@ -233,6 +233,54 @@ describe("buildJournalActivityItems credit-note posting vs reclass", () => {
     }
   })
 
+  it("labels VAT payments and accruals without using the expense fallback", async () => {
+    const businessId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    const filingId = "vvvvvvvv-vvvv-4vvv-8vvv-vvvvvvvvvvvv"
+    const items = await buildJournalActivityItems(
+      mockSupabase({}),
+      [
+        {
+          id: "je-vat-payment",
+          created_at: "2026-10-25T12:55:26.000Z",
+          description: "VAT payment - 2026-10-01 to 2026-10-31",
+          source_type: null,
+          reference_type: "vat_return_payment",
+          reference_id: filingId,
+          journal_amount: 120,
+        },
+        {
+          id: "je-vat-accrual",
+          created_at: "2026-10-25T12:48:48.000Z",
+          description: "VAT accrual - October 2026",
+          source_type: null,
+          reference_type: "test_vat_accrual",
+          reference_id: filingId,
+          journal_amount: 120,
+        },
+      ],
+      businessId
+    )
+
+    expect(items.map((item) => item.type)).toEqual([
+      "vat_payment",
+      "vat_accrual",
+    ])
+    expect(items[0].href).toBe(
+      `/vat-returns/${filingId}?business_id=${businessId}`
+    )
+    expect(items[1].href).toBe(
+      `/service/ledger?business_id=${businessId}&reference_type=test_vat_accrual&reference_id=${filingId}`
+    )
+    for (const item of items) {
+      const label = formatServiceActivityDescription({
+        type: item.type,
+        description: item.description,
+      })
+      expect(label).not.toMatch(/Expense recorded/i)
+      expect(label).toMatch(/^VAT (payment|accrual)/)
+    }
+  })
+
   it("keeps ordinary invoice posting as Invoice created with the invoice destination", async () => {
     const items = await buildJournalActivityItems(
       mockSupabase({

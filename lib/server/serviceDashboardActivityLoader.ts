@@ -13,6 +13,7 @@ import {
   isCreditNoteReclassJournal,
   type ServiceActivityType,
 } from "@/lib/dashboard/formatServiceActivityDescription"
+import { vatFilingHref } from "@/lib/vat/vatRoutes"
 
 export type ActivityType = ServiceActivityType
 
@@ -40,6 +41,9 @@ const SOURCE_TYPE_MAP: Record<string, Exclude<ActivityType, "email">> = {
   journal: "expense",
   service_manual: "manual_journal",
   service_manual_reversal: "reversal",
+  vat_return_payment: "vat_payment",
+  vat_accrual: "vat_accrual",
+  vat_return_accrual: "vat_accrual",
 }
 
 export const MAX_ACTIVITY_LIMIT = 15
@@ -110,6 +114,16 @@ function mapActivityType(e: JournalActivityRow): Exclude<ActivityType, "email"> 
   if (sourceRaw === "service_manual_reversal" || referenceRaw === "reversal") {
     return "reversal"
   }
+  if (referenceRaw === "vat_return_payment" || sourceRaw === "vat_return_payment") {
+    return "vat_payment"
+  }
+  if (
+    referenceRaw.includes("vat_accrual") ||
+    sourceRaw.includes("vat_accrual") ||
+    /^vat accrual/i.test((e.description ?? "").trim())
+  ) {
+    return "vat_accrual"
+  }
 
   const loanKind = classifyLoanActivityKind(e.description, e.reference_type)
   if (loanKind) return loanKind
@@ -143,13 +157,24 @@ function basicJournalActivityItems(
             e.reference_id
           )
         : undefined
+    const vatHref =
+      businessId && type === "vat_payment" && e.reference_id
+        ? vatFilingHref(e.reference_id, businessId)
+        : businessId && type === "vat_accrual"
+          ? manualJournalDetailHref(
+              businessId,
+              e.id,
+              e.reference_type,
+              e.reference_id
+            )
+          : undefined
     return {
       id: e.id,
       type,
       description,
       amount: journalAmountFromRow(e),
       timestamp: e.created_at,
-      href: manualHref,
+      href: manualHref ?? vatHref,
     }
   })
 }
@@ -374,6 +399,15 @@ export async function buildJournalActivityItems(
       businessId &&
       (type === "manual_journal" || type === "reversal")
     ) {
+      href = manualJournalDetailHref(
+        businessId,
+        e.id,
+        e.reference_type,
+        e.reference_id
+      )
+    } else if (businessId && type === "vat_payment" && refId) {
+      href = vatFilingHref(refId, businessId)
+    } else if (businessId && type === "vat_accrual") {
       href = manualJournalDetailHref(
         businessId,
         e.id,

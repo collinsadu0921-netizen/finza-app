@@ -6,10 +6,13 @@ import { Suspense } from "react"
 import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
+import { vatFilingHref, vatFilingsHref } from "@/lib/vat/vatRoutes"
 
 function CreateVatReturnContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const businessId =
+    searchParams.get("business_id") ?? searchParams.get("businessId")
   const toast = useToast()
   const [loading, setLoading] = useState(false)
   const [calculating, setCalculating] = useState(false)
@@ -27,7 +30,7 @@ function CreateVatReturnContent() {
     if (formData.period_start_date && formData.period_end_date) {
       calculateVat()
     }
-  }, [formData.period_start_date, formData.period_end_date])
+  }, [businessId, formData.period_start_date, formData.period_end_date])
 
   // Returns the calculation result directly so callers don't depend on stale state
   const calculateVat = async (): Promise<any | null> => {
@@ -37,6 +40,7 @@ function CreateVatReturnContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          business_id: businessId,
           period_start_date: formData.period_start_date,
           period_end_date: formData.period_end_date,
         }),
@@ -80,13 +84,16 @@ function CreateVatReturnContent() {
       const response = await fetch("/api/vat-returns/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          business_id: businessId,
+        }),
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        router.push(`/vat-returns/${data.vatReturn.id}`)
+        router.push(vatFilingHref(data.vatReturn.id, businessId))
       } else {
         toast.showToast(data.error || "Error creating VAT filing", "error")
       }
@@ -116,7 +123,7 @@ function CreateVatReturnContent() {
           <div className="flex items-center gap-3 mb-6">
             <button
               type="button"
-              onClick={() => router.back()}
+              onClick={() => router.push(vatFilingsHref(businessId))}
               className="group flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
             >
               <svg
@@ -365,7 +372,7 @@ function CreateVatReturnContent() {
               <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => router.back()}
+                  onClick={() => router.push(vatFilingsHref(businessId))}
                   className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
                 >
                   Cancel

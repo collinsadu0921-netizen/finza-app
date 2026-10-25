@@ -180,15 +180,18 @@ BEGIN
 
   -- 0) The database guard blocks a status-only transition into paid.
   BEGIN
+    SET LOCAL ROLE authenticated;
     UPDATE public.vat_returns
     SET status = 'paid'
     WHERE id = v_clean_return;
     RAISE EXCEPTION 'TEST_FAILED: status-only paid update was accepted';
   EXCEPTION WHEN others THEN
+    RESET ROLE;
     IF SQLERRM <> 'VAT_PAYMENT_JOURNAL_REQUIRED' THEN
       RAISE EXCEPTION 'TEST_FAILED: wrong status-only guard error: %', SQLERRM;
     END IF;
   END;
+  RESET ROLE;
 
   SELECT status, payment_journal_entry_id
   INTO v_status, v_payment_je

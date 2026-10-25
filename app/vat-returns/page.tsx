@@ -9,6 +9,7 @@ import PageHeader from "@/components/ui/PageHeader"
 import EmptyState from "@/components/ui/EmptyState"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import type { LedgerLine, MonthlyVatReturn } from "@/app/api/vat-returns/monthly/route"
+import { vatCreateHref, vatFilingHref } from "@/lib/vat/vatRoutes"
 
 type FiledReturn = {
   id: string
@@ -108,7 +109,7 @@ export default function VatReturnsPage() {
               subtitle="Monthly VAT from the immutable ledger (accounts 2100–2130)"
             />
             <button
-              onClick={() => router.push("/vat-returns/create")}
+              onClick={() => router.push(vatCreateHref({ businessId }))}
               className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-black transition-colors shadow-sm shrink-0"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -202,14 +203,22 @@ export default function VatReturnsPage() {
                                 </button>
                                 {filed ? (
                                   <button
-                                    onClick={() => router.push(`/vat-returns/${filed.id}`)}
+                                    onClick={() => router.push(vatFilingHref(filed.id, businessId))}
                                     className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
                                   >
                                     View filing
                                   </button>
                                 ) : (
                                   <button
-                                    onClick={() => router.push(`/vat-returns/create?start=${monthReturn.month}-01&end=${monthReturn.month}-${new Date(parseInt(monthReturn.month.split("-")[0]), parseInt(monthReturn.month.split("-")[1]), 0).getDate()}`)}
+                                    onClick={() =>
+                                      router.push(
+                                        vatCreateHref({
+                                          start: `${monthReturn.month}-01`,
+                                          end: `${monthReturn.month}-${new Date(parseInt(monthReturn.month.split("-")[0]), parseInt(monthReturn.month.split("-")[1]), 0).getDate()}`,
+                                          businessId,
+                                        })
+                                      )
+                                    }
                                     className="text-green-600 hover:text-green-800 font-medium transition-colors"
                                   >
                                     Start filing
@@ -261,7 +270,13 @@ export default function VatReturnsPage() {
                       onClick={() => {
                         const [year, month] = selectedMonth.month.split("-")
                         const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
-                        router.push(`/vat-returns/create?start=${selectedMonth.month}-01&end=${selectedMonth.month}-${lastDay}`)
+                        router.push(
+                          vatCreateHref({
+                            start: `${selectedMonth.month}-01`,
+                            end: `${selectedMonth.month}-${lastDay}`,
+                            businessId,
+                          })
+                        )
                         setShowDetailsModal(false)
                       }}
                       className="px-3 py-1.5 bg-slate-900 text-white text-xs font-medium rounded-lg hover:bg-black transition-colors"

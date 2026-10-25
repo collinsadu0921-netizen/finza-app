@@ -48,6 +48,41 @@ describe("formatServiceActivityDescription", () => {
     ).toBe("Expense recorded — Office supplies")
   })
 
+  it("labels VAT payments and accruals distinctly", () => {
+    expect(
+      formatServiceActivityDescription({
+        type: "vat_payment",
+        description: "VAT payment - 2026-10-01 to 2026-10-31",
+      })
+    ).toBe("VAT payment - 2026-10-01 to 2026-10-31")
+    expect(
+      formatServiceActivityDescription({
+        type: "vat_accrual",
+        description: "VAT accrual - October 2026",
+      })
+    ).toBe("VAT accrual - October 2026")
+    for (const type of ["vat_payment", "vat_accrual"] as const) {
+      const label = formatServiceActivityDescription({
+        type,
+        description: "October 2026",
+      })
+      expect(label).not.toMatch(/Expense recorded/i)
+      expect(label).toMatch(/^VAT /)
+    }
+  })
+
+  it("maps VAT journal reference types to VAT activity types", () => {
+    expect(mapJournalSourceToActivityType(null, "vat_return_payment")).toBe(
+      "vat_payment"
+    )
+    expect(mapJournalSourceToActivityType(null, "vat_accrual")).toBe(
+      "vat_accrual"
+    )
+    expect(mapJournalSourceToActivityType(null, "test_vat_accrual")).toBe(
+      "vat_accrual"
+    )
+  })
+
   it("labels bill payments distinctly", () => {
     expect(
       formatServiceActivityDescription({
