@@ -66,6 +66,33 @@ BEGIN
     RAISE EXCEPTION 'TEST_FAILED: new tenant chart 2150 active count = %', v_count;
   END IF;
 
+  -- Regression guard: preserve the 566/469 account provisioning while adding 2150.
+  SELECT COUNT(*) INTO v_count
+  FROM public.accounts a
+  WHERE a.business_id = v_biz
+    AND a.code IN ('5610', '2231', '2232', '2241');
+  IF v_count <> 4 THEN
+    RAISE EXCEPTION 'TEST_FAILED: 566/469 system accounts regressed (found % of 4)', v_count;
+  END IF;
+
+  SELECT COUNT(*) INTO v_count
+  FROM public.accounts a
+  WHERE a.business_id = v_biz
+    AND a.code = '2300'
+    AND a.sub_type = 'loan';
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'TEST_FAILED: 2300 loan sub_type regressed';
+  END IF;
+
+  SELECT COUNT(*) INTO v_count
+  FROM public.accounts a
+  WHERE a.business_id = v_biz
+    AND a.code = '2150'
+    AND a.sub_type = 'tax_payable';
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'TEST_FAILED: 2150 tax_payable sub_type missing';
+  END IF;
+
   -- Repair helper is idempotent and does not duplicate.
   v_account_id_retry := public.ensure_wht_payable_account_id(v_biz);
   IF v_account_id_retry <> v_account_id THEN
