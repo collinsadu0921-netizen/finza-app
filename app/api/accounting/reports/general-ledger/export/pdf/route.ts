@@ -212,6 +212,7 @@ export async function GET(request: NextRequest) {
     })
 
     const addFooter = () => {
+      doc.fillColor("#000000")
       const pageHeight = doc.page.height
       const previousBottomMargin = doc.page.margins.bottom
       doc.page.margins.bottom = 0
@@ -307,15 +308,19 @@ export async function GET(request: NextRequest) {
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text("Totals", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] - 10, align: "left" })
     x += columnWidths[0] + columnWidths[1]
     doc.rect(x, y, columnWidths[2], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalDebit), x + 5, y + 7, { width: columnWidths[2] - 10, align: "right" })
     x += columnWidths[2]
     doc.rect(x, y, columnWidths[3], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalCredit), x + 5, y + 7, { width: columnWidths[3] - 10, align: "right" })
     x += columnWidths[3]
     doc.rect(x, y, columnWidths[4], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(finalBalance), x + 5, y + 7, { width: columnWidths[4] - 10, align: "right" })
 
     addFooter()

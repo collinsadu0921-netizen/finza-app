@@ -151,6 +151,7 @@ export async function GET(request: NextRequest) {
     })
 
     const addFooter = () => {
+      doc.fillColor("#000000")
       const pageHeight = doc.page.height
       const previousBottomMargin = doc.page.margins.bottom
       doc.page.margins.bottom = 0
@@ -176,13 +177,13 @@ export async function GET(request: NextRequest) {
     doc.fontSize(12).font("Helvetica").text(`${businessName} — ${periodLabel}`, { align: "center" })
     doc.moveDown(1)
 
-    // Table headers
-    const columnWidths = [80, 180, 80, 100, 100, 100] // Account Code, Name, Type, Debit, Credit, Balance
+    // Table headers. Widths must fit 612pt page - 50pt margins = 512pt.
+    const columnWidths = [62, 160, 55, 75, 75, 85] // Account Code, Name, Type, Debit, Credit, Balance
     const rowHeight = 25
     let x = 50
     let y = doc.y
 
-    doc.fontSize(10).font("Helvetica-Bold")
+    doc.fontSize(8.5).font("Helvetica-Bold")
     const headers = ["Account Code", "Account Name", "Type", "Debit Total", "Credit Total", "Ending Balance"]
     headers.forEach((header: string, i: number) => {
       doc.rect(x, y, columnWidths[i], rowHeight).stroke()
@@ -192,11 +193,16 @@ export async function GET(request: NextRequest) {
     y += rowHeight
 
     // Table rows
-    doc.fontSize(9).font("Helvetica")
+    doc.fontSize(8).font("Helvetica")
     if (trialBalance && trialBalance.length > 0) {
       for (const account of trialBalance) {
+        const nameHeight = doc.heightOfString(account.account_name || " ", {
+          width: columnWidths[1] - 10,
+        })
+        const currentRowHeight = Math.max(20, nameHeight + 8)
+
         x = 50
-        if (y + rowHeight > doc.page.height - 50) {
+        if (y + currentRowHeight > doc.page.height - 50) {
           addFooter()
           doc.addPage()
           y = 50
@@ -212,11 +218,15 @@ export async function GET(request: NextRequest) {
         ]
 
         cells.forEach((cell: string | number, i: number) => {
-          doc.rect(x, y, columnWidths[i], rowHeight).stroke()
-          doc.text(String(cell), x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 3 ? "right" : "left" })
+          doc.rect(x, y, columnWidths[i], currentRowHeight).stroke()
+          doc.text(String(cell), x + 5, y + 4, {
+            width: columnWidths[i] - 10,
+            height: currentRowHeight - 6,
+            align: i >= 3 ? "right" : "left",
+          })
           x += columnWidths[i]
         })
-        y += rowHeight
+        y += currentRowHeight
       }
     }
 
@@ -234,15 +244,19 @@ export async function GET(request: NextRequest) {
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1] + columnWidths[2], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text("Totals", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] + columnWidths[2] - 10, align: "left" })
     x += columnWidths[0] + columnWidths[1] + columnWidths[2]
     doc.rect(x, y, columnWidths[3], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalDebits), x + 5, y + 7, { width: columnWidths[3] - 10, align: "right" })
     x += columnWidths[3]
     doc.rect(x, y, columnWidths[4], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalCredits), x + 5, y + 7, { width: columnWidths[4] - 10, align: "right" })
     x += columnWidths[4]
     doc.rect(x, y, columnWidths[5], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalDebits - totalCredits), x + 5, y + 7, { width: columnWidths[5] - 10, align: "right" })
     y += rowHeight + 10
 

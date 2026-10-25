@@ -24,10 +24,20 @@ describe("report PDF export source guards", () => {
     expect(source).toContain("lineBreak: false")
   })
 
-  it("Balance Sheet resets the text fill after subtotal fills", () => {
-    const source = read("app/api/accounting/reports/balance-sheet/export/pdf/route.ts")
+  it("report PDFs reset text fill after shaded rows", () => {
+    for (const file of [
+      "app/api/accounting/reports/balance-sheet/export/pdf/route.ts",
+      "app/api/accounting/reports/general-ledger/export/pdf/route.ts",
+      "app/api/accounting/reports/trial-balance/export/pdf/route.ts",
+    ]) {
+      expect(read(file)).toContain('doc.fillColor("#000000")')
+    }
+  })
 
-    expect(source).toContain('doc.fillColor("#000000")')
+  it("Trial Balance columns fit the portrait page", () => {
+    const source = read("app/api/accounting/reports/trial-balance/export/pdf/route.ts")
+
+    expect(source).toContain("const columnWidths = [62, 160, 55, 75, 75, 85]")
   })
 
   it("Ledger pagination has a deterministic unique tie-breaker", () => {
