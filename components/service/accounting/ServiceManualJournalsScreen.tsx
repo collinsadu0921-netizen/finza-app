@@ -8,6 +8,11 @@ import {
   type ServiceManualJournalAccount,
   type ServiceManualJournalLine,
 } from "@/lib/service/accounting/manualJournal"
+import {
+  formatManualJournalPeriod,
+  periodForManualJournalDate,
+  sortManualJournalPeriods,
+} from "@/lib/service/accounting/manualJournalPeriods"
 
 type DraftStatus = "draft" | "posted" | "reversed"
 
@@ -98,6 +103,7 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
   const [currency, setCurrency] = useState("GHS")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [showPeriods, setShowPeriods] = useState(false)
   const [entryDate, setEntryDate] = useState(todayIso())
   const [description, setDescription] = useState("")
   const [reference, setReference] = useState("")
@@ -122,6 +128,11 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
   const selectedDraft = useMemo(
     () => drafts.find((draft) => draft.id === selectedId) || null,
     [drafts, selectedId]
+  )
+  const sortedPeriods = useMemo(() => sortManualJournalPeriods(periods), [periods])
+  const selectedEntryPeriod = useMemo(
+    () => periodForManualJournalDate(sortedPeriods, entryDate),
+    [sortedPeriods, entryDate]
   )
 
   const load = useCallback(async () => {
@@ -342,11 +353,61 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
             </label>
           </div>
 
-          {periods.length > 0 && (
-            <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-              Open periods: {periods.map((period) => `${period.period_start} to ${period.period_end}`).join(", ")}
-            </p>
-          )}
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/40">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                Entry date period
+              </span>
+              {selectedEntryPeriod ? (
+                <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  Open · {formatManualJournalPeriod(selectedEntryPeriod)}
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full border border-red-300 bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+                  No open period covers {entryDate || "this date"}
+                </span>
+              )}
+              {sortedPeriods.length > 0 && (
+                <button
+                  type="button"
+                  aria-expanded={showPeriods}
+                  aria-controls="manual-journal-open-periods"
+                  onClick={() => setShowPeriods((value) => !value)}
+                  className="ml-auto text-xs font-medium text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-blue-400"
+                >
+                  {showPeriods
+                    ? "Hide open periods"
+                    : `Show all open periods (${sortedPeriods.length})`}
+                </button>
+              )}
+            </div>
+
+            {showPeriods && (
+              <ul
+                id="manual-journal-open-periods"
+                className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+              >
+                {sortedPeriods.map((period) => {
+                  const isSelected = selectedEntryPeriod?.id === period.id
+                  return (
+                    <li
+                      key={period.id}
+                      className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                        isSelected
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-100"
+                          : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                      }`}
+                    >
+                      <div className="font-medium">{formatManualJournalPeriod(period)}</div>
+                      <div className="mt-0.5 text-[11px] capitalize text-gray-500 dark:text-gray-400">
+                        {period.status}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -457,21 +518,65 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
                   </tr>
                 </thead>
                 <tbody>
-                  {drafts.map((draft) => (
-                    <tr
-                      key={draft.id}
-                      onClick={() => { setSelectedId(draft.id); setShowReversal(false) }}
-                      className={`cursor-pointer border-t border-gray-100 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/40 ${selectedId === draft.id ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}
-                    >
-                      <td className="px-3 py-2 whitespace-nowrap">{draft.entry_date}</td>
-                      <td className="px-3 py-2">
-                        <div className="font-medium">{draft.description}</div>
-                        {draft.reference && <div className="text-xs text-gray-500">{draft.reference}</div>}
-                      </td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">{formatMoney(draft.total_debit, currency)}</td>
-                      <td className="px-3 py-2"><StatusBadge status={draft.status} /></td>
-                    </tr>
-                  ))}
+                  {drafts.map((draft) => {
+                    const isSelected = selectedId === draft.id
+                    return (
+                      <tr
+                        key={draft.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
+                        aria-label={`Select manual journal ${draft.description}`}
+                        onClick={() => { setSelectedId(draft.id); setShowReversal(false) }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault()
+                            setSelectedId(draft.id)
+                            setShowReversal(false)
+                          }
+                        }}
+                        className={`group cursor-pointer border-t border-gray-100 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-500 dark:border-gray-800 ${
+                          isSelected
+                            ? "bg-blue-50/70 dark:bg-blue-950/30"
+                            : "bg-white hover:bg-gray-50 dark:bg-gray-900/40 dark:hover:bg-gray-800/40"
+                        }`}
+                      >
+                        <td
+                          className={`whitespace-nowrap border-l-4 px-3 py-2 ${
+                            isSelected ? "border-blue-500 font-medium" : "border-transparent"
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <svg
+                              className={`h-4 w-4 shrink-0 ${
+                                isSelected
+                                  ? "text-blue-600 dark:text-blue-300"
+                                  : "text-gray-400 dark:text-gray-500"
+                              }`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              aria-hidden
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 5l7 7-7 7"
+                              />
+                            </svg>
+                            {draft.entry_date}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="font-medium">{draft.description}</div>
+                          {draft.reference && <div className="text-xs text-gray-500">{draft.reference}</div>}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right">{formatMoney(draft.total_debit, currency)}</td>
+                        <td className="px-3 py-2"><StatusBadge status={draft.status} /></td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

@@ -13,6 +13,7 @@ import { formatCurrencySafe } from "@/lib/currency/formatCurrency"
 import { buildServiceRoute } from "@/lib/service/routes"
 import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { PAYROLL_LIABILITY_PRESET_OPTIONS } from "@/lib/accounting/resolveGeneralLedgerAccountSelection"
+import { ExportButton } from "@/components/ui/ExportButton"
 import type { ScreenProps } from "./types"
 
 type AccountingPeriod = {
@@ -550,7 +551,7 @@ export default function GeneralLedgerScreen({ mode, businessId: businessIdProp }
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-8">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <button
               onClick={() => router.push(backUrl)}
@@ -567,21 +568,13 @@ export default function GeneralLedgerScreen({ mode, businessId: businessIdProp }
             </p>
           </div>
           {showExportButtons && (
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
-              >
+            <div className="flex flex-wrap items-center gap-2">
+              <ExportButton variant="csv" onClick={handleExportCSV}>
                 Export CSV
-              </button>
-              <button
-                type="button"
-                onClick={handleExportPDF}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 font-medium flex items-center gap-2"
-              >
+              </ExportButton>
+              <ExportButton variant="pdf" onClick={handleExportPDF}>
                 Export PDF
-              </button>
+              </ExportButton>
             </div>
           )}
         </div>

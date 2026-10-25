@@ -14,6 +14,7 @@ import { buildServiceRoute } from "@/lib/service/routes"
 import EmptyState from "@/components/ui/EmptyState"
 import type { ScreenProps } from "./types"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
+import { ExportButton } from "@/components/ui/ExportButton"
 import {
   PERIODS_TTL_MS,
   READINESS_TTL_MS,
@@ -279,7 +280,7 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
             businessId={businessId}
             onInitSuccess={() => window.location.reload()}
           />
-          <div className="flex justify-between items-center mb-8 export-hide print-hide">
+          <div className="mb-8 flex flex-col gap-4 export-hide print-hide sm:flex-row sm:items-center sm:justify-between">
             <div>
               <button
                 onClick={() => router.push(backUrl)}
@@ -295,25 +296,13 @@ export default function TrialBalanceScreen({ mode, businessId }: ScreenProps) {
               </p>
             </div>
             {accounts.length > 0 && (
-              <div className="flex gap-3">
-                <button
-                  onClick={handleExportCSV}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
+              <div className="flex flex-wrap items-center gap-2">
+                <ExportButton variant="csv" onClick={handleExportCSV}>
                   Export CSV
-                </button>
-                <button
-                  onClick={handleExportPDF}
-                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 font-medium flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
+                </ExportButton>
+                <ExportButton variant="pdf" onClick={handleExportPDF}>
                   Export PDF
-                </button>
+                </ExportButton>
               </div>
             )}
           </div>

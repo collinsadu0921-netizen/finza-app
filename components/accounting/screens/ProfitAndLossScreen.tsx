@@ -13,6 +13,7 @@ import {
 } from "@/lib/accounting/clientBooksRequestShare"
 import { fetchAccountingReportJson } from "@/lib/accounting/fetchAccountingReportJson"
 import { mapProfitAndLossTotals } from "@/lib/accounting/reportClientTotals"
+import { ExportButton } from "@/components/ui/ExportButton"
 
 type AccountingPeriod = {
   id: string
@@ -252,25 +253,13 @@ export default function ProfitAndLossScreen({ mode, businessId }: ScreenProps) {
               )}
             </div>
             {hasData && (
-              <div className="flex gap-2 shrink-0">
-                <button
-                  onClick={() => handleExport("csv")}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
+              <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                <ExportButton variant="csv" onClick={() => handleExport("csv")}>
                   CSV
-                </button>
-                <button
-                  onClick={() => handleExport("pdf")}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-sm font-medium text-red-600 dark:text-red-400 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
+                </ExportButton>
+                <ExportButton variant="pdf" onClick={() => handleExport("pdf")}>
                   PDF
-                </button>
+                </ExportButton>
               </div>
             )}
           </div>

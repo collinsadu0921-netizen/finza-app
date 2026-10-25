@@ -26,6 +26,7 @@ import { MenuSelect } from "@/components/ui/MenuSelect"
 import { formatMoney } from "@/lib/money"
 import { getCurrencySymbol } from "@/lib/currency"
 import { buildLedgerCsv } from "@/lib/accounting/ledgerCsvExport"
+import { ExportButton } from "@/components/ui/ExportButton"
 import type { ScreenProps } from "./types"
 
 type JournalEntry = {
@@ -672,7 +673,7 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
         />
 
         {/* ── Header ── */}
-        <div className="flex justify-between items-start mb-6">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <button
               onClick={() => router.push(backUrl)}
@@ -701,22 +702,19 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
               Append-only · every entry is permanent and traceable
             </p>
           </div>
-          <div className="flex items-center gap-3 mt-1 shrink-0">
+          <div className="mt-1 flex flex-wrap items-center gap-3 sm:shrink-0">
             {pagination.total > 0 && (
               <span className="text-sm text-gray-500 dark:text-gray-400">
                 <span className="font-semibold text-gray-900 dark:text-white">{pagination.total}</span> journal lines
               </span>
             )}
-            <button
+            <ExportButton
+              variant="csv"
               onClick={openExportModal}
               disabled={exporting}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
               Export CSV
-            </button>
+            </ExportButton>
           </div>
         </div>
 
@@ -947,16 +945,14 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
                 )}
               </div>
               <div className="flex gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
-                <button
+                <ExportButton
+                  variant="csv"
                   onClick={exportCsv}
                   disabled={exporting || !!(exportDates.start && exportDates.end && exportDates.end < exportDates.start)}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 justify-center"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
                   {exporting ? "Exporting…" : "Download CSV"}
-                </button>
+                </ExportButton>
                 <button
                   onClick={() => setExportModalOpen(false)}
                   className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"

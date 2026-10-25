@@ -6,6 +6,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import { supabase } from "@/lib/supabaseClient"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { ExportLink } from "@/components/ui/ExportButton"
 
 type AccountBalance = {
   id: string
@@ -255,22 +256,22 @@ export default function BalanceSheetPage() {
                 )}
                 {business?.id && business?.industry !== "retail" && (
                   <>
-                    <a
+                    <ExportLink
+                      variant="csv"
                       href={`/api/accounting/reports/balance-sheet/export/csv?business_id=${encodeURIComponent(business.id)}&as_of_date=${encodeURIComponent(data.asOfDate)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
                       Export CSV
-                    </a>
-                    <a
+                    </ExportLink>
+                    <ExportLink
+                      variant="pdf"
                       href={`/api/accounting/reports/balance-sheet/export/pdf?business_id=${encodeURIComponent(business.id)}&as_of_date=${encodeURIComponent(data.asOfDate)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
                       Export PDF
-                    </a>
+                    </ExportLink>
                   </>
                 )}
               </div>

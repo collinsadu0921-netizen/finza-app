@@ -13,6 +13,7 @@ import {
   proposalConversionBlockReason,
   proposalStaffOutboundChannelsAllowed,
 } from "@/lib/proposals/proposalState"
+import { ExportButton, ExportLink } from "@/components/ui/ExportButton"
 
 export default function ProposalPreviewPage() {
   const params = useParams()
@@ -221,22 +222,18 @@ export default function ProposalPreviewPage() {
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Client document</p>
           <p className="mt-1 text-sm text-slate-600">Print or download for records. The public link is what you send to the client.</p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
-            >
+            <ExportButton variant="print" onClick={() => window.print()}>
               Print
-            </button>
+            </ExportButton>
             {pdfHref ? (
-              <a
+              <ExportLink
+                variant="pdf"
                 href={pdfHref}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
               >
                 Download PDF
-              </a>
+              </ExportLink>
             ) : (
               <span className="inline-flex items-center rounded-lg border border-dashed border-slate-200 px-4 py-2 text-sm text-slate-400">
                 Download PDF (loading…)

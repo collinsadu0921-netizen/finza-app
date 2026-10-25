@@ -12,6 +12,7 @@ import { getCurrentBusiness, getSelectedBusinessId } from "@/lib/business"
 import { downloadEstimatePdfDocument } from "@/lib/documents/downloadWorkspaceQuoteProformaPdf"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { ExportButton } from "@/components/ui/ExportButton"
 
 type Estimate = {
   id: string
@@ -414,17 +415,13 @@ export default function EstimateViewPage() {
                 <p className="text-sm text-slate-500">{estimate.customers?.name || "No Customer"}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
+                <ExportButton
+                  variant="pdf"
                   disabled={pdfDownloading}
                   onClick={() => void handleDownloadPdf()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
-                  </svg>
                   {pdfDownloading ? "Preparing…" : "Download PDF"}
-                </button>
+                </ExportButton>
                 {/* Edit button */}
                 {!readOnly && !estimate.converted_to && (estimate.status === "draft" || estimate.status === "sent") && (
                   <button onClick={() => router.push(`/service/estimates/${estimateId}/edit`)} className="px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors">

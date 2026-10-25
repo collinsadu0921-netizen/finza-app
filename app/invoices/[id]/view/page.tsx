@@ -28,6 +28,7 @@ import { useServiceFinancialWrite } from "@/components/service/useServiceFinanci
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 import { computeInvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
 import CustomerApprovalSection from "@/components/invoices/CustomerApprovalSection"
+import { ExportButton } from "@/components/ui/ExportButton"
 import {
   canShowReturnMaterialsAction,
   canShowUndoReturnAction,
@@ -901,17 +902,14 @@ Thank you.`
                     Preview
                   </button>
                   {invoice.status !== "draft" && (
-                    <button
-                      type="button"
+                    <ExportButton
+                      variant="pdf"
                       onClick={handleDownloadInvoiceDocument}
                       disabled={downloadDocLoading}
-                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      className="h-10 px-3.5"
                     >
-                      <svg className="h-4 w-4 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      {downloadDocLoading ? "…" : "Download PDF"}
-                    </button>
+                      {downloadDocLoading ? "Preparing…" : "Download PDF"}
+                    </ExportButton>
                   )}
                 </div>
 

@@ -12,6 +12,7 @@ import { downloadProformaPdfDocument } from "@/lib/documents/downloadWorkspaceQu
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
+import { ExportButton } from "@/components/ui/ExportButton"
 
 type ProformaInvoice = {
   id: string
@@ -470,17 +471,13 @@ export default function ProformaViewPage() {
             </div>
             {/* Action Buttons */}
             <div className="flex gap-2 flex-wrap items-center">
-              <button
-                type="button"
+              <ExportButton
+                variant="pdf"
                 disabled={pdfDownloading}
                 onClick={() => void handleDownloadPdf()}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v-8m0 8l-3-3m3 3l3-3M5 20h14" />
-                </svg>
                 {pdfDownloading ? "Preparing…" : "Download PDF"}
-              </button>
+              </ExportButton>
               {/* DRAFT */}
               {!readOnly && proforma.status === "draft" && (
                 <>

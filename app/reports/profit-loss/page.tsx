@@ -7,6 +7,7 @@ import LoadingScreen from "@/components/ui/LoadingScreen"
 import { supabase } from "@/lib/supabaseClient"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
+import { ExportLink } from "@/components/ui/ExportButton"
 
 /** Canonical P&L — same schema as /api/accounting/reports/profit-and-loss (period, sections, totals, telemetry). */
 type PnLLine = { account_code: string; account_name: string; amount: number }
@@ -200,22 +201,22 @@ export default function ProfitLossPage() {
                 )}
                 {(data?.period?.period_start || resolvedPeriodStart) && business?.id && business?.industry !== "retail" && (
                   <>
-                    <a
+                    <ExportLink
+                      variant="csv"
                       href={`/api/accounting/reports/profit-and-loss/export/csv?business_id=${encodeURIComponent(business.id)}&period_start=${encodeURIComponent(data?.period?.period_start || resolvedPeriodStart || "")}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
                       Export CSV
-                    </a>
-                    <a
+                    </ExportLink>
+                    <ExportLink
+                      variant="pdf"
                       href={`/api/accounting/reports/profit-and-loss/export/pdf?business_id=${encodeURIComponent(business.id)}&period_start=${encodeURIComponent(data?.period?.period_start || resolvedPeriodStart || "")}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
                       Export PDF
-                    </a>
+                    </ExportLink>
                   </>
                 )}
               </div>

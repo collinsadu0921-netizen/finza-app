@@ -16,6 +16,7 @@ import {
   proposalStaffOutboundChannelsAllowed,
 } from "@/lib/proposals/proposalState"
 import { formatMoney } from "@/lib/money"
+import { ExportLink } from "@/components/ui/ExportButton"
 
 type CustomerOpt = { id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null }
 
@@ -873,14 +874,14 @@ export function ProposalEditorForm({
             >
               Preview
             </button>
-            <a
+            <ExportLink
+              variant="pdf"
               href={`/api/proposals/${proposalId}/export-pdf?${qs}`}
               target="_blank"
               rel="noreferrer"
-              className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
             >
               Download PDF
-            </a>
+            </ExportLink>
             <div className="relative" ref={sendMenuRef}>
               <button
                 type="button"

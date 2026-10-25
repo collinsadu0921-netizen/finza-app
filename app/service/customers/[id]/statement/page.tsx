@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import { useToast } from "@/components/ui/ToastProvider"
 import { downloadFileFromApi } from "@/lib/download/downloadFileFromApi"
+import { ExportButton } from "@/components/ui/ExportButton"
 
 type Customer = {
   id: string
@@ -141,14 +142,14 @@ export default function ServiceCustomerStatementPage() {
                 Statements are private. Download the PDF and send it manually if needed.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <button
+            <div className="flex flex-wrap items-center gap-2">
+              <ExportButton
+                variant="pdf"
                 onClick={downloadPDF}
                 disabled={downloadingPdf}
-                className="bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium"
               >
-                {downloadingPdf ? "Downloading..." : "Download PDF"}
-              </button>
+                {downloadingPdf ? "Downloading…" : "Download PDF"}
+              </ExportButton>
             </div>
           </div>
         </div>
