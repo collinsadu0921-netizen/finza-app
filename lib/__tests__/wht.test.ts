@@ -24,6 +24,16 @@ describe("Ghana WHT current rates", () => {
     expect(getWHTRate("GH_RENT_NONRES_15")?.name).toContain("Non-residential")
   })
 
+  it("keeps dividends and interest labels/rates accurate", () => {
+    expect(getWHTRate("GH_DIV_8")?.rate).toBe(0.08)
+    expect(getWHTRate("GH_INT_8")?.rate).toBe(0.08)
+    expect(getWHTRate("GH_DIV_8")?.description).toContain("Final withholding")
+    expect(getWHTRate("GH_INT_8")?.description).toContain("Non-final")
+    expect(getWHTRate("GH_NR_DIV_8")?.rate).toBe(0.08)
+    expect(getWHTRate("GH_NR_INT_8")?.rate).toBe(0.08)
+    expect(getWHTRate("GH_NR_RENT_15")?.rate).toBe(0.15)
+  })
+
   it("does not expose legacy ambiguous codes in the selector", () => {
     expect(GH_WHT_RATES.some((r) => r.code === "GH_SVC_5")).toBe(false)
     expect(GH_WHT_RATES.some((r) => r.code === "GH_RENT_8")).toBe(false)
