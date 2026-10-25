@@ -500,7 +500,7 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
-        <section>
+        <section className="min-w-0">
           <h2 className="text-lg font-semibold mb-3">Entries</h2>
           {drafts.length === 0 ? (
             <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -583,7 +583,7 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
           )}
         </section>
 
-        <aside>
+        <aside className="min-w-0">
           <h2 className="text-lg font-semibold mb-3">Details</h2>
           {!selectedDraft ? (
             <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
