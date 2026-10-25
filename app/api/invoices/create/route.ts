@@ -81,6 +81,15 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+    if (wht_receivable_applicable && !wht_receivable_rate_code) {
+      return NextResponse.json(
+        {
+          error: "Select a WHT category before applying withholding tax.",
+          code: "WHT_CATEGORY_REQUIRED",
+        },
+        { status: 400 }
+      )
+    }
 
     const business_id = business.id
 

@@ -170,6 +170,16 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+    if (apply_wht && !wht_rate_code) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Select a WHT category before applying withholding tax.",
+          code: "WHT_CATEGORY_REQUIRED",
+        },
+        { status: 400 }
+      )
+    }
 
     const business = await getCurrentBusiness(supabase, user.id)
     if (!business || business.id !== business_id) {
