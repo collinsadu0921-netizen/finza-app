@@ -61,6 +61,21 @@ function mockCreateClient(opts?: { captureItems?: jest.Mock }) {
         return {
           select: jest.fn(() => ({
             eq: jest.fn(() => ({
+              is: jest.fn(() => ({
+                maybeSingle: jest.fn(() =>
+                  Promise.resolve({
+                    data: {
+                      id: BILL_ID,
+                      status: "draft",
+                      total: 100,
+                      currency_code: null,
+                      fx_rate: null,
+                      business_id: BUSINESS_ID,
+                    },
+                    error: null,
+                  })
+                ),
+              })),
               eq: jest.fn(() => ({
                 single: jest.fn(() =>
                   Promise.resolve({

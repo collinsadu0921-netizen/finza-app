@@ -164,6 +164,9 @@ describe("bill supplier persistence", () => {
             }),
             select: jest.fn(() => ({
               eq: jest.fn(() => ({
+                is: jest.fn(() => ({
+                  maybeSingle: jest.fn(() => Promise.resolve({ data: storedBill, error: null })),
+                })),
                 eq: jest.fn(() => ({
                   is: jest.fn(() => ({
                     single: jest.fn(() => Promise.resolve({ data: storedBill, error: null })),

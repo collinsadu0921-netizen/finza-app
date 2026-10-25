@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
@@ -72,23 +71,12 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
-    const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "professional",
-    })
-    if (denied) return denied
-
     const { data: bill, error } = await supabase
       .from("bills")
       .select("*, business_id")
       .eq("id", billId)
-      .eq("business_id", business.id)
       .is("deleted_at", null)
-      .single()
+      .maybeSingle()
 
     if (error || !bill) {
       return NextResponse.json(
@@ -96,6 +84,13 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    const billBusinessId = String(bill.business_id)
+
+    const denied = await enforceServiceWorkspaceAccess({
+      supabase, userId: user.id, businessId: billBusinessId, minTier: "professional",
+    })
+    if (denied) return denied
 
     // Get bill items
     const { data: items, error: itemsError } = await supabase
@@ -160,13 +155,24 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const { data: existingBill, error: billLookupError } = await supabase
+      .from("bills")
+      .select("id, status, total, currency_code, fx_rate, business_id")
+      .eq("id", billId)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (billLookupError || !existingBill) {
+      return NextResponse.json(
+        { error: "Bill not found" },
+        { status: 404 }
+      )
     }
 
+    const billBusinessId = String(existingBill.business_id)
+
     const denied = await enforceServiceWorkspaceWriteAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+      supabase, userId: user.id, businessId: billBusinessId, minTier: "professional",
     })
     if (denied) return denied
 
@@ -216,21 +222,6 @@ export async function PUT(
           code: headerDiscountRejection.code,
         },
         { status: 400 }
-      )
-    }
-
-    // Verify bill exists and belongs to this business
-    const { data: existingBill } = await supabase
-      .from("bills")
-      .select("id, status, total, currency_code, fx_rate")
-      .eq("id", billId)
-      .eq("business_id", business.id)
-      .single()
-
-    if (!existingBill) {
-      return NextResponse.json(
-        { error: "Bill not found" },
-        { status: 404 }
       )
     }
 
@@ -364,7 +355,7 @@ export async function PUT(
     if (Object.prototype.hasOwnProperty.call(body, "supplier_id")) {
       const supplierLink = await resolveBillSupplierLink(
         supabase,
-        business.id,
+        billBusinessId,
         supplier_id
       )
       if (!supplierLink.ok) {
@@ -402,7 +393,7 @@ export async function PUT(
       const { data: bizProf } = await supabase
         .from("businesses")
         .select("default_currency")
-        .eq("id", business.id)
+        .eq("id", billBusinessId)
         .maybeSingle()
 
       const homeCurrencyCode = bizProf?.default_currency
@@ -487,7 +478,7 @@ export async function PUT(
       if (hasMaterialLines) {
         const resolved = await resolveMaterialInventoryAccount(
           supabase,
-          business.id
+          billBusinessId
         )
         if (!resolved.ok) {
           return NextResponse.json(
@@ -526,10 +517,9 @@ export async function PUT(
 
     // Log audit entry
     try {
-      const business = await getCurrentBusiness(supabase, user?.id || "")
-      if (business && bill) {
+      if (bill) {
         await createAuditLog({
-          businessId: business.id,
+          businessId: billBusinessId,
           userId: user?.id || null,
           actionType: "bill.updated",
           entityType: "bill",
@@ -585,30 +575,26 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
-    }
-
-    const denied = await enforceServiceWorkspaceWriteAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "professional",
-    })
-    if (denied) return denied
-
-    // Only allow deletion of draft bills
-    const { data: bill } = await supabase
+    const { data: bill, error: billLookupError } = await supabase
       .from("bills")
-      .select("status")
+      .select("status, business_id")
       .eq("id", billId)
-      .eq("business_id", business.id)
-      .single()
+      .is("deleted_at", null)
+      .maybeSingle()
 
-    if (!bill) {
+    if (billLookupError || !bill) {
       return NextResponse.json(
         { error: "Bill not found" },
         { status: 404 }
       )
     }
+
+    const billBusinessId = String(bill.business_id)
+
+    const denied = await enforceServiceWorkspaceWriteAccess({
+      supabase, userId: user.id, businessId: billBusinessId, minTier: "professional",
+    })
+    if (denied) return denied
 
     if (bill.status !== "draft") {
       return NextResponse.json(
@@ -622,6 +608,7 @@ export async function DELETE(
       .from("bills")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", billId)
+      .eq("business_id", billBusinessId)
 
     if (error) {
       console.error("Error deleting bill:", error)
@@ -633,20 +620,17 @@ export async function DELETE(
 
     // Log audit entry
     try {
-      const business = await getCurrentBusiness(supabase, user?.id || "")
-      if (business) {
-        await createAuditLog({
-          businessId: business.id,
-          userId: user?.id || null,
-          actionType: "bill.deleted",
-          entityType: "bill",
-          entityId: billId,
-          oldValues: bill,
-          newValues: null,
-          request,
-          description: `Bill ${billId} deleted`,
-        })
-      }
+      await createAuditLog({
+        businessId: billBusinessId,
+        userId: user?.id || null,
+        actionType: "bill.deleted",
+        entityType: "bill",
+        entityId: billId,
+        oldValues: bill,
+        newValues: null,
+        request,
+        description: `Bill ${billId} deleted`,
+      })
     } catch (auditError) {
       console.error("Error logging audit:", auditError)
     }
