@@ -135,12 +135,18 @@ export async function GET(request: NextRequest) {
     const addFooter = () => {
       resetPdfTextState(doc)
       const pageHeight = doc.page.height
+      const previousBottomMargin = doc.page.margins.bottom
+      doc.page.margins.bottom = 0
       doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, PDF_MARGIN, pageHeight - 30, { align: "left" })
+      doc.text(`Generated on ${new Date().toISOString()}`, PDF_MARGIN, pageHeight - 30, {
+        lineBreak: false,
+      })
       doc.text("FINZA — Read-only report", PDF_MARGIN, pageHeight - 30, {
         width: doc.page.width - PDF_MARGIN * 2,
         align: "right",
+        lineBreak: false,
       })
+      doc.page.margins.bottom = previousBottomMargin
     }
 
     resetPdfTextState(doc)

@@ -24,6 +24,8 @@ import { buildServiceRoute } from "@/lib/service/routes"
 import { Money } from "@/components/ui/Money"
 import { MenuSelect } from "@/components/ui/MenuSelect"
 import { formatMoney } from "@/lib/money"
+import { getCurrencySymbol } from "@/lib/currency"
+import { buildLedgerCsv } from "@/lib/accounting/ledgerCsvExport"
 import type { ScreenProps } from "./types"
 
 type JournalEntry = {
@@ -570,40 +572,32 @@ export default function LedgerScreen({ mode, businessId }: ScreenProps) {
       if (filters.account_code)       params.append("account_code",   filters.account_code)
       if (filters.reference_type)     params.append("reference_type", filters.reference_type)
       if (filters.reference_id)       params.append("reference_id",   filters.reference_id)
-      params.append("page",      "1")
-      params.append("page_size", "10000")
+      // /api/ledger/list caps page_size at 100. Walk every page so the export
+      // contains all entries matching the active filters.
+      const pageSize = 100
+      let page = 1
+      let totalPages = 1
+      const allEntries: JournalEntry[] = []
 
-      const response = await fetch(`/api/ledger/list?${params.toString()}`)
-      if (!response.ok) throw new Error("Export fetch failed")
-      const { entries: allEntries } = await response.json()
+      do {
+        params.set("page", String(page))
+        params.set("page_size", String(pageSize))
+        const response = await fetch(`/api/ledger/list?${params.toString()}`)
+        if (!response.ok) throw new Error("Export fetch failed")
+        const body = await response.json()
+        allEntries.push(...((body.entries as JournalEntry[]) ?? []))
+        totalPages = Number(body.pagination?.totalPages) || 1
+        page += 1
+      } while (page <= totalPages)
 
-      const rows: string[][] = [
-        ["Date", "Period", "Type", "Journal Description", "Account Code", "Account Name", "Line Description", "Debit", "Credit"],
-      ]
-
-      for (const entry of (allEntries as JournalEntry[])) {
-        const period = entry.date.substring(0, 7)
-        const meta = entry.reference_type
-          ? (TYPE_META[entry.reference_type]?.label ?? entry.reference_type)
-          : "Manual Entry"
-        for (const line of entry.journal_entry_lines) {
-          rows.push([
-            formatDate(entry.date),
-            period,
-            meta,
-            entry.description ?? "",
-            line.accounts.code,
-            line.accounts.name,
-            line.description ?? "",
-            Number(line.debit  || 0) > 0 ? formatMoney(Number(line.debit), currencyCode)  : "",
-            Number(line.credit || 0) > 0 ? formatMoney(Number(line.credit), currencyCode) : "",
-          ])
-        }
-      }
-
-      const csv = rows
-        .map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-        .join("\n")
+      const currencySymbol = getCurrencySymbol(currencyCode ?? "GHS") || currencyCode || ""
+      const csv = buildLedgerCsv(allEntries, {
+        currencySymbol,
+        typeLabel: (referenceType) =>
+          referenceType
+            ? (TYPE_META[referenceType]?.label ?? referenceType)
+            : "Manual Entry",
+      })
 
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
       const url  = URL.createObjectURL(blob)

@@ -213,12 +213,18 @@ export async function GET(request: NextRequest) {
 
     const addFooter = () => {
       const pageHeight = doc.page.height
+      const previousBottomMargin = doc.page.margins.bottom
+      doc.page.margins.bottom = 0
       doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
+      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, {
+        lineBreak: false,
+      })
       doc.text("FINZA — Read-only report", 50, pageHeight - 30, {
         width: doc.page.width - 100,
         align: "right",
+        lineBreak: false,
       })
+      doc.page.margins.bottom = previousBottomMargin
     }
 
     // Register footers manually before page breaks; pageAdded + fillAndStroke can overflow pdfkit stack.
@@ -232,13 +238,13 @@ export async function GET(request: NextRequest) {
     doc.fontSize(12).font("Helvetica").text(`${account.code} - ${account.name} — ${periodLabel}`, { align: "center" })
     doc.moveDown(1)
 
-    // Table headers
-    const columnWidths = [90, 200, 100, 100, 110] // Date, Description, Debit, Credit, Running Balance
-    const rowHeight = 25
+    // Table headers. Total width must fit 612pt page - 50pt margins = 512pt.
+    const columnWidths = [70, 210, 75, 75, 82] // Date, Description, Debit, Credit, Running Balance
+    const rowHeight = 26
     let x = 50
     let y = doc.y
 
-    doc.fontSize(10).font("Helvetica-Bold")
+    doc.fontSize(8.5).font("Helvetica-Bold")
     const headers = ["Entry Date", "Description", "Debit", "Credit", "Running Balance"]
     headers.forEach((header: string, i: number) => {
       doc.rect(x, y, columnWidths[i], rowHeight).stroke()
@@ -248,31 +254,40 @@ export async function GET(request: NextRequest) {
     y += rowHeight
 
     // Table rows
-    doc.fontSize(9).font("Helvetica")
+    doc.fontSize(8).font("Helvetica")
     if (ledgerLines && ledgerLines.length > 0) {
       for (const line of ledgerLines) {
+        const description = line.journal_entry_description || line.line_description || ""
+        const descriptionHeight = doc.heightOfString(description || " ", {
+          width: columnWidths[1] - 10,
+        })
+        const currentRowHeight = Math.max(20, descriptionHeight + 8)
+
         x = 50
-        if (y + rowHeight > doc.page.height - 50) {
+        if (y + currentRowHeight > doc.page.height - 50) {
           addFooter()
           doc.addPage()
           y = 50
         }
 
-        const description = line.journal_entry_description || line.line_description || ""
         const cells = [
           line.entry_date ? new Date(line.entry_date).toLocaleDateString() : "",
-          description.substring(0, 40), // Truncate long descriptions
+          description,
           formatNumeric(line.debit || 0),
           formatNumeric(line.credit || 0),
           formatNumeric(line.running_balance || 0),
         ]
 
         cells.forEach((cell: string | number, i: number) => {
-          doc.rect(x, y, columnWidths[i], rowHeight).stroke()
-          doc.text(String(cell), x + 5, y + 7, { width: columnWidths[i] - 10, align: i >= 2 ? "right" : "left" })
+          doc.rect(x, y, columnWidths[i], currentRowHeight).stroke()
+          doc.text(String(cell), x + 5, y + 4, {
+            width: columnWidths[i] - 10,
+            height: currentRowHeight - 6,
+            align: i >= 2 ? "right" : "left",
+          })
           x += columnWidths[i]
         })
-        y += rowHeight
+        y += currentRowHeight
       }
     }
 

@@ -16,6 +16,7 @@ import { calculateTaxesFromAmount } from "@/lib/taxEngine"
 import type { TaxLine } from "@/lib/taxEngine/types"
 import { resolveDocumentCurrencySymbol } from "@/lib/currency/resolveCurrencyDisplay"
 import { formatMoneyWithSymbol } from "@/lib/money"
+import { DOCUMENT_FONT_FACE_CSS, DOCUMENT_FONT_FAMILY } from "@/lib/pdf/documentFontCss"
 import {
   showTenantBankPaymentCard,
   showTenantMomoPaymentCard,
@@ -493,8 +494,9 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${escapeHtml(labels.title)} - ${escapeHtml(String(meta.document_number))}</title>
     <style>
+      ${DOCUMENT_FONT_FACE_CSS}
       body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        font-family: '${DOCUMENT_FONT_FAMILY}', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
         margin: 0;
         padding: 24px;
         background: #f8fafc;

@@ -60,6 +60,14 @@ describe("FinancialDocument GHS currency rendering", () => {
     expect(html).toContain('<meta charset="utf-8">')
   })
 
+  it("embeds a document font that covers the cedi glyph", () => {
+    const html = buildDocumentHtml("invoice")
+
+    expect(html).toContain("font-family: 'FinzaDocument'")
+    expect(html).toContain("data:font/woff2;base64,")
+    expect(html).toContain("@font-face")
+  })
+
   it("preserves numeric totals when correcting symbol", () => {
     const html = buildDocumentHtml("invoice")
 

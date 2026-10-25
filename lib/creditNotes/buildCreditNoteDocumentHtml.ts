@@ -48,6 +48,7 @@ export async function buildCreditNoteDocumentHtml(
         invoices (
           id,
           invoice_number,
+          currency_code,
           customers (
             id,
             name,
@@ -67,7 +68,8 @@ export async function buildCreditNoteDocumentHtml(
           address,
           logo_url,
           tax_id,
-          registration_number
+          registration_number,
+          default_currency
         ),
         credit_note_items (
           id,
@@ -147,6 +149,20 @@ export async function buildCreditNoteDocumentHtml(
     status: (cn.status as string) || null,
   }
 
+  // Credit notes do not store a currency column. The document currency is the
+  // related invoice's currency, falling back to the business default. Never
+  // assume GHS.
+  const currencyCode =
+    (invoiceRel?.currency_code as string | null | undefined) ||
+    (businessRel?.default_currency as string | null | undefined) ||
+    ((cn as any).currency_code as string | null | undefined) ||
+    null
+
+  const currencySymbol =
+    (currencyCode ? getCurrencySymbol(currencyCode) : null) ||
+    ((cn as any).currency_symbol as string | null | undefined) ||
+    null
+
   const htmlPreview = generateFinancialDocumentHTML({
     documentType: "credit_note",
     business,
@@ -157,10 +173,8 @@ export async function buildCreditNoteDocumentHtml(
     notes: creditNote.notes || null,
     footer_message: null,
     apply_taxes: false,
-    currency_symbol: (cn as any).currency_code
-      ? getCurrencySymbol((cn as any).currency_code) || (cn as any).currency_symbol || null
-      : (cn as any).currency_symbol || null,
-    currency_code: (cn as any).currency_code || null,
+    currency_symbol: currencySymbol ?? undefined,
+    currency_code: currencyCode ?? undefined,
   })
 
   return {

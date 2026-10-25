@@ -7,6 +7,7 @@ import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccoun
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { createPdfKitDocument } from "@/lib/pdf/createPdfKitDocument"
 
 /**
  * GET /api/accounting/reports/trial-balance/export/pdf
@@ -139,15 +140,31 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Generate PDF
-    const PDFDocument = (await import("pdfkit")).default
-    const doc = new PDFDocument({ margin: 50 })
+    // Generate PDF. Use the standalone build so bundled Helvetica AFM files are
+    // available on Vercel (plain `pdfkit` looks for .next/server/chunks/data).
+    const doc = await createPdfKitDocument({ margin: 50 })
 
     // Collect PDF chunks - set up listener early
     const chunks: Buffer[] = []
     doc.on("data", (chunk: Buffer) => {
       chunks.push(chunk)
     })
+
+    const addFooter = () => {
+      const pageHeight = doc.page.height
+      const previousBottomMargin = doc.page.margins.bottom
+      doc.page.margins.bottom = 0
+      doc.fontSize(8).font("Helvetica")
+      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, {
+        lineBreak: false,
+      })
+      doc.text("FINZA — Read-only report", 50, pageHeight - 30, {
+        width: doc.page.width - 100,
+        align: "right",
+        lineBreak: false,
+      })
+      doc.page.margins.bottom = previousBottomMargin
+    }
 
     // Title
     doc.fontSize(18).font("Helvetica-Bold").text("Trial Balance Report", { align: "center" })
@@ -180,6 +197,7 @@ export async function GET(request: NextRequest) {
       for (const account of trialBalance) {
         x = 50
         if (y + rowHeight > doc.page.height - 50) {
+          addFooter()
           doc.addPage()
           y = 50
         }
@@ -208,6 +226,7 @@ export async function GET(request: NextRequest) {
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01
 
     if (y + rowHeight > doc.page.height - 50) {
+      addFooter()
       doc.addPage()
       y = 50
     }
@@ -231,19 +250,7 @@ export async function GET(request: NextRequest) {
     doc.fontSize(9).font("Helvetica")
     doc.text(`Balanced: ${isBalanced ? "Yes" : "No"}`, 50, y)
 
-    // Footer on each page
-    doc.on("pageAdded", () => {
-      const pageHeight = doc.page.height
-      doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-      doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
-    })
-
-    // Footer on first page
-    const pageHeight = doc.page.height
-    doc.fontSize(8).font("Helvetica")
-    doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
-    doc.text("FINZA — Read-only report", doc.page.width - 50, pageHeight - 30, { align: "right" })
+    addFooter()
 
     // Finalize PDF
     doc.end()

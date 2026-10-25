@@ -126,12 +126,18 @@ export async function GET(request: NextRequest) {
 
     const addFooter = () => {
       const pageHeight = doc.page.height
+      const previousBottomMargin = doc.page.margins.bottom
+      doc.page.margins.bottom = 0
       doc.fontSize(8).font("Helvetica")
-      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, { align: "left" })
+      doc.text(`Generated on ${new Date().toISOString()}`, 50, pageHeight - 30, {
+        lineBreak: false,
+      })
       doc.text("FINZA — Read-only report", 50, pageHeight - 30, {
         width: doc.page.width - 100,
         align: "right",
+        lineBreak: false,
       })
+      doc.page.margins.bottom = previousBottomMargin
     }
 
     // Title
@@ -201,9 +207,11 @@ export async function GET(request: NextRequest) {
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text("Total Assets", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] - 10 })
     x += columnWidths[0] + columnWidths[1]
     doc.rect(x, y, columnWidths[2], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalAssets), x + 5, y + 7, { width: columnWidths[2] - 10, align: "right" })
     y += rowHeight + 10
 
@@ -254,9 +262,11 @@ export async function GET(request: NextRequest) {
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text("Total Liabilities", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] - 10 })
     x += columnWidths[0] + columnWidths[1]
     doc.rect(x, y, columnWidths[2], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalLiabilities), x + 5, y + 7, { width: columnWidths[2] - 10, align: "right" })
     y += rowHeight + 10
 
@@ -307,9 +317,11 @@ export async function GET(request: NextRequest) {
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(`Total ${equitySectionLabel}`, x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] - 10 })
     x += columnWidths[0] + columnWidths[1]
     doc.rect(x, y, columnWidths[2], rowHeight).fillAndStroke("#F0F0F0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(adjustedEquity), x + 5, y + 7, { width: columnWidths[2] - 10, align: "right" })
     y += rowHeight
 
@@ -327,17 +339,21 @@ export async function GET(request: NextRequest) {
     doc.fontSize(10).font("Helvetica-Bold")
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1], rowHeight).fillAndStroke("#E0E0E0", "#000000")
+    doc.fillColor("#000000")
     doc.text("Total Assets", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] - 10 })
     x += columnWidths[0] + columnWidths[1]
     doc.rect(x, y, columnWidths[2], rowHeight).fillAndStroke("#E0E0E0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalAssets), x + 5, y + 7, { width: columnWidths[2] - 10, align: "right" })
     y += rowHeight
 
     x = 50
     doc.rect(x, y, columnWidths[0] + columnWidths[1], rowHeight).fillAndStroke("#E0E0E0", "#000000")
+    doc.fillColor("#000000")
     doc.text("Total Liabilities + Equity", x + 5, y + 7, { width: columnWidths[0] + columnWidths[1] - 10 })
     x += columnWidths[0] + columnWidths[1]
     doc.rect(x, y, columnWidths[2], rowHeight).fillAndStroke("#E0E0E0", "#000000")
+    doc.fillColor("#000000")
     doc.text(formatNumeric(totalLiabilitiesAndEquity), x + 5, y + 7, { width: columnWidths[2] - 10, align: "right" })
     y += rowHeight
 
