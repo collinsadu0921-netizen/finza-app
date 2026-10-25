@@ -16,6 +16,9 @@ jest.mock("@/lib/supabaseServer", () => ({
 jest.mock("@/lib/business", () => ({
   getCurrentBusiness: jest.fn(),
 }))
+jest.mock("@/lib/userRoles", () => ({
+  getUserRole: jest.fn(),
+}))
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -36,6 +39,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const OTHER_BIZ = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
@@ -92,6 +96,7 @@ describe("bill supplier persistence", () => {
       id: BUSINESS_ID,
       industry: "service",
     })
+    ;(getUserRole as jest.Mock).mockResolvedValue("owner")
 
     ;(createSupabaseServerClient as jest.Mock).mockResolvedValue({
       auth: {
