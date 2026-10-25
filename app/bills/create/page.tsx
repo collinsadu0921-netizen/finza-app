@@ -8,7 +8,12 @@ import { calculateGhanaTaxes, calculateGhanaTaxesFromLineItems, calculateBaseFro
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
-import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
+import {
+  GH_WHT_RATES,
+  calculateWHTForRate,
+  formatWHTRate,
+  isResidentContractWhtCode,
+} from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
 import { hasMeaningfulReceiptSuggestions, scanErrorMessage, useReceiptScanner } from "@/lib/ocr/useReceiptScanner"
 import BillSupplierSelector from "@/components/bills/BillSupplierSelector"
@@ -75,7 +80,7 @@ export default function CreateBillPage() {
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [applyWHT, setApplyWHT] = useState(false)
-  const [whtRateCode, setWhtRateCode] = useState("GH_SVC_5")
+  const [whtRateCode, setWhtRateCode] = useState("GH_SVC_75")
   const [status, setStatus] = useState<"draft" | "open">("draft")
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
   const [currencySymbol, setCurrencySymbol] = useState<string>("")
@@ -577,13 +582,27 @@ export default function CreateBillPage() {
   const whtBase = isImportBill
     ? vatBase
     : (activeTaxResult.grandTotal - (activeTaxResult.totalTax ?? 0))
-  const selectedWHTRate = GH_WHT_RATES.find(r => r.code === whtRateCode) ?? GH_WHT_RATES[0]
-  const whtCalc = applyWHT
-    ? (() => {
-        const { whtAmount } = calculateWHT(whtBase, selectedWHTRate.rate)
-        return { whtAmount, netPayable: Math.round((activeTaxResult.grandTotal - whtAmount) * 100) / 100 }
-      })()
-    : { whtAmount: 0, netPayable: activeTaxResult.grandTotal }
+  const whtBaseGhs =
+    fxEnabled && fxRate ? whtBase * (Number(fxRate) || 0) : whtBase
+  const selectedWHTRate =
+    GH_WHT_RATES.find((r) => r.code === whtRateCode) ?? GH_WHT_RATES[0]
+  const whtCalcResult = applyWHT
+    ? calculateWHTForRate({
+        baseAmount: whtBase,
+        rate: selectedWHTRate.rate,
+        code: selectedWHTRate.code,
+        baseAmountGhs: whtBaseGhs,
+      })
+    : { whtAmount: 0, netPayable: activeTaxResult.grandTotal, thresholdMet: true }
+  const whtThresholdBlocked =
+    applyWHT &&
+    isResidentContractWhtCode(selectedWHTRate.code) &&
+    !whtCalcResult.thresholdMet
+  const whtCalc = {
+    whtAmount: whtCalcResult.whtAmount,
+    netPayable:
+      Math.round((activeTaxResult.grandTotal - whtCalcResult.whtAmount) * 100) / 100,
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -633,6 +652,13 @@ export default function CreateBillPage() {
 
     if (fxEnabled && fxCurrencyCode && (!fxRate || parseFloat(fxRate) <= 0)) {
       setError(`Exchange rate is required for ${fxCurrencyCode} bills. Please enter the current rate.`)
+      return
+    }
+
+    if (whtThresholdBlocked) {
+      setError(
+        "Resident contract WHT applies only where the contract value exceeds GHS 2,000. Turn off WHT or increase the contract value."
+      )
       return
     }
 
@@ -1567,6 +1593,12 @@ export default function CreateBillPage() {
                       ))}
                     </select>
                     <p className="mt-1 text-xs text-slate-500">{selectedWHTRate.description}</p>
+                    {whtThresholdBlocked && (
+                      <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                        Resident contract WHT applies only where the contract value
+                        exceeds GHS 2,000. WHT will not be applied to this bill.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1682,7 +1714,7 @@ export default function CreateBillPage() {
                       <>
                         <div className="flex justify-between items-center text-sm pt-2 border-t border-amber-200">
                           <span className="text-amber-700 font-medium">
-                            WHT Deduction ({(selectedWHTRate.rate * 100).toFixed(0)}%):
+                            WHT Deduction ({formatWHTRate(selectedWHTRate.rate)}):
                           </span>
                           <span className="text-amber-700 font-semibold">
                             − {currency}{whtCalc.whtAmount.toFixed(2)}

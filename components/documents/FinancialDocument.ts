@@ -13,6 +13,7 @@
  */
 
 import { calculateTaxesFromAmount } from "@/lib/taxEngine"
+import { formatWHTRate } from "@/lib/wht"
 import type { TaxLine } from "@/lib/taxEngine/types"
 import { resolveDocumentCurrencySymbol } from "@/lib/currency/resolveCurrencyDisplay"
 import { formatMoneyWithSymbol } from "@/lib/money"
@@ -1129,7 +1130,7 @@ export function generateFinancialDocumentHTML(props: FinancialDocumentProps): st
         </div>
         ${totals.wht_applicable && totals.wht_amount ? `
         <div class="total-row" style="color:#92400e;margin-top:4px">
-          <span>Less WHT (${((totals.wht_rate ?? 0) * 100).toFixed(0)}% withheld by customer)</span>
+          <span>Less WHT (${formatWHTRate(totals.wht_rate ?? 0)} withheld by customer)</span>
           <span>(${fmtMoney(totals.wht_amount)})</span>
         </div>
         <div class="total-row final" style="border-top:2px solid #1e40af;margin-top:4px;color:#1e40af">

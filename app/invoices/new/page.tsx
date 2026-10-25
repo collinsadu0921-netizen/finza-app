@@ -12,7 +12,12 @@ import InvoicePreviewModal from "@/components/invoices/InvoicePreviewModal"
 import Toast from "@/components/Toast"
 import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
-import { GH_WHT_RATES, calculateWHT } from "@/lib/wht"
+import {
+  GH_WHT_RATES,
+  calculateWHTForRate,
+  formatWHTRate,
+  isResidentContractWhtCode,
+} from "@/lib/wht"
 
 // FINZA Design System Components (Phase 2 Refactor)
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -313,7 +318,7 @@ function NewInvoicePageContent() {
 
   // WHT suffered — when a corporate customer withholds tax from payment
   const [applyWHTReceivable, setApplyWHTReceivable] = useState(false)
-  const [whtReceivableRateCode, setWhtReceivableRateCode] = useState("GH_SVC_5")
+  const [whtReceivableRateCode, setWhtReceivableRateCode] = useState("GH_SVC_75")
 
   // Symbol used for all amount displays — switches to FX symbol when FX is enabled
   const displaySymbol = fxEnabled && fxCurrencyCode
@@ -789,13 +794,28 @@ function NewInvoicePageContent() {
   // WHT receivable — applied on pre-tax base, NOT the VAT-inclusive total.
   // GRA: you do not withhold tax on tax (NHIL/GETFund/VAT are excluded from the WHT base).
   // baseSubtotal = subtotal_excl_tax when Ghana tax is on; equals subtotal when tax is off.
-  const selectedWHTRecvRate = GH_WHT_RATES.find(r => r.code === whtReceivableRateCode) ?? GH_WHT_RATES[0]
-  const whtRecvCalc = applyWHTReceivable
-    ? (() => {
-        const { whtAmount } = calculateWHT(baseSubtotal, selectedWHTRecvRate?.rate ?? 0)
-        return { whtAmount, netPayable: Math.round((total - whtAmount) * 100) / 100 }
-      })()
-    : { whtAmount: 0, netPayable: total }
+  const selectedWHTRecvRate =
+    GH_WHT_RATES.find((r) => r.code === whtReceivableRateCode) ?? GH_WHT_RATES[0]
+  const whtBaseGhs =
+    fxEnabled && fxRate
+      ? baseSubtotal * (Number(fxRate) || 0)
+      : baseSubtotal
+  const whtRecvCalcResult = applyWHTReceivable
+    ? calculateWHTForRate({
+        baseAmount: baseSubtotal,
+        rate: selectedWHTRecvRate?.rate ?? 0,
+        code: selectedWHTRecvRate?.code,
+        baseAmountGhs: whtBaseGhs,
+      })
+    : { whtAmount: 0, netPayable: total, thresholdMet: true }
+  const whtThresholdBlocked =
+    applyWHTReceivable &&
+    isResidentContractWhtCode(selectedWHTRecvRate?.code) &&
+    !whtRecvCalcResult.thresholdMet
+  const whtRecvCalc = {
+    whtAmount: whtRecvCalcResult.whtAmount,
+    netPayable: Math.round((total - whtRecvCalcResult.whtAmount) * 100) / 100,
+  }
 
   // -- Actions --
   const handleCreateCustomer = async (e?: React.SyntheticEvent) => {
@@ -874,6 +894,13 @@ function NewInvoicePageContent() {
       return
     }
 
+    if (whtThresholdBlocked) {
+      setError(
+        "Resident contract WHT applies only where the contract value exceeds GHS 2,000. Turn off WHT or increase the contract value."
+      )
+      return
+    }
+
     try {
       setLoading(true)
 
@@ -887,6 +914,7 @@ function NewInvoicePageContent() {
         status: "draft", // Always create as draft first
         wht_receivable_applicable: applyWHTReceivable,
         wht_receivable_rate: applyWHTReceivable ? (selectedWHTRecvRate?.rate ?? null) : null,
+        wht_receivable_rate_code: applyWHTReceivable ? selectedWHTRecvRate?.code ?? null : null,
         wht_receivable_amount: applyWHTReceivable ? whtRecvCalc.whtAmount : 0,
         ...(fxEnabled && fxCurrencyCode && fxRate ? {
           currency_code: fxCurrencyCode,
@@ -1463,8 +1491,20 @@ function NewInvoicePageContent() {
                           <option key={r.code} value={r.code}>{r.name}</option>
                         ))}
                       </NativeSelect>
+                      <p className="text-xs text-slate-500">
+                        {selectedWHTRecvRate?.description}
+                      </p>
+                      {whtThresholdBlocked && (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                          Resident contract WHT applies only where the contract value
+                          exceeds GHS 2,000. WHT will not be applied to this invoice.
+                        </p>
+                      )}
                       <div className="flex justify-between text-sm">
-                        <span className="text-amber-700">WHT deducted:</span>
+                        <span className="text-amber-700">
+                          WHT deducted (
+                          {formatWHTRate(selectedWHTRecvRate?.rate ?? 0)}):
+                        </span>
                         <span className="font-semibold text-amber-800 tabular-nums">
                           {formatMoney(whtRecvCalc.whtAmount, amountCurrencyCode)}
                         </span>
@@ -1532,6 +1572,8 @@ function NewInvoicePageContent() {
                   ...(applyWHTReceivable && whtRecvCalc.whtAmount > 0 ? {
                     wht_applicable: true,
                     wht_rate:       selectedWHTRecvRate?.rate ?? 0,
+                    wht_code:       selectedWHTRecvRate?.code ?? null,
+                    wht_base_ghs:   whtBaseGhs,
                   } : {}),
                 };
                 (window as any).__previewData = previewData

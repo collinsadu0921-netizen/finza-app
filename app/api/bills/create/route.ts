@@ -4,6 +4,11 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import {
+  calculateWHTForRate,
+  getWHTRate,
+  isResidentContractWhtCode,
+} from "@/lib/wht"
+import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
 } from "@/lib/documents/incomingDocumentsService"
@@ -280,6 +285,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Server-authoritative WHT: calculate on the pre-tax contract value, never
+    // on VAT/NHIL/GETFund. The client-supplied amount is not trusted.
+    const whtCode = apply_wht ? wht_rate_code || null : null
+    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
+    const effectiveWhtRate = apply_wht
+      ? knownWhtRate?.rate ?? (Number(wht_rate) || 0)
+      : 0
+    const whtBaseAmount = Number(taxResult.subtotalBeforeTax) || 0
+    const whtBaseGhs =
+      isFxBill && parsedFxRate
+        ? whtBaseAmount * parsedFxRate
+        : whtBaseAmount
+    const whtCalculation =
+      apply_wht && effectiveWhtRate > 0
+        ? calculateWHTForRate({
+            baseAmount: whtBaseAmount,
+            rate: effectiveWhtRate,
+            code: whtCode,
+            baseAmountGhs: whtBaseGhs,
+          })
+        : { whtAmount: 0, thresholdMet: true }
+
+    if (
+      apply_wht &&
+      isResidentContractWhtCode(whtCode) &&
+      !whtCalculation.thresholdMet
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Resident contract WHT applies only where the contract value exceeds GHS 2,000.",
+          code: "WHT_CONTRACT_THRESHOLD_NOT_MET",
+        },
+        { status: 400 }
+      )
+    }
+
     // Standard bills: always insert as draft, then insert lines, then open if requested
     // so the post trigger never runs before bill_items exist.
     const wantsOpen = status !== "draft"
@@ -306,9 +349,9 @@ export async function POST(request: NextRequest) {
         total_tax: taxResult.totalTax,
         total: taxResult.grandTotal,
         wht_applicable: apply_wht,
-        wht_rate_code: apply_wht ? wht_rate_code : null,
-        wht_rate: apply_wht ? wht_rate : null,
-        wht_amount: apply_wht ? wht_amount : 0,
+        wht_rate_code: apply_wht ? whtCode : null,
+        wht_rate: apply_wht ? effectiveWhtRate : null,
+        wht_amount: apply_wht ? whtCalculation.whtAmount : 0,
         status: insertStatus,
         attachment_path: attachment_path || null,
         // Import bill fields

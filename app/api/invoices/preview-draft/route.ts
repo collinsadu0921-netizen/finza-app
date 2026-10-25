@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateTaxes } from "@/lib/taxEngine"
+import { calculateWHTForRate } from "@/lib/wht"
 import {
   generateFinancialDocumentHTML,
   type BusinessInfo,
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
       currency_code,
       wht_applicable,
       wht_rate,
+      wht_code,
+      wht_base_ghs,
     } = body
 
     const supabase = await createSupabaseServerClient()
@@ -170,10 +173,18 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total
-    const whtAmount = (wht_applicable && wht_rate && subtotal > 0)
-      ? Math.round(subtotal * Number(wht_rate) * 100) / 100
-      : 0
+    // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total.
+    // Resident contract threshold is tested on the GHS equivalent base.
+    const whtAmount =
+      wht_applicable && wht_rate && subtotal > 0
+        ? calculateWHTForRate({
+            baseAmount: subtotal,
+            rate: Number(wht_rate),
+            code: wht_code || null,
+            baseAmountGhs:
+              wht_base_ghs != null ? Number(wht_base_ghs) : subtotal,
+          }).whtAmount
+        : 0
 
     const documentTotals: DocumentTotals = {
       subtotal,

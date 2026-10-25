@@ -14,6 +14,11 @@ import {
   fetchGhanaEvatLevyScheduleMetadataMap,
 } from "@/lib/tax/ghanaTaxScheduleMetadata"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  calculateWHTForRate,
+  getWHTRate,
+  isResidentContractWhtCode,
+} from "@/lib/wht"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 import {
   mapInvoiceItemsForInsert,
@@ -65,6 +70,7 @@ export async function POST(request: NextRequest) {
       // WHT suffered — when a customer is required by GRA to withhold tax from payment
       wht_receivable_applicable = false,
       wht_receivable_rate = null,
+      wht_receivable_rate_code = null,
       wht_receivable_amount = 0,
     } = body
 
@@ -328,6 +334,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Server-authoritative customer WHT: calculate on the pre-tax invoice
+    // subtotal, not the VAT-inclusive total. The client amount is not trusted.
+    const whtCode = wht_receivable_applicable
+      ? wht_receivable_rate_code || null
+      : null
+    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
+    const effectiveWhtRate = wht_receivable_applicable
+      ? knownWhtRate?.rate ?? (Number(wht_receivable_rate) || 0)
+      : 0
+    const whtBaseGhs =
+      isFxInvoice && parsedFxRate
+        ? baseSubtotal * parsedFxRate
+        : baseSubtotal
+    const whtCalculation =
+      wht_receivable_applicable && effectiveWhtRate > 0
+        ? calculateWHTForRate({
+            baseAmount: baseSubtotal,
+            rate: effectiveWhtRate,
+            code: whtCode,
+            baseAmountGhs: whtBaseGhs,
+          })
+        : { whtAmount: 0, thresholdMet: true }
+
+    if (
+      wht_receivable_applicable &&
+      isResidentContractWhtCode(whtCode) &&
+      !whtCalculation.thresholdMet
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Resident contract WHT applies only where the contract value exceeds GHS 2,000.",
+          code: "WHT_CONTRACT_THRESHOLD_NOT_MET",
+        },
+        { status: 400 }
+      )
+    }
+
     // Generate public token
     let publicToken: string
     try {
@@ -375,8 +419,10 @@ export async function POST(request: NextRequest) {
       vat: apply_taxes ? Math.round(legacyTaxColumns.vat * 100) / 100 : 0,
       // WHT suffered by this company (customer withholds from payment)
       wht_receivable_applicable: wht_receivable_applicable || false,
-      wht_receivable_rate: wht_receivable_applicable ? (wht_receivable_rate ?? null) : null,
-      wht_receivable_amount: wht_receivable_applicable ? (Number(wht_receivable_amount) || 0) : 0,
+      wht_receivable_rate: wht_receivable_applicable ? effectiveWhtRate || null : null,
+      wht_receivable_amount: wht_receivable_applicable
+        ? whtCalculation.whtAmount
+        : 0,
     }
 
     // If status is "sent", set sent_at timestamp (this is the tax effective date)

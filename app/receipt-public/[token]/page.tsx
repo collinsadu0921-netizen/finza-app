@@ -6,6 +6,7 @@ import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { formatMoney } from "@/lib/money"
 import { getTaxLinesForDisplay } from "@/lib/taxes/readTaxLines"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { formatWHTRate } from "@/lib/wht"
 
 type InvoiceCustomer = {
   id?: string
@@ -258,7 +259,7 @@ export default function PublicReceiptPage() {
   const cashReceivedThisPayment = payment ? Number(payment.amount) - whtThisPayment : 0
   const whtWithheldLabel =
     invoice?.wht_receivable_applicable && Number(invoice.wht_receivable_rate ?? 0) > 0
-      ? `Less WHT (${(Number(invoice.wht_receivable_rate) * 100).toFixed(0)}% withheld by customer)`
+      ? `Less WHT (${formatWHTRate(Number(invoice.wht_receivable_rate))} withheld by customer)`
       : "Less WHT withheld"
 
   if (loading) {

@@ -9,6 +9,7 @@ import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
 import { formatMoney } from "@/lib/money"
+import { formatWHTRate } from "@/lib/wht"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 import ServiceReadOnlyNotice from "@/components/service/ServiceReadOnlyNotice"
 
@@ -336,7 +337,7 @@ Thank you.`
             </div>
             {bill.wht_applicable && (
               <div className={`rounded-xl border shadow-sm p-4 ${bill.wht_remitted_at ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">WHT ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%)</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">WHT ({formatWHTRate(bill.wht_rate ?? 0)})</p>
                 <p className={`text-2xl font-bold ${bill.wht_remitted_at ? 'text-emerald-700' : 'text-amber-700'}`}>{docCurrencyDisplay}{Number(bill.wht_amount).toFixed(2)}</p>
                 <p className={`text-xs mt-1 ${bill.wht_remitted_at ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {bill.wht_remitted_at ? '✓ Remitted to GRA' : 'Pending remittance'}
@@ -594,7 +595,7 @@ Thank you.`
                       <>
                         <div className="flex justify-between items-center text-sm pt-2 border-t border-amber-200">
                           <span className="text-amber-700 font-medium">
-                            WHT Deduction ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%):
+                            WHT Deduction ({formatWHTRate(bill.wht_rate ?? 0)}):
                           </span>
                           <span className="text-amber-700 font-semibold">
                             − {docCurrencyDisplay}{Number(bill.wht_amount).toFixed(2)}
