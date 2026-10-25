@@ -145,8 +145,9 @@ export async function GET(
       doc.fillColor("#000000")
     }
 
-    // Apply footer to subsequent pages automatically
-    doc.on("pageAdded", drawFooter)
+    // Do not attach drawFooter to pageAdded: PDFKit text at the page bottom
+    // can trigger another page break, which recurses through pageAdded until
+    // the stack overflows. The footer is drawn explicitly at the end.
 
     // ── HEADER ────────────────────────────────────────────────────────────────
     doc
@@ -182,9 +183,9 @@ export async function GET(
     const paymentState = vatPaymentState(vatReturn)
     const statusLabel =
       paymentState === "paid_recorded"
-        ? "PAID — PAYMENT RECORDED"
+        ? "PAID - PAYMENT RECORDED"
         : paymentState === "paid_without_payment"
-          ? "PAID — NO PAYMENT JOURNAL"
+          ? "PAID - NO PAYMENT JOURNAL"
           : String(vatReturn.status || "draft").toUpperCase()
     const statusColor =
       paymentState === "paid_recorded"
@@ -214,14 +215,14 @@ export async function GET(
         ? String(vatReturn.payment_date).slice(0, 10)
         : "date not recorded"
       const ref = vatReturn.payment_reference
-        ? ` · Ref: ${vatReturn.payment_reference}`
+        ? ` - Ref: ${vatReturn.payment_reference}`
         : ""
       doc
         .fontSize(7.5)
         .font("Helvetica")
         .fillColor("#166534")
         .text(
-          `Payment recorded ${paidOn}${ref} · Journal ${vatReturn.payment_journal_entry_id}`,
+          `Payment recorded ${paidOn}${ref} - Journal ${vatReturn.payment_journal_entry_id}`,
           { align: "center" }
         )
     }
