@@ -52,8 +52,7 @@ export async function GET(request: NextRequest) {
         .select("id,period_start,period_end,status")
         .eq("business_id", authority.businessId)
         .eq("status", "open")
-        .order("period_start", { ascending: false })
-        .limit(24),
+        .order("period_start", { ascending: false }),
     ])
 
     if (draftsResult.error || accountsResult.error || periodsResult.error) {
