@@ -5,6 +5,7 @@ import {
   enforceServiceWorkspaceAccess,
   enforceServiceWorkspaceWriteAccess,
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
 
 export async function GET(
   request: NextRequest,
@@ -132,9 +133,37 @@ export async function GET(
       // Continue with empty source data
     }
 
+    const { data: assetAccounts } = await supabase
+      .from("accounts")
+      .select("id,code,name,type,sub_type")
+      .eq("business_id", vatReturn.business_id)
+      .eq("type", "asset")
+      .is("deleted_at", null)
+      .order("code", { ascending: true })
+
+    const paymentAccounts = (assetAccounts || [])
+      .filter((account) => {
+        const subType = String(account.sub_type || "").toLowerCase()
+        const code = String(account.code || "")
+        return (
+          ["cash", "bank", "momo", "mobile_money"].includes(subType) ||
+          ["1000", "1010", "1020"].includes(code)
+        )
+      })
+      .map((account) => ({
+        id: account.id,
+        code: account.code,
+        name: account.name,
+        sub_type: account.sub_type,
+      }))
+
     return NextResponse.json({
-      vatReturn,
+      vatReturn: {
+        ...vatReturn,
+        payment_state: vatPaymentState(vatReturn),
+      },
       sourceData,
+      paymentAccounts,
     })
   } catch (error: any) {
     console.error("Error fetching VAT return:", error)
@@ -209,6 +238,17 @@ export async function PUT(
       net_vat_refund,
     } = body
 
+    if (status === "paid") {
+      return NextResponse.json(
+        {
+          error: "VAT_PAYMENT_REQUIRED",
+          message:
+            "VAT filings can only be marked paid through the Record payment action, which posts and links a payment journal.",
+        },
+        { status: 409 }
+      )
+    }
+
     // If submitted, lock the return (only notes editable)
     if (status === "submitted" && existingReturn.status !== "submitted") {
       // Lock the return - no further edits to calculations
@@ -258,16 +298,10 @@ export async function PUT(
       updateData.adjustment_reason = adjustment_reason?.trim() || null
     }
     if (submission_date !== undefined) updateData.submission_date = submission_date || null
-    if (payment_date !== undefined) updateData.payment_date = payment_date || null
-    if (payment_reference !== undefined) updateData.payment_reference = payment_reference?.trim() || null
     if (notes !== undefined) updateData.notes = notes?.trim() || null
 
     if (status === "submitted" && !existingReturn.submission_date) {
       updateData.submission_date = new Date().toISOString().split("T")[0]
-    }
-
-    if (status === "paid" && !existingReturn.payment_date) {
-      updateData.payment_date = new Date().toISOString().split("T")[0]
     }
 
     const { data: vatReturn, error } = await supabase

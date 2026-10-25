@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
 
 export async function GET(request: NextRequest) {
   try {
@@ -37,7 +38,12 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ returns: returns || [] })
+    return NextResponse.json({
+      returns: (returns || []).map((row) => ({
+        ...row,
+        payment_state: vatPaymentState(row),
+      })),
+    })
   } catch (error: any) {
     console.error("Error in VAT returns list:", error)
     return NextResponse.json(

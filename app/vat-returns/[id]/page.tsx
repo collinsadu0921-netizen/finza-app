@@ -15,6 +15,7 @@ import { GRA_VAT3_BOXES, isPost2026Period } from "@/lib/gra/vatForm"
 
 type VatReturn = {
   id: string
+  business_id: string
   period_start_date: string
   period_end_date: string
   status: string
@@ -38,8 +39,37 @@ type VatReturn = {
   submission_date: string | null
   payment_date: string | null
   payment_reference: string | null
+  payment_journal_entry_id: string | null
+  payment_account_id: string | null
+  payment_amount: number | null
+  payment_posted_at: string | null
+  payment_state: "unpaid" | "paid_recorded" | "paid_without_payment"
   notes: string | null
   ledger_authority?: boolean
+}
+
+type PaymentAccount = {
+  id: string
+  code: string
+  name: string
+  sub_type: string | null
+}
+
+type PaymentReconciliation = {
+  filing_total?: number
+  ledger_total?: number
+  difference?: number
+  accounts?: Array<{
+    code: string
+    name: string
+    filing: number
+    ledger: number
+    difference: number
+  }>
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10)
 }
 
 export default function VatReturnViewPage() {
@@ -53,6 +83,15 @@ export default function VatReturnViewPage() {
   const [ledgerEntries, setLedgerEntries] = useState<LedgerLine[]>([])
   const [updating, setUpdating] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentDate, setPaymentDate] = useState(todayIso())
+  const [paymentAccountId, setPaymentAccountId] = useState("")
+  const [paymentReference, setPaymentReference] = useState("")
+  const [postingPayment, setPostingPayment] = useState(false)
+  const [paymentError, setPaymentError] = useState("")
+  const [paymentReconciliation, setPaymentReconciliation] =
+    useState<PaymentReconciliation | null>(null)
 
   useEffect(() => {
     loadReturn()
@@ -65,12 +104,17 @@ export default function VatReturnViewPage() {
 
       if (response.ok) {
         setVatReturn(data.vatReturn)
+        const accounts: PaymentAccount[] = data.paymentAccounts || []
+        setPaymentAccounts(accounts)
+        setPaymentAccountId((current) => current || accounts[0]?.id || "")
 
         // Fetch ledger entries for this period from the monthly endpoint
         const startMonth = (data.vatReturn.period_start_date as string).substring(0, 7)
         const endMonth = (data.vatReturn.period_end_date as string).substring(0, 7)
         try {
-          const monthlyRes = await fetch("/api/vat-returns/monthly")
+          const monthlyRes = await fetch(
+            `/api/vat-returns/monthly?business_id=${encodeURIComponent(data.vatReturn.business_id)}`
+          )
           if (monthlyRes.ok) {
             const monthlyData = await monthlyRes.json()
             const entries: LedgerLine[] = []
@@ -123,6 +167,70 @@ export default function VatReturnViewPage() {
       toast.showToast("Error updating VAT filing", "error")
     } finally {
       setUpdating(false)
+    }
+  }
+
+  const openPaymentModal = () => {
+    setPaymentDate(todayIso())
+    setPaymentAccountId(paymentAccounts[0]?.id || "")
+    setPaymentReference("")
+    setPaymentError("")
+    setPaymentReconciliation(null)
+    setShowPaymentModal(true)
+  }
+
+  const handleRecordPayment = async () => {
+    if (postingPayment) return
+    if (!paymentDate) {
+      setPaymentError("Payment date is required.")
+      return
+    }
+    if (!paymentAccountId) {
+      setPaymentError("Select the bank, cash, or mobile-money account paid from.")
+      return
+    }
+
+    setPostingPayment(true)
+    setPaymentError("")
+    setPaymentReconciliation(null)
+
+    try {
+      const response = await fetch(`/api/vat-returns/${returnId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_date: paymentDate,
+          payment_account_id: paymentAccountId,
+          payment_reference: paymentReference || null,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        setPaymentError(data.message || data.error || "Could not post VAT payment.")
+        if (
+          data.accounts ||
+          data.difference !== undefined ||
+          data.filing_total !== undefined
+        ) {
+          setPaymentReconciliation(data as PaymentReconciliation)
+        }
+        return
+      }
+
+      setShowPaymentModal(false)
+      setPaymentReconciliation(null)
+      toast.showToast(
+        `VAT payment of ₵${Number(data.payment_amount || 0).toFixed(2)} posted`,
+        "success"
+      )
+      await loadReturn()
+    } catch (error) {
+      setPaymentError(
+        error instanceof Error ? error.message : "Could not post VAT payment."
+      )
+    } finally {
+      setPostingPayment(false)
     }
   }
 
@@ -437,16 +545,51 @@ export default function VatReturnViewPage() {
                 )}
                 {vatReturn.status === "submitted" && (
                   <button
-                    onClick={() => handleStatusUpdate("paid")}
+                    onClick={openPaymentModal}
                     disabled={updating}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
-                    Mark Paid
+                    Record payment
                   </button>
                 )}
               </div>
             </div>
           </div>
+
+          {vatReturn.payment_state === "paid_without_payment" && (
+            <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                Paid status recorded without a payment journal
+              </p>
+              <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
+                This filing is marked paid, but no journal entry is linked and the
+                tax liabilities remain in the ledger. It has not been repaired
+                automatically. Review the payment and post a correcting journal in
+                an open period if the payment left the bank.
+              </p>
+            </div>
+          )}
+
+          {vatReturn.payment_state === "paid_recorded" && (
+            <div className="mb-6 rounded-xl border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/30">
+              <p className="text-sm font-semibold text-green-900 dark:text-green-100">
+                Payment recorded and linked to the ledger
+              </p>
+              <p className="mt-1 text-sm text-green-800 dark:text-green-200">
+                ₵{Number(vatReturn.payment_amount || 0).toFixed(2)} posted on{" "}
+                {vatReturn.payment_date
+                  ? new Date(vatReturn.payment_date).toLocaleDateString("en-GH")
+                  : "the recorded payment date"}
+                . Journal entry:{" "}
+                <span className="font-mono text-xs">
+                  {vatReturn.payment_journal_entry_id}
+                </span>
+                {vatReturn.payment_reference
+                  ? ` · Ref: ${vatReturn.payment_reference}`
+                  : ""}
+              </p>
+            </div>
+          )}
 
           {/* Output / Input Tax cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -698,6 +841,150 @@ export default function VatReturnViewPage() {
 
         </div>
       </div>
+
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-800"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vat-payment-title"
+          >
+            <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+              <h2
+                id="vat-payment-title"
+                className="text-lg font-bold text-gray-900 dark:text-white"
+              >
+                Record VAT payment
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                The filing tax split must match the tax liabilities posted to the
+                ledger for this filing period. Nothing is posted if they differ.
+              </p>
+            </div>
+
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-5">
+              {paymentError && (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+                  {paymentError}
+                </div>
+              )}
+
+              {paymentReconciliation && (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm dark:border-red-800 dark:bg-red-950/40">
+                  <div className="grid grid-cols-3 gap-2 font-semibold text-red-900 dark:text-red-100">
+                    <span>Filing</span>
+                    <span className="text-right">Ledger period</span>
+                    <span className="text-right">Difference</span>
+                  </div>
+                  <div className="mt-1 grid grid-cols-3 gap-2 text-red-800 dark:text-red-200">
+                    <span>
+                      ₵{Number(paymentReconciliation.filing_total || 0).toFixed(2)}
+                    </span>
+                    <span className="text-right">
+                      ₵{Number(paymentReconciliation.ledger_total || 0).toFixed(2)}
+                    </span>
+                    <span className="text-right font-semibold">
+                      ₵{Number(paymentReconciliation.difference || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  {paymentReconciliation.accounts && (
+                    <div className="mt-3 divide-y divide-red-200 border-t border-red-200 pt-2 dark:divide-red-900 dark:border-red-900">
+                      {paymentReconciliation.accounts.map((account) => (
+                        <div
+                          key={account.code}
+                          className="grid grid-cols-4 gap-2 py-1 text-xs"
+                        >
+                          <span>
+                            {account.code} {account.name}
+                          </span>
+                          <span className="text-right">
+                            ₵{Number(account.filing || 0).toFixed(2)}
+                          </span>
+                          <span className="text-right">
+                            ₵{Number(account.ledger || 0).toFixed(2)}
+                          </span>
+                          <span className="text-right font-semibold">
+                            ₵{Number(account.difference || 0).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
+                  Payment date
+                </span>
+                <input
+                  type="date"
+                  value={paymentDate}
+                  onChange={(event) => setPaymentDate(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
+                  Paid from
+                </span>
+                <select
+                  value={paymentAccountId}
+                  onChange={(event) => setPaymentAccountId(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                >
+                  <option value="">Select account</option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.code} · {account.name}
+                    </option>
+                  ))}
+                </select>
+                {paymentAccounts.length === 0 && (
+                  <span className="mt-1 block text-xs text-red-600 dark:text-red-400">
+                    No active cash/bank/mobile-money account found.
+                  </span>
+                )}
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
+                  Payment reference (optional)
+                </span>
+                <input
+                  type="text"
+                  value={paymentReference}
+                  onChange={(event) => setPaymentReference(event.target.value)}
+                  maxLength={200}
+                  placeholder="Bank transfer ref / GRA receipt"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-6 py-4 dark:border-gray-700 dark:bg-gray-900/50">
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                disabled={postingPayment}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRecordPayment}
+                disabled={postingPayment || paymentAccounts.length === 0}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                {postingPayment ? "Posting…" : "Post payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ProtectedLayout>
     </TierGate>
   )
