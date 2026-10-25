@@ -3,18 +3,16 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { mapVatPaymentRpcError } from "@/lib/vat/vatReturnPayment"
 
-type RouteParams = Promise<{ id: string }> | { id: string }
-
 function nonEmpty(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: RouteParams }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id: returnId } = await Promise.resolve(params)
+    const { id: returnId } = await params
     const supabase = await createSupabaseServerClient()
     const {
       data: { user },
