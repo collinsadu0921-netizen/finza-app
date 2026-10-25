@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { enforceServiceWorkspaceWriteAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { mapVatPaymentRpcError } from "@/lib/vat/vatReturnPayment"
 
 function nonEmpty(value: unknown): string | null {
@@ -38,7 +38,7 @@ export async function POST(
       return NextResponse.json({ error: "VAT filing not found" }, { status: 404 })
     }
 
-    const denied = await enforceServiceWorkspaceAccess({
+    const denied = await enforceServiceWorkspaceWriteAccess({
       supabase,
       userId: user.id,
       businessId: vatReturn.business_id,
