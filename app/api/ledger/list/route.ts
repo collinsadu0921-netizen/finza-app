@@ -123,6 +123,9 @@ export async function GET(request: NextRequest) {
       .eq("business_id", businessId)
       .order("date", { ascending: false })
       .order("created_at", { ascending: false })
+      // Deterministic tie-breaker so page boundaries cannot duplicate or skip
+      // entries that share the same date/created_at (e.g. seeded bulk posts).
+      .order("id", { ascending: false })
 
     if (startDate) {
       query = query.gte("date", startDate)

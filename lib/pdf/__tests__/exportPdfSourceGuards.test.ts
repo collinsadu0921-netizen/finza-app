@@ -30,6 +30,14 @@ describe("report PDF export source guards", () => {
     expect(source).toContain('doc.fillColor("#000000")')
   })
 
+  it("Ledger pagination has a deterministic unique tie-breaker", () => {
+    const source = read("app/api/ledger/list/route.ts")
+
+    expect(source).toContain('.order("date", { ascending: false })')
+    expect(source).toContain('.order("created_at", { ascending: false })')
+    expect(source).toContain('.order("id", { ascending: false })')
+  })
+
   it("General Ledger columns fit the portrait page and do not truncate descriptions", () => {
     const source = read("app/api/accounting/reports/general-ledger/export/pdf/route.ts")
 
