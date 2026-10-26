@@ -36,6 +36,7 @@ type AuditLog = {
 const ACTION_TYPES = [
   "",
   "reversal",
+  "manual_journal.reversed",
   "adjustment",
   "period_close",
   "period_reopen",

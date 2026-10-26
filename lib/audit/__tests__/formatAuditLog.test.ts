@@ -99,4 +99,23 @@ describe("Service audit display formatting", () => {
     expect(formatAuditAction(log)).toBe("Journal entry reversed")
     expect(formatAuditSummary(log)).toBe("Staging verification reverse A generic")
   })
+
+  it("formats a Service manual reversal atomically recorded by the trigger", () => {
+    const log = {
+      user_id: "user-1",
+      user: { email: "staging@test.com" },
+      action_type: "manual_journal.reversed",
+      entity_type: "journal_entry",
+      description: "Reversal reason for audit test",
+      new_values: {
+        original_journal_entry_id: "original-1",
+        reversal_journal_entry_id: "reversal-1",
+        source_type: "service_manual",
+        reference: "AUDIT-REV-A",
+      },
+    }
+    expect(formatAuditAction(log)).toBe("Manual journal reversed")
+    expect(formatAuditEntity(log)).toBe("Manual journal · AUDIT-REV-A")
+    expect(formatAuditSummary(log)).toBe("Reversal reason for audit test")
+  })
 })

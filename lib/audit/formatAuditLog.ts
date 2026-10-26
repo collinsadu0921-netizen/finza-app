@@ -74,6 +74,9 @@ export function formatAuditAction(log: AuditLogDisplay): string {
       ? "Journal entry reversed"
       : "Reversal"
   }
+  if (action === "manual_journal.reversed") {
+    return "Manual journal reversed"
+  }
   if (action === "account.created" && isSystemAccountCreation(log)) {
     return "System account created"
   }

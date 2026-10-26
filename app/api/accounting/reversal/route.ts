@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
-import { logAudit } from "@/lib/auditLog"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
 import {
@@ -337,21 +336,8 @@ export async function POST(request: NextRequest) {
       journalEntryId
     )
 
-    const tAudit = performance.now()
-    await logAudit({
-      businessId: resolvedBusinessId,
-      userId: user.id,
-      actionType: "reversal",
-      entityType: "journal_entry",
-      entityId: original_je_id,
-      description: reason,
-      newValues: {
-        reversal_je_id: journalEntryId,
-        business_id: resolvedBusinessId,
-        period_id: period.id,
-      },
-      request,
-    })
+    // The reversal audit row is written atomically by the journal_entries
+    // reversal trigger in migration 591. Do not write a second audit row here.
 
     const refType = originalJe.reference_type as string | null
     const refId = originalJe.reference_id as string | null
@@ -380,7 +366,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    diag.recordTiming("audit", timedStepMs(tAudit))
     return respond({
       reversal_journal_entry_id: journalEntryId,
       original_journal_entry_id: original_je_id,
