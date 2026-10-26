@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { resolveServiceManualJournalAuthority } from "@/lib/service/accounting/manualJournalAuth"
+import { getTrustedRequestMetadata } from "@/lib/audit/requestMetadata"
 import { mapServiceManualRpcError } from "@/lib/service/accounting/manualJournal"
 
 export const dynamic = "force-dynamic"
@@ -13,6 +14,9 @@ export async function POST(
   try {
     const supabase = await createSupabaseServerClient()
     const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 })
+    }
     const { id } = await params
     const body = await request.json().catch(() => null)
     if (!body || typeof body !== "object") {
@@ -56,12 +60,16 @@ export async function POST(
       return NextResponse.json({ error: "Reversal reason must be between 10 and 500 characters.", code: "REASON_INVALID" }, { status: 400 })
     }
 
-    const { data: reversalId, error } = await supabase.rpc(
-      "reverse_service_manual_journal",
+    const requestMeta = getTrustedRequestMetadata(request)
+    const { data: reversalId, error } = await admin.rpc(
+      "reverse_service_manual_journal_with_request_metadata",
       {
         p_journal_entry_id: id,
         p_reversal_date: reversalDate,
         p_reason: reason,
+        p_actor_user_id: user.id,
+        p_request_ip: requestMeta.ipAddress,
+        p_request_user_agent: requestMeta.userAgent,
       }
     )
 

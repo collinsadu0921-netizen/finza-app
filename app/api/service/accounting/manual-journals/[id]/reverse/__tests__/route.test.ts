@@ -25,7 +25,10 @@ function adminWithOriginal(original: unknown = {
     eq: () => q,
     maybeSingle: () => Promise.resolve({ data: original, error: null }),
   }
-  return { from: jest.fn(() => q) } as never
+  return {
+    from: jest.fn(() => q),
+    rpc: jest.fn().mockResolvedValue({ data: "rev-1", error: null }),
+  } as any
 }
 
 function userClient() {
@@ -39,7 +42,11 @@ function call(body: unknown) {
   return POST(
     new NextRequest(`http://localhost/api/service/accounting/manual-journals/${JE}/reverse`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "JestServiceAgent/1.0",
+        "x-forwarded-for": "203.0.113.5, 198.51.100.20",
+      },
       body: JSON.stringify(body),
     }),
     { params: Promise.resolve({ id: JE }) }
@@ -60,26 +67,37 @@ describe("POST Service manual journal reversal", () => {
     })
   })
 
-  it("posts a linked reversal", async () => {
+  it("posts a linked reversal with trusted request metadata", async () => {
     const client = userClient() as any
+    const admin = adminWithOriginal()
     jest.mocked(createSupabaseServerClient).mockResolvedValue(client)
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin)
     const response = await call({ reversal_date: "2026-09-01", reason: "Correct duplicate accrual" })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ success: true, reversal_journal_entry_id: "rev-1" })
-    expect(client.rpc).toHaveBeenCalledWith("reverse_service_manual_journal", {
-      p_journal_entry_id: JE,
-      p_reversal_date: "2026-09-01",
-      p_reason: "Correct duplicate accrual",
-    })
+    expect(admin.rpc).toHaveBeenCalledWith(
+      "reverse_service_manual_journal_with_request_metadata",
+      {
+        p_journal_entry_id: JE,
+        p_reversal_date: "2026-09-01",
+        p_reason: "Correct duplicate accrual",
+        p_actor_user_id: USER,
+        p_request_ip: "198.51.100.20",
+        p_request_user_agent: "JestServiceAgent/1.0",
+      }
+    )
+    expect(client.rpc).not.toHaveBeenCalled()
   })
 
   it("rejects a short reason before calling the RPC", async () => {
     const client = userClient() as any
+    const admin = adminWithOriginal()
     jest.mocked(createSupabaseServerClient).mockResolvedValue(client)
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin)
     const response = await call({ reversal_date: "2026-09-01", reason: "short" })
     expect(response.status).toBe(400)
     expect((await response.json()).code).toBe("REASON_INVALID")
-    expect(client.rpc).not.toHaveBeenCalled()
+    expect(admin.rpc).not.toHaveBeenCalled()
   })
 
   it("denies an unauthorized user", async () => {
@@ -93,9 +111,11 @@ describe("POST Service manual journal reversal", () => {
 
   it("returns the existing reversal for a repeated attempt without a second ledger entry", async () => {
     const client = userClient() as any
+    const admin = adminWithOriginal()
     // The RPC is idempotent and returns the same reversal id on every attempt.
-    client.rpc.mockResolvedValue({ data: "rev-existing", error: null })
+    admin.rpc.mockResolvedValue({ data: "rev-existing", error: null })
     jest.mocked(createSupabaseServerClient).mockResolvedValue(client)
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin)
 
     const first = await call({ reversal_date: "2026-09-01", reason: "Correct duplicate accrual" })
     const second = await call({ reversal_date: "2026-09-01", reason: "Correct duplicate accrual" })
@@ -110,12 +130,15 @@ describe("POST Service manual journal reversal", () => {
       success: true,
       reversal_journal_entry_id: "rev-existing",
     })
+    expect(admin.rpc).toHaveBeenCalledTimes(2)
   })
 
   it("returns a legacy generic reversal that the RPC recognises by reference_id", async () => {
     const client = userClient() as any
-    client.rpc.mockResolvedValue({ data: "generic-rev-1", error: null })
+    const admin = adminWithOriginal()
+    admin.rpc.mockResolvedValue({ data: "generic-rev-1", error: null })
     jest.mocked(createSupabaseServerClient).mockResolvedValue(client)
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin)
 
     const response = await call({
       reversal_date: "2026-09-01",
@@ -131,7 +154,8 @@ describe("POST Service manual journal reversal", () => {
 
   it("maps the database duplicate guard to ALREADY_REVERSED", async () => {
     const client = userClient() as any
-    client.rpc.mockResolvedValue({
+    const admin = adminWithOriginal()
+    admin.rpc.mockResolvedValue({
       data: null,
       error: {
         message:
@@ -139,6 +163,7 @@ describe("POST Service manual journal reversal", () => {
       },
     })
     jest.mocked(createSupabaseServerClient).mockResolvedValue(client)
+    jest.mocked(createSupabaseAdminClient).mockReturnValue(admin)
 
     const response = await call({
       reversal_date: "2026-09-01",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { getTrustedRequestMetadata } from "@/lib/audit/requestMetadata"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
 import {
@@ -265,7 +266,9 @@ export async function POST(request: NextRequest) {
     }))
 
     const tRpc = performance.now()
-    const { data: journalEntryId, error: postError } = await dataClient.rpc("post_journal_entry", {
+    const requestMeta = getTrustedRequestMetadata(request)
+    const admin = createSupabaseAdminClient()
+    const { data: journalEntryId, error: postError } = await admin.rpc("post_journal_entry_with_request_metadata", {
       p_business_id: resolvedBusinessId,
       p_date: reversal_date,
       p_description: description,
@@ -283,6 +286,8 @@ export async function POST(request: NextRequest) {
       p_posted_by_accountant_id: user.id,
       p_posting_source: "accountant",
       p_is_revenue_correction: false,
+      p_request_ip: requestMeta.ipAddress,
+      p_request_user_agent: requestMeta.userAgent,
     })
 
     diag.recordTiming("rpc", timedStepMs(tRpc), "post_journal_entry")

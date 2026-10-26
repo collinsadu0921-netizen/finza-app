@@ -131,7 +131,7 @@ function makeHarness(options?: {
   return { serverClient, rpc, from }
 }
 
-function makeAdmin() {
+function makeAdmin(rpc = jest.fn(async () => ({ data: NEW_REVERSAL_ID, error: null }))) {
   const updates: Array<Record<string, unknown>> = []
   const from = jest.fn((table: string) => {
     const q = builder({ data: null, error: null })
@@ -144,13 +144,18 @@ function makeAdmin() {
     }
     return q
   })
-  return { admin: { from }, updates }
+  return { admin: { from, rpc }, updates }
 }
 
 function call() {
   return POST(
     new NextRequest("http://localhost/api/accounting/reversal", {
       method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "JestGeneralAgent/2.0",
+        "x-forwarded-for": "203.0.113.5, 198.51.100.21",
+      },
       body: JSON.stringify({
         original_je_id: JE_ID,
         business_id: BUSINESS_ID,
@@ -181,9 +186,9 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
     } as never)
   })
 
-  it("passes reverses_entry_id and links the Service draft on a new reversal", async () => {
+  it("passes reverses_entry_id and trusted request metadata on a new reversal", async () => {
     const { serverClient, rpc } = makeHarness()
-    const { admin, updates } = makeAdmin()
+    const { admin, updates } = makeAdmin(rpc)
     jest.mocked(createSupabaseServerClient).mockResolvedValue(serverClient as never)
     jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
 
@@ -196,11 +201,13 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
 
     expect(rpc).toHaveBeenCalledTimes(1)
     const [fn, args] = rpc.mock.calls[0]
-    expect(fn).toBe("post_journal_entry")
+    expect(fn).toBe("post_journal_entry_with_request_metadata")
     expect(args).toMatchObject({
       p_reference_type: "reversal",
       p_reference_id: JE_ID,
       p_reverses_entry_id: JE_ID,
+      p_request_ip: "198.51.100.21",
+      p_request_user_agent: "JestGeneralAgent/2.0",
     })
 
     expect(updates).toEqual([
@@ -212,7 +219,7 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
     const { serverClient, rpc } = makeHarness({
       existing: { id: EXISTING_REVERSAL_ID },
     })
-    const { admin, updates } = makeAdmin()
+    const { admin, updates } = makeAdmin(rpc)
     jest.mocked(createSupabaseServerClient).mockResolvedValue(serverClient as never)
     jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
 
@@ -231,7 +238,7 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
 
   it("is idempotent across repeated attempts", async () => {
     const { serverClient, rpc } = makeHarness()
-    const { admin } = makeAdmin()
+    const { admin } = makeAdmin(rpc)
     jest.mocked(createSupabaseServerClient).mockResolvedValue(serverClient as never)
     jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
 
@@ -255,7 +262,7 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
       rpcError: "SERVICE_MANUAL_ALREADY_REVERSED: this manual journal has already been reversed",
       race: { id: RACED_REVERSAL_ID },
     })
-    const { admin, updates } = makeAdmin()
+    const { admin, updates } = makeAdmin(rpc)
     jest.mocked(createSupabaseServerClient).mockResolvedValue(serverClient as never)
     jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
 
