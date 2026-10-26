@@ -17,6 +17,9 @@ jest.mock("@/lib/supabaseServer", () => ({
 jest.mock("@/lib/business", () => ({
   getCurrentBusiness: jest.fn(),
 }))
+jest.mock("@/lib/userRoles", () => ({
+  getUserRole: jest.fn(),
+}))
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -37,6 +40,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const BILL_ID = "bill4444-4444-4444-8444-444444444444"
@@ -57,6 +61,21 @@ function mockCreateClient(opts?: { captureItems?: jest.Mock }) {
         return {
           select: jest.fn(() => ({
             eq: jest.fn(() => ({
+              is: jest.fn(() => ({
+                maybeSingle: jest.fn(() =>
+                  Promise.resolve({
+                    data: {
+                      id: BILL_ID,
+                      status: "draft",
+                      total: 100,
+                      currency_code: null,
+                      fx_rate: null,
+                      business_id: BUSINESS_ID,
+                    },
+                    error: null,
+                  })
+                ),
+              })),
               eq: jest.fn(() => ({
                 single: jest.fn(() =>
                   Promise.resolve({
@@ -140,6 +159,7 @@ describe("Bill-level discount rejection", () => {
       id: BUSINESS_ID,
       industry: "service",
     })
+    ;(getUserRole as jest.Mock).mockResolvedValue("owner")
     mockCreateClient()
   })
 

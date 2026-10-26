@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
 import { normalizeCountry, assertMethodAllowed } from "@/lib/payments/eligibility"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 import {
@@ -26,13 +25,21 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business) {
-      return NextResponse.json({ error: "Business not found" }, { status: 404 })
+    const { data: bill, error: billLookupError } = await supabase
+      .from("bills")
+      .select("id, business_id")
+      .eq("id", billId)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (billLookupError || !bill) {
+      return NextResponse.json({ error: "Bill not found" }, { status: 404 })
     }
 
+    const billBusinessId = String(bill.business_id)
+
     const denied = await enforceServiceWorkspaceAccess({
-      supabase, userId: user.id, businessId: business.id, minTier: "professional",
+      supabase, userId: user.id, businessId: billBusinessId, minTier: "professional",
     })
     if (denied) return denied
 
@@ -40,7 +47,7 @@ export async function GET(
       .from("bill_payments")
       .select("*")
       .eq("bill_id", billId)
-      .eq("business_id", business.id)
+      .eq("business_id", billBusinessId)
       .is("deleted_at", null)
       .order("date", { ascending: false })
 

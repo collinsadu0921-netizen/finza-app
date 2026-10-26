@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import {
   getIncomingDocumentForBusiness,
@@ -166,9 +166,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const business = await getCurrentBusiness(supabase, user.id)
-    if (!business || business.id !== business_id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    // Authorize the submitted business directly. The server cannot read the
+    // client's selected-workspace preference, so getCurrentBusiness() may
+    // resolve a different owned business and must not be used as an equality
+    // gate. Membership/role on the submitted business preserves tenant
+    // isolation; the tier/write guard below remains authoritative.
+    const role = await getUserRole(supabase, user.id, business_id)
+    if (!role) {
+      return NextResponse.json(
+        { error: "Forbidden: no access to this business" },
+        { status: 403 }
+      )
     }
 
     const tierDenied = await enforceServiceIndustryMinTierWrite(

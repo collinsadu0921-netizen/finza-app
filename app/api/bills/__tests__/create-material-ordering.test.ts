@@ -16,6 +16,9 @@ jest.mock("@/lib/supabaseServer", () => ({
 jest.mock("@/lib/business", () => ({
   getCurrentBusiness: jest.fn(),
 }))
+jest.mock("@/lib/userRoles", () => ({
+  getUserRole: jest.fn(),
+}))
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -32,6 +35,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
 
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
+import { getUserRole } from "@/lib/userRoles"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -52,6 +56,7 @@ describe("POST /api/bills/create — draft→lines→open ordering", () => {
       id: BUSINESS_ID,
       industry: "service",
     })
+    ;(getUserRole as jest.Mock).mockResolvedValue("owner")
 
     billsInsert = jest.fn((row: { status?: string }) => {
       callOrder.push(`bills.insert:${row.status}`)
